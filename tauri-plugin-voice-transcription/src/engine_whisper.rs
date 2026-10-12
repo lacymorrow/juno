@@ -1,6 +1,7 @@
 use crate::engine::{TranscriptionEngine, TranscriptionSession};
 use crate::utils::filter_transcription_text;
 use std::sync::Arc;
+use std::time::Instant;
 use whisper_rs::{FullParams, WhisperContext};
 
 /// STT engine backed by whisper-rs (ggml). Wraps a shared `Arc<WhisperContext>`
@@ -79,14 +80,32 @@ impl WhisperSession {
         ctx: &WhisperContext,
         params: FullParams,
         audio: &[f32],
+        final_pass: bool,
     ) -> Result<String, String> {
+        let started = Instant::now();
         let mut state = ctx
             .create_state()
             .map_err(|e| format!("Failed to create WhisperState: {:?}", e))?;
+        let state_ready = started.elapsed();
 
         state
             .full(params, audio)
             .map_err(|e| format!("Whisper transcription failed: {:?}", e))?;
+
+        // Splits a slow release into state setup and the decode itself, so it is
+        // clear which one to fix.
+        let line = format!(
+            "[Whisper] {} decode of {:.2}s: state {} ms, decode {} ms",
+            if final_pass { "final" } else { "partial" },
+            audio.len() as f32 / 16_000.0,
+            state_ready.as_millis(),
+            (started.elapsed() - state_ready).as_millis()
+        );
+        if final_pass {
+            tracing::info!("{line}");
+        } else {
+            tracing::debug!("{line}");
+        }
 
         let n = state.full_n_segments().unwrap_or(0);
         let mut text = String::new();
@@ -111,7 +130,7 @@ impl TranscriptionSession for WhisperSession {
         params.set_single_segment(true);
         params.set_no_context(true);
 
-        let text = Self::run_params(&self.ctx, params, audio)?;
+        let text = Self::run_params(&self.ctx, params, audio, false)?;
         if text.is_empty() {
             Ok(None)
         } else {
@@ -120,20 +139,31 @@ impl TranscriptionSession for WhisperSession {
     }
 
     fn transcribe_final(&mut self, audio: &[f32]) -> Result<String, String> {
+        self.transcribe_final_segment(audio, "")
+    }
+
+    fn transcribe_final_segment(&mut self, audio: &[f32], context: &str) -> Result<String, String> {
         if audio.is_empty() {
             return Ok(String::new());
         }
 
-        // The final pass decodes the whole utterance once the key is released, so it sits
-        // directly on the hotkey-to-text latency. Beam 2 keeps most of the accuracy of
-        // beam 5 at a fraction of the decoder cost.
+        // The final pass sits directly on the hotkey-to-text latency. Beam 2 keeps most of
+        // the accuracy of beam 5 at a fraction of the decoder cost.
         let mut params = FullParams::new(whisper_rs::SamplingStrategy::BeamSearch {
             beam_size: 2,
             patience: 1.0,
         });
         apply_common_params(&mut params);
+        // A segment cut from a longer utterance is conditioned on the text before it, the
+        // way whisper.cpp conditions each 30 s window on the previous one, so casing and
+        // punctuation carry across the seam. whisper-rs leaks the prompt's CString (a few
+        // hundred bytes per segment); it also panics on NUL, which `prompt_tail` strips.
+        let context = context.replace('\0', "");
+        if !context.trim().is_empty() {
+            params.set_initial_prompt(context.trim());
+        }
 
-        let text = Self::run_params(&self.ctx, params, audio)?;
+        let text = Self::run_params(&self.ctx, params, audio, true)?;
         Ok(filter_transcription_text(&text))
     }
 }

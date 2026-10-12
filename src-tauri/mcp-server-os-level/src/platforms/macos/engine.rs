@@ -242,7 +242,11 @@ impl MacOSEngine {
         element: &UIElement,
         depth: usize,
     ) -> Result<JsonValue, AutomationError> {
-        const MAX_DEPTH: usize = 10; // Limit recursion depth
+        // Deep enough to reach the controls inside a web view. A React page in
+        // a WKWebView sits 20 to 40 levels below its window, so the old cap of
+        // 10 returned Juno's own pane as a few empty groups and no text field
+        // or buttons, while System Events saw them fine.
+        const MAX_DEPTH: usize = 60;
         if depth > MAX_DEPTH {
             return Ok(json!({ "error": "Max recursion depth reached" }));
         }
@@ -755,9 +759,6 @@ impl AccessibilityEngine for MacOSEngine {
     /// Fast AX hit-test: returns the accessibility element at screen coordinates.
     /// Uses native `AXUIElementCopyElementAtPosition` (~1-5ms).
     fn element_at_position(&self, x: f64, y: f64) -> Option<UIElement> {
-        use accessibility_sys::AXUIElementCopyElementAtPosition;
-        use core_foundation::base::TCFType;
-
         // Get frontmost application PID via NSWorkspace
         let pid: i32 = unsafe {
             use objc::{class, msg_send, sel, sel_impl};
@@ -776,11 +777,21 @@ impl AccessibilityEngine for MacOSEngine {
             msg_send![frontmost_app, processIdentifier]
         };
 
+        self.element_at_position_in_app(pid, x, y)
+    }
+
+    /// Hit-test inside one application. The background click path uses this with
+    /// the app that owns the window under the point, because the frontmost app
+    /// (often Juno itself, or whatever the person is using) is not the target.
+    fn element_at_position_in_app(&self, pid: i32, x: f64, y: f64) -> Option<UIElement> {
+        use accessibility_sys::AXUIElementCopyElementAtPosition;
+        use core_foundation::base::TCFType;
+
         if pid <= 0 {
             return None;
         }
 
-        // Create AXUIElement for the frontmost application
+        // Create AXUIElement for the target application
         let app_element = accessibility::AXUIElement::application(pid);
 
         // Call native hit-test

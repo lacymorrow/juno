@@ -104,39 +104,19 @@ describe("one geometry rule, every width", () => {
 });
 
 describe("predictedWindowOrigin", () => {
-  it("is the cursor less the grab offset", () => {
-    expect(predictedWindowOrigin({ x: 880, y: 60 }, { x: 850, y: 33 }, display)).toEqual({
+  it("is the cursor less the grab offset, both in points", () => {
+    expect(predictedWindowOrigin({ x: 880, y: 60 }, { x: 850, y: 33 })).toEqual({
       x: 30,
       y: 27,
     });
   });
 
-  it("scales the grab offset by the display the cursor is on", () => {
-    // The offset came from a DOM clientX/clientY, so it is logical px; the
-    // cursor is physical. On a 2× display 850 logical is 1700 physical.
-    const retina: MonitorRect[] = [
-      { position: { x: 0, y: 0 }, size: { width: 2560, height: 1600 }, scaleFactor: 2 },
-    ];
-    expect(predictedWindowOrigin({ x: 1760, y: 120 }, { x: 850, y: 33 }, retina)).toEqual({
-      x: 60,
-      y: 54,
+  it("needs no scale factor: points are the same on every display", () => {
+    // A cursor on a second display left of the primary, at negative points.
+    expect(predictedWindowOrigin({ x: -1200, y: 40 }, { x: 44, y: 33 })).toEqual({
+      x: -1244,
+      y: 7,
     });
-  });
-
-  it("falls back to the first display's scale when the cursor is between displays", () => {
-    const gap: MonitorRect[] = [
-      ...display,
-      { position: { x: 1000, y: 0 }, size: { width: 800, height: 600 }, scaleFactor: 2 },
-    ];
-    // y = 700 is below the second display and right of the first: on neither.
-    expect(predictedWindowOrigin({ x: 1200, y: 700 }, { x: 10, y: 10 }, gap)).toEqual({
-      x: 1190,
-      y: 690,
-    });
-  });
-
-  it("is the cursor itself with no monitors at all", () => {
-    expect(predictedWindowOrigin({ x: 5, y: 7 }, { x: 2, y: 3 }, [])).toEqual({ x: 3, y: 4 });
   });
 });
 
@@ -167,7 +147,7 @@ describe("the drop indicator agrees with where a wide look lands", () => {
   };
 
   it("predicts the well the bar will actually land in", () => {
-    const origin = predictedWindowOrigin(cursor, grabOffset, display);
+    const origin = predictedWindowOrigin(cursor, grabOffset);
     expect(origin).toEqual({ x: 30, y: 27 });
     const predicted = nearestWell(origin, wells)!;
     // The window's top-left is at 30,27, so the nearest well is the left
@@ -182,7 +162,7 @@ describe("the drop indicator agrees with where a wide look lands", () => {
     // column. Half a window's width of disagreement, a whole column of error.
     const old = oldHighlight();
     expect({ x: old.x, y: old.y }).toEqual({ x: 84, y: 36 });
-    const origin = predictedWindowOrigin(cursor, grabOffset, display);
+    const origin = predictedWindowOrigin(cursor, grabOffset);
     expect(old).not.toBe(landing(origin));
   });
 
@@ -190,7 +170,7 @@ describe("the drop indicator agrees with where a wide look lands", () => {
     const narrowWells = computeWells(display, { ...NARROW, includeCenter: true });
     // A Pill grabbed near its middle: the error the old rule carried was at
     // most half of 88px, far less than the 440px between columns.
-    const origin = predictedWindowOrigin({ x: 500, y: 70 }, { x: 44, y: 33 }, display);
+    const origin = predictedWindowOrigin({ x: 500, y: 70 }, { x: 44, y: 33 });
     const predicted = nearestWell(origin, narrowWells)!;
     expect({ x: predicted.x, y: predicted.y }).toEqual({ x: 456, y: 36 });
   });

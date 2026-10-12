@@ -41,17 +41,11 @@ pub fn apply_macos_setup(app_handle: &AppHandle) {
     {
         info!("Applying macOS specific setup...");
 
-        // Setup floating bar window
+        // Setup floating bar window. It is the only declared window that
+        // exists this early: the rest are built once the bar is on screen
+        // (`startup_windows`), and each is set up by
+        // `configure_deferred_window` as it is built.
         setup_floating_bar_window(app_handle);
-
-        // Setup floating panel window
-        setup_floating_panel_window(app_handle);
-
-        // Setup main window
-        setup_main_window(app_handle);
-
-        // Setup desktop cursor overlay (pre-created in config as visible:false)
-        setup_desktop_cursor_overlay_window(app_handle);
 
         // Read the keyboard layout while we are still on the main thread.
         // Paste insertion runs on a blocking worker and Text Input Services
@@ -142,6 +136,58 @@ pub fn apply_bar_stacking(
 ) {
 }
 
+/// Order the floating bar directly above another of Juno's windows, when both
+/// are on screen at the same level. Ordering only: the level is untouched, so
+/// nothing changes for any other app, and a bar that has stepped down to the
+/// normal level (see [`crate::bar_stacking`]) is left exactly where it is.
+///
+/// The drop overlay is the caller. It shares the bar's floating level, and
+/// showing it orders it to the front of that level, so without this its dim
+/// could be drawn over the very pill being dragged.
+#[cfg(target_os = "macos")]
+pub fn order_bar_above(app_handle: &AppHandle, other_label: &str) {
+    let Some(bar) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) else {
+        return;
+    };
+    let Some(other) = app_handle.get_webview_window(other_label) else {
+        return;
+    };
+    let (Ok(bar_ptr), Ok(other_ptr)) = (bar.ns_window(), other.ns_window()) else {
+        return;
+    };
+    let bar_addr = bar_ptr as usize;
+    let other_addr = other_ptr as usize;
+    // SAFETY: live NSWindow pointers handed out by Tauri for two windows that
+    // live for the app's lifetime; standard NSWindow selectors; main thread.
+    if let Err(e) = app_handle.run_on_main_thread(move || unsafe {
+        let bar = bar_addr as cocoa_id;
+        let other = other_addr as cocoa_id;
+        #[allow(unexpected_cfgs)]
+        let bar_visible: BOOL = msg_send![bar, isVisible];
+        #[allow(unexpected_cfgs)]
+        let other_visible: BOOL = msg_send![other, isVisible];
+        if bar_visible == NO || other_visible == NO {
+            return;
+        }
+        #[allow(unexpected_cfgs)]
+        let bar_level: i64 = msg_send![bar, level];
+        #[allow(unexpected_cfgs)]
+        let other_level: i64 = msg_send![other, level];
+        if bar_level != other_level {
+            return;
+        }
+        #[allow(unexpected_cfgs)]
+        let other_number: i64 = msg_send![other, windowNumber];
+        #[allow(unexpected_cfgs)]
+        let _: () = msg_send![bar, orderWindow: NS_WINDOW_ABOVE relativeTo: other_number];
+    }) {
+        warn!(
+            "Could not order the floating bar above '{}': {}",
+            other_label, e
+        );
+    }
+}
+
 /// Setup macOS-specific styling and behavior for the floating bar window
 #[cfg(target_os = "macos")]
 fn setup_floating_bar_window(app_handle: &AppHandle) {
@@ -217,55 +263,140 @@ fn setup_floating_bar_window(app_handle: &AppHandle) {
 /// Setup macOS-specific styling and behavior for the floating panel window
 /// Atomically move + resize the floating bar in a single `NSWindow setFrame:`.
 ///
-/// Tauri exposes `set_position` and `set_size` separately; issuing both for a
-/// compact<->hover transition let the WindowServer composite them in different
-/// frames, so for one frame the window showed its new width still anchored at
-/// the old top-left and the centered pill/dot jumped ~half the width delta
-/// before snapping back. One `setFrame:display:animate:NO` changes origin and
-/// size in a single transaction, so no intermediate frame can exist.
+/// Tauri exposes `set_position` and `set_size` separately; issuing both let
+/// the WindowServer composite them in different frames, so for one frame the
+/// window showed its new size still at the old top-left. One
+/// `setFrame:display:animate:NO` changes origin and size in one transaction.
 ///
-/// The Cocoa frame is derived as a delta from the window's *current* frame
-/// rather than by an absolute top-left->bottom-left flip. That cancels the
-/// primary-screen height and any multi-monitor origin, and is exact as long as
-/// the window stays on one display (constant scale factor) across the resize,
-/// which a same-spot compact<->hover transition always does.
+/// `x`/`y` (top-left) and `w_pt`/`h_pt` are global desktop points, top-left
+/// origin at the primary display. Cocoa's frame is the same space with y
+/// pointing up from the primary display's bottom edge, so the conversion is
+/// one flip against the primary display's height (`NSScreen.screens[0]`, the
+/// screen at the origin). That is exact on every display; the delta this used
+/// to apply to physical pixels was scaled by the display the window was
+/// leaving, which put a frame aimed at a second display of another density
+/// in the wrong place.
 ///
-/// `x_phys`/`y_phys` are the target top-left in Tauri physical pixels;
-/// `w_pt`/`h_pt` are the target size in logical points.
+/// `grab`, when given, is a point inside the window (from its top-left, in
+/// points) that must end up under the cursor: `x`/`y` are then ignored and the
+/// origin is computed from `NSEvent.mouseLocation`, read here on the main
+/// thread in the same call as `setFrame:`. The bar's drag window is placed
+/// this way so the spot the user pressed is under the cursor when the OS drag
+/// starts, however far a fast flick has carried the cursor since the press.
+///
+/// Returns where the window actually is afterwards, in points (AppKit may
+/// constrain the frame, e.g. below the menu bar), and the cursor it was
+/// placed by, when it was placed by one.
 #[cfg(target_os = "macos")]
 pub fn set_bar_frame_atomic(
     app_handle: &AppHandle,
-    x_phys: f64,
-    y_phys: f64,
+    x: f64,
+    y: f64,
     w_pt: f64,
     h_pt: f64,
-) -> Result<(), String> {
+    grab: Option<(f64, f64)>,
+) -> Result<BarFramePlaced, String> {
+    use crate::platform::desktop_points::{
+        cocoa_frame_top_left, cocoa_point_to_points, origin_under_cursor,
+    };
     let label = constants::ui::window_labels::FLOATING_BAR;
     let window = app_handle
         .get_webview_window(label)
         .ok_or("floating-bar window not found")?;
-    let scale = window.scale_factor().map_err(|e| e.to_string())?;
-    let cur = window.outer_position().map_err(|e| e.to_string())?;
     let ns_window = window.ns_window().map_err(|e| e.to_string())? as cocoa_id;
 
-    // SAFETY: `frame`/`setFrame:` are standard NSWindow selectors; ns_window is
-    // a live window handle from Tauri. Called on whatever thread invokes the
-    // command; NSWindow's frame setters are main-thread-only, so callers route
-    // this through a command that Tauri dispatches on the main thread.
+    // SAFETY: `screens`, `objectAtIndex:`, `frame` and `setFrame:` are standard
+    // AppKit selectors on live objects; ns_window is the bar's window handle
+    // from Tauri. The command dispatches this to the main thread.
     unsafe {
-        let frame: NSRect = msg_send![ns_window, frame];
-        let dx_pt = (x_phys - cur.x as f64) / scale;
-        let dy_top_pt = (y_phys - cur.y as f64) / scale; // + = window moved down
-        let cur_top_y = frame.origin.y + frame.size.height; // Cocoa top edge (y-up)
-        let new_origin_x = frame.origin.x + dx_pt;
-        let new_origin_y = cur_top_y - dy_top_pt - h_pt; // keep top-left fixed
+        let primary_h = primary_screen_height()?;
+        let cursor = grab.map(|_| {
+            let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
+            cocoa_point_to_points((mouse.x, mouse.y), primary_h)
+        });
+        let (x, y) = match (grab, cursor) {
+            (Some(grab), Some(cursor)) => origin_under_cursor(cursor, grab),
+            _ => (x, y),
+        };
         let new_frame = NSRect::new(
-            NSPoint::new(new_origin_x, new_origin_y),
+            NSPoint::new(x, primary_h - y - h_pt),
             NSSize::new(w_pt, h_pt),
         );
         let _: () = msg_send![ns_window, setFrame: new_frame display: YES animate: NO];
+        let placed: NSRect = msg_send![ns_window, frame];
+        let (x, y) = cocoa_frame_top_left(
+            (placed.origin.x, placed.origin.y),
+            placed.size.height,
+            primary_h,
+        );
+        Ok(BarFramePlaced { x, y, cursor })
     }
-    Ok(())
+}
+
+/// Where `set_bar_frame_atomic` left the bar, in global points.
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy)]
+pub struct BarFramePlaced {
+    pub x: f64,
+    pub y: f64,
+    /// The cursor the window was placed by, read in the same call.
+    pub cursor: Option<(f64, f64)>,
+}
+
+/// The primary display's height in points: the flip between Cocoa's
+/// bottom-up frames and global top-left points.
+///
+/// # Safety
+/// Main thread only (AppKit).
+#[cfg(target_os = "macos")]
+unsafe fn primary_screen_height() -> Result<f64, String> {
+    let screens: cocoa_id = msg_send![class!(NSScreen), screens];
+    let count: usize = msg_send![screens, count];
+    if count == 0 {
+        return Err("No screens to place the bar on".to_string());
+    }
+    let primary: cocoa_id = msg_send![screens, objectAtIndex: 0usize];
+    let primary_frame: NSRect = msg_send![primary, frame];
+    Ok(primary_frame.size.height)
+}
+
+/// Start carrying the bar with the cursor: from here until the release, every
+/// mouse-dragged event puts `grab` (points from the window's top-left) under
+/// the cursor (`platform::bar_drag_follow`).
+///
+/// This replaced handing the window to the OS drag (`performWindowDragWithEvent:`
+/// with a mouse-down made at the cursor, #766). That drag is the
+/// WindowServer's: Juno cannot see it, and with a mouse-down that is not the
+/// real press the window drifted off the cursor as the drag went on, and once
+/// was left behind off screen. See the module docs for the evidence.
+///
+/// Must run on the main thread, right after the frame was set, so no event is
+/// handled between the placement and the first move. Returns the cursor
+/// (global points) the drag started at. Never touches the window's class or
+/// its level: every move goes through `setFrameTopLeftPoint:`, so the menu bar
+/// constraint holds exactly as it does for any frame change, and the #728
+/// rules in `docs/plans/appearance-steady-frame.md` are untouched.
+#[cfg(target_os = "macos")]
+pub fn start_bar_drag_follow(
+    app_handle: &AppHandle,
+    grab: (f64, f64),
+) -> Result<(f64, f64), String> {
+    use crate::platform::desktop_points::cocoa_point_to_points;
+    let label = constants::ui::window_labels::FLOATING_BAR;
+    let window = app_handle
+        .get_webview_window(label)
+        .ok_or("floating-bar window not found")?;
+    let ns_window = window.ns_window().map_err(|e| e.to_string())? as cocoa_id;
+
+    // SAFETY: standard AppKit selectors on the main thread (the caller is a
+    // `run_on_main_thread` closure).
+    let cursor = unsafe {
+        let primary_h = primary_screen_height()?;
+        let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
+        cocoa_point_to_points((mouse.x, mouse.y), primary_h)
+    };
+    crate::platform::bar_drag_follow::start(app_handle, ns_window, grab)?;
+    Ok(cursor)
 }
 
 #[cfg(target_os = "macos")]
@@ -370,57 +501,61 @@ fn setup_main_window(app_handle: &AppHandle) {
 }
 
 /// Setup macOS-specific behavior for the desktop cursor overlay window.
+#[cfg(target_os = "macos")]
+fn setup_desktop_cursor_overlay_window(app_handle: &AppHandle) {
+    match app_handle.get_webview_window(crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL) {
+        Some(window) => style_cursor_overlay(app_handle, &window),
+        None => info!(
+            "desktop-cursor-overlay not found during macOS setup; it is styled when first shown."
+        ),
+    }
+}
+
+/// Make the cursor overlay a window that can be seen wherever Juno acts.
 ///
-/// This window shows the AI agent's cursor position during computer-use tasks.
 /// It must be:
 ///   - At NSScreenSaverWindowLevel (1000) so it appears above all app content
 ///   - Fully click-through (ignoresMouseEvents) so it never blocks user input
 ///   - Non-activating: must not steal focus from the user's active application
 ///   - Persistent across spaces and full-screen apps
+///
+/// Called at setup and again on every show, because a window rebuilt from its
+/// config comes back at the floating level with none of this, which put it
+/// under every full-screen app.
 #[cfg(target_os = "macos")]
-fn setup_desktop_cursor_overlay_window(app_handle: &AppHandle) {
-    if let Some(window) = app_handle.get_webview_window("desktop-cursor-overlay") {
-        info!("Found desktop-cursor-overlay for macOS setup.");
-
-        match window.ns_window() {
-            Ok(ns_window_ptr) => {
-                let ns_window = ns_window_ptr as cocoa_id;
-                unsafe {
-                    // NSScreenSaverWindowLevel (1000) — above all app content including full-screen
-                    ns_window.setLevel_(1000);
-
-                    // Fully click-through: agent cursor must never intercept user input
-                    #[allow(unexpected_cfgs)]
-                    let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
-
-                    // Visible across all spaces and above full-screen apps
-                    ns_window.setCollectionBehavior_(
-                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
-                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary |
-                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary |
-                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle
-                    );
-
-                    // Stay visible when user switches to another app
-                    ns_window.setHidesOnDeactivate_(NO);
-
-                    ns_window.setOpaque_(NO);
-                    ns_window.setHasShadow_(NO);
-
-                    info!("macOS Setup: Desktop cursor overlay configured at screen-saver level, fully click-through.");
-                }
-            }
-            Err(e) => {
-                error!(
-                    "Error getting NSWindow for styling desktop-cursor-overlay: {}",
-                    e
-                );
-            }
+pub fn style_cursor_overlay(app_handle: &AppHandle, window: &tauri::WebviewWindow) {
+    let ns_window_addr = match window.ns_window() {
+        Ok(ptr) => ptr as usize,
+        Err(e) => {
+            error!(
+                "Error getting NSWindow for styling desktop-cursor-overlay: {}",
+                e
+            );
+            return;
         }
-    } else {
-        // Window is pre-created as visible:false in tauri.conf.json, so this should not happen
-        // at app startup. Log as info (not error) since it may not be created yet in all builds.
-        info!("desktop-cursor-overlay not found during macOS setup — will be configured on first open.");
+    };
+    // AppKit, so the main thread. The address crosses the hop because the
+    // raw pointer is not Send.
+    if let Err(e) = app_handle.run_on_main_thread(move || unsafe {
+        let ns_window = ns_window_addr as cocoa_id;
+        // NSScreenSaverWindowLevel (1000): above all app content, full-screen included.
+        ns_window.setLevel_(1000);
+        // Fully click-through: the agent cursor must never intercept input.
+        #[allow(unexpected_cfgs)]
+        let _: () = msg_send![ns_window, setIgnoresMouseEvents: YES];
+        // On every Space, and allowed over a full-screen app.
+        ns_window.setCollectionBehavior_(
+            NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
+                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary
+                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary
+                | NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle,
+        );
+        // Stay visible when the person switches to another app.
+        ns_window.setHidesOnDeactivate_(NO);
+        ns_window.setOpaque_(NO);
+        ns_window.setHasShadow_(NO);
+    }) {
+        warn!("Could not style the cursor overlay: {}", e);
     }
 }
 
@@ -453,8 +588,11 @@ fn activate_floating_bar_window(window: tauri::WebviewWindow<tauri::Wry>) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(BAR_SHOW_FALLBACK_MS)).await;
 
-        // The normal path already won: leave it alone.
-        if window.is_visible().unwrap_or(false) {
+        // The normal path already won: leave it alone. That includes a reveal
+        // whose smoke is up but whose bar is not yet: the window is still
+        // hidden for that second, and this used to log a second "put up" for
+        // a show the reveal guard then dropped.
+        if window.is_visible().unwrap_or(false) || crate::intro::reveal_in_flight() {
             return;
         }
 
@@ -468,15 +606,11 @@ fn activate_floating_bar_window(window: tauri::WebviewWindow<tauri::Wry>) {
             return;
         }
 
-        // Only show, never steal focus. Overlays must not activate Juno.
-        if let Err(e) = window.show() {
-            warn!(
-                "{}",
-                format_error(templates::FAILED_TO_PROCESS, "show floating bar window", e)
-            );
-        } else {
-            info!("Floating bar shown by the startup fallback (no focus steal)");
-        }
+        // Revealed, never focused: the same smoke the normal path uses, and
+        // it leaves a reveal already in flight alone. Overlays must not
+        // activate Juno.
+        info!("Floating bar put up by the startup fallback (no focus steal)");
+        crate::intro::show_bar_with_reveal(&window.app_handle().clone());
     });
 }
 
@@ -548,6 +682,12 @@ pub mod mouse_tracking {
             };
 
             if let Some(window_label) = window_label {
+                // A steady bar window is mostly transparent; while it has hit
+                // regions, enter and leave mean the drawn content, and
+                // `bar_hit_test` reports them instead of this whole-window area.
+                if crate::platform::bar_hit_test::owns_hover(&window_label) {
+                    return;
+                }
                 if let Some(window) = handle.get_webview_window(&window_label) {
                     let _ = window.emit(events::system::MOUSE_ENTERED_WINDOW, ()); // Emit specific event
                     debug!(
@@ -660,6 +800,12 @@ pub mod mouse_tracking {
             };
 
             if let Some(window_label) = window_label {
+                // A steady bar window is mostly transparent; while it has hit
+                // regions, enter and leave mean the drawn content, and
+                // `bar_hit_test` reports them instead of this whole-window area.
+                if crate::platform::bar_hit_test::owns_hover(&window_label) {
+                    return;
+                }
                 if let Some(window) = handle.get_webview_window(&window_label) {
                     let _ = window.emit(events::system::MOUSE_LEFT_WINDOW, ()); // Emit specific event
                     debug!(
@@ -836,6 +982,29 @@ pub mod mouse_tracking {
         }
 
         Ok(())
+    }
+}
+
+/// The macOS setup for a window built after launch by `startup_windows`:
+/// what `apply_macos_setup` used to do for it when every declared window
+/// existed before setup ran. AppKit, so it hops to the main thread.
+#[cfg(target_os = "macos")]
+pub fn configure_deferred_window(app_handle: &AppHandle, label: &str) {
+    if label == crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL {
+        // Already dispatches to the main thread itself.
+        setup_desktop_cursor_overlay_window(app_handle);
+        return;
+    }
+    let app = app_handle.clone();
+    let owned = label.to_string();
+    if let Err(e) = app_handle.run_on_main_thread(move || {
+        if owned == constants::window_labels::FLOATING_PANEL {
+            setup_floating_panel_window(&app);
+        } else if owned == constants::window_labels::MAIN {
+            setup_main_window(&app);
+        }
+    }) {
+        warn!("Could not set up the {} window: {}", label, e);
     }
 }
 

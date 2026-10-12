@@ -30,6 +30,20 @@
 //! and unclickable. Level here is therefore only ever floating or normal, and
 //! "below that particular window" is done with `orderWindow:relativeTo:`,
 //! which is app-relative and touches nothing else.
+//!
+//! ## Overlays never hold the keyboard
+//!
+//! The front window is read from AppKit's key-window events, so anything that
+//! can become key can confuse it. Tauri's `show()` is `makeKeyAndOrderFront:`
+//! on macOS, and an overlay that can become key takes the keyboard the moment
+//! it appears; when it hides, AppKit gives the keyboard to whichever window it
+//! likes. The drop indicator did exactly that: it took key from the bar at the
+//! start of a drag and handed it to settings on the drop, so the bar the
+//! person had just put down went straight back under settings. The overlays
+//! (the cursor overlay, the snap wells, the listening glow, the intro) are
+//! therefore declared `focusable: false`, which makes `canBecomeKeyWindow`
+//! answer no, and a test below reads `tauri.conf.json` so a new overlay cannot
+//! forget it.
 
 use crate::constants::ui::window_labels;
 use std::sync::Mutex;
@@ -362,10 +376,47 @@ pub fn apply(app: &AppHandle) {
     crate::platform::macos::apply_bar_stacking(app, stacking, front);
 }
 
+/// Whether the bar should be ordered above a drop overlay, given the stacking
+/// last applied. Only a floating bar shares the overlay's level; a bar that
+/// stepped aside for a window or a system prompt stays aside. Nothing applied
+/// yet is the resting state, which is floating.
+pub fn bar_goes_over_overlay(applied: Option<BarStacking>) -> bool {
+    matches!(applied, None | Some(BarStacking::Floating))
+}
+
+/// Keep the bar above one of Juno's own drop overlays.
+///
+/// The overlay and the bar are both at the floating level, and showing the
+/// overlay orders it to the front of that level, over the bar being dragged.
+/// Ordering within a level is app-relative and touches nothing else on the
+/// system, so this is the one restack the drag needs, and it is decided here
+/// with every other one.
+pub fn raise_over_overlay(app: &AppHandle, overlay_label: &str) {
+    let applied = match OBSERVED.lock() {
+        Ok(observed) => observed.applied.map(|(stacking, _)| stacking),
+        Err(_) => return,
+    };
+    if !bar_goes_over_overlay(applied) {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    crate::platform::macos::order_bar_above(app, overlay_label);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, overlay_label);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tauri::utils::config::WindowConfig as DeclaredWindowConfig;
+
+    #[test]
+    fn only_a_floating_bar_is_put_over_the_drop_overlay() {
+        assert!(bar_goes_over_overlay(None));
+        assert!(bar_goes_over_overlay(Some(BarStacking::Floating)));
+        assert!(!bar_goes_over_overlay(Some(BarStacking::Normal)));
+        assert!(!bar_goes_over_overlay(Some(BarStacking::BelowFront)));
+    }
 
     fn situation() -> BarSituation {
         BarSituation::default()
@@ -530,6 +581,42 @@ mod tests {
                 "window '{}' is an ordinary window the person can work in, but \
                  bar_stacking::front_window_for does not know it, so the floating \
                  bar will sit on top of it",
+                window.label
+            );
+        }
+    }
+
+    #[test]
+    fn no_overlay_can_take_the_keyboard() {
+        // Every always-on-top window is either a surface the person types into
+        // (the bar and the panel both carry a text field) or an overlay, and an
+        // overlay must be `focusable: false`. An overlay that can become key
+        // takes the keyboard when it is shown and AppKit hands it on when it
+        // hides; the snap-wells overlay handed it to settings on every drop,
+        // which put the bar the person had just dropped back under settings.
+        let typed_into = [window_labels::FLOATING_BAR, window_labels::FLOATING_PANEL];
+        let windows = declared_windows();
+        let overlays: Vec<&DeclaredWindowConfig> = windows
+            .iter()
+            .filter(|w| w.always_on_top && !typed_into.contains(&w.label.as_str()))
+            .collect();
+
+        assert!(
+            overlays.len() >= 3,
+            "expected the cursor, snap-wells and listening overlays to be declared always-on-top"
+        );
+
+        for window in overlays {
+            assert!(
+                !window.focusable,
+                "overlay '{}' can become the key window; declare it \"focusable\": false \
+                 in tauri.conf.json, or it will take the keyboard when shown and hand \
+                 it to a window of AppKit's choosing when hidden",
+                window.label
+            );
+            assert!(
+                !window.focus,
+                "overlay '{}' is declared to take focus when created",
                 window.label
             );
         }

@@ -149,6 +149,10 @@ impl AgentExecutionQueue {
         // Guard automatically cleans up on drop
         drop(guard);
 
+        // A run with no session leaves its cursor behind; let go of it now
+        // that the run is over, so the ghost fades instead of lingering.
+        crate::cursor_overlay::release_transient(&query.app_handle);
+
         // Handle execution result
         match result {
             Ok(()) => {
@@ -371,6 +375,17 @@ pub async fn submit_query(
         return Ok(());
     }
 
+    // Time a typed query like a voice turn, from the submit. A spoken query
+    // arrives here too, and the voice turn already open keeps it.
+    crate::turn_timing::begin_typed();
+
+    // A new task starts on the whole screen: the last task's working window,
+    // element ids and window picture must not steer this one. Sessions with
+    // their own id start fresh by construction; this clears the shared one.
+    crate::agent::tools::ax_targeting::reset_for_new_turn(
+        crate::utils::coordinates::DEFAULT_AGENT_KEY,
+    );
+
     // --- Answer a pending per-send approval (LAC-4058) by voice (LAC-4066) ---
     // Every query source funnels through here, including the push-to-talk /
     // hotkey and cloud-voice transcripts. While a connector send is waiting on
@@ -379,11 +394,29 @@ pub async fn submit_query(
     // new agent turn. This runs before the query is announced to any surface,
     // so nothing is left in a working state. A no-op when nothing is pending or
     // the text is not a clear yes/no.
-    if crate::agent::providers::cli_approval::try_answer_pending_approval(&state, trimmed_query)
+    //
+    // A waiting text or email (the send gate) is answered only by "send it" or
+    // the Send button. A bare yes leaves it waiting and Juno says the phrase;
+    // anything else said here is a correction the waiting gate hands back to
+    // the agent, so nothing is sent and the message is redone.
+    use crate::agent::providers::cli_approval::{self, AnswerSource, PendingAnswer};
+    match cli_approval::answer_pending_approval(&state, trimmed_query, AnswerSource::Deliberate)
         .await
     {
-        info!("Query answered a pending tool approval: {}", trimmed_query);
-        return Ok(());
+        PendingAnswer::NotAnAnswer => {}
+        PendingAnswer::Answered => {
+            info!("Query answered a pending tool approval: {}", trimmed_query);
+            return Ok(());
+        }
+        PendingAnswer::SayThePhrase(line) => {
+            info!("A bare yes to a waiting send; asking for the phrase");
+            let app = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let state = app.state::<AppState>();
+                let _ = crate::tts::invoke_tts(line, state, app.clone()).await;
+            });
+            return Ok(());
+        }
     }
 
     // Phase D analytics: fire `onboarding_first_query` exactly once per process
@@ -410,7 +443,11 @@ pub async fn submit_query(
     // scheduled automation): chat windows append the user message and enter
     // their processing state, and the floating bar shows "submitting".
     if !crate::cli::headless::is_headless_mode() {
-        announce_query_submission(&app_handle, trimmed_query).await;
+        announce_query_submission(&app_handle, trimmed_query, images.as_deref()).await;
+
+        // A new query opens a new turn for speech, so a local intent's answer
+        // is not mistaken for the tail of a turn that was stopped.
+        crate::tts::begin_turn();
 
         // --- Local intents: deterministic requests answered in-process ---
         // Bare playback commands ("pause Spotify", "what's playing?") resolve to
@@ -441,6 +478,22 @@ pub async fn submit_query(
             }
             return Ok(());
         }
+    }
+
+    // --- No way to reach a model: say so instead of calling one ---
+    // Checked after local intents, which need no network ("pause Spotify"
+    // works offline), and before anything that would. A lost connection is
+    // not a failure, so the reply is an ordinary answer in plain words with a
+    // button to send the same request again, never an error.
+    if let Some(blocked) = crate::connectivity::check_before_query().await {
+        let had_images = images.as_ref().is_some_and(|v| !v.is_empty());
+        let reply = crate::connectivity::blocked_reply(blocked, trimmed_query, had_images);
+        info!("Query not sent, no connection: {:?}", blocked);
+        if crate::cli::headless::is_headless_mode() {
+            return Err(reply.spoken);
+        }
+        crate::agent::local_intents::emit_reply(&app_handle, reply).await;
+        return Ok(());
     }
 
     // --- Smart routing (beta, off by default) ---
@@ -488,12 +541,22 @@ pub async fn submit_query(
 /// Emits `user-message-submitted` so every chat surface appends the message and
 /// enters its processing state, and moves the floating bar into `Submitting`.
 /// Only `submit_query` calls this, so every query source shares one announcement.
-async fn announce_query_submission(app_handle: &tauri::AppHandle, query: &str) {
+async fn announce_query_submission(
+    app_handle: &tauri::AppHandle,
+    query: &str,
+    images: Option<&[String]>,
+) {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
-    let payload = serde_json::json!({ "content": query, "timestamp": timestamp });
+    // The attached pictures ride along as data URLs so the person's own
+    // bubble can show what they sent, not just their words.
+    let payload = serde_json::json!({
+        "content": query,
+        "timestamp": timestamp,
+        "images": images,
+    });
     if let Err(e) = app_handle.emit(events::messages::USER_MESSAGE_SUBMITTED, payload) {
         warn!("Failed to emit user-message-submitted event: {}", e);
     }
@@ -609,6 +672,12 @@ async fn execute_agent_internal(
 ) -> Result<(), String> {
     // Generate a unique execution ID for this agent run
     let execution_id = uuid::Uuid::new_v4().to_string();
+    // Whether "Send again" can resend the whole request, should a lost
+    // connection end the turn: only the words can be sent again.
+    let had_images = images.as_ref().is_some_and(|v| !v.is_empty());
+
+    // Whatever the previous turn had left to say is not wanted by this one.
+    crate::tts::begin_turn();
 
     // Mark agent execution as started with max iterations (both modes use 15).
     //
@@ -1484,6 +1553,7 @@ async fn execute_agent_internal(
     // --- Process Agent Result ---
     let final_response = match agent_result {
         Ok(message) => {
+            crate::connectivity::record_provider_answer();
             // Note: Success sound will be played after TTS completes (or immediately if TTS is disabled)
 
             // TODO: TARS Integration disabled - event system not yet implemented
@@ -1528,7 +1598,18 @@ async fn execute_agent_internal(
 
             // Check if this is a network-related error
             let error_message = e.to_string();
-            let is_network_error = crate::utils::network::is_network_error(&error_message);
+            // The network monitor going down mid-turn is the surest sign;
+            // the error text is the fallback for a provider that dropped.
+            let is_network_error = crate::utils::network::is_network_error(&error_message)
+                || !crate::connectivity::network_up();
+            if matches!(e, AgentError::LlmError(_)) {
+                if is_network_error {
+                    crate::connectivity::record_provider_failure();
+                } else {
+                    // An error from the provider is still an answer from it.
+                    crate::connectivity::record_provider_answer();
+                }
+            }
 
             let (state_str, msg) = match e {
                 AgentError::Terminated => {
@@ -1569,10 +1650,11 @@ async fn execute_agent_internal(
                     )
                 }
                 AgentError::LlmError(_) if is_network_error => {
-                    // Handle network errors gracefully - use friendly message instead of raw error
+                    // A lost connection is not a failure. End the turn with a
+                    // plain answer saying what happened, spoken in whatever
+                    // voice works offline, with a button to send it again.
                     warn!("LLM error appears to be network-related: {}", error_message);
 
-                    // Play different sound for network issues (less alarming)
                     if !crate::cli::headless::is_headless_mode() {
                         if let Err(e) = crate::commands::sound::play_agent_attention_sound(
                             app_handle.clone(),
@@ -1587,9 +1669,22 @@ async fn execute_agent_internal(
                         }
                     }
 
+                    let reply = crate::connectivity::lost_mid_turn_reply(
+                        &crate::connectivity::current(),
+                        &query,
+                        had_images,
+                    );
+                    let spoken = reply.spoken.clone();
+                    if !crate::cli::headless::is_headless_mode() {
+                        crate::agent::local_intents::emit_reply_message(
+                            &app_handle,
+                            reply,
+                            crate::constants::ui::agent_status::FINISHED,
+                        );
+                    }
                     (
-                        "Offline".to_string(),
-                        crate::utils::network::get_offline_message(),
+                        crate::constants::ui::agent_status::FINISHED.to_string(),
+                        spoken,
                     )
                 }
                 _ => {
@@ -1608,40 +1703,12 @@ async fn execute_agent_internal(
                 }
             };
 
-            // For network errors, temporarily switch to system TTS to ensure the message is heard
-            let should_force_system_tts = is_network_error || state_str == "Offline";
-            let original_tts_provider = if should_force_system_tts {
-                let current_provider = state.get_tts_provider().unwrap_or_default();
-                // Switch to system TTS for network errors
-                if let Ok(()) = state.set_tts_provider("system".to_string()) {
-                    info!("Temporarily switched to system TTS for offline/network error message");
-                }
-                Some(current_provider)
-            } else {
-                None
-            };
-
-            let result = SubmitQueryResult {
-                text: msg.clone(),
+            SubmitQueryResult {
+                text: msg,
                 spoken_text: None, // Error messages use same content for speech
                 agent_state: state_str,
                 screenshot_data: None,
-            };
-
-            // Store the original provider to restore later if needed
-            if let Some(original_provider) = original_tts_provider {
-                // We'll restore it after TTS processing below
-                let state_ref = state.inner().clone();
-                tauri::async_runtime::spawn(async move {
-                    // Give TTS time to process
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    if let Ok(()) = state_ref.set_tts_provider(original_provider) {
-                        info!("Restored original TTS provider after offline/network error message");
-                    }
-                });
             }
-
-            result
         }
     };
 

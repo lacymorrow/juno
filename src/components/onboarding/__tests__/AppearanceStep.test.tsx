@@ -49,10 +49,12 @@ describe("onboarding appearance step", () => {
 
   it("is the second screen, and Continue advances past it", async () => {
     render(<OnboardingFlow onComplete={() => {}} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Get Started" }));
-    expect(await screen.findByText("Pick how Juno looks")).toBeInTheDocument();
+    // The steps load lazily; a loaded CI runner can take past the 1s default.
+    const slow = { timeout: 5000 };
+    fireEvent.click(await screen.findByRole("button", { name: "Get Started" }, slow));
+    expect(await screen.findByText("Pick how Juno looks", {}, slow)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Skip this step" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    await waitFor(() => expect(screen.queryByText("Pick how Juno looks")).toBeNull());
-  });
+    await waitFor(() => expect(screen.queryByText("Pick how Juno looks")).toBeNull(), slow);
+  }, 15000);
 });

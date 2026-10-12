@@ -13,12 +13,12 @@ export function AgentModeGroup({ settings }: SettingsSectionProps) {
   return (
     <SettingsGroup
       title="Agent"
-      footer="Multi-agent mode uses specialized agents for different tasks; single-agent mode uses one agent for everything."
     >
       <SettingsRow
         htmlFor="agent-mode"
         label="Agent mode"
         description="How Juno divides up tasks"
+        info="Multi-agent mode uses specialized agents for different tasks; single-agent mode uses one agent for everything."
       >
         <Select
           value={settings.agentMode}

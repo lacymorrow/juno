@@ -8,13 +8,15 @@ import type { ProviderInfo } from "@/types/settings";
  * ternary. They disagreed: one said "setup required", the others "No API key",
  * and all three said "No API key" for the one provider that has never wanted a
  * key. The distinction that matters is what you do next, and there are only
- * three answers: paste a key, install Claude Code, or run `claude login`.
+ * three answers: paste a key, install the CLI, or sign the CLI in.
  *
  * Returns null when the provider is ready, so callers can render nothing.
  */
 export function providerUnavailableReason(provider: ProviderInfo): string | null {
   if (provider.is_available) return null;
-  if (provider.needs_sign_in) return "Sign in to Claude Code";
+  if (provider.needs_sign_in) {
+    return provider.id === "codex_cli" ? "Sign in to Codex" : "Sign in to Claude Code";
+  }
   if (provider.id === "claude_cli") return "Claude Code not installed";
   return "No API key";
 }

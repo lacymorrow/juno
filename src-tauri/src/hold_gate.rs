@@ -51,13 +51,23 @@ struct InFlight {
     id: HoldId,
     opened_at: Instant,
     release: Option<HoldEnd>,
+    /// The start was refused because the other trigger's session holds the
+    /// microphone. See [`StartGate::disown`].
+    disowned: bool,
 }
+
+/// How many disowned holds are remembered while their key is still down.
+/// One per target is the real number; the rest is slack.
+const DISOWNED_KEPT: usize = 8;
 
 /// The starts of one target that have been emitted and not yet settled.
 #[derive(Debug, Default)]
 pub struct StartGate {
     last_id: HoldId,
     in_flight: Vec<InFlight>,
+    /// Settled holds whose start was disowned and whose key is still down.
+    /// Their release is swallowed.
+    disowned: Vec<HoldId>,
 }
 
 impl StartGate {
@@ -70,20 +80,38 @@ impl StartGate {
             id: self.last_id,
             opened_at: Instant::now(),
             release: None,
+            disowned: false,
         });
         self.last_id
     }
 
-    /// The key came up. Answers `true` when the start has not landed yet, in
-    /// which case the release is recorded and the caller must not act on it
-    /// now: [`StartGate::settle`] hands it back once the start is done.
+    /// The key came up. Answers `true` when the caller must not act on the
+    /// release now: either the start has not landed yet, in which case the
+    /// release is recorded and [`StartGate::settle`] hands it back once the
+    /// start is done, or the start was disowned and the release is swallowed.
     pub fn defer(&mut self, id: HoldId, end: HoldEnd) -> bool {
-        match self.in_flight.iter_mut().find(|entry| entry.id == id) {
-            Some(entry) => {
-                entry.release = Some(end);
-                true
-            }
-            None => false,
+        if let Some(entry) = self.in_flight.iter_mut().find(|entry| entry.id == id) {
+            entry.release = Some(end);
+            return true;
+        }
+        if let Some(index) = self.disowned.iter().position(|&held| held == id) {
+            self.disowned.remove(index);
+            return true;
+        }
+        false
+    }
+
+    /// The start was refused because the *other* trigger's session holds the
+    /// microphone: this hold opened nothing, so its release ends nothing.
+    ///
+    /// Without this the release went out as an ordinary stop or cancel, and
+    /// the stop paths hand a verb aimed at the wrong side to the session that
+    /// is open. So tapping the agent key while dictating cancelled the
+    /// dictation, and letting go of it committed the dictation early while
+    /// its own key was still held.
+    pub fn disown(&mut self, id: HoldId) {
+        if let Some(entry) = self.in_flight.iter_mut().find(|entry| entry.id == id) {
+            entry.disowned = true;
         }
     }
 
@@ -92,7 +120,18 @@ impl StartGate {
     /// any, for the caller to perform now.
     pub fn settle(&mut self, id: HoldId) -> Option<HoldEnd> {
         let index = self.in_flight.iter().position(|entry| entry.id == id)?;
-        self.in_flight.remove(index).release
+        let entry = self.in_flight.remove(index);
+        if !entry.disowned {
+            return entry.release;
+        }
+        if entry.release.is_none() {
+            // The key is still down: remember to swallow its release.
+            self.disowned.push(id);
+            if self.disowned.len() > DISOWNED_KEPT {
+                self.disowned.remove(0);
+            }
+        }
+        None
     }
 
     /// Whether a start is still in flight. Tests only.
@@ -105,10 +144,12 @@ impl StartGate {
 static AGENT: Mutex<StartGate> = Mutex::new(StartGate {
     last_id: 0,
     in_flight: Vec::new(),
+    disowned: Vec::new(),
 });
 static DICTATION: Mutex<StartGate> = Mutex::new(StartGate {
     last_id: 0,
     in_flight: Vec::new(),
+    disowned: Vec::new(),
 });
 
 fn with<R>(target: VoiceTarget, f: impl FnOnce(&mut StartGate) -> R) -> R {
@@ -136,6 +177,24 @@ pub fn defer(target: VoiceTarget, id: HoldId, end: HoldEnd) -> bool {
 /// See [`StartGate::settle`].
 pub fn settle(target: VoiceTarget, id: HoldId) -> Option<HoldEnd> {
     with(target, |gate| gate.settle(id))
+}
+
+/// A start for `target` was refused because a session for `standing` holds
+/// the microphone. When that is the other trigger's session, the hold is
+/// disowned (see [`StartGate::disown`]). A refused start of the same target
+/// is a second press of a control already talking, and its release still ends
+/// that session, as it always has.
+pub fn disown_if_crossed(target: VoiceTarget, standing: VoiceTarget, hold: Option<HoldId>) {
+    if let Some(id) = hold {
+        if crossed(target, standing) {
+            with(target, |gate| gate.disown(id));
+        }
+    }
+}
+
+/// A refused start whose release must not reach the standing session.
+pub fn crossed(target: VoiceTarget, standing: VoiceTarget) -> bool {
+    target != standing
 }
 
 /// The event a release emits for a target. One table, so the immediate path
@@ -198,6 +257,48 @@ impl Drop for SettleOnDrop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_agent_key_tapped_during_a_dictation_does_not_cancel_it() {
+        // Agent key down while dictating: its start is refused (the dictation
+        // holds the microphone) and disowned. The tap's release lands after.
+        let mut gate = StartGate::default();
+        let id = gate.open();
+        gate.disown(id);
+        assert_eq!(gate.settle(id), None);
+        assert!(
+            gate.defer(id, HoldEnd::Cancel),
+            "the release is swallowed, not sent on to the dictation"
+        );
+        // Swallowed once; the next hold is an ordinary one.
+        let next = gate.open();
+        assert_eq!(gate.settle(next), None);
+        assert!(!gate.defer(next, HoldEnd::Commit));
+    }
+
+    #[test]
+    fn a_disowned_release_that_arrived_early_is_dropped_too() {
+        let mut gate = StartGate::default();
+        let id = gate.open();
+        assert!(gate.defer(id, HoldEnd::Commit), "start still in flight");
+        gate.disown(id);
+        assert_eq!(
+            gate.settle(id),
+            None,
+            "the recorded commit must not be performed on the other session"
+        );
+        assert!(!gate.defer(id, HoldEnd::Commit), "nothing left to swallow");
+    }
+
+    #[test]
+    fn only_the_other_triggers_session_disowns() {
+        assert!(crossed(VoiceTarget::Agent, VoiceTarget::Dictation));
+        assert!(crossed(VoiceTarget::Dictation, VoiceTarget::Agent));
+        assert!(
+            !crossed(VoiceTarget::Agent, VoiceTarget::Agent),
+            "a second press of the same control still ends its session"
+        );
+    }
 
     #[test]
     fn a_release_after_the_start_landed_acts_at_once() {

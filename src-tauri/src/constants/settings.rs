@@ -35,9 +35,11 @@ pub mod store_keys {
     pub const DOCK_ICON_VISIBLE: &str = "dock_icon_visible";
     pub const SHOW_TRAY_ICON: &str = "show_tray_icon";
     pub const SHOW_GLOW_BORDER: &str = "show_glow_border";
+    pub const AGENT_CURSOR_COLOR: &str = "agent_cursor_color";
     pub const CLI: &str = "cli";
-    /// Experimental. Reuse one long-lived `claude` process per conversation instead
-    /// of spawning one per query. Off unless explicitly set.
+    /// Reuse one long-lived `claude` process per conversation instead of spawning
+    /// one per query. On unless explicitly set to false; see
+    /// `defaults::CLI_PERSISTENT_SESSION_ENABLED`.
     /// See docs/plans/cli-persistent-session-spike.md
     pub const CLI_PERSISTENT_SESSION_ENABLED: &str = "cli_persistent_session_enabled";
     /// Ask before Juno sends (LAC-4058). Default on. Routes the Claude CLI's
@@ -161,8 +163,16 @@ pub mod validation {
 
 /// Default values for settings
 pub mod defaults {
-    pub const TTS_PROVIDER: &str = "system";
+    /// Kokoro speaks unless somebody picks otherwise. Its chain ends in the
+    /// Mac's own voice (`tts::fallback_chain`), so a model that has not
+    /// downloaded, or will not load, still speaks.
+    pub const TTS_PROVIDER: &str = "kokoro";
     pub const SOUND_ENABLED: bool = true;
+    /// The persistent Claude CLI session is on for anyone who has not turned it
+    /// off. It saves 1.6-3.1s of process start on every follow-up, which is most
+    /// of the gap between a key release and the first spoken word on this
+    /// provider. An explicit `false` in the store still wins.
+    pub const CLI_PERSISTENT_SESSION_ENABLED: bool = true;
     pub const DICTATION_CLIPBOARD_ENABLED: bool = true;
     /// Paste stays the default while clipboard-free proves itself in the field.
     /// Literal (not a re-export of `dictation_insertion_modes::PASTE`) because
@@ -227,6 +237,13 @@ pub mod defaults {
     /// Juno's policy is capability first, so "high" rather than "medium".
     /// Anything outside `CLAUDE_CLI_EFFORT_LEVELS` is ignored and this is used.
     pub const CLAUDE_CLI_EFFORT: &str = "high";
+    /// The effort for a spoken turn when the person has not set one. At "high"
+    /// the model plans before it writes its first spoken line, and on voice
+    /// turns that plan was most of the 1.5 to 2 seconds between the request
+    /// and the first word. "medium" rather than "low": a spoken request still
+    /// drives tools and multi-step work, and "low" trades away too much of the
+    /// planning that makes those land.
+    pub const CLAUDE_CLI_VOICE_EFFORT: &str = "medium";
     /// The levels the CLI accepts. A store value outside this list is dropped
     /// rather than passed through, so a stale setting cannot make every spawn
     /// fail on an unknown argument.
@@ -292,6 +309,11 @@ pub mod defaults {
     pub fn show_glow_border() -> bool {
         SHOW_GLOW_BORDER
     }
+    /// The glow around Juno's cursor starts in system blue. Older stores lack
+    /// the key and get it too.
+    pub fn agent_cursor_color() -> String {
+        crate::constants::ui::agent_cursor_colors::DEFAULT.to_string()
+    }
 
     // Default keyboard shortcuts (cross-platform)
     #[cfg(target_os = "macos")]
@@ -334,6 +356,13 @@ pub mod events {
     pub const PROMPT_SETTINGS_CHANGED: &str = "prompt_settings_changed";
     pub const CLI_SETTINGS_CHANGED: &str = "cli_settings_changed";
     pub const VOICE_TRANSCRIPTION_SETTINGS_CHANGED: &str = "voice_transcription_settings_changed";
+    /// The agent asked the Settings window to show a pane, and maybe one row
+    /// in it, or changed a setting the window should redraw. Payload:
+    /// `{ pane, row, reload }`. See `agent::tools::settings_tool`.
+    pub const SETTINGS_NAVIGATE: &str = "settings_navigate";
+    /// "Show advanced settings" changed, from the sidebar or from the agent.
+    /// Payload: the new value.
+    pub const ADVANCED_SETTINGS_CHANGED: &str = "advanced_settings_changed";
 }
 
 #[cfg(test)]

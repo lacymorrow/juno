@@ -483,6 +483,7 @@ mod tests {
             Provider::Rig,
             Provider::Gemini,
             Provider::ClaudeCli,
+            Provider::CodexCli,
         ] {
             for role in [RouterRole::Classifier, RouterRole::Chat] {
                 let holders = provider
@@ -553,7 +554,12 @@ mod tests {
 
     #[test]
     fn providers_without_router_roles_never_override() {
-        for provider in [Provider::OpenAI, Provider::Gemini, Provider::ClaudeCli] {
+        for provider in [
+            Provider::OpenAI,
+            Provider::Gemini,
+            Provider::ClaudeCli,
+            Provider::CodexCli,
+        ] {
             let configured = provider.default_model();
             for route in [Route::Chat, Route::Tools, Route::Escalate] {
                 assert_eq!(model_for_route(route, &provider, configured), None);

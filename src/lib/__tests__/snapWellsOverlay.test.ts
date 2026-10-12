@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import type { MonitorRect } from "../snapWells";
-import { unionLogicalBounds, wellToOverlayRect } from "../snapWellsOverlay";
+import { computeWells } from "../snapWells";
+import { monitorsInPoints } from "../desktopPoints";
+import {
+  overlayDisplayIndex,
+  unionLogicalBounds,
+  wellToOverlayRect,
+  wellsForDisplay,
+} from "../snapWellsOverlay";
 
 const mon = (
   x: number,
@@ -52,41 +59,39 @@ describe("unionLogicalBounds", () => {
   });
 });
 
-describe("wellToOverlayRect", () => {
-  const monitors = [mon(0, 0, 1920, 1080, 1)];
+describe("one overlay per display", () => {
+  // A 2x laptop (1512x982 points) with a 1x 1920x1080 display to its left,
+  // as Tauri reports them, converted to points the way the overlay does.
+  const desk = monitorsInPoints([
+    mon(0, 0, 3024, 1964, 2),
+    mon(-1920, -100, 1920, 1080, 1),
+  ]);
+  const wells = computeWells(desk, { windowWidth: 88, windowHeight: 76, includeCenter: true });
 
-  it("maps a well straight through at scale 1 with a zero origin", () => {
-    const rect = wellToOverlayRect(
-      { x: 16, y: 36, monitorIndex: 0 },
-      monitors,
-      { x: 0, y: 0 },
-      { width: 88, height: 66 },
-    );
-    expect(rect).toEqual({ x: 16, y: 36, w: 88, h: 66 });
+  it("reads its display from its window label", () => {
+    expect(overlayDisplayIndex("snap-wells-overlay")).toBe(0);
+    expect(overlayDisplayIndex("snap-wells-overlay-1")).toBe(1);
+    expect(overlayDisplayIndex("snap-wells-overlay-x")).toBe(-1);
+    expect(overlayDisplayIndex("floating-bar")).toBe(-1);
   });
 
-  it("divides physical coords + bar size by the well monitor's scale factor", () => {
-    const retina = [mon(0, 0, 2560, 1600, 2)];
-    const rect = wellToOverlayRect(
-      { x: 200, y: 100, monitorIndex: 0 },
-      retina,
-      { x: 0, y: 0 },
-      { width: 88, height: 66 },
-    );
-    expect(rect).toEqual({ x: 100, y: 50, w: 44, h: 33 });
+  it("draws only its own display's wells, all inside its own window", () => {
+    for (const idx of [0, 1]) {
+      const display = desk[idx];
+      const own = wellsForDisplay(wells, idx);
+      expect(own).toHaveLength(9);
+      for (const w of own) {
+        const r = wellToOverlayRect(w, display);
+        expect(r.x).toBeGreaterThanOrEqual(0);
+        expect(r.y).toBeGreaterThanOrEqual(0);
+        expect(r.x + r.w).toBeLessThanOrEqual(display.size.width);
+        expect(r.y + r.h).toBeLessThanOrEqual(display.size.height);
+      }
+    }
   });
 
-  it("subtracts the logical union origin so a secondary display lines up", () => {
-    // Secondary 1x display sitting at physical x = -1920 (logical -1920).
-    const twoMon = [mon(0, 0, 2560, 1600, 2), mon(-1920, 0, 1920, 1080, 1)];
-    const origin = { x: -1920, y: 0 };
-    const rect = wellToOverlayRect(
-      { x: -1904, y: 36, monitorIndex: 1 },
-      twoMon,
-      origin,
-      { width: 88, height: 66 },
-    );
-    // -1904 logical - (-1920) origin = 16 into the overlay.
-    expect(rect).toEqual({ x: 16, y: 36, w: 88, h: 66 });
+  it("puts a well on the left display 16 points in from that display's edge", () => {
+    const tl = wellsForDisplay(wells, 1).find((w) => w.fx === 0 && w.fy === 0)!;
+    expect(wellToOverlayRect(tl, desk[1])).toEqual({ x: 16, y: 36, w: 88, h: 76 });
   });
 });

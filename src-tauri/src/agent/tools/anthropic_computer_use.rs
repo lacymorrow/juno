@@ -9,10 +9,10 @@ use crate::utils::permission_validator::{validate_permission, RequiredPermission
 // Removed unused import - BashResult is handled differently now
 // Keep the tool versioning from errors branch (enhanced functionality)
 use super::tool_versioning::{ApiVersion, ToolVersionConfig, ToolVersionManager};
-use crate::state::AgentCursorState;
 use crate::utils::coordinate_validation::{
     validate_coordinate_pair, validate_coordinate_parameter, CoordinateValidationError,
 };
+use computer_use_ai_sdk::window_target::PinnedWindow;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -60,24 +60,12 @@ static LAST_UI_ACTION_MS: AtomicU64 = AtomicU64::new(0);
 /// Monotonic counter for assigning unique cursor IDs to concurrent agent instances.
 static NEXT_AGENT_CURSOR_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Agent cursor color palette — each slot is used round-robin for up to 8 concurrent agents.
-const AGENT_CURSOR_COLORS: &[&str] = &[
-    "#8B5CF6", // violet  (matches default Juno cursor)
-    "#10B981", // emerald
-    "#F59E0B", // amber
-    "#EF4444", // red
-    "#3B82F6", // blue
-    "#EC4899", // pink
-    "#14B8A6", // teal
-    "#F97316", // orange
-];
-
 /// Identity of the parallel agent session that owns a tool registration
 /// (LAC-1432). When present, the agent's overlay cursor is keyed by the
 /// session id and drawn in the session's identity color, and physical
 /// input is attributed to the session in the input arbiter. When absent
-/// (legacy callers), a process-unique `agent-N` cursor id and the legacy
-/// palette are used instead.
+/// (legacy callers), a process-unique `agent-N` cursor id and the primary
+/// cursor color are used instead.
 #[derive(Clone, Debug)]
 pub struct SessionToolContext {
     pub session_id: String,
@@ -109,130 +97,55 @@ pub async fn run_computer_action(
         return Err(reason);
     }
 
+    // Frames and targets an action sets belong to this agent alone.
+    coordinates::scoped_to_agent(
+        session_id,
+        run_scoped_computer_action(app_handle, input, session_id, cursor_id, cursor_color),
+    )
+    .await
+}
+
+async fn run_scoped_computer_action(
+    app_handle: &tauri::AppHandle,
+    input: Value,
+    session_id: Option<&str>,
+    cursor_id: &str,
+    cursor_color: &str,
+) -> Result<Value, String> {
     let result = execute_computer_tool(app_handle, input.clone(), session_id).await;
 
-    // Emit cursor position for the agent overlay (non-blocking).
-    if result.is_ok() {
-        let action = input["action"].as_str().unwrap_or("");
-        if let Some((raw_x, raw_y)) = extract_coordinate(&input) {
-            use crate::utils::coordinates;
-            let (sx, sy) = coordinates::transform_to_screen_coordinates(raw_x, raw_y);
-            let cursor_state = match action {
-                "left_click" | "right_click" | "middle_click" | "double_click" | "triple_click" => {
-                    "clicking"
-                }
-                "mouse_move" => "moving",
-                _ => "idle",
-            };
-            emit_agent_cursor_update(app_handle, cursor_id, sx, sy, cursor_state, cursor_color);
+    // Put Juno's cursor where the action landed. A screenshot or a keystroke
+    // has no point, so the cursor is left where it is rather than moved to
+    // nowhere.
+    if let Ok(response) = &result {
+        let point = match extract_coordinate(&input) {
+            Some((raw_x, raw_y)) => {
+                Some(coordinates::transform_to_screen_coordinates(raw_x, raw_y))
+            }
+            // An `element` action reports where the control is.
+            None => response["screen_point"]
+                .as_array()
+                .and_then(|p| Some((p.first()?.as_f64()?, p.get(1)?.as_f64()?))),
+        };
+        if let Some((sx, sy)) = point {
+            let background = crate::input_control::background_mode_enabled(app_handle).await;
+            crate::cursor_overlay::take(
+                app_handle,
+                crate::cursor_overlay::CursorAction {
+                    agent_id: cursor_id,
+                    identity_color: cursor_color,
+                    x: sx,
+                    y: sy,
+                    action: input["action"].as_str().unwrap_or(""),
+                    foreground: crate::cursor_overlay::takes_real_cursor(response, background),
+                    transient: session_id.is_none(),
+                },
+            )
+            .await;
         }
-        // A screenshot has no coordinate, so the cursor is left where it is
-        // rather than moved to nowhere.
     }
 
     result
-}
-
-/// Emit a cursor position update for a named agent. No-op if the app_handle cannot emit.
-fn emit_agent_cursor_update(
-    app_handle: &tauri::AppHandle,
-    agent_id: &str,
-    x: f64,
-    y: f64,
-    cursor_state: &str,
-    color: &str,
-) {
-    let state_manager = app_handle.state::<AppState>();
-    let cursor = AgentCursorState {
-        agent_id: agent_id.to_string(),
-        x,
-        y,
-        state: cursor_state.to_string(),
-        color: color.to_string(),
-    };
-    state_manager.update_agent_cursor(cursor.clone());
-
-    // Put the overlay on screen. It is declared hidden and nothing ever showed
-    // it, so every cursor update so far has been drawn into a window nobody
-    // was looking at: the pointer moved on its own with nothing to say why.
-    show_cursor_overlay(app_handle);
-
-    // Someone is driving another application, so the floating bar is where the
-    // work shows and the only place it can be stopped. It stays on top for the
-    // duration, even over Juno's own chat window. Cheap to repeat: an unchanged
-    // fact costs nothing.
-    crate::bar_stacking::note_agent_driving(app_handle, true);
-
-    if let Err(e) = app_handle.emit(crate::constants::events::ui::AGENT_CURSOR_UPDATE, &cursor) {
-        tracing::debug!("agent cursor update emit failed: {}", e);
-    }
-}
-
-/// Bring up the click-through overlay that draws agent cursors.
-///
-/// Cheap to call repeatedly: an already-visible window is left alone, so this
-/// sits on the hot path of every mouse action without costing anything after
-/// the first one.
-fn show_cursor_overlay(app_handle: &tauri::AppHandle) {
-    use tauri::Manager;
-    if let Some(window) =
-        app_handle.get_webview_window(crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL)
-    {
-        if window.is_visible().unwrap_or(false) {
-            return;
-        }
-        if let Err(e) = window.show() {
-            tracing::warn!("Could not show the cursor overlay: {}", e);
-        }
-        return;
-    }
-
-    // Not built yet (it is declared in tauri.conf.json, but a window can be
-    // destroyed). Building is async, so it is spawned rather than awaited on
-    // the action path.
-    let app = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
-        if let Err(e) = crate::window_management::open_desktop_cursor_overlay(app).await {
-            tracing::warn!("Could not open the cursor overlay: {}", e);
-        }
-    });
-}
-
-/// Emit cursor removal for a named agent (call on agent completion or cancellation).
-///
-/// Called from `SessionHandle::drop` so every session end path — complete,
-/// cancel, error, panic unwind — clears the session's overlay cursor.
-pub(crate) fn emit_agent_cursor_remove(app_handle: &tauri::AppHandle, agent_id: &str) {
-    if let Some(state_manager) = app_handle.try_state::<AppState>() {
-        state_manager.remove_agent_cursor(agent_id);
-    }
-    let payload = serde_json::json!({ "agent_id": agent_id });
-    if let Err(e) = app_handle.emit(crate::constants::events::ui::AGENT_CURSOR_REMOVE, &payload) {
-        tracing::debug!("agent cursor remove emit failed: {}", e);
-    }
-
-    // Once nobody is driving, take the overlay away. It is click-through and
-    // transparent, so leaving it up harms nothing, but a window that is only
-    // ever shown is a window that is eventually blamed for something.
-    let nobody_left = app_handle
-        .try_state::<AppState>()
-        .map(|state| state.agent_cursors_is_empty())
-        .unwrap_or(true);
-    if nobody_left {
-        // Nobody is driving any more, so the bar goes back to whatever the rest
-        // of the situation asks for: on top if the person is working elsewhere,
-        // behind a Juno window they are reading.
-        crate::bar_stacking::note_agent_driving(app_handle, false);
-
-        use tauri::Manager;
-        if let Some(window) =
-            app_handle.get_webview_window(crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL)
-        {
-            if let Err(e) = window.hide() {
-                tracing::debug!("Could not hide the cursor overlay: {}", e);
-            }
-        }
-    }
 }
 
 /// Extract [x, y] from a computer tool input's "coordinate" field.
@@ -510,6 +423,14 @@ pub(crate) fn failure_halts_batch(tool_name: &str, input: &Value) -> bool {
         return match input.get("action").and_then(Value::as_str) {
             Some(action) => is_ui_modifying_action(action),
             None => true,
+        };
+    }
+    // A failed press halts the batch like a failed click; a failed list or
+    // window picture changes nothing on screen.
+    if tool_name == APP_CONTROLS_TOOL {
+        return match app_controls_to_computer_input(input) {
+            Ok(computer) => failure_halts_batch("computer", &computer),
+            Err(_) => true,
         };
     }
     is_ui_modifying_action(tool_name)
@@ -887,6 +808,25 @@ fn is_interactive_ax_role(role: &str) -> bool {
     )
 }
 
+/// The process and window a click at a screen point is for: the named window
+/// when there is one, otherwise the topmost window under the point that is not
+/// Juno's own.
+fn click_target(x: f64, y: f64, window_pin: Option<PinnedWindow>) -> Option<(i32, Option<u32>)> {
+    if let Some(pin) = window_pin {
+        return Some((pin.pid, Some(pin.window_id)));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        computer_use_ai_sdk::platforms::macos::display::get_window_at_screen_point(x, y)
+            .map(|(pid, id)| (pid, Some(id)))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (x, y);
+        None
+    }
+}
+
 /// Attempt an AX-grounded click at the given screen coordinates.
 ///
 /// Performs a fast native hit-test (~1-5ms) via `AXUIElementCopyElementAtPosition`.
@@ -901,23 +841,50 @@ fn try_ax_grounded_click(
     screen_x: f64,
     screen_y: f64,
     kind: AxClickKind,
+    window_pin: Option<PinnedWindow>,
 ) -> AxGroundingResult {
     let state = app_handle.state::<AppState>();
-
-    let element = match state.desktop.element_at_position(screen_x, screen_y) {
-        Some(el) => el,
-        None => {
-            return AxGroundingResult {
-                used_ax_click: false,
-                role: None,
-                label: None,
-            };
-        }
+    let not_used = AxGroundingResult {
+        used_ax_click: false,
+        role: None,
+        label: None,
     };
+
+    // Hit-test inside the app the click is for, not the frontmost app. The
+    // frontmost app is the person's (or Juno itself) and in background mode is
+    // by design not the target, so a frontmost-app hit-test pressed buttons in
+    // the wrong app whenever its window happened to cover the point.
+    let Some((target_pid, _)) = click_target(screen_x, screen_y, window_pin) else {
+        return not_used;
+    };
+    let Some(element) = state
+        .desktop
+        .element_at_position_in_app(target_pid, screen_x, screen_y)
+    else {
+        return not_used;
+    };
+    let owner = computer_use_ai_sdk::ax_text::element_owner(&element);
+    let own_pid = std::process::id() as i32;
+    if !ax_click_element_ok(target_pid, window_pin.map(|p| p.window_id), owner, own_pid) {
+        tracing::debug!(
+            "AX grounding: element owner {:?} is not the click target (pid {}, window {:?}); skipping AXPress",
+            owner,
+            target_pid,
+            window_pin.map(|p| p.window_id)
+        );
+        return not_used;
+    }
 
     let attrs = element.attributes();
     let role = attrs.role.clone();
-    let label = attrs.label.clone();
+    // Calculator's keys, like many icon buttons, have no title, only a
+    // description ("1", "Add"). Without it a result said "button" and nothing
+    // more, and a press on the wrong key looked exactly like the right one.
+    let label = computer_use_ai_sdk::ax_elements::element_name(
+        attrs.label.as_deref(),
+        attrs.description.as_deref(),
+        None,
+    );
 
     if !is_interactive_ax_role(&role) {
         tracing::debug!(
@@ -943,6 +910,9 @@ fn try_ax_grounded_click(
 
     match result {
         Ok(()) => {
+            // Keystrokes that follow carry no coordinate, so remember where this
+            // click went; otherwise a later `type` has no target in background mode.
+            computer_use_ai_sdk::background::remember_target_window(target_pid, owner.1);
             info!(
                 "✨ AX grounded click ({:?}): {} '{}' at ({:.0}, {:.0})",
                 kind,
@@ -972,40 +942,6 @@ fn try_ax_grounded_click(
                 role: Some(role),
                 label,
             }
-        }
-    }
-}
-
-/// Try to type text directly into the currently focused AX element.
-///
-/// Fetches the system-wide focused element and calls `type_text()` on it, which
-/// first tries `kAXValueAttribute` (no cursor, no clipboard) and falls back to
-/// clipboard paste if that fails. Returns true if AX typing succeeded.
-///
-/// On any failure (no permissions, no focused element, element rejects AXValue),
-/// returns false so the caller can fall back to global keyboard simulation.
-fn try_ax_type_focused(app_handle: &tauri::AppHandle, text: &str) -> bool {
-    let state = app_handle.state::<AppState>();
-    match state.desktop.focused_element() {
-        Ok(element) => match element.type_text(text) {
-            Ok(()) => {
-                info!(
-                    "✨ AX type: {} chars typed into focused element via AXValue",
-                    text.chars().count()
-                );
-                true
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "AX type failed on focused element: {} — falling back to global keyboard",
-                    e
-                );
-                false
-            }
-        },
-        Err(e) => {
-            tracing::debug!("Could not get focused element for AX type: {}", e);
-            false
         }
     }
 }
@@ -1051,11 +987,19 @@ async fn run_background_first<F>(
     app_handle: &tauri::AppHandle,
     action: &str,
     target_app: Option<&str>,
+    window_pin: Option<PinnedWindow>,
     attempt: F,
 ) -> Result<computer_use_ai_sdk::InputOutcome, String>
 where
     F: Fn(bool) -> Result<Option<computer_use_ai_sdk::InputOutcome>, String>,
 {
+    // The pin is thread-local and the attempt runs synchronously, so pinning
+    // around each call (never across an await) routes exactly that attempt.
+    let attempt = |allow_physical: bool| {
+        let _pin = computer_use_ai_sdk::window_target::pin(window_pin);
+        attempt(allow_physical)
+    };
+
     use crate::input_control::{commands::describe_request, request_physical_cursor};
 
     // Every input step funnels through here, so this is the one place that has
@@ -1113,7 +1057,337 @@ where
 fn with_input_tier(mut response: Value, outcome: &computer_use_ai_sdk::InputOutcome) -> Value {
     response["input_tier"] = json!(outcome.tier.as_str());
     response["input_method"] = json!(outcome.method);
+    // True when the step took the person's own pointer or keyboard focus, so it
+    // could not be done in the background. Always present, so it is visible.
+    response["foreground"] = json!(outcome.tier.takes_physical_cursor());
     response
+}
+
+/// Add who an input step reached to a tool response.
+fn with_target(mut response: Value, target: &computer_use_ai_sdk::ax_text::TargetInfo) -> Value {
+    response["target"] = json!({
+        "app": target.app,
+        "bundle_id": target.bundle_id,
+        "pid": target.pid,
+        "window_id": target.window_id,
+        "window_title": target.window_title,
+    });
+    response
+}
+
+/// The window an input action named with its optional `window` parameter.
+#[derive(Debug, Clone)]
+struct NamedWindow {
+    pid: i32,
+    id: u32,
+}
+
+/// Resolve the optional `window` parameter to an on-screen window.
+///
+/// Absent means no window was named and nothing changes. A window that cannot
+/// be found is an error the agent sees, never a silent fall back to "whatever
+/// is on top", which is the failure the parameter exists to prevent.
+fn resolve_named_window(input: &Value) -> Result<Option<NamedWindow>, String> {
+    let Some(selector) = computer_use_ai_sdk::window_target::WindowSelector::from_input(input)?
+    else {
+        return Ok(None);
+    };
+    #[cfg(target_os = "macos")]
+    {
+        let records = computer_use_ai_sdk::platforms::macos::display::list_window_records();
+        let own_pid = std::process::id() as i32;
+        let window =
+            computer_use_ai_sdk::window_target::select_window(&records, &selector, own_pid)?;
+        Ok(Some(NamedWindow {
+            pid: window.pid,
+            id: window.id,
+        }))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = selector;
+        Err("Window targeting is only available on macOS".to_string())
+    }
+}
+
+/// Read-only actions that still take a `window`: a picture of that window, or
+/// the list of its controls.
+fn takes_window_for_reading(action: &str) -> bool {
+    matches!(action, "screenshot" | "elements")
+}
+
+/// The `element` parameter, as a string id, if one was given.
+fn element_param(input: &Value) -> Option<String> {
+    match input.get("element")? {
+        Value::String(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+/// Act on a control from the latest `elements` listing: press it or open its
+/// menu (`type` is handled in [`execute_computer_tool`], which focuses the
+/// field and types through the verified typing path). Accessibility first:
+/// when the control refuses the accessibility action, the fallback clicks its
+/// real centre, read from the accessibility tree, never a guessed pixel.
+async fn run_element_action(
+    app_handle: &tauri::AppHandle,
+    action: &str,
+    element_id: &str,
+    session_id: Option<&str>,
+) -> Result<Value, String> {
+    use super::ax_targeting;
+
+    if !matches!(action, "left_click" | "right_click" | "double_click") {
+        return Ok(create_anthropic_error_response(format!(
+            "'element' works with left_click, right_click, double_click and type, not {action}"
+        )));
+    }
+    let resolved = match ax_targeting::resolve_element(element_id) {
+        Ok(resolved) => resolved,
+        Err(message) => return Ok(create_anthropic_error_response(message)),
+    };
+    let pin = resolved.pin;
+    let (center_x, center_y) = resolved.screen_center();
+    ax_targeting::set_working_window(pin);
+
+    let accessibility = match action {
+        "left_click" => computer_use_ai_sdk::ax_elements::press(&resolved.element),
+        "right_click" => computer_use_ai_sdk::ax_elements::show_menu(&resolved.element),
+        // A double click means "open" to most apps, which has no reliable
+        // accessibility action; click the real centre twice instead.
+        _ => Err("double click goes to the centre".to_string()),
+    };
+
+    let mut response = match accessibility {
+        Ok(()) => {
+            computer_use_ai_sdk::background::remember_target_window(pin.pid, Some(pin.window_id));
+            info!(
+                "✨ AX {} on {} via accessibility",
+                action,
+                resolved.describe()
+            );
+            let method = if action == "right_click" {
+                "AXShowMenu"
+            } else {
+                "AXPress"
+            };
+            json!({ "success": true, "method": method })
+        }
+        Err(reason) => {
+            info!(
+                "[AX] {} on {}: {}; clicking its centre at ({:.0}, {:.0})",
+                action,
+                resolved.describe(),
+                reason,
+                center_x,
+                center_y
+            );
+            let state_manager = app_handle.state::<AppState>();
+            let _guard = state_manager.input_arbiter().acquire(session_id).await;
+            let target_app = get_frontmost_app_name();
+            let window_pin = Some(pin);
+            let outcome = match run_background_first(
+                app_handle,
+                action,
+                target_app.as_deref(),
+                window_pin,
+                |allow_physical| match action {
+                    "right_click" => state_manager.desktop.right_click_no_warp(
+                        center_x,
+                        center_y,
+                        allow_physical,
+                    ),
+                    "double_click" => state_manager.desktop.double_click_no_warp(
+                        center_x,
+                        center_y,
+                        None,
+                        allow_physical,
+                    ),
+                    _ => state_manager.desktop.left_click_no_warp(
+                        center_x,
+                        center_y,
+                        None,
+                        allow_physical,
+                    ),
+                },
+            )
+            .await
+            {
+                Ok(outcome) => outcome,
+                Err(message) => return Ok(create_anthropic_error_response(message)),
+            };
+            with_input_tier(json!({ "success": true }), &outcome)
+        }
+    };
+    response["pressed"] = resolved.describe();
+    // Where the control is, so Juno's pointer can be drawn on it.
+    response["screen_point"] = json!([center_x.round(), center_y.round()]);
+    Ok(response)
+}
+
+/// Which app (and window) a `type` should land in, before anything is written.
+///
+/// Background mode: the named window, else the app and window the agent last
+/// acted on. Foreground mode: the frontmost app, since that is where the
+/// person's keyboard goes. Never Juno: an agent typing into Juno's own chat is
+/// the bug this exists to rule out.
+fn typing_target(
+    named: Option<&NamedWindow>,
+    background: bool,
+    remembered: Option<computer_use_ai_sdk::background::InputTarget>,
+    frontmost_pid: Option<i32>,
+    own_pid: i32,
+) -> Option<computer_use_ai_sdk::ax_text::TypeTarget> {
+    use computer_use_ai_sdk::ax_text::TypeTarget;
+    let target = match named {
+        Some(w) => Some(TypeTarget {
+            pid: w.pid,
+            window_id: Some(w.id),
+        }),
+        None if background => remembered.map(|t| TypeTarget {
+            pid: t.pid,
+            window_id: t.window_id,
+        }),
+        None => frontmost_pid.map(|pid| TypeTarget {
+            pid,
+            window_id: None,
+        }),
+    };
+    target.filter(|t| t.pid > 0 && t.pid != own_pid)
+}
+
+/// Who a keyboard step reached, read back after it ran: the window-aware
+/// background target for a process-targeted step, the frontmost app for a
+/// foreground one.
+fn keyboard_reach(
+    outcome: &computer_use_ai_sdk::InputOutcome,
+    window_pin: Option<PinnedWindow>,
+) -> (Option<i32>, Option<u32>) {
+    use computer_use_ai_sdk::InputTier;
+    match outcome.tier {
+        InputTier::ProcessTargeted | InputTier::Accessibility => {
+            let _pin = computer_use_ai_sdk::window_target::pin(window_pin);
+            computer_use_ai_sdk::background::input_target()
+                .map(|t| (Some(t.pid), t.window_id))
+                .unwrap_or((None, None))
+        }
+        InputTier::PhysicalCursor => (frontmost_app_pid(), None),
+    }
+}
+
+/// The pid of the app the person is using, by NSWorkspace's reckoning.
+#[cfg(target_os = "macos")]
+fn frontmost_app_pid() -> Option<i32> {
+    use objc::{class, msg_send, sel, sel_impl};
+
+    unsafe {
+        let shared_workspace: *mut objc::runtime::Object =
+            msg_send![class!(NSWorkspace), sharedWorkspace];
+        if shared_workspace.is_null() {
+            return None;
+        }
+        let frontmost_app: *mut objc::runtime::Object =
+            msg_send![shared_workspace, frontmostApplication];
+        if frontmost_app.is_null() {
+            return None;
+        }
+        let pid: i32 = msg_send![frontmost_app, processIdentifier];
+        (pid > 0).then_some(pid)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn frontmost_app_pid() -> Option<i32> {
+    None
+}
+
+/// Why keyboard input must not be sent, if it must not.
+///
+/// Keystrokes land in the background target when there is one, otherwise in
+/// the frontmost app. Two outcomes are refused rather than sent: landing in
+/// Juno itself (Return in Juno's chat sends a message the person never wrote),
+/// and landing somewhere other than the window the agent named.
+///
+/// A modified shortcut (cmd+space, ctrl+tab) is exempt from the Juno check:
+/// the system acts on those whichever app is in front.
+fn keyboard_landing_refusal(
+    named: Option<&NamedWindow>,
+    background_target: Option<computer_use_ai_sdk::background::InputTarget>,
+    frontmost_pid: Option<i32>,
+    own_pid: i32,
+    system_shortcut: bool,
+) -> Option<String> {
+    let landing = background_target.map(|t| t.pid).or(frontmost_pid);
+    if landing == Some(own_pid) && !system_shortcut {
+        return Some(
+            "Keyboard input would go to Juno itself. Click into the app you want first, \
+             or pass 'window' to name it."
+                .to_string(),
+        );
+    }
+    if let Some(named) = named {
+        if landing.is_some() && landing != Some(named.pid) {
+            return Some(format!(
+                "Window {} cannot receive keystrokes in the foreground without being brought \
+                 forward; turn on background mode or click into it first.",
+                named.id
+            ));
+        }
+    }
+    None
+}
+
+/// `keyboard_landing_refusal` against the live state.
+fn keyboard_refusal_now(
+    named: Option<&NamedWindow>,
+    window_pin: Option<PinnedWindow>,
+    system_shortcut: bool,
+) -> Option<String> {
+    let background_target = {
+        let _pin = computer_use_ai_sdk::window_target::pin(window_pin);
+        computer_use_ai_sdk::background::input_target()
+    };
+    keyboard_landing_refusal(
+        named,
+        background_target,
+        frontmost_app_pid(),
+        std::process::id() as i32,
+        system_shortcut,
+    )
+}
+
+/// A key combination with a command, control or option modifier.
+fn is_modified_shortcut(key: &str) -> bool {
+    let lower = key.to_lowercase();
+    let parts: Vec<&str> = lower.split('+').map(str::trim).collect();
+    parts.len() > 1
+        && parts[..parts.len() - 1].iter().any(|p| {
+            matches!(
+                *p,
+                "cmd" | "command" | "super" | "meta" | "ctrl" | "control" | "alt" | "option"
+            )
+        })
+}
+
+/// Whether an AX-grounded click may act on the element a hit-test found.
+///
+/// The element must belong to the app the click is for, never to Juno, and,
+/// when a window was named, to that window.
+fn ax_click_element_ok(
+    target_pid: i32,
+    named_window: Option<u32>,
+    element_owner: (Option<i32>, Option<u32>),
+    own_pid: i32,
+) -> bool {
+    let (pid, window) = element_owner;
+    if pid != Some(target_pid) || target_pid == own_pid {
+        return false;
+    }
+    match named_window {
+        Some(expected) => window == Some(expected),
+        None => true,
+    }
 }
 
 /// Show the on-screen click marker for an action that no longer routes through
@@ -1804,10 +2078,143 @@ pub async fn execute_computer_tool(
     //    BEFORE the action fires. Fires only for coordinate-based actions.
     emit_computer_use_preview(app_handle, action, &input);
 
+    // 5. Optional `window`: pin input to one window so stacking cannot redirect
+    //    it. Accepted the same way on both request shapes: the toolset's member
+    //    input reaches here unchanged, so this one read covers both.
+    let mut named_window = if is_ui_modifying_action(action) || takes_window_for_reading(action) {
+        match resolve_named_window(&input) {
+            Ok(window) => window,
+            Err(message) => return Ok(create_anthropic_error_response(message)),
+        }
+    } else {
+        None
+    };
+    let mut window_pin = named_window.as_ref().map(|w| PinnedWindow {
+        pid: w.pid,
+        window_id: w.id,
+    });
+
+    // 6. Accessibility first (see `ax_targeting`). A window the agent names
+    //    becomes its working window, so the unnamed actions that follow go
+    //    there and never to whatever happens to be on top.
+    if let Some(pin) = window_pin {
+        super::ax_targeting::set_working_window(pin);
+    }
+    // Coordinates are pixels in the last screenshot. When that showed one
+    // window, they belong to that window and to no other.
+    if extract_coordinate(&input).is_some() {
+        if let Some((pid, window_id)) = coordinates::current_frame().window() {
+            match window_pin {
+                Some(pin) if pin.window_id != window_id => {
+                    return Ok(create_anthropic_error_response(format!(
+                        "Your coordinates are pixels in your last screenshot, which shows only \
+                         window {window_id}. Take a screenshot with 'window' set to the window \
+                         you want, then use coordinates from that picture."
+                    )));
+                }
+                Some(_) => {}
+                None => window_pin = Some(PinnedWindow { pid, window_id }),
+            }
+        }
+    }
+    if window_pin.is_none() && is_ui_modifying_action(action) {
+        window_pin = super::ax_targeting::working_window();
+    }
+    // A pointer action aimed at the working window that would land on another
+    // app is refused rather than sent into someone else's window.
+    if let (Some(pin), Some((x, y))) = (window_pin, extract_coordinate(&input)) {
+        if is_ui_modifying_action(action) {
+            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+            if let Some(refusal) =
+                super::ax_targeting::pinned_point_refusal(pin, screen_x, screen_y)
+            {
+                warn!(
+                    "[AX] Refused {} at ({:.0}, {:.0}): off the working window",
+                    action, screen_x, screen_y
+                );
+                return Ok(create_anthropic_error_response(refusal));
+            }
+        }
+    }
+    // An `element` from the latest listing: act on the control itself. Typing
+    // focuses the field inside its app (no raise), then goes through the
+    // normal verified typing path, pinned to the field's window.
+    if let Some(element_id) = element_param(&input) {
+        if action != "type" {
+            return run_element_action(app_handle, action, &element_id, session_id).await;
+        }
+        let resolved = match super::ax_targeting::resolve_element(&element_id) {
+            Ok(resolved) => resolved,
+            Err(message) => return Ok(create_anthropic_error_response(message)),
+        };
+        if let Err(reason) = computer_use_ai_sdk::ax_elements::focus(&resolved.element) {
+            tracing::info!(
+                "[AX] Focus before typing failed ({}); typing into the window",
+                reason
+            );
+        }
+        super::ax_targeting::set_working_window(resolved.pin);
+        named_window = Some(NamedWindow {
+            pid: resolved.pin.pid,
+            id: resolved.pin.window_id,
+        });
+        window_pin = Some(resolved.pin);
+    }
+
     // Execute action
     let execution_start = std::time::Instant::now();
     let result = match action {
+        "screenshot" if window_pin.is_some() => {
+            handle_anthropic_result!(validate_permission(
+                app_handle,
+                RequiredPermission::ScreenRecording,
+                "computer (screenshot)"
+            )
+            .await
+            .map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
+            let Some(pin) = window_pin else {
+                return Ok(create_anthropic_error_response(
+                    "No window to capture".to_string(),
+                ));
+            };
+            // Captured on a blocking thread; adopted back here, on the agent's
+            // task, where its coordinate frame lives.
+            let picture = handle_anthropic_result!(tokio::task::spawn_blocking(move || {
+                super::ax_targeting::capture_window(pin)
+            })
+            .await
+            .map_err(|e| format!("Window capture task failed: {}", e))
+            .and_then(|r| r));
+            Ok::<Value, String>(super::ax_targeting::adopt_picture(picture))
+        }
+        "elements" => {
+            handle_anthropic_result!(validate_permission(
+                app_handle,
+                RequiredPermission::Accessibility,
+                "computer (elements)"
+            )
+            .await
+            .map_err(|e: AgentError| format!("Permission validation failed: {}", e)));
+            let Some(pin) = window_pin.or_else(super::ax_targeting::working_window) else {
+                return Ok(create_anthropic_error_response(
+                    "Name the window to read, for example {\"action\": \"elements\", \"window\": \"Calculator\"}. \
+                     An app name works when the app has one window."
+                        .to_string(),
+                ));
+            };
+            // Read on a blocking thread; remembered back here, on the agent's
+            // task, where its element ids live.
+            let listing = handle_anthropic_result!(tokio::task::spawn_blocking(move || {
+                super::ax_targeting::read_elements(pin)
+            })
+            .await
+            .map_err(|e| format!("Element listing task failed: {}", e))
+            .and_then(|r| r));
+            Ok::<Value, String>(super::ax_targeting::present_elements(listing))
+        }
         "screenshot" => {
+            // A full screenshot puts coordinates back in screen space.
+            coordinates::set_frame(coordinates::CoordinateFrame::Screen);
             // Use the pre-captured PTT screenshot if available (parallelized at PTT release).
             // Falls back to a fresh capture if none is cached or serialization fails.
             let app_state = app_handle.state::<crate::state::AppState>();
@@ -1888,7 +2295,13 @@ pub async fn execute_computer_tool(
                     // If it succeeds we skip the coordinate click. Modifier keys force coordinate
                     // path because AXPress doesn't accept modifiers.
                     let ax_result = if modifier.is_none() {
-                        try_ax_grounded_click(app_handle, screen_x, screen_y, AxClickKind::Left)
+                        try_ax_grounded_click(
+                            app_handle,
+                            screen_x,
+                            screen_y,
+                            AxClickKind::Left,
+                            window_pin,
+                        )
                     } else {
                         AxGroundingResult {
                             used_ax_click: false,
@@ -1915,6 +2328,7 @@ pub async fn execute_computer_tool(
                                 app_handle,
                                 action,
                                 target_app.as_deref(),
+                                window_pin,
                                 |allow_physical| {
                                     state_manager.desktop.left_click_no_warp(
                                         screen_x,
@@ -1953,7 +2367,13 @@ pub async fn execute_computer_tool(
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     let ax_result = if modifier.is_none() {
-                        try_ax_grounded_click(app_handle, screen_x, screen_y, AxClickKind::Right)
+                        try_ax_grounded_click(
+                            app_handle,
+                            screen_x,
+                            screen_y,
+                            AxClickKind::Right,
+                            window_pin,
+                        )
                     } else {
                         AxGroundingResult {
                             used_ax_click: false,
@@ -1977,6 +2397,7 @@ pub async fn execute_computer_tool(
                                 app_handle,
                                 action,
                                 target_app.as_deref(),
+                                window_pin,
                                 |allow_physical| {
                                     state_manager.desktop.right_click_no_warp(
                                         screen_x,
@@ -2019,6 +2440,7 @@ pub async fn execute_computer_tool(
                             app_handle,
                             action,
                             target_app.as_deref(),
+                            window_pin,
                             |allow_physical| {
                                 state_manager.desktop.middle_click_no_warp(
                                     screen_x,
@@ -2045,7 +2467,13 @@ pub async fn execute_computer_tool(
                     let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
 
                     let ax_result = if modifier.is_none() {
-                        try_ax_grounded_click(app_handle, screen_x, screen_y, AxClickKind::Double)
+                        try_ax_grounded_click(
+                            app_handle,
+                            screen_x,
+                            screen_y,
+                            AxClickKind::Double,
+                            window_pin,
+                        )
                     } else {
                         AxGroundingResult {
                             used_ax_click: false,
@@ -2069,6 +2497,7 @@ pub async fn execute_computer_tool(
                                 app_handle,
                                 action,
                                 target_app.as_deref(),
+                                window_pin,
                                 |allow_physical| {
                                     state_manager.desktop.double_click_no_warp(
                                         screen_x,
@@ -2112,6 +2541,7 @@ pub async fn execute_computer_tool(
                             app_handle,
                             action,
                             target_app.as_deref(),
+                            window_pin,
                             |allow_physical| {
                                 state_manager.desktop.triple_click_no_warp(
                                     screen_x,
@@ -2195,6 +2625,7 @@ pub async fn execute_computer_tool(
                             app_handle,
                             action,
                             target_app.as_deref(),
+                            window_pin,
                             |allow_physical| {
                                 state_manager.desktop.left_click_drag_no_warp(
                                     screen_start_x,
@@ -2230,7 +2661,8 @@ pub async fn execute_computer_tool(
                         Ok(json!({
                             "success": true,
                             "input_tier": computer_use_ai_sdk::InputTier::Accessibility.as_str(),
-                            "virtual_cursor_only": true
+                            "virtual_cursor_only": true,
+                            "foreground": false
                         }))
                     } else {
                         handle_anthropic_result!(crate::commands::mouse::mouse_move(
@@ -2263,6 +2695,7 @@ pub async fn execute_computer_tool(
                             app_handle,
                             action,
                             target_app.as_deref(),
+                            window_pin,
                             |allow_physical| {
                                 state_manager.desktop.left_mouse_down_no_warp(
                                     screen_x,
@@ -2292,6 +2725,7 @@ pub async fn execute_computer_tool(
                             app_handle,
                             action,
                             target_app.as_deref(),
+                            window_pin,
                             |allow_physical| {
                                 state_manager.desktop.left_mouse_up_no_warp(
                                     screen_x,
@@ -2343,6 +2777,13 @@ pub async fn execute_computer_tool(
                         }
                     };
 
+                    if let Some(refusal) = keyboard_refusal_now(
+                        named_window.as_ref(),
+                        window_pin,
+                        is_modified_shortcut(key),
+                    ) {
+                        return Ok(create_anthropic_error_response(refusal));
+                    }
                     emit_key_visualization(app_handle, key, None);
 
                     // Keyboard events posted to a process are only routed there
@@ -2355,6 +2796,7 @@ pub async fn execute_computer_tool(
                                 app_handle,
                                 action,
                                 target_app.as_deref(),
+                                window_pin,
                                 |allow_physical| {
                                     state_manager.desktop.press_key_no_warp(
                                         key,
@@ -2378,7 +2820,13 @@ pub async fn execute_computer_tool(
                         }
                     };
 
-                    Ok(with_input_tier(json!({ "success": true }), &outcome))
+                    let reached = keyboard_reach(&outcome, window_pin);
+                    let target =
+                        computer_use_ai_sdk::ax_text::describe_target(reached.0, reached.1);
+                    Ok(with_target(
+                        with_input_tier(json!({ "success": true }), &outcome),
+                        &target,
+                    ))
                 }
                 "hold_key" => {
                     // Support both 'key' and 'text' parameters for backward compatibility
@@ -2399,6 +2847,13 @@ pub async fn execute_computer_tool(
                         Err(message) => return Ok(create_anthropic_error_response(message)),
                     };
 
+                    if let Some(refusal) = keyboard_refusal_now(
+                        named_window.as_ref(),
+                        window_pin,
+                        is_modified_shortcut(key),
+                    ) {
+                        return Ok(create_anthropic_error_response(refusal));
+                    }
                     emit_key_visualization(
                         app_handle,
                         &format!("Hold: {}", key),
@@ -2409,6 +2864,7 @@ pub async fn execute_computer_tool(
                             app_handle,
                             action,
                             target_app.as_deref(),
+                            window_pin,
                             |allow_physical| {
                                 state_manager.desktop.hold_key_no_warp(
                                     key,
@@ -2420,7 +2876,13 @@ pub async fn execute_computer_tool(
                         .await
                     );
 
-                    Ok(with_input_tier(json!({ "success": true }), &outcome))
+                    let reached = keyboard_reach(&outcome, window_pin);
+                    let target =
+                        computer_use_ai_sdk::ax_text::describe_target(reached.0, reached.1);
+                    Ok(with_target(
+                        with_input_tier(json!({ "success": true }), &outcome),
+                        &target,
+                    ))
                 }
                 "type" => {
                     let text = match input["text"].as_str() {
@@ -2432,52 +2894,109 @@ pub async fn execute_computer_tool(
                         }
                     };
 
-                    // Try AX-based typing first: finds the focused element and sets AXValue
-                    // directly (no cursor movement, no clipboard). Falls back to global
-                    // keyboard simulation (clipboard paste) when AX isn't supported.
-                    let typed_via_ax = try_ax_type_focused(app_handle, text);
-                    let mut outcome = None;
-                    if !typed_via_ax {
-                        // Fallback is clipboard + Cmd+V. In background mode the
-                        // paste is posted to the process the agent is working on
-                        // after pointing input focus at it without raising it, so
-                        // it cannot land in whatever app the user is looking at.
-                        //
-                        // As with the click fallbacks: the 300 ms action-cooldown
-                        // floor already ran at the top of this function and does
-                        // NOT stack with the 500 ms cooldown here. The AX typing
-                        // path above takes neither.
-                        let _guard = state_manager.input_arbiter().acquire(session_id).await;
-                        let preview: String = text
-                            .chars()
-                            .take(
-                                crate::constants::ui::text_display::MAX_KEYPRESS_VISUALIZATION_TEXT_LENGTH,
+                    // Accessibility first, but only into the target app's own
+                    // focused field, only after it is checked against the target
+                    // process and window, and only counted when the text reads
+                    // back. See `computer_use_ai_sdk::ax_text` for why the old
+                    // system-wide-focus write reported success into Juno's chat.
+                    let background = computer_use_ai_sdk::background::is_background_mode();
+                    let remembered = {
+                        let _pin = computer_use_ai_sdk::window_target::pin(window_pin);
+                        computer_use_ai_sdk::background::input_target()
+                    };
+                    let ax_target = typing_target(
+                        named_window.as_ref(),
+                        background,
+                        remembered,
+                        frontmost_app_pid(),
+                        std::process::id() as i32,
+                    );
+                    let ax_attempt = match &ax_target {
+                        Some(target) => computer_use_ai_sdk::ax_text::type_verified(target, text),
+                        None => Err(computer_use_ai_sdk::ax_text::AxTypeSkip::NoTarget),
+                    };
+                    let (ax_report, ax_skipped) = match ax_attempt {
+                        Ok(report) => (Some(report), None),
+                        Err(skip) => {
+                            tracing::info!(
+                                "AX type skipped ({}): {:?}; using the process-targeted paste",
+                                skip.label(),
+                                skip
+                            );
+                            (None, Some(skip.label()))
+                        }
+                    };
+
+                    let (outcome, reached) = match &ax_report {
+                        Some(report) => {
+                            info!(
+                                "✨ AX type: {} chars verified in PID {} window {:?}",
+                                text.chars().count(),
+                                report.pid,
+                                report.window_id
+                            );
+                            // A following `key` (Return, say) must reach the same
+                            // window without being told again.
+                            computer_use_ai_sdk::background::remember_target_window(
+                                report.pid,
+                                report.window_id,
+                            );
+                            (
+                                computer_use_ai_sdk::InputOutcome::accessibility(report.method),
+                                (Some(report.pid), report.window_id),
                             )
-                            .collect();
-                        emit_key_visualization(app_handle, &format!("Type: {}", preview), None);
-                        outcome = Some(handle_anthropic_result!(
-                            run_background_first(
-                                app_handle,
-                                action,
-                                target_app.as_deref(),
-                                |allow_physical| {
-                                    state_manager
-                                        .desktop
-                                        .type_text_no_warp(text, allow_physical)
-                                },
-                            )
-                            .await
-                        ));
-                    }
+                        }
+                        None => {
+                            if let Some(refusal) =
+                                keyboard_refusal_now(named_window.as_ref(), window_pin, false)
+                            {
+                                return Ok(create_anthropic_error_response(refusal));
+                            }
+                            // Clipboard + Cmd+V posted to the target process, after
+                            // pointing input focus at it without raising it and
+                            // making the target window key inside its app.
+                            //
+                            // As with the click fallbacks: the 300 ms action-cooldown
+                            // floor already ran at the top of this function and does
+                            // NOT stack with the 500 ms cooldown here.
+                            let _guard = state_manager.input_arbiter().acquire(session_id).await;
+                            let preview: String = text
+                                .chars()
+                                .take(
+                                    crate::constants::ui::text_display::MAX_KEYPRESS_VISUALIZATION_TEXT_LENGTH,
+                                )
+                                .collect();
+                            emit_key_visualization(app_handle, &format!("Type: {}", preview), None);
+                            let outcome = handle_anthropic_result!(
+                                run_background_first(
+                                    app_handle,
+                                    action,
+                                    target_app.as_deref(),
+                                    window_pin,
+                                    |allow_physical| {
+                                        state_manager
+                                            .desktop
+                                            .type_text_no_warp(text, allow_physical)
+                                    },
+                                )
+                                .await
+                            );
+                            let reach = keyboard_reach(&outcome, window_pin);
+                            (outcome, reach)
+                        }
+                    };
 
                     let mut response = json!({
                         "success": true,
-                        "ax_grounded": typed_via_ax
+                        "ax_grounded": ax_report.is_some(),
                     });
-                    if let Some(outcome) = &outcome {
-                        response = with_input_tier(response, outcome);
+                    if let Some(reason) = ax_skipped {
+                        response["ax_skipped"] = json!(reason);
                     }
-                    Ok(response)
+                    response = with_input_tier(response, &outcome);
+                    let target =
+                        computer_use_ai_sdk::ax_text::describe_target(reached.0, reached.1);
+                    Ok(with_target(response, &target))
                 }
                 _ => unreachable!("Keyboard action already matched in outer pattern"),
             }
@@ -2526,6 +3045,7 @@ pub async fn execute_computer_tool(
                     app_handle,
                     action,
                     target_app.as_deref(),
+                    window_pin,
                     |allow_physical| {
                         state_manager.desktop.scroll_no_warp(
                             screen_x,
@@ -2598,14 +3118,35 @@ pub async fn execute_computer_tool(
                 )));
             }
 
-            // Capture screenshot (already scaled to standard resolution by capture_screenshot_command)
-            let screenshot_result =
-                handle_anthropic_result!(crate::commands::core::capture_screenshot_command(
-                    app_handle.clone(),
-                    state_manager.clone()
-                )
-                .await
-                .map_err(|e| format!("Zoom screenshot capture failed: {}", e)));
+            // Crop from the same kind of picture the coordinates refer to: the
+            // window on its own when the last screenshot was one window,
+            // otherwise the screen at the standard resolution.
+            let source_base64 = match coordinates::current_frame() {
+                coordinates::CoordinateFrame::Window { pid, window_id, .. } => {
+                    let pin = PinnedWindow { pid, window_id };
+                    let picture =
+                        handle_anthropic_result!(tokio::task::spawn_blocking(move || {
+                            super::ax_targeting::capture_window(pin)
+                        })
+                        .await
+                        .map_err(|e| format!("Window capture task failed: {}", e))
+                        .and_then(|r| r));
+                    let picture = super::ax_targeting::adopt_picture(picture);
+                    picture["base64_image"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string()
+                }
+                coordinates::CoordinateFrame::Screen => {
+                    handle_anthropic_result!(crate::commands::core::capture_screenshot_command(
+                        app_handle.clone(),
+                        state_manager.clone()
+                    )
+                    .await
+                    .map_err(|e| format!("Zoom screenshot capture failed: {}", e)))
+                    .base64_image
+                }
+            };
 
             // Decode the base64 screenshot for cropping
             use base64::Engine;
@@ -2613,7 +3154,7 @@ pub async fn execute_computer_tool(
             use std::io::Cursor;
             let engine = base64::engine::general_purpose::STANDARD;
             let image_data = handle_anthropic_result!(engine
-                .decode(&screenshot_result.base64_image)
+                .decode(&source_base64)
                 .map_err(|e| format!("Failed to decode screenshot for zoom: {}", e)));
 
             let img = handle_anthropic_result!(image::load_from_memory(&image_data)
@@ -3009,6 +3550,50 @@ pub async fn execute_str_replace_tool(
 ///
 /// This function creates tools with proper API types and versioning to ensure
 /// compliance with the official Anthropic Computer Use specification
+/// The accessibility-first tool offered next to Anthropic's built-in
+/// `computer` tool on the direct API.
+pub const APP_CONTROLS_TOOL: &str = "app_controls";
+
+/// An `app_controls` call as the `computer` action it is: one executor, two
+/// schemas.
+pub fn app_controls_to_computer_input(input: &Value) -> Result<Value, String> {
+    let action = input.get("action").and_then(Value::as_str).ok_or_else(|| {
+        "Missing 'action': use list, press, right_click, double_click, type or screenshot"
+            .to_string()
+    })?;
+    let computer_action = match action {
+        "list" => "elements",
+        "press" => "left_click",
+        "right_click" => "right_click",
+        "double_click" => "double_click",
+        "type" => "type",
+        "screenshot" => "screenshot",
+        other => {
+            return Err(format!(
+                "Unknown action '{other}': use list, press, right_click, double_click, type or screenshot"
+            ))
+        }
+    };
+    if matches!(action, "press" | "right_click" | "double_click") && element_param(input).is_none()
+    {
+        return Err(format!(
+            "'{action}' needs 'element': an id from your latest list, such as \"e7\""
+        ));
+    }
+    if action == "screenshot" && input.get("window").is_none_or(Value::is_null) {
+        return Err(
+            "'screenshot' needs 'window'; for the whole screen use the computer tool".to_string(),
+        );
+    }
+    let mut computer = json!({ "action": computer_action });
+    for key in ["window", "element", "text"] {
+        if let Some(value) = input.get(key).filter(|v| !v.is_null()) {
+            computer[key] = value.clone();
+        }
+    }
+    Ok(computer)
+}
+
 pub fn create_versioned_tools(version_config: ToolVersionConfig) -> Vec<ToolDefinition> {
     let manager = ToolVersionManager::with_config(version_config);
 
@@ -3017,28 +3602,33 @@ pub fn create_versioned_tools(version_config: ToolVersionConfig) -> Vec<ToolDefi
     // Computer tool - main screen interaction tool (Official Anthropic Computer Use API)
     let computer_tool = ToolDefinition {
         name: "computer".to_string(),
-        description: "Use a computer to complete tasks. This tool gives you access to interact with any desktop application using the mouse and keyboard, take screenshots, and perform various system operations.
+        description: "Use a computer to complete tasks: read and operate any desktop app, in the background, without taking the person's mouse or keyboard.
 
-The computer tool accepts these actions:
-- screenshot: Take a screenshot of the current screen
-- left_click: Click at coordinates with left mouse button
-- right_click: Click at coordinates with right mouse button
-- middle_click: Click at coordinates with middle mouse button
-- double_click: Double-click at coordinates
-- triple_click: Triple-click at coordinates
-- left_click_drag: Drag from start coordinates to end coordinates
-- mouse_move: Move mouse to coordinates
-- left_mouse_down: Press and hold left mouse button at coordinates
-- left_mouse_up: Release left mouse button at coordinates
+Work through accessibility first and pixels last:
+1. List the window's controls: {\"action\": \"elements\", \"window\": \"Calculator\"}. You get every button, field and piece of text with an id, its name and its current value. It works on windows behind other windows and costs far fewer tokens than a screenshot.
+2. Act on a control by id: {\"action\": \"left_click\", \"element\": \"e7\"}, or {\"action\": \"type\", \"element\": \"e3\", \"text\": \"hello\"}. The result names the control that was pressed.
+3. Read the outcome from the values in a fresh elements listing.
+Use screenshots and coordinates only when a window has no controls to list (games, canvases, remote screens) or you need to see its layout. Then prefer {\"action\": \"screenshot\", \"window\": \"Calculator\"}: a picture of just that window, even when it is covered. Coordinates you send afterwards are pixels in that picture. A screenshot without 'window' is the whole screen, in screen coordinates.
+
+Always say which window you mean with 'window' (its title, its app's name, or its id). The window you name becomes your working window: later actions without 'window' go to it, never to whatever is on top, and a click that would land on another app is refused instead of sent.
+
+Actions:
+- elements: List a window's controls and text with ids (needs 'window', or uses your working window)
+- screenshot: Picture of one window (with 'window') or of the whole screen
+- left_click, right_click, double_click: Press a control ('element') or click at 'coordinate'
+- type: Type text into a field ('element') or into the working window's focused field
 - key: Press a key (supports modifiers like 'cmd+c', 'ctrl+v', etc.)
 - hold_key: Hold a key down for a duration ('duration' in seconds, max 300; or 'duration_ms' in milliseconds)
-- type: Type text at current cursor position
+- middle_click, triple_click: Click at coordinates
+- left_click_drag: Drag from start coordinates to end coordinates
+- mouse_move: Move mouse to coordinates
+- left_mouse_down, left_mouse_up: Press or release the left button at coordinates
 - scroll: Scroll at coordinates in specified direction
 - cursor_position: Get current mouse cursor position
 - wait: Wait for specified number of seconds
-- zoom: View a specific screen region at full native resolution (region: [x0, y0, x1, y1])
+- zoom: View a region of your last screenshot in more detail (region: [x0, y0, x1, y1])
 
-Coordinates are provided as [x, y] arrays and are automatically transformed from screenshot coordinates to screen coordinates.".to_string(),
+Coordinates are [x, y] pixels in your last screenshot.".to_string(),
         api_type: None, // Will be set by version manager
         beta_flag: None, // Will be set by version manager
         input_schema: json!({
@@ -3047,7 +3637,11 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                 "action": {
                     "type": "string",
                     "description": "The action to perform",
-                    "enum": ["screenshot", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "mouse_move", "left_mouse_down", "left_mouse_up", "key", "hold_key", "type", "scroll", "cursor_position", "wait", "zoom"]
+                    "enum": ["elements", "screenshot", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "mouse_move", "left_mouse_down", "left_mouse_up", "key", "hold_key", "type", "scroll", "cursor_position", "wait", "zoom"]
+                },
+                "element": {
+                    "type": ["string", "integer"],
+                    "description": "An id from your latest 'elements' listing, such as \"e7\". For left_click, right_click, double_click and type: acts on that control directly instead of at a coordinate."
                 },
                 "coordinate": {
                     "type": "array",
@@ -3086,6 +3680,10 @@ Coordinates are provided as [x, y] arrays and are automatically transformed from
                     "type": "array",
                     "description": "The [x0, y0, x1, y1] bounding box for zoom action. Coordinates define the top-left and bottom-right corners of the region to inspect at full resolution.",
                     "items": {"type": "integer"}
+                },
+                "window": {
+                    "type": ["integer", "string"],
+                    "description": "The window to act on or read: its title, its app's name (when the app has one window), or its id. Works for elements, screenshot, clicks, scrolls, key and type, even when the window is behind others. It becomes your working window, so later actions without 'window' go to it. Results report the window each action reached."
                 }
             },
             "required": ["action"]
@@ -3175,8 +3773,50 @@ Example usage:
         }),
     };
 
+    // Accessibility-first controls, as a tool of its own. On the direct API
+    // the `computer` tool is Anthropic's built-in schema, which the model
+    // reads and Juno cannot extend, so `elements` and `element` are offered
+    // here instead. The Claude CLI gets the same actions inside `computer`
+    // (Juno's own schema) and is not offered this tool.
+    let app_controls_tool = ToolDefinition {
+        name: APP_CONTROLS_TOOL.to_string(),
+        description: "Read and operate an app's real controls through macOS accessibility, in the background, without guessing pixels. Use this before the computer tool's screenshots and coordinates.
+
+- list: every button, field and piece of text in a window, with an id, its name and its current value. Works on windows behind other windows and costs far fewer tokens than a screenshot.
+- press, right_click, double_click: act on a control by its id from the latest list. The result names what was pressed.
+- type: type 'text' into a field by its id (or into the working window's focused field without one).
+- screenshot: a picture of just that window, even when it is covered. Afterwards the computer tool's coordinates are pixels in that picture, and its clicks go to that window.
+
+Always name the window (its title, its app's name, or its id). It becomes your working window: computer-tool actions without a window go to it, and a click that would land on another app is refused. Read results from the values in a fresh list.".to_string(),
+        api_type: None,
+        beta_flag: None,
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "press", "right_click", "double_click", "type", "screenshot"]
+                },
+                "window": {
+                    "type": ["integer", "string"],
+                    "description": "The window: its title, its app's name (when the app has one window), or its id. Optional after the first call: your working window is used."
+                },
+                "element": {
+                    "type": ["string", "integer"],
+                    "description": "An id from your latest list, such as \"e7\"."
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Text to type, for type."
+                }
+            },
+            "required": ["action"]
+        }),
+    };
+
     // Apply versioning to all tools
     tools.push(manager.apply_versioning(computer_tool));
+    tools.push(app_controls_tool);
     tools.push(manager.apply_versioning(bash_tool));
     tools.push(manager.apply_versioning(str_replace_tool));
 
@@ -3231,17 +3871,16 @@ pub async fn register_anthropic_computer_use_tools_with_version(
     );
 
     // Cursor identity: prefer the parallel-session identity (session id +
-    // palette color) so overlay cursors match the roster UI. Legacy callers
-    // without a session get a process-unique `agent-N` id and the legacy
-    // palette, exactly as before.
+    // palette color) so overlay cursors match the roster UI. Callers without
+    // a session get a process-unique `agent-N` id and the primary slot, which
+    // `cursor_overlay::cursor_color` draws in the color chosen in Settings.
     let (agent_cursor_id, agent_cursor_color, session_id) = match session {
         Some(ctx) => (ctx.session_id.clone(), ctx.color, Some(ctx.session_id)),
         None => {
             let cursor_slot = NEXT_AGENT_CURSOR_ID.fetch_add(1, Ordering::Relaxed);
             (
                 format!("agent-{}", cursor_slot),
-                AGENT_CURSOR_COLORS[(cursor_slot as usize - 1) % AGENT_CURSOR_COLORS.len()]
-                    .to_string(),
+                crate::constants::ui::agent_session_colors::SLOT_0.to_string(),
                 None,
             )
         }
@@ -3274,6 +3913,38 @@ pub async fn register_anthropic_computer_use_tools_with_version(
                                 run_computer_action(
                                     &handle,
                                     input,
+                                    session_id.as_deref(),
+                                    &cursor_id,
+                                    &cursor_color,
+                                )
+                                .await
+                            }
+                        }
+                    })
+                    .await;
+            }
+            APP_CONTROLS_TOOL => {
+                provider
+                    .register_async_tool(tool, {
+                        let handle = app_handle.clone();
+                        let cursor_id = agent_cursor_id.clone();
+                        let cursor_color = agent_cursor_color.clone();
+                        let session_id = session_id.clone();
+                        move |input: Value| {
+                            let handle = handle.clone();
+                            let cursor_id = cursor_id.clone();
+                            let cursor_color = cursor_color.clone();
+                            let session_id = session_id.clone();
+                            async move {
+                                let computer_input = match app_controls_to_computer_input(&input) {
+                                    Ok(computer_input) => computer_input,
+                                    Err(message) => {
+                                        return Ok(create_anthropic_error_response(message))
+                                    }
+                                };
+                                run_computer_action(
+                                    &handle,
+                                    computer_input,
                                     session_id.as_deref(),
                                     &cursor_id,
                                     &cursor_color,
@@ -3839,5 +4510,387 @@ mod descriptive_name_tests {
             get_descriptive_tool_name("hold_key", &json!({ "key": "shift", "duration_ms": 2 })),
             "computer/hold_key(shift, 2ms)"
         );
+    }
+}
+
+#[cfg(test)]
+mod input_targeting_tests {
+    use super::*;
+    use computer_use_ai_sdk::background::InputTarget;
+
+    const JUNO: i32 = 10;
+    const GHOSTTY: i32 = 20;
+    const EDITOR: i32 = 30;
+
+    /// This file's source, for tests that pin a check to the code it guards.
+    const SOURCE: &str = include_str!("anthropic_computer_use.rs");
+
+    /// The text of the `"type" => { ... }` keyboard arm.
+    fn type_arm() -> &'static str {
+        let start = SOURCE
+            .find("                \"type\" => {\n                    let text")
+            .expect("type arm present");
+        let rest = &SOURCE[start..];
+        let end = rest
+            .find("_ => unreachable!(\"Keyboard action already matched")
+            .expect("end of keyboard match");
+        &rest[..end]
+    }
+
+    #[test]
+    fn background_typing_targets_the_app_the_agent_acted_on_not_the_front_app() {
+        let target = typing_target(
+            None,
+            true,
+            Some(InputTarget {
+                pid: GHOSTTY,
+                window_id: Some(5),
+            }),
+            Some(JUNO),
+            JUNO,
+        );
+        assert_eq!(
+            target.map(|t| (t.pid, t.window_id)),
+            Some((GHOSTTY, Some(5)))
+        );
+    }
+
+    #[test]
+    fn a_named_window_wins_over_the_remembered_target() {
+        let named = NamedWindow { pid: EDITOR, id: 9 };
+        let target = typing_target(
+            Some(&named),
+            true,
+            Some(InputTarget {
+                pid: GHOSTTY,
+                window_id: Some(5),
+            }),
+            None,
+            JUNO,
+        );
+        assert_eq!(
+            target.map(|t| (t.pid, t.window_id)),
+            Some((EDITOR, Some(9)))
+        );
+    }
+
+    #[test]
+    fn juno_is_never_a_typing_target() {
+        // Foreground mode with Juno frontmost: the observed failure.
+        assert_eq!(typing_target(None, false, None, Some(JUNO), JUNO), None);
+        assert_eq!(
+            typing_target(
+                None,
+                true,
+                Some(InputTarget {
+                    pid: JUNO,
+                    window_id: None
+                }),
+                None,
+                JUNO
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn background_typing_with_nothing_targeted_has_no_ax_target() {
+        // Must not fall back to the frontmost app: that one is the person's.
+        assert_eq!(typing_target(None, true, None, Some(EDITOR), JUNO), None);
+    }
+
+    #[test]
+    fn ax_clicks_only_act_on_the_target_apps_element() {
+        assert!(ax_click_element_ok(
+            GHOSTTY,
+            None,
+            (Some(GHOSTTY), Some(3)),
+            JUNO
+        ));
+        assert!(!ax_click_element_ok(
+            GHOSTTY,
+            None,
+            (Some(JUNO), None),
+            JUNO
+        ));
+        assert!(!ax_click_element_ok(GHOSTTY, None, (None, None), JUNO));
+        assert!(!ax_click_element_ok(JUNO, None, (Some(JUNO), None), JUNO));
+        // A named window must match exactly; unknown is a mismatch.
+        assert!(ax_click_element_ok(
+            GHOSTTY,
+            Some(3),
+            (Some(GHOSTTY), Some(3)),
+            JUNO
+        ));
+        assert!(!ax_click_element_ok(
+            GHOSTTY,
+            Some(3),
+            (Some(GHOSTTY), Some(4)),
+            JUNO
+        ));
+        assert!(!ax_click_element_ok(
+            GHOSTTY,
+            Some(3),
+            (Some(GHOSTTY), None),
+            JUNO
+        ));
+    }
+
+    #[test]
+    fn foreground_flag_follows_the_tier() {
+        let bg = with_input_tier(
+            json!({}),
+            &computer_use_ai_sdk::InputOutcome::process_targeted("SkyLight/SLEventPostToPid"),
+        );
+        assert_eq!(bg["foreground"], json!(false));
+        assert_eq!(bg["input_tier"], json!("process_targeted"));
+        let fg = with_input_tier(
+            json!({}),
+            &computer_use_ai_sdk::InputOutcome::physical_cursor("HID"),
+        );
+        assert_eq!(fg["foreground"], json!(true));
+    }
+
+    #[test]
+    fn results_name_the_target_window() {
+        let response = with_target(
+            json!({ "success": true }),
+            &computer_use_ai_sdk::ax_text::TargetInfo {
+                app: Some("TextEdit".into()),
+                bundle_id: Some("com.apple.TextEdit".into()),
+                pid: Some(EDITOR),
+                window_id: Some(9),
+                window_title: Some("Untitled".into()),
+            },
+        );
+        assert_eq!(response["target"]["pid"], json!(EDITOR));
+        assert_eq!(response["target"]["window_id"], json!(9));
+        assert_eq!(response["target"]["window_title"], json!("Untitled"));
+        assert_eq!(response["target"]["app"], json!("TextEdit"));
+    }
+
+    #[test]
+    fn a_missing_window_param_changes_nothing() {
+        assert!(
+            resolve_named_window(&json!({ "action": "type", "text": "x" }))
+                .expect("no window is fine")
+                .is_none()
+        );
+        assert!(resolve_named_window(&json!({ "window": true })).is_err());
+    }
+
+    #[test]
+    fn the_window_param_survives_toolset_routing() {
+        let (name, input) = route_toolset_call(
+            "type",
+            Some(crate::constants::api::computer_use_api_types::COMPUTER_TOOLSET_NAME),
+            &json!({ "text": "ls", "window": "zsh: logs" }),
+        )
+        .expect("type is a toolset member");
+        assert_eq!(name, "computer");
+        assert_eq!(input["action"], json!("type"));
+        assert_eq!(input["window"], json!("zsh: logs"));
+    }
+
+    #[test]
+    fn element_ids_are_read_as_strings_or_numbers() {
+        assert_eq!(
+            element_param(&json!({ "element": "e7" })),
+            Some("e7".to_string())
+        );
+        assert_eq!(
+            element_param(&json!({ "element": 7 })),
+            Some("7".to_string())
+        );
+        assert_eq!(element_param(&json!({ "element": " " })), None);
+        assert_eq!(element_param(&json!({})), None);
+    }
+
+    #[test]
+    fn listing_and_pictures_take_a_window_but_change_nothing() {
+        for action in ["elements", "screenshot"] {
+            assert!(takes_window_for_reading(action));
+            assert!(
+                !is_ui_modifying_action(action),
+                "{action} must not be paced"
+            );
+        }
+    }
+
+    #[test]
+    fn the_schema_offers_elements_and_element_ids() {
+        let tools = create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124));
+        let computer = tools
+            .iter()
+            .find(|t| t.name == "computer")
+            .expect("computer tool");
+        let actions = computer.input_schema["properties"]["action"]["enum"]
+            .as_array()
+            .expect("action enum");
+        assert!(actions.contains(&json!("elements")));
+        assert!(computer.input_schema["properties"]["element"].is_object());
+    }
+
+    #[test]
+    fn app_controls_calls_are_computer_actions() {
+        assert_eq!(
+            app_controls_to_computer_input(&json!({ "action": "list", "window": "Calculator" })),
+            Ok(json!({ "action": "elements", "window": "Calculator" }))
+        );
+        assert_eq!(
+            app_controls_to_computer_input(&json!({ "action": "press", "element": "e7" })),
+            Ok(json!({ "action": "left_click", "element": "e7" }))
+        );
+        assert_eq!(
+            app_controls_to_computer_input(
+                &json!({ "action": "type", "element": "e3", "text": "hi" })
+            ),
+            Ok(json!({ "action": "type", "element": "e3", "text": "hi" }))
+        );
+    }
+
+    #[test]
+    fn app_controls_refuses_what_would_fall_back_to_pixels() {
+        // A press without an element would become a coordinate-less click.
+        assert!(app_controls_to_computer_input(&json!({ "action": "press" })).is_err());
+        // A screenshot without a window is the computer tool's job.
+        assert!(app_controls_to_computer_input(&json!({ "action": "screenshot" })).is_err());
+        assert!(app_controls_to_computer_input(&json!({ "action": "drag" })).is_err());
+    }
+
+    #[test]
+    fn a_failed_press_halts_the_batch_and_a_failed_list_does_not() {
+        assert!(failure_halts_batch(
+            APP_CONTROLS_TOOL,
+            &json!({ "action": "press", "element": "e1" })
+        ));
+        assert!(!failure_halts_batch(
+            APP_CONTROLS_TOOL,
+            &json!({ "action": "list", "window": "Calculator" })
+        ));
+    }
+
+    #[test]
+    fn app_controls_is_offered_as_a_custom_tool() {
+        let tools = create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124));
+        let controls = tools
+            .iter()
+            .find(|t| t.name == APP_CONTROLS_TOOL)
+            .expect("app_controls tool");
+        // No Anthropic type: it goes out with its own description and schema.
+        assert_eq!(controls.api_type, None);
+        assert!(controls.input_schema["properties"]["element"].is_object());
+    }
+
+    #[test]
+    fn the_legacy_schema_offers_window_as_optional() {
+        let tools = create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124));
+        let computer = tools
+            .iter()
+            .find(|t| t.name == "computer")
+            .expect("computer tool");
+        assert!(computer.input_schema["properties"]["window"].is_object());
+        assert_eq!(computer.input_schema["required"], json!(["action"]));
+    }
+
+    #[test]
+    fn plain_keys_and_typing_never_land_in_juno() {
+        // Juno frontmost, nothing targeted: Return would send Juno's chat.
+        assert!(keyboard_landing_refusal(None, None, Some(JUNO), JUNO, false).is_some());
+        // A background target elsewhere: fine even with Juno in front.
+        let elsewhere = Some(InputTarget {
+            pid: GHOSTTY,
+            window_id: None,
+        });
+        assert!(keyboard_landing_refusal(None, elsewhere, Some(JUNO), JUNO, false).is_none());
+        // System shortcuts work whoever is in front.
+        assert!(keyboard_landing_refusal(None, None, Some(JUNO), JUNO, true).is_none());
+    }
+
+    #[test]
+    fn keys_for_a_named_window_never_land_elsewhere() {
+        let named = NamedWindow { pid: EDITOR, id: 9 };
+        // Foreground mode: keys go to the frontmost app, not the named one.
+        assert!(keyboard_landing_refusal(Some(&named), None, Some(GHOSTTY), JUNO, false).is_some());
+        let pinned = Some(InputTarget {
+            pid: EDITOR,
+            window_id: Some(9),
+        });
+        assert!(
+            keyboard_landing_refusal(Some(&named), pinned, Some(GHOSTTY), JUNO, false).is_none()
+        );
+    }
+
+    #[test]
+    fn modified_shortcuts_are_recognised() {
+        assert!(is_modified_shortcut("cmd+space"));
+        assert!(is_modified_shortcut("ctrl+shift+tab"));
+        assert!(is_modified_shortcut("cmd+-"));
+        assert!(!is_modified_shortcut("Return"));
+        assert!(!is_modified_shortcut("shift+a"));
+        assert!(!is_modified_shortcut("+"));
+    }
+
+    #[test]
+    fn every_keyboard_arm_checks_where_keys_will_land() {
+        let start = SOURCE
+            .find("        \"key\" | \"hold_key\" | \"type\" => {")
+            .expect("keyboard arm");
+        let rest = &SOURCE[start..];
+        let arm = &rest[..rest.find("        \"scroll\" => {").unwrap_or(rest.len())];
+        assert_eq!(arm.matches("keyboard_refusal_now(").count(), 3);
+    }
+
+    // --- the links that must not be cut (dead-control class) ---
+
+    #[test]
+    fn typing_never_writes_to_the_system_wide_focused_element() {
+        let arm = type_arm();
+        assert!(
+            !arm.contains("focused_element()"),
+            "the type action must not use the system-wide focused element"
+        );
+        assert!(
+            arm.contains("ax_text::type_verified("),
+            "the AX path must go through the checked, read-back write"
+        );
+    }
+
+    #[test]
+    fn ax_typing_success_comes_only_from_a_verified_report() {
+        let arm = type_arm();
+        assert!(arm.contains("\"ax_grounded\": ax_report.is_some()"));
+        assert!(arm.contains("Ok(report) => (Some(report), None)"));
+    }
+
+    #[test]
+    fn every_type_result_carries_tier_method_and_target() {
+        let arm = type_arm();
+        assert!(arm.contains("with_input_tier(response, &outcome)"));
+        assert!(arm.contains("with_target(response, &target)"));
+    }
+
+    #[test]
+    fn every_background_attempt_is_pinned_to_the_named_window() {
+        let definition = SOURCE
+            .find("async fn run_background_first<F>(")
+            .expect("definition");
+        let body = &SOURCE[definition..];
+        let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
+        assert!(body.contains("window_target::pin(window_pin)"));
+
+        let calls: Vec<usize> = SOURCE
+            .match_indices("run_background_first(\n")
+            .map(|(i, _)| i)
+            .collect();
+        assert!(calls.len() >= 12, "found {} call sites", calls.len());
+        for i in calls {
+            let head: String = SOURCE[i..].chars().take(300).collect();
+            assert!(
+                head.contains("window_pin,"),
+                "a run_background_first call does not pass window_pin: {}",
+                head
+            );
+        }
     }
 }

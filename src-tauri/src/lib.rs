@@ -31,28 +31,36 @@ pub mod cleanup; // Application cleanup and resource management
 pub mod cli;
 pub mod cloud; // Cloud connectivity and remote control
 pub mod commands;
+pub mod connectivity; // Can Juno answer right now: network and provider health, for the dot and submit_query
 pub mod constants;
 pub mod conversation_history; // Persist/list/load past conversations across restart
+pub mod cursor_overlay; // Juno's cursor on screen: glow behind the real one, or a ghost in the background
 pub mod cursor_scale_migration; // Undo a pointer an older build left enlarged
+pub mod deep_link; // juno:// links: navigation only, never a change
 pub mod demo; // Golden demo builds that carry their own Anthropic key
 pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
 pub mod events; // Event handling system for shortcuts and voice transcription
 pub mod export; // A response as a document: copy, share sheet, Save as Markdown/HTML
+pub mod file_log; // The log on disk: ~/Library/Logs/Juno, one file per day, a week kept
 pub mod greeting; // The one line Juno says when she starts
 pub mod hold_gate; // A hold released before its voice session finished starting
 pub mod input_control; // Background operation and consent for taking the physical cursor
 pub mod integration; // Application integration patterns, component coordination, and event listeners
+pub mod intro; // How Juno first appears: the smoke reveal around the bar
 pub mod menu; // Menu management for app and tray menus
 pub mod path_gate; // The one place that answers "may this path be touched, for this purpose"
 pub mod permission_gate; // Asking for a macOS permission at the moment it is needed
 pub mod persistent_memory; // Cross-session persistent user memory
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
+pub mod readiness; // What is still warming up after launch, for the bar's status dot
 pub mod scheduler; // User-facing scheduled automations (cron-based agent tasks)
 pub mod settings; // Centralized settings management with reactive updates
 pub mod shell_command; // The one place that parses a shell command string
 pub mod shortcuts; // Shortcut string parsing utilities
 pub mod startup; // Application startup, initialization, and bootstrapping
+pub mod startup_timing; // [Startup] log lines: milliseconds to each launch milestone
+pub mod startup_windows; // Which windows are built at launch, in what order, and the rest after
 pub mod state;
 pub mod state_management; // Application state management, initialization, and monitoring
 pub mod testing; // Test harness and mock implementations for headless integration tests
@@ -60,6 +68,7 @@ pub mod tools;
 pub mod trash; // Deleting is recoverable: the shell session deletes to the Trash
 pub mod triggers; // Unified activation model (methods x targets)
 pub mod tts;
+pub mod turn_timing; // One log line per voice turn: where the time between key release and first sound went
 pub mod updater; // Auto-update: which feed, when to look, what to do with it
 pub mod utils;
 pub mod window_management; // Window operations, state management, and positioning
@@ -278,6 +287,7 @@ pub fn install_crypto_provider() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    startup_timing::begin();
     // Must precede any HTTP client construction anywhere in the process.
     install_crypto_provider();
 
@@ -292,6 +302,7 @@ pub fn run() {
 
     // --- Tauri Application Builder ---
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
@@ -391,7 +402,10 @@ pub fn run() {
             tts::get_kokoro_voice_command, // Kokoro voice selection via settings
             tts::voices::get_juno_voices,  // Juno's voice: the curated rows
             tts::voices::set_juno_voice,   // Juno's voice: pick one and hear it
+            tts::voices::set_juno_voice_rate, // Juno's voice: how fast it speaks
+            tts::voices::set_juno_silent,     // Juno's voice: speech off or back on
             tts::voices::preview_juno_voice, // Juno's voice: hear it again
+            tts::voices::open_read_and_speak, // Juno's voice: where the Mac's voice is set
             commands::audio_devices::list_audio_devices, // Microphone and speaker lists
             commands::audio_devices::set_audio_input_device, // Which microphone Juno listens on
             commands::audio_devices::set_audio_output_device, // Which speaker Juno talks out of
@@ -468,6 +482,8 @@ pub fn run() {
             check_api_keys_available,
             crate::demo::get_demo_info,
             crate::build_info::get_build_info,
+            crate::connectivity::get_connectivity,
+            crate::readiness::get_startup_readiness,
             update_provider_model,
             update_provider_max_tokens,
             update_provider_temperature,
@@ -627,6 +643,7 @@ pub fn run() {
             commands::conversations::list_conversations,
             commands::conversations::get_current_conversation_id,
             commands::conversations::load_conversation,
+            commands::conversations::open_claude_turn_conversation,
             commands::conversations::new_conversation,
             commands::conversations::delete_conversation,
             commands::escape_key_coordinator::set_bar_pane_open,
@@ -723,6 +740,7 @@ pub fn run() {
             anthropic::handle_tts_completion,
             // Window Management Commands
             window_management::open_settings_window,
+            agent::local_intents::settings_follow::run_reply_chip,
             window_management::close_settings_window,
             window_management::open_main_window,
             window_management::close_main_window,
@@ -731,6 +749,8 @@ pub fn run() {
             window_management::open_onboarding_window,
             window_management::close_onboarding_window,
             window_management::open_desktop_cursor_overlay,
+            intro::intro_ready,
+            intro::replay_intro,
             // Onboarding Commands
             commands::check_onboarding_status,
             commands::complete_onboarding,
@@ -782,6 +802,8 @@ pub fn run() {
             commands::settings::set_autostart_enabled,
             commands::settings::get_advanced_settings_enabled,
             commands::settings::set_advanced_settings_enabled,
+            commands::settings::take_pending_settings_navigation,
+            commands::settings::open_juno_link,
             // Experimental: one long-lived `claude` process per conversation.
             // Off by default — docs/plans/cli-persistent-session-spike.md
             agent::providers::claude_cli_session::get_cli_persistent_session_enabled,
@@ -794,6 +816,11 @@ pub fn run() {
             commands::bar_position::get_bar_position,
             commands::bar_position::set_bar_position,
             commands::bar_position::set_bar_frame,
+            commands::bar_position::set_bar_hit_regions,
+            commands::bar_position::bar_pointer_held,
+            commands::bar_position::bar_drag_released,
+            commands::bar_position::bar_order_above_snap_wells,
+            commands::bar_position::ensure_snap_wells_overlays,
             commands::bar_position::show_bar_when_ready,
             // Auto-update commands (the whole bridge; policy lives in `updater`)
             commands::updates::get_update_status,
@@ -889,22 +916,38 @@ pub fn run() {
             open_config_file,
             get_config_directory_path,
         ])
+        // The bar's page finished loading: a launch milestone, and the moment
+        // its first paint becomes possible.
+        .on_page_load(|webview, payload| {
+            if webview.label() == constants::window_labels::FLOATING_BAR
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+            {
+                startup_timing::mark_once("bar page loaded");
+            }
+        })
         .setup(|app| {
             let app_handle = app.handle().clone();
+            startup_timing::mark("setup start");
+
+            // What is still loading after the bar is up. Before the bar exists,
+            // so its first read is already the truth.
+            readiness::start(&app_handle);
+
+            // juno:// links: the one that launched the app, and later ones.
+            deep_link::register(&app_handle);
+
+            // The bar first, alone: every other declared window waits until it
+            // is on screen (`startup_windows`). Each window is named for a demo
+            // build as it is built.
+            if let Err(e) = startup_windows::create_bar(&app_handle) {
+                tracing::error!("Could not build the floating bar: {}", e);
+            }
+
             // Juno's speaking level goes to every window from here on.
             tts::speech_level::bind(app_handle.clone());
-
-            // A demo build names the windows declared in tauri.conf.json
-            // "Juno Demo". Windows opened later are renamed as they are built.
-            if crate::demo::is_demo_build() {
-                for window in app_handle.webview_windows().values() {
-                    if let Ok(title) = window.title() {
-                        if let Err(e) = window.set_title(&crate::demo::window_title(&title)) {
-                            warn!("Failed to rename {} window for the demo: {}", window.label(), e);
-                        }
-                    }
-                }
-            }
+            // The launch greeting, rendered in parallel with the rest of
+            // startup so it plays the moment the bar appears.
+            greeting::refresh_cache(&app_handle);
 
             // --- Initialize Settings Manager ---
             let settings_manager = match SettingsManager::new(app_handle.clone()) {
@@ -1064,6 +1107,13 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             platform::apply_macos_setup(&app_handle);
 
+            // The smoke window, loaded now beside the bar instead of when the
+            // bar asks to be shown, so the reveal starts the moment it does.
+            intro::preload(&app_handle);
+            // The other windows, after the bar is up, or by this timer if it
+            // never comes up.
+            startup_windows::schedule_fallback(&app_handle);
+
             // Banners while Juno is frontmost. Set early so the first
             // notification already goes through the delegate.
             commands::notifications::install_presenter();
@@ -1151,6 +1201,21 @@ pub fn run() {
             Ok(())
         });
 
+    // The bar's web process died (a crash, or macOS reclaiming memory). Load
+    // the page again, and put the bar up now rather than waiting out the
+    // startup fallback: a bar that is coming back beats no bar.
+    #[cfg(target_os = "macos")]
+    let builder = builder.on_web_content_process_terminate(|webview| {
+        if webview.label() != constants::window_labels::FLOATING_BAR {
+            return;
+        }
+        warn!("[Startup] The floating bar's web process ended; reloading it");
+        if let Err(e) = webview.reload() {
+            warn!("Could not reload the floating bar: {}", e);
+        }
+        intro::show_bar_with_reveal(webview.app_handle());
+    });
+
     // Build the app, then run with event callback for dock click (RunEvent::Reopen) support
     match builder.build(get_tauri_context()) {
         Ok(app) => {
@@ -1162,7 +1227,9 @@ pub fn run() {
                         ..
                     } => {
                         // macOS: User clicked the dock icon — show the main window
-                        if !has_visible_windows {
+                        if !has_visible_windows
+                            && !window_management::onboarding_is_open(app_handle)
+                        {
                             if let Some(window) = app_handle.get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.unminimize();
@@ -1235,6 +1302,9 @@ pub fn run() {
                             // (e.g., user clicks the red X instead of completing/skipping)
                             let app_handle = app_handle.clone();
                             tauri::async_runtime::spawn(async move {
+                                // The red X skips close_onboarding_window, so
+                                // what setup put away comes back from here too.
+                                window_management::restore_after_onboarding(&app_handle).await;
                                 if let Err(e) =
                                     commands::set_onboarding_active(app_handle, false).await
                                 {
@@ -1255,6 +1325,7 @@ pub fn run() {
                         tauri::async_runtime::block_on(
                             agent::providers::claude_cli_session::shutdown_all(),
                         );
+                        agent::providers::codex_session::shutdown();
                     }
                     _ => {}
                 }

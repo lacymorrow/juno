@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 import { toast } from "sonner";
-import { COMMANDS } from "@/lib/constants.generated";
+import { COMMANDS, UI } from "@/lib/constants.generated";
 import { AppearancePicker } from "../AppearancePicker";
 import { useBarAppearance } from "../useBarAppearance";
 import { UpdatesGroup } from "../UpdatesGroup";
+import { NotificationsGroup } from "../NotificationsGroup";
+import { CursorColorPicker } from "../CursorColorPicker";
 
 export default function GeneralSettings(_props: SettingsSectionProps) {
   const [autoLaunchEnabled, setAutoLaunchEnabled] = useState(false);
@@ -19,6 +21,8 @@ export default function GeneralSettings(_props: SettingsSectionProps) {
   } = useBarAppearance();
   const [followCursorDisplay, setFollowCursorDisplay] = useState(true);
   const [followCursorLoading, setFollowCursorLoading] = useState(false);
+  const [cursorColor, setCursorColor] = useState<string>(UI.AGENT_CURSOR_COLORS_DEFAULT);
+  const [cursorColorSaving, setCursorColorSaving] = useState(false);
 
   // Load auto-launch status on component mount
   useEffect(() => {
@@ -29,11 +33,15 @@ export default function GeneralSettings(_props: SettingsSectionProps) {
         setAutoLaunchEnabled(enabled);
 
         // Load "follow cursor across displays"
-        const barSettings = await invoke<{ follow_cursor_display?: boolean }>(
-          COMMANDS.SETTINGS_GET_FLOATING_BAR_SETTINGS,
-        );
+        const barSettings = await invoke<{
+          follow_cursor_display?: boolean;
+          agent_cursor_color?: string;
+        }>(COMMANDS.SETTINGS_GET_FLOATING_BAR_SETTINGS);
         if (typeof barSettings?.follow_cursor_display === "boolean") {
           setFollowCursorDisplay(barSettings.follow_cursor_display);
+        }
+        if (typeof barSettings?.agent_cursor_color === "string") {
+          setCursorColor(barSettings.agent_cursor_color);
         }
       } catch (error) {
         console.error("Failed to load initial data:", error);
@@ -94,11 +102,36 @@ export default function GeneralSettings(_props: SettingsSectionProps) {
     }
   };
 
+  const handleCursorColorChange = async (id: string) => {
+    if (cursorColorSaving || id === cursorColor) return;
+    const previous = cursorColor;
+    // Show the choice at once; put it back only if saving fails.
+    setCursorColor(id);
+    setCursorColorSaving(true);
+    try {
+      // Read-modify-write: this command takes the whole settings object.
+      const current = await invoke<Record<string, unknown>>(
+        COMMANDS.SETTINGS_GET_FLOATING_BAR_SETTINGS,
+      );
+      await invoke(COMMANDS.SETTINGS_SET_FLOATING_BAR_SETTINGS, {
+        settings: { ...current, agent_cursor_color: id },
+      });
+    } catch (error) {
+      console.error("Failed to update cursor color:", error);
+      setCursorColor(previous);
+      toast.error("Failed to update setting", {
+        description: error as string,
+      });
+    } finally {
+      setCursorColorSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <SettingsGroup
         title="Appearance"
-        footer="Your bar changes as you browse. Every look goes through the same moments: resting, listening, dictating, done."
+        footer="Every look covers the same moments: resting, listening, dictating, done."
       >
         <SettingsRow
           id="bar-appearance"
@@ -122,6 +155,18 @@ export default function GeneralSettings(_props: SettingsSectionProps) {
             disabled={followCursorLoading}
           />
         </SettingsRow>
+        <SettingsRow
+          id="cursor-color"
+          label={<span id="cursor-color-label">Cursor color</span>}
+          description="The glow that shows where Juno is working on your screen."
+        >
+          <CursorColorPicker
+            value={cursorColor}
+            onChange={handleCursorColorChange}
+            disabled={cursorColorSaving}
+            labelledBy="cursor-color-label"
+          />
+        </SettingsRow>
       </SettingsGroup>
 
       <SettingsGroup title="Startup">
@@ -138,6 +183,8 @@ export default function GeneralSettings(_props: SettingsSectionProps) {
           />
         </SettingsRow>
       </SettingsGroup>
+
+      <NotificationsGroup />
 
       <UpdatesGroup />
 

@@ -11,6 +11,7 @@ use std::collections::HashMap;
 
 pub mod manager;
 pub mod persist;
+pub mod registry;
 pub mod reset;
 
 /// Main application settings structure
@@ -110,6 +111,11 @@ pub struct FloatingBarSettings {
     /// hides it in every state. On by default; older stores lack the key.
     #[serde(default = "defaults::show_glow_border")]
     pub show_glow_border: bool,
+    /// The color of the glow around Juno's cursor: one of
+    /// `ui::agent_cursor_colors::ALL`. Older stores lack the key and get blue;
+    /// an unknown value is read as blue (see `agent_cursor_colors::resolve`).
+    #[serde(default = "defaults::agent_cursor_color")]
+    pub agent_cursor_color: String,
 }
 
 /// Agent behavior and execution settings
@@ -259,19 +265,20 @@ pub struct AudioSettings {
     /// by `afplay`, which can only use the system output device.
     #[serde(default)]
     pub output_device: Option<String>,
-    /// Which macOS voice speaks as Juno, by `say -v` name. `None` means the
-    /// voice the Mac is already set to use.
+    /// The Mac row's id (`system_default`) once resolved. Juno never names a
+    /// Mac voice, so any other value (a name an older build stored) resolves
+    /// to it; see `tts::voices::resolve_voice`.
     #[serde(default)]
     pub system_voice: Option<String>,
-    /// True once the person has picked a Mac voice in the Audio pane. Until
-    /// then `system_voice` is only something Juno wrote down after ranking the
-    /// installed voices (a build before the Mac's own voice became the default
-    /// stored "Samantha" for everyone), so it is not a choice and the Mac's own
-    /// voice replaces it. See `tts::voices::resolve_stored_voice`.
+    /// Written by older builds; read by nothing. Kept so their stores load.
     #[serde(default)]
     pub system_voice_chosen: bool,
     #[serde(default = "AudioSettings::default_kokoro_voice")]
     pub kokoro_voice: String,
+    /// The engine that was speaking when Juno was told not to speak, so
+    /// turning speech back on returns to it. `None` returns to the default.
+    #[serde(default)]
+    pub engine_before_silent: Option<String>,
     #[serde(default)]
     pub chatterbox_reference_audio_url: Option<String>,
     #[serde(default = "AudioSettings::default_chatterbox_exaggeration")]
@@ -284,6 +291,10 @@ pub struct AudioSettings {
     pub supertonic_voice: String,
     #[serde(default = "AudioSettings::default_supertonic_speed")]
     pub supertonic_speed: f64,
+    /// How fast Juno speaks, 1.0 being the engine's own pace. One setting for
+    /// every engine that can change speed; see `tts::rate`.
+    #[serde(default = "AudioSettings::default_voice_rate")]
+    pub voice_rate: f64,
     pub sound_enabled: bool,
     /// Legacy single clipboard knob, kept so older stores migrate cleanly.
     /// Read through [`AudioSettings::dictation_copy_to_clipboard`], which
@@ -383,6 +394,10 @@ impl AudioSettings {
 
     fn default_supertonic_speed() -> f64 {
         crate::tts::supertonic::DEFAULT_SPEED
+    }
+
+    fn default_voice_rate() -> f64 {
+        crate::tts::rate::DEFAULT_RATE
     }
 }
 
@@ -576,6 +591,7 @@ impl Default for FloatingBarSettings {
             bar_appearance: ui::bar_appearances::DEFAULT.to_string(),
             follow_cursor_display: defaults::follow_cursor_display(),
             show_glow_border: defaults::show_glow_border(),
+            agent_cursor_color: defaults::agent_cursor_color(),
         }
     }
 }
@@ -635,12 +651,14 @@ impl Default for AudioSettings {
             system_voice: None,
             system_voice_chosen: false,
             kokoro_voice: Self::default_kokoro_voice(),
+            engine_before_silent: None,
             chatterbox_reference_audio_url: None,
             chatterbox_exaggeration: Self::default_chatterbox_exaggeration(),
             chatterbox_use_hd: false,
             supertonic_server_url: Self::default_supertonic_server_url(),
             supertonic_voice: Self::default_supertonic_voice(),
             supertonic_speed: Self::default_supertonic_speed(),
+            voice_rate: Self::default_voice_rate(),
             sound_enabled: defaults::SOUND_ENABLED,
             dictation_clipboard_enabled: defaults::DICTATION_CLIPBOARD_ENABLED,
             dictation_insertion_mode: defaults::dictation_insertion_mode(),

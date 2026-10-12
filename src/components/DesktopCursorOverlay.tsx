@@ -1,592 +1,220 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
-import {
-  getCurrentWindow,
-  LogicalSize,
-  PhysicalPosition,
-  availableMonitors,
-} from "@tauri-apps/api/window";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { useEventListener } from "@/hooks/useEventListener";
 import { EVENTS } from "@/lib/constants.generated";
+import {
+  ARROW_SHAPE,
+  FADE_IN_MS,
+  FADE_OUT_MS,
+  FOREGROUND_LINGER_MS,
+  GHOST_IDLE_MS,
+  GLIDE_MS,
+  INITIAL_OVERLAY_STATE,
+  PULSE_MS,
+  cursorBox,
+  overlayReducer,
+  shapeFor,
+  type AgentCursorUpdate,
+  type CursorShape,
+  type DrawnCursor,
+} from "@/lib/agentCursor";
+import { PointFlight } from "./PointFlight";
 
-type CursorState = "idle" | "moving" | "clicking" | "thinking";
+/**
+ * Juno's cursor, drawn in the `desktop-cursor-overlay` window: a soft glow
+ * behind the real cursor when Juno moves it, or a ghost arrow wearing the same
+ * glow where Juno works in the background. Rust owns the window (which display
+ * it covers, when it shows, its level) and every fact drawn here; see
+ * `src-tauri/src/cursor_overlay.rs`. The geometry is in `@/lib/agentCursor`.
+ */
 
-// Maximum number of simultaneous agent cursors rendered.
-const MAX_AGENT_SLOTS = 8;
-// The ring is drawn around the real pointer, so it is centred on the point
-// rather than hung off a hot-spot the way an arrow sprite would be.
-const RING_SIZE = 44;
-const HOT_SPOT = RING_SIZE / 2;
-/** Matches agent_session_colors::SLOT_0 in the Rust palette. */
-const DEFAULT_RING_COLOR = "#3B82F6";
-const CURSOR_FADE_DELAY_MS = 1500;
-const CLICK_ANIM_DURATION_MS = 700;
+const EASE_OUT = "cubic-bezier(0.2, 0, 0, 1)";
 
-// LAC-1920: Pre-action targeting reticle duration. Matches the 500ms cooldown
-// between computer-use actions so the reticle finishes fading just as the
-// action lands. Must match the longest keyframe in the juno-preview-* set.
-const PREVIEW_ANIM_DURATION_MS = 500;
-
-// Human-readable labels shown above the reticle when the agent is about to act.
-const PREVIEW_ACTION_LABELS: Record<string, string> = {
-  left_click: "clicking",
-  right_click: "right-clicking",
-  middle_click: "middle-clicking",
-  double_click: "double-clicking",
-  triple_click: "triple-clicking",
-  left_click_drag: "dragging",
-  mouse_move: "moving to",
-  left_mouse_down: "pressing",
-  left_mouse_up: "releasing",
-  scroll: "scrolling",
-};
-
-// ─── POINT flying cursor ───────────────────────────────────────────────────────
-const FLIGHT_DURATION = 380; // ms — bezier arc from last landed to target
-const LINGER_DURATION = 1600; // ms — display time after landing before hiding
-
-type CursorPointPayload = {
-  x: number;
-  y: number;
-  label: string | null;
-  screen: number | null;
-};
-
-// Quadratic bezier: P(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
-function bezier(t: number, p0: number, p1: number, p2: number): number {
-  const mt = 1 - t;
-  return mt * mt * p0 + 2 * mt * t * p1 + t * t * p2;
-}
-
-// ─── CSS Animations ───────────────────────────────────────────────────────────
 const CURSOR_CSS = `
-  .juno-cursor {
-    transform-origin: ${HOT_SPOT}px ${HOT_SPOT}px;
+  .juno-agent-cursor {
+    position: absolute;
+    left: 0;
+    top: 0;
+    pointer-events: none;
     will-change: transform, opacity;
-    transition: opacity 0.35s ease;
+    animation: juno-cursor-in ${FADE_IN_MS}ms ease-out;
+  }
+  @keyframes juno-cursor-in {
+    from { opacity: 0; }
   }
 
-  /* The ring sits around the real pointer, so its only jobs are to say
-     "not you" and to say when something happened. Opacity carries the
-     first, a single scale step carries the second. */
-  .juno-cursor--thinking svg {
-    animation: juno-ring-wait 1.8s ease-in-out infinite;
-    transform-origin: ${HOT_SPOT}px ${HOT_SPOT}px;
+  /* Two blurred silhouettes of the cursor, tinted: a tight core that traces
+     the outline and a wide, faint bloom. The blur sits on a wrapper because a
+     filter on the masked element itself would be clipped back to the shape. */
+  .juno-glow, .juno-glow-layer, .juno-glow-tint {
+    position: absolute;
+    inset: 0;
+  }
+  .juno-glow-tint {
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-size: 100% 100%;
+    mask-size: 100% 100%;
   }
 
-  .juno-cursor--clicking svg {
-    animation: juno-ring-press 0.22s ease-out;
-    transform-origin: ${HOT_SPOT}px ${HOT_SPOT}px;
+  .juno-glow--pulse { animation: juno-glow-pulse ${PULSE_MS}ms ${EASE_OUT}; }
+  @keyframes juno-glow-pulse {
+    0%   { transform: scale(1);    opacity: 1; }
+    30%  { transform: scale(1.22); opacity: 1; }
+    100% { transform: scale(1);    opacity: 1; }
   }
-
-  @keyframes juno-ring-wait {
-    0%, 100% { opacity: 0.55; }
-    50%      { opacity: 1; }
-  }
-
-  @keyframes juno-ring-press {
+  .juno-ghost-arrow { position: absolute; inset: 0; display: block; }
+  .juno-ghost-arrow--pulse { animation: juno-ghost-press 200ms ${EASE_OUT}; }
+  @keyframes juno-ghost-press {
     0%   { transform: scale(1); }
-    40%  { transform: scale(0.86); }
+    35%  { transform: scale(0.9); }
     100% { transform: scale(1); }
   }
 
+  /* Reduced motion: no glide, no scale. The fades stay, and a click still
+     shows, as a brief brightening. */
   @media (prefers-reduced-motion: reduce) {
-    .juno-cursor--thinking svg,
-    .juno-cursor--clicking svg { animation: none; }
+    .juno-agent-cursor { transition-property: opacity !important; }
+    .juno-glow--pulse { animation: juno-glow-flash ${PULSE_MS}ms ease-out; }
+    .juno-ghost-arrow--pulse { animation: none; }
   }
-
-  @keyframes juno-ripple {
-    0%   { transform: scale(0.2); opacity: 1; }
-    100% { transform: scale(3.2); opacity: 0; }
+  @keyframes juno-glow-flash {
+    0%, 100% { opacity: 1; }
+    30%      { opacity: 0.55; }
   }
-  .juno-ripple-active {
-    animation: juno-ripple 0.7s ease-out forwards;
-  }
-
-  /* LAC-1920: Pre-action targeting reticle — shows BEFORE a computer-use
-     action fires. Container positioned via left/top; children use
-     translate(-50%, -50%) so scale animations start centred on the point. */
-  @keyframes juno-preview-expand {
-    0%   { transform: translate(-50%, -50%) scale(0.4); opacity: 0.8; }
-    60%  { transform: translate(-50%, -50%) scale(1.1); opacity: 0.5; }
-    100% { transform: translate(-50%, -50%) scale(1.4); opacity: 0;   }
-  }
-  @keyframes juno-preview-pulse {
-    0%   { transform: translate(-50%, -50%) scale(0.6);  opacity: 0;   }
-    20%  { transform: translate(-50%, -50%) scale(1.1);  opacity: 1;   }
-    80%  { transform: translate(-50%, -50%) scale(1.0);  opacity: 0.9; }
-    100% { transform: translate(-50%, -50%) scale(0.95); opacity: 0;   }
-  }
-  @keyframes juno-preview-dot {
-    0%   { opacity: 0; transform: translate(-50%, -50%) scale(0); }
-    20%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-    80%  { opacity: 1; }
-    100% { opacity: 0; }
-  }
-  @keyframes juno-preview-label {
-    0%   { opacity: 0; transform: translateX(-50%) translateY(4px);  }
-    20%  { opacity: 1; transform: translateX(-50%) translateY(0);    }
-    70%  { opacity: 1; }
-    100% { opacity: 0; transform: translateX(-50%) translateY(-2px); }
-  }
-  .juno-preview-active .juno-preview-outer { animation: juno-preview-expand 0.5s ease-out forwards; }
-  .juno-preview-active .juno-preview-inner { animation: juno-preview-pulse  0.5s ease-out forwards; }
-  .juno-preview-active .juno-preview-dot   { animation: juno-preview-dot    0.5s ease-out forwards; }
-  .juno-preview-active .juno-preview-label { animation: juno-preview-label  0.5s ease-out forwards; }
 `;
 
-// ─── Cursor ring ──────────────────────────────────────────────────────────────
-// A ring drawn around the person's real pointer, centred on the point.
-//
-// This used to be a second arrow in a purple gradient with a blur filter,
-// which put two pointers on screen and looked nothing like the rest of the
-// app. Flat, one stroke, system-blue by default: it says "Juno is moving this"
-// without competing with what is underneath it.
-const JunoCursorRing = ({ color = DEFAULT_RING_COLOR }: { color?: string }) => (
-  <svg
-    width={RING_SIZE}
-    height={RING_SIZE}
-    viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`}
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    style={{ display: "block" }}
-    aria-hidden="true"
-  >
-    {/* A hairline of dark under the ring keeps it legible on a light
-        background without resorting to a glow. */}
-    <circle
-      cx={HOT_SPOT}
-      cy={HOT_SPOT}
-      r={HOT_SPOT - 3}
-      stroke="rgba(0,0,0,0.28)"
-      strokeWidth="3.5"
-    />
-    <circle
-      cx={HOT_SPOT}
-      cy={HOT_SPOT}
-      r={HOT_SPOT - 3}
-      stroke={color}
-      strokeWidth="2"
-      fill={`${color}14`}
-    />
-  </svg>
-);
-
-// ─── Per-slot cursor refs ─────────────────────────────────────────────────────
-interface SlotRefs {
-  cursor: HTMLDivElement | null;
-  ripples: (HTMLDivElement | null)[];
-  hideTimer: ReturnType<typeof setTimeout> | null;
-  clickTimer: ReturnType<typeof setTimeout> | null;
-  state: CursorState;
-  nextRippleIdx: number;
-}
-
-// ─── Reducer for active agent-slot mapping ────────────────────────────────────
-type SlotMap = Map<string, number>; // agentId → slot index
-
-type SlotAction =
-  | { type: "assign"; agentId: string; slot: number }
-  | { type: "release"; agentId: string };
-
-function slotReducer(map: SlotMap, action: SlotAction): SlotMap {
-  const next = new Map(map);
-  if (action.type === "assign") {
-    next.set(action.agentId, action.slot);
-  } else {
-    next.delete(action.agentId);
-  }
-  return next;
-}
-
-// ─── Component ────────────────────────────────────────────────────────────────
-
-// AgentCursorUpdate payload from backend
-interface AgentCursorUpdate {
-  agent_id: string;
-  x: number;
-  y: number;
-  state: string;
+function GlowLayer({
+  shape,
+  color,
+  blur,
+  scale,
+  opacity,
+}: {
+  shape: CursorShape;
   color: string;
+  blur: number;
+  scale: number;
+  opacity: number;
+}) {
+  const mask = `url("${shape.image}")`;
+  return (
+    <div className="juno-glow-layer" style={{ filter: `blur(${blur}px)`, opacity }}>
+      <div
+        className="juno-glow-tint"
+        style={{
+          backgroundColor: color,
+          WebkitMaskImage: mask,
+          maskImage: mask,
+          transform: `scale(${scale})`,
+          transformOrigin: `${shape.hotspot_x}px ${shape.hotspot_y}px`,
+        }}
+      />
+    </div>
+  );
 }
 
-interface AgentCursorRemove {
-  agent_id: string;
+function AgentCursor({
+  cursor,
+  originX,
+  originY,
+  systemShape,
+}: {
+  cursor: DrawnCursor;
+  originX: number;
+  originY: number;
+  systemShape: CursorShape | null;
+}) {
+  const shape = shapeFor(cursor.look, systemShape);
+  const box = cursorBox(cursor.x, cursor.y, originX, originY, shape);
+  const fade = cursor.visible ? `opacity ${FADE_IN_MS}ms ease-out` : `opacity ${FADE_OUT_MS}ms ease-in`;
+  const transition = cursor.instant ? fade : `${fade}, transform ${GLIDE_MS}ms ${EASE_OUT}`;
+  const pulsing = cursor.pulse > 0;
+  const origin = `${box.hotspotX}px ${box.hotspotY}px`;
+
+  return (
+    <div
+      className="juno-agent-cursor"
+      data-agent-cursor={cursor.id}
+      data-look={cursor.look}
+      data-visible={cursor.visible ? "true" : "false"}
+      style={{
+        width: box.width,
+        height: box.height,
+        transform: `translate3d(${box.left}px, ${box.top}px, 0)`,
+        opacity: cursor.visible ? 1 : 0,
+        transition,
+      }}
+    >
+      {/* Remounted per click, so the pulse restarts. */}
+      <div
+        key={`glow-${cursor.pulse}`}
+        className={pulsing ? "juno-glow juno-glow--pulse" : "juno-glow"}
+        style={{ transformOrigin: origin }}
+      >
+        <GlowLayer shape={shape} color={cursor.color} blur={10} scale={1.6} opacity={0.45} />
+        <GlowLayer shape={shape} color={cursor.color} blur={3} scale={1.2} opacity={0.9} />
+      </div>
+      {cursor.look === "ghost" && (
+        <img
+          key={`ghost-${cursor.pulse}`}
+          src={ARROW_SHAPE.image}
+          width={ARROW_SHAPE.width}
+          height={ARROW_SHAPE.height}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          className={pulsing ? "juno-ghost-arrow juno-ghost-arrow--pulse" : "juno-ghost-arrow"}
+          style={{ transformOrigin: origin }}
+        />
+      )}
+    </div>
+  );
 }
 
 export const DesktopCursorOverlay = () => {
-  // Slot assignment: agentId → 0..MAX_AGENT_SLOTS-1
-  const [slotMap, dispatch] = useReducer(slotReducer, new Map<string, number>());
+  const [state, dispatch] = useReducer(overlayReducer, INITIAL_OVERLAY_STATE);
+  const [systemShape, setSystemShape] = useState<CursorShape | null>(null);
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
-  // Per-slot imperative refs (indexed 0..MAX_AGENT_SLOTS-1)
-  const slots = useRef<SlotRefs[]>(
-    Array.from({ length: MAX_AGENT_SLOTS }, () => ({
-      cursor: null,
-      ripples: Array<null>(5).fill(null),
-      hideTimer: null,
-      clickTimer: null,
-      state: "idle" as CursorState,
-      nextRippleIdx: 0,
-    }))
-  );
-
-  // Colors per slot (assigned at first AgentCursorUpdate, persisted for the session)
-  const slotColors = useRef<(string | null)[]>(Array(MAX_AGENT_SLOTS).fill(null));
-
-  // Tracks which slots are currently occupied
-  const occupiedSlots = useRef<Set<number>>(new Set());
-
-  // ── LAC-1920: Pre-action reticle refs ─────────────────────────────────────
-  // Single global reticle (not per-slot) — backend emits one preview per
-  // computer-use action; agents on different slots share the same reticle.
-  const previewRef = useRef<HTMLDivElement>(null);
-  const previewLabelRef = useRef<HTMLDivElement>(null);
-  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // ── POINT flying cursor refs ───────────────────────────────────────────────
-  const flyDivRef = useRef<HTMLDivElement | null>(null);
-  const flyLabelRef = useRef<HTMLDivElement | null>(null);
-  const flyRippleRef = useRef<HTMLDivElement | null>(null);
-  const flyAnimFrameRef = useRef<number | null>(null);
-  const flyLingerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastLandedRef = useRef<{ x: number; y: number } | null>(null);
-
-  // ── Slot allocation ────────────────────────────────────────────────────────
-  const getOrAssignSlot = (agentId: string, map: SlotMap): number | null => {
-    const existing = map.get(agentId);
-    if (existing !== undefined) return existing;
-
-    for (let i = 0; i < MAX_AGENT_SLOTS; i++) {
-      if (!occupiedSlots.current.has(i)) {
-        occupiedSlots.current.add(i);
-        dispatch({ type: "assign", agentId, slot: i });
-        return i;
-      }
-    }
-    return null; // all slots full
+  const schedule = (id: string, ms: number, then: () => void) => {
+    const existing = timers.current.get(id);
+    if (existing) clearTimeout(existing);
+    timers.current.set(
+      id,
+      setTimeout(() => {
+        timers.current.delete(id);
+        then();
+      }, ms),
+    );
   };
 
-  // ── Imperative slot helpers ────────────────────────────────────────────────
-  const applySlotState = (slot: SlotRefs, state: CursorState) => {
-    slot.state = state;
-    if (slot.cursor) {
-      slot.cursor.className = `juno-cursor juno-cursor--${state}`;
-    }
-  };
-
-  const moveSlotTo = (slot: SlotRefs, x: number, y: number) => {
-    if (!slot.cursor) return;
-    // Centred on the point, because the ring surrounds the real pointer.
-    slot.cursor.style.transform = `translate(${x - HOT_SPOT}px, ${y - HOT_SPOT}px)`;
-  };
-
-  const revealSlot = (slot: SlotRefs) => {
-    if (slot.hideTimer) { clearTimeout(slot.hideTimer); slot.hideTimer = null; }
-    if (slot.cursor) slot.cursor.style.opacity = "1";
-  };
-
-  const scheduleSlotFade = (slot: SlotRefs, delayMs: number) => {
-    if (slot.hideTimer) clearTimeout(slot.hideTimer);
-    slot.hideTimer = setTimeout(() => {
-      if (slot.cursor) slot.cursor.style.opacity = "0";
-    }, delayMs);
-  };
-
-  const fireSlotRipple = (slot: SlotRefs, x: number, y: number, color: string) => {
-    const idx = slot.nextRippleIdx % slot.ripples.length;
-    slot.nextRippleIdx++;
-    const el = slot.ripples[idx];
-    if (!el) return;
-    el.style.left = `${x - 20}px`;
-    el.style.top = `${y - 20}px`;
-    el.style.borderColor = color;
-    el.style.backgroundColor = `${color}18`;
-    el.classList.remove("juno-ripple-active");
-    void el.offsetWidth;
-    el.classList.add("juno-ripple-active");
-  };
-
-  // ── LAC-1920: Fire pre-action targeting reticle at (x, y) ────────────────
-  const firePreview = (x: number, y: number, action: string) => {
-    const el = previewRef.current;
-    if (!el) return;
-
-    // Position container so its centre sits at (x, y). Children use
-    // translate(-50%, -50%) to centre on the container.
-    el.style.left = `${x}px`;
-    el.style.top = `${y}px`;
-
-    // Update label text (raw action name if we have no friendly label).
-    if (previewLabelRef.current) {
-      previewLabelRef.current.textContent =
-        PREVIEW_ACTION_LABELS[action] ?? action;
-    }
-
-    // Restart animation — same forced-reflow trick as fireSlotRipple.
-    el.classList.remove("juno-preview-active");
-    void el.offsetWidth; // intentional forced reflow — do not remove
-    el.classList.add("juno-preview-active");
-
-    // Clear active class once the animation finishes so the reticle doesn't
-    // linger as a static shape (all animations use `forwards` at opacity 0).
-    if (previewTimer.current) clearTimeout(previewTimer.current);
-    previewTimer.current = setTimeout(() => {
-      if (previewRef.current) {
-        previewRef.current.classList.remove("juno-preview-active");
-      }
-    }, PREVIEW_ANIM_DURATION_MS);
-  };
-
-  // ── POINT: fly cursor to (targetX, targetY) along a bezier arc ───────────
-  const flyTo = useCallback((targetX: number, targetY: number, label: string | null) => {
-    if (flyAnimFrameRef.current !== null) cancelAnimationFrame(flyAnimFrameRef.current);
-    if (flyLingerRef.current) clearTimeout(flyLingerRef.current);
-
-    const startX = lastLandedRef.current?.x ?? targetX - 250;
-    const startY = lastLandedRef.current?.y ?? targetY - 80;
-
-    // Perpendicular bezier control point — 15% of flight distance, max 80px arc
-    const midX = (startX + targetX) / 2;
-    const midY = (startY + targetY) / 2;
-    const dx = targetX - startX;
-    const dy = targetY - startY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const perp = Math.min(0.15, 80 / Math.max(dist, 1));
-    const ctrlX = midX - dy * perp;
-    const ctrlY = midY + dx * perp;
-
-    if (flyDivRef.current) {
-      flyDivRef.current.style.opacity = "1";
-      flyDivRef.current.style.transform = `translate(${startX}px, ${startY}px)`;
-    }
-    if (flyLabelRef.current) {
-      flyLabelRef.current.style.opacity = "0";
-      flyLabelRef.current.textContent = label ?? "";
-    }
-    if (flyRippleRef.current) {
-      flyRippleRef.current.style.opacity = "0";
-      flyRippleRef.current.classList.remove("juno-ripple-active");
-    }
-
-    const startTime = Date.now();
-    const tick = () => {
-      const elapsed = Date.now() - startTime;
-      const tRaw = Math.min(elapsed / FLIGHT_DURATION, 1);
-      // Ease-in-out cubic
-      const t = tRaw < 0.5 ? 4 * tRaw * tRaw * tRaw : 1 - Math.pow(-2 * tRaw + 2, 3) / 2;
-      const curX = bezier(t, startX, ctrlX, targetX);
-      const curY = bezier(t, startY, ctrlY, targetY);
-      if (flyDivRef.current) {
-        flyDivRef.current.style.transform = `translate(${curX}px, ${curY}px)`;
-      }
-      if (tRaw < 1) {
-        flyAnimFrameRef.current = requestAnimationFrame(tick);
-      } else {
-        lastLandedRef.current = { x: targetX, y: targetY };
-        if (label && flyLabelRef.current) flyLabelRef.current.style.opacity = "1";
-        if (flyRippleRef.current) {
-          flyRippleRef.current.style.opacity = "1";
-          flyRippleRef.current.classList.remove("juno-ripple-active");
-          void flyRippleRef.current.offsetWidth;
-          flyRippleRef.current.classList.add("juno-ripple-active");
-        }
-        flyLingerRef.current = setTimeout(() => {
-          if (flyDivRef.current) flyDivRef.current.style.opacity = "0";
-          if (flyLabelRef.current) flyLabelRef.current.style.opacity = "0";
-        }, LINGER_DURATION);
-      }
-    };
-    flyAnimFrameRef.current = requestAnimationFrame(tick);
-  }, []);
-
-  // ── Window setup ──────────────────────────────────────────────────────────
-  // Phase D / LAC-1882: span the union of all connected monitors so agent
-  // cursors can render on a non-primary display. Single-monitor users get the
-  // same coverage as before.
-  //
-  // The 2560x1600 @ 0,0 geometry in tauri.conf.json is only a startup
-  // fallback (JSON cannot carry comments): this effect resizes/positions the
-  // window to the real display topology before every show().
   useEffect(() => {
-    let mounted = true;
-    const setupWindow = async () => {
-      try {
-        const win = getCurrentWindow();
-        // Compute the bounding rectangle that contains every monitor. Each
-        // monitor has physical { position: {x,y}, size: {width,height} }.
-        // We fall back to window.screen if the API errors (e.g. headless test).
-        let originX = 0;
-        let originY = 0;
-        let spanWidth = window.screen.width;
-        let spanHeight = window.screen.height;
-        try {
-          const monitors = await availableMonitors();
-          if (monitors.length > 0) {
-            let minX = Number.POSITIVE_INFINITY;
-            let minY = Number.POSITIVE_INFINITY;
-            let maxX = Number.NEGATIVE_INFINITY;
-            let maxY = Number.NEGATIVE_INFINITY;
-            for (const m of monitors) {
-              // Tauri monitor coords are physical pixels; for setSize we use
-              // logical pixels (assume scale factor 1 for span; the overlay
-              // is transparent + pointer-events:none so an oversize window
-              // is harmless).
-              const scale = m.scaleFactor || 1;
-              const lx = m.position.x / scale;
-              const ly = m.position.y / scale;
-              const lw = m.size.width / scale;
-              const lh = m.size.height / scale;
-              if (lx < minX) minX = lx;
-              if (ly < minY) minY = ly;
-              if (lx + lw > maxX) maxX = lx + lw;
-              if (ly + lh > maxY) maxY = ly + lh;
-            }
-            if (Number.isFinite(minX) && Number.isFinite(maxX)) {
-              originX = minX;
-              originY = minY;
-              spanWidth = maxX - minX;
-              spanHeight = maxY - minY;
-            }
-          }
-        } catch (err) {
-          console.debug("[JunoCursor] availableMonitors failed; using primary display:", err);
-        }
-
-        await Promise.all([
-          win.setSize(new LogicalSize(spanWidth, spanHeight)),
-          // PhysicalPosition is in raw pixels; multiplying by primary scale is
-          // approximate, but Tauri normalizes by primary monitor's scale.
-          win.setPosition(new PhysicalPosition(Math.round(originX), Math.round(originY))),
-          win.setIgnoreCursorEvents(true),
-        ]);
-        if (mounted) await win.show();
-      } catch (err) {
-        console.error("[JunoCursor] Window setup failed:", err);
-      }
-    };
-    setupWindow();
+    const pending = timers.current;
     return () => {
-      mounted = false;
-      slots.current.forEach((slot) => {
-        if (slot.hideTimer) clearTimeout(slot.hideTimer);
-        if (slot.clickTimer) clearTimeout(slot.clickTimer);
-      });
-      if (flyAnimFrameRef.current !== null) cancelAnimationFrame(flyAnimFrameRef.current);
-      if (flyLingerRef.current) clearTimeout(flyLingerRef.current);
-      if (previewTimer.current) clearTimeout(previewTimer.current);
+      pending.forEach((t) => clearTimeout(t));
+      pending.clear();
     };
   }, []);
 
-  // ── Multi-agent cursor events ─────────────────────────────────────────────
-  useEventListener<AgentCursorUpdate>(EVENTS.UI_AGENT_CURSOR_UPDATE, (payload) => {
-    const slotIdx = getOrAssignSlot(payload.agent_id, slotMap);
-    if (slotIdx === null) return; // all slots occupied
-
-    // Store the color for this slot if not yet set
-    if (!slotColors.current[slotIdx]) {
-      slotColors.current[slotIdx] = payload.color;
-    }
-
-    const slot = slots.current[slotIdx];
-    revealSlot(slot);
-    moveSlotTo(slot, payload.x, payload.y);
-
-    const state = (payload.state as CursorState) || "idle";
-    if (state === "clicking") {
-      applySlotState(slot, "clicking");
-      fireSlotRipple(slot, payload.x, payload.y, payload.color);
-      if (slot.clickTimer) clearTimeout(slot.clickTimer);
-      slot.clickTimer = setTimeout(() => {
-        applySlotState(slot, "idle");
-        scheduleSlotFade(slot, CURSOR_FADE_DELAY_MS);
-      }, CLICK_ANIM_DURATION_MS);
-    } else {
-      applySlotState(slot, state);
-      if (state === "idle") scheduleSlotFade(slot, CURSOR_FADE_DELAY_MS);
-    }
+  useEventListener<AgentCursorUpdate>(EVENTS.UI_AGENT_CURSOR_UPDATE, (update) => {
+    dispatch({ type: "update", update });
+    // The glow belongs to the real cursor, which the person takes back the
+    // moment they move it, so it lingers only briefly. The ghost stays until
+    // Juno lets go; the long timeout only covers a release that never came.
+    const id = update.agent_id;
+    schedule(id, update.foreground ? FOREGROUND_LINGER_MS : GHOST_IDLE_MS, () =>
+      dispatch({ type: "fade", id }),
+    );
   });
 
-  useEventListener<AgentCursorRemove>(EVENTS.UI_AGENT_CURSOR_REMOVE, ({ agent_id }) => {
-    const slotIdx = slotMap.get(agent_id);
-    if (slotIdx === undefined) return;
-
-    const slot = slots.current[slotIdx];
-    if (slot.cursor) slot.cursor.style.opacity = "0";
-    if (slot.hideTimer) { clearTimeout(slot.hideTimer); slot.hideTimer = null; }
-    if (slot.clickTimer) { clearTimeout(slot.clickTimer); slot.clickTimer = null; }
-    slotColors.current[slotIdx] = null;
-    occupiedSlots.current.delete(slotIdx);
-    dispatch({ type: "release", agentId: agent_id });
+  useEventListener<{ agent_id: string }>(EVENTS.UI_AGENT_CURSOR_REMOVE, ({ agent_id }) => {
+    dispatch({ type: "fade", id: agent_id });
+    schedule(agent_id, FADE_OUT_MS, () => dispatch({ type: "remove", id: agent_id }));
   });
 
-  // ── Legacy single-agent cursor events (backward compat) ──────────────────
-  // These events are emitted by smooth_mouse_move for the HID path.
-  // They map to slot 0 with the default purple color.
-  const LEGACY_SLOT = 0;
-
-  useEventListener<[number, number]>(EVENTS.UI_UI_CURSOR_HIGHLIGHT_START, ([x, y]) => {
-    if (!occupiedSlots.current.has(LEGACY_SLOT)) occupiedSlots.current.add(LEGACY_SLOT);
-    const slot = slots.current[LEGACY_SLOT];
-    revealSlot(slot);
-    moveSlotTo(slot, x, y);
-    applySlotState(slot, "moving");
+  useEventListener<CursorShape>(EVENTS.UI_AGENT_CURSOR_SHAPE, (shape) => {
+    setSystemShape(shape);
   });
-
-  useEventListener<[number, number]>(EVENTS.UI_UI_CURSOR_HIGHLIGHT_MOVE, ([x, y]) => {
-    const slot = slots.current[LEGACY_SLOT];
-    moveSlotTo(slot, x, y);
-    if (slot.state !== "clicking") applySlotState(slot, "moving");
-  });
-
-  useEventListener<[number, number]>(EVENTS.UI_UI_CURSOR_HIGHLIGHT_STOP, ([x, y]) => {
-    const slot = slots.current[LEGACY_SLOT];
-    moveSlotTo(slot, x, y);
-    applySlotState(slot, "idle");
-    scheduleSlotFade(slot, CURSOR_FADE_DELAY_MS);
-  });
-
-  useEventListener<[number, number, string]>(EVENTS.UI_CLICK_VISUALIZATION, ([x, y, color]) => {
-    const slot = slots.current[LEGACY_SLOT];
-    revealSlot(slot);
-    moveSlotTo(slot, x, y);
-    fireSlotRipple(slot, x, y, color);
-    applySlotState(slot, "clicking");
-    if (slot.clickTimer) clearTimeout(slot.clickTimer);
-    slot.clickTimer = setTimeout(() => {
-      applySlotState(slot, "idle");
-      scheduleSlotFade(slot, CURSOR_FADE_DELAY_MS);
-    }, CLICK_ANIM_DURATION_MS);
-  });
-
-  useEventListener(EVENTS.STREAMING_THINKING_START, () => {
-    const slot = slots.current[LEGACY_SLOT];
-    if (slot.state === "idle") { revealSlot(slot); applySlotState(slot, "thinking"); }
-  });
-
-  useEventListener(EVENTS.STREAMING_THINKING_END, () => {
-    const slot = slots.current[LEGACY_SLOT];
-    if (slot.state === "thinking") { applySlotState(slot, "idle"); scheduleSlotFade(slot, CURSOR_FADE_DELAY_MS); }
-  });
-
-  // ── POINT teaching cursor — agent [POINT:x,y:label:screenN] ──────────────
-  // payload.screen is parsed + forwarded but coordinates are treated as global
-  // screen space. TODO: map screenN to display origin for multi-monitor support.
-  useEventListener<CursorPointPayload>(EVENTS.UI_CURSOR_POINT, (payload) => {
-    flyTo(payload.x, payload.y, payload.label ?? null);
-  });
-
-  // ── LAC-1920: Pre-action targeting reticle ────────────────────────────────
-  // Fires ~500ms BEFORE a coordinate-based computer-use action so the user
-  // can see WHERE the agent is about to click/scroll/drag before it acts.
-  useEventListener<{
-    action: string;
-    coordinate: [number, number];
-    timestamp: number;
-  }>(EVENTS.TOOLS_COMPUTER_USE_PREVIEW, ({ action, coordinate }) => {
-    const [x, y] = coordinate;
-    firePreview(x, y, action);
-  });
-
-  // ── Render: N cursor sprites ───────────────────────────────────────────────
 
   return (
     <div
@@ -599,214 +227,16 @@ export const DesktopCursorOverlay = () => {
       }}
     >
       <style>{CURSOR_CSS}</style>
-
-      {Array.from({ length: MAX_AGENT_SLOTS }, (_, slotIdx) => {
-        // Derive color: check slotColors ref first, fall back to palette
-        const color = slotColors.current[slotIdx] ?? DEFAULT_RING_COLOR;
-
-        return (
-          <div key={`cursor-slot-${slotIdx}`}>
-            {/* Click ripple pool */}
-            {Array.from({ length: 5 }, (__, i) => (
-              <div
-                key={`ripple-${slotIdx}-${i}`}
-                ref={(el) => { slots.current[slotIdx].ripples[i] = el; }}
-                style={{
-                  position: "absolute",
-                  width: 40,
-                  height: 40,
-                  borderRadius: "50%",
-                  border: "2px solid",
-                  opacity: 0,
-                  pointerEvents: "none",
-                }}
-              />
-            ))}
-
-            {/* Cursor sprite */}
-            <div
-              ref={(el) => { slots.current[slotIdx].cursor = el; }}
-              className="juno-cursor juno-cursor--idle"
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                opacity: 0,
-                transform: "translate(-200px, -200px)",
-                pointerEvents: "none",
-              }}
-            >
-              <JunoCursorRing color={color} />
-            </div>
-          </div>
-        );
-      })}
-
-      {/* POINT teaching cursor — flies to agent-pointed coordinates */}
-      <div
-        ref={flyDivRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          opacity: 0,
-          transform: "translate(-200px, -200px)",
-          pointerEvents: "none",
-          willChange: "transform, opacity",
-        }}
-      >
-        <svg
-          width="36"
-          height="36"
-          viewBox="0 0 36 36"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-          aria-hidden="true"
-        >
-          <defs>
-            <filter id="point-shadow" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="1" dy="2" stdDeviation="2" floodColor="rgba(0,0,0,0.4)" />
-            </filter>
-          </defs>
-          <path
-            d="M6 4L28 18L17 19.5L12 30L6 4Z"
-            fill="white"
-            stroke="#1a1a2e"
-            strokeWidth="2"
-            strokeLinejoin="round"
-            filter="url(#point-shadow)"
-          />
-          <circle cx="6.5" cy="4.5" r="2.5" fill="#6366f1" />
-        </svg>
-
-        {/* Label tooltip — fades in on landing */}
-        <div
-          ref={flyLabelRef}
-          style={{
-            position: "absolute",
-            top: "40px",
-            left: 0,
-            backgroundColor: "rgba(15, 15, 30, 0.88)",
-            backdropFilter: "blur(8px)",
-            color: "#e2e8f0",
-            fontSize: "12px",
-            fontWeight: 500,
-            fontFamily: "system-ui, -apple-system, sans-serif",
-            padding: "4px 10px",
-            borderRadius: "6px",
-            border: "1px solid rgba(99,102,241,0.4)",
-            whiteSpace: "nowrap",
-            opacity: 0,
-            transition: "opacity 0.18s ease-out",
-            boxShadow: "0 2px 12px rgba(0,0,0,0.3)",
-          }}
+      {state.cursors.map((cursor) => (
+        <AgentCursor
+          key={cursor.id}
+          cursor={cursor}
+          originX={state.originX}
+          originY={state.originY}
+          systemShape={systemShape}
         />
-
-        {/* Landing ripple — reuses .juno-ripple-active keyframe */}
-        <div
-          ref={flyRippleRef}
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: 40,
-            height: 40,
-            transform: "translate(-8px, -8px)",
-            borderRadius: "50%",
-            border: "2px solid rgba(99,102,241,0.6)",
-            opacity: 0,
-            pointerEvents: "none",
-          }}
-        />
-      </div>
-
-      {/* LAC-1920: Pre-action targeting reticle. Repositioned via left/top
-          on each `computer-use-preview` event; children centre on the
-          container via translate(-50%, -50%). Only visible while the
-          `juno-preview-active` class is applied. */}
-      <div
-        ref={previewRef}
-        style={{
-          position: "absolute",
-          left: 0,
-          top: 0,
-          width: 0,
-          height: 0,
-          pointerEvents: "none",
-        }}
-      >
-        {/* Outer expanding ring */}
-        <div
-          className="juno-preview-outer"
-          style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            width: 80,
-            height: 80,
-            borderRadius: "50%",
-            border: "2px solid rgba(99, 179, 237, 0.5)",
-            opacity: 0,
-            transform: "translate(-50%, -50%)",
-          }}
-        />
-        {/* Inner targeting reticle */}
-        <div
-          className="juno-preview-inner"
-          style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            width: 36,
-            height: 36,
-            borderRadius: "50%",
-            border: "2.5px solid rgba(66, 153, 225, 0.9)",
-            backgroundColor: "rgba(66, 153, 225, 0.15)",
-            opacity: 0,
-            transform: "translate(-50%, -50%)",
-            boxShadow:
-              "0 0 12px rgba(66, 153, 225, 0.6), inset 0 0 8px rgba(66, 153, 225, 0.2)",
-          }}
-        />
-        {/* Crosshair center dot */}
-        <div
-          className="juno-preview-dot"
-          style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            width: 6,
-            height: 6,
-            borderRadius: "50%",
-            backgroundColor: "rgba(66, 153, 225, 0.9)",
-            opacity: 0,
-            transform: "translate(-50%, -50%)",
-          }}
-        />
-        {/* Action label — text set imperatively via previewLabelRef */}
-        <div
-          ref={previewLabelRef}
-          className="juno-preview-label"
-          style={{
-            position: "absolute",
-            left: 0,
-            top: -38,
-            transform: "translateX(-50%)",
-            fontSize: 10,
-            fontWeight: 600,
-            fontFamily: "system-ui, -apple-system, sans-serif",
-            color: "rgba(226, 232, 240, 0.95)",
-            backgroundColor: "rgba(15, 15, 30, 0.82)",
-            border: "1px solid rgba(99, 179, 237, 0.5)",
-            padding: "3px 8px",
-            borderRadius: 6,
-            whiteSpace: "nowrap",
-            opacity: 0,
-            letterSpacing: "0.02em",
-            boxShadow: "0 2px 10px rgba(0, 0, 0, 0.35)",
-          }}
-        />
-      </div>
+      ))}
+      <PointFlight originX={state.originX} originY={state.originY} />
     </div>
   );
 };

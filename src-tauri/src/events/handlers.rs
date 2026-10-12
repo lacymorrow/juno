@@ -38,6 +38,11 @@ fn setup_menu_event_listeners(app: &AppHandle) {
 
 async fn handle_toggle_floating_bar(app_handle: AppHandle) {
     let label = constants::ui::window_labels::FLOATING_BAR;
+    // The bar waits for setup to finish; see `open_onboarding_window`.
+    if crate::window_management::onboarding_is_open(&app_handle) {
+        crate::window_management::bring_onboarding_forward(&app_handle);
+        return;
+    }
     if WindowManager::is_window_visible(&app_handle, label) {
         if let Err(e) = WindowManager::hide_window(&app_handle, label).await {
             error!("[Menu] Failed to hide floating bar: {}", e);
@@ -116,7 +121,7 @@ fn setup_dictation_listeners(app: &AppHandle) {
                     VoiceTarget::Dictation,
                     hold,
                 );
-                handle_dictation_transcription_start(app_handle, method).await;
+                handle_dictation_transcription_start(app_handle, method, hold).await;
             });
         },
     );
@@ -315,6 +320,10 @@ async fn handle_agent_mode_result(
                     .unwrap_or(false)
                 {
                     info!("[Event] Empty transcription, not waking the agent");
+                    // Close the voice turn now. Left open, it lingered until the
+                    // next release and was logged then as `superseded`, which
+                    // read as one release counted twice.
+                    crate::turn_timing::finish(None, "empty_transcript");
                     return;
                 }
 
@@ -439,7 +448,11 @@ async fn handle_voice_transcription_error(app_handle: AppHandle) {
     }
 }
 
-async fn handle_dictation_transcription_start(app_handle: AppHandle, method: VoiceStartMethod) {
+async fn handle_dictation_transcription_start(
+    app_handle: AppHandle,
+    method: VoiceStartMethod,
+    hold: Option<crate::hold_gate::HoldId>,
+) {
     let app_state = app_handle.state::<state::AppState>();
 
     // Give the session an identity before anything opens the microphone. Every
@@ -457,6 +470,13 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle, method: Voi
             info!(
                 "[Dictation Mode] Ignoring a dictation start: {}",
                 refused.reason()
+            );
+            // An agent voice turn holds the microphone; this key's release
+            // must not commit or cancel it. See `StartGate::disown`.
+            crate::hold_gate::disown_if_crossed(
+                VoiceTarget::Dictation,
+                refused.standing.target,
+                hold,
             );
             return;
         }

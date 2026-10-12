@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -74,6 +74,14 @@ beforeEach(() => {
   mockBackend();
 });
 
+async function openInfo(el: HTMLElement, text: RegExp) {
+  const row = el.closest('[id^="settings-row-"]') as HTMLElement;
+  await act(async () => {
+    within(row).getByRole("button", { name: "More info" }).focus();
+  });
+  return (await screen.findAllByText(text))[0];
+}
+
 describe("Smart routing (beta) toggle", () => {
   it("is off unless the backend says otherwise", async () => {
     await mount();
@@ -89,7 +97,7 @@ describe("Smart routing (beta) toggle", () => {
   it("sits in the Beta group and says what it does in one plain line", async () => {
     await mount();
     expect(screen.getByText("Beta")).toBeInTheDocument();
-    const description = screen.getByText(/picks a model for each request/i);
+    const description = await openInfo(toggle(), /picks a model for each request/i);
     expect(description).toHaveTextContent(/use your computer/i);
     expect(description.textContent ?? "").not.toMatch(/\u2014/);
   });

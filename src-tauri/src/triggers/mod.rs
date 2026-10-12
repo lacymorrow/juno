@@ -1257,7 +1257,7 @@ pub fn issues(triggers: &[Trigger], reserved: &[String]) -> Vec<TriggerIssue> {
             if phrase.is_empty() {
                 out.push(TriggerIssue {
                     trigger_id: t.id.clone(),
-                    message: "Voice triggers need a wake phrase.".to_string(),
+                    message: "Voice shortcuts need a wake phrase.".to_string(),
                 });
                 continue;
             }

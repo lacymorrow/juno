@@ -10,6 +10,12 @@ pub mod macos;
 
 /// Automation (TCC AppleEvents) consent per target app, asked before macOS asks.
 pub mod automation;
+/// The bar's drag: Juno moves the window on every mouse-dragged event until the release.
+pub mod bar_drag_follow;
+/// Click-through for a steady bar window: hit-test the cursor against what the page draws.
+pub mod bar_hit_test;
+/// Tauri's mixed-scale screen numbers, converted to global desktop points.
+pub mod desktop_points;
 pub mod file_panels;
 /// Whether a connected keyboard has a globe (Fn) key, from IOKit HID.
 pub mod fn_key_detection;
@@ -24,6 +30,8 @@ pub mod stop_key_monitor; // Passive mouse-button trigger observer
 /// Recognising Juno's own synthesized keyboard events (macOS only).
 #[cfg(target_os = "macos")]
 pub mod synthetic_events;
+/// The system cursor's shape, for the agent cursor glow (macOS; no-op elsewhere).
+pub mod system_cursor;
 
 #[cfg(target_os = "windows")]
 pub mod windows;

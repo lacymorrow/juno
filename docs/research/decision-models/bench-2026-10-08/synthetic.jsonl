@@ -1,0 +1,347 @@
+{"id": "syn-settings-000", "synthetic": true, "question": "settings", "text": "open Juno's general setting", "label": "juno_general", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-001", "synthetic": true, "question": "settings", "text": "make juno start when i log in", "label": "juno_general", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-002", "synthetic": true, "question": "settings", "text": "show the Juno settings", "label": "juno_general", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-003", "synthetic": true, "question": "settings", "text": "where do i change launch at login for juno", "label": "juno_general", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-004", "synthetic": true, "question": "settings", "text": "i want to change Juno's language in settings", "label": "juno_general", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-005", "synthetic": true, "question": "settings", "text": "change junos voice", "label": "juno_voice", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-006", "synthetic": true, "question": "settings", "text": "I want a different voice for you", "label": "juno_voice", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-007", "synthetic": true, "question": "settings", "text": "you sound too robotic open the voice settings", "label": "juno_voice", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-008", "synthetic": true, "question": "settings", "text": "switch your speaking voice to something deeper", "label": "juno_voice", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-009", "synthetic": true, "question": "settings", "text": "slow down fast you talk, in your voice settings", "label": "juno_voice", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-010", "synthetic": true, "question": "settings", "text": "change the push to talk key", "label": "juno_triggers", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-011", "synthetic": true, "question": "settings", "text": "open trigger settings", "label": "juno_triggers", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-012", "synthetic": true, "question": "settings", "text": "I want to hold a different key to talk to you", "label": "juno_triggers", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-013", "synthetic": true, "question": "settings", "text": "change the shortcut that you up", "label": "juno_triggers", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-014", "synthetic": true, "question": "settings", "text": "set the dictation hotkey to something else", "label": "juno_triggers", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-015", "synthetic": true, "question": "settings", "text": "switch your provider to anthropic", "label": "juno_ai_provider", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-016", "synthetic": true, "question": "settings", "text": "open the the AI provider settings", "label": "juno_ai_provider", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-017", "synthetic": true, "question": "settings", "text": "let me put in my open router key", "label": "juno_ai_provider", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-018", "synthetic": true, "question": "settings", "text": "change which company's model you use", "label": "juno_ai_provider", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-019", "synthetic": true, "question": "settings", "text": "where do I paste my API key for you", "label": "juno_ai_provider", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-020", "synthetic": true, "question": "settings", "text": "pick a different model for you", "label": "juno_models", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-021", "synthetic": true, "question": "settings", "text": "change the default model to the one", "label": "juno_models", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-022", "synthetic": true, "question": "settings", "text": "open the models page", "label": "juno_models", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-023", "synthetic": true, "question": "settings", "text": "let me download a different speech model", "label": "juno_models", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-024", "synthetic": true, "question": "settings", "text": "which transcription model i want to change it", "label": "juno_models", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-025", "synthetic": true, "question": "settings", "text": "open the tools settings", "label": "juno_tools", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-026", "synthetic": true, "question": "settings", "text": "turn off the browser tool for you", "label": "juno_tools", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-027", "synthetic": true, "question": "settings", "text": "show me which tools you can use in settings", "label": "juno_tools", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-028", "synthetic": true, "question": "settings", "text": "disable file tools in your settings", "label": "juno_tools", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-029", "synthetic": true, "question": "settings", "text": "enable the shell tool in Juno settings", "label": "juno_tools", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-030", "synthetic": true, "question": "settings", "text": "open automations", "label": "juno_automations", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-031", "synthetic": true, "question": "settings", "text": "show me my scheduled tasks setting", "label": "juno_automations", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-032", "synthetic": true, "question": "settings", "text": "edit the morning routine automation", "label": "juno_automations", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-033", "synthetic": true, "question": "settings", "text": "take me to where the automations live", "label": "juno_automations", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-034", "synthetic": true, "question": "settings", "text": "manage my recurring in Juno", "label": "juno_automations", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-035", "synthetic": true, "question": "settings", "text": "change how Juno notifies me", "label": "juno_notifications", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-036", "synthetic": true, "question": "settings", "text": "turn off your notification sounds in your settings", "label": "juno_notifications", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-037", "synthetic": true, "question": "settings", "text": "open Juno notification settings", "label": "juno_notifications", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-038", "synthetic": true, "question": "settings", "text": "stop juno from popping up alerts in settings", "label": "juno_notifications", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-039", "synthetic": true, "question": "settings", "text": "set Juno's Juno's alerts to quiet", "label": "juno_notifications", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-040", "synthetic": true, "question": "settings", "text": "what permissions does Juno have, open that", "label": "juno_permissions", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-041", "synthetic": true, "question": "settings", "text": "open Juno's permission settings settings", "label": "juno_permissions", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-042", "synthetic": true, "question": "settings", "text": "where's the toggle to let you control my screen", "label": "juno_permissions", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-043", "synthetic": true, "question": "settings", "text": "revoke Juno's file in settings", "label": "juno_permissions", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-044", "synthetic": true, "question": "settings", "text": "so change what Juno is allowed to do without asking", "label": "juno_permissions", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-045", "synthetic": true, "question": "settings", "text": "open advanced settings", "label": "juno_advanced", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-046", "synthetic": true, "question": "settings", "text": "show me the developer options for Juno", "label": "juno_advanced", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-047", "synthetic": true, "question": "settings", "text": "reset junos settings on the advanced page", "label": "juno_advanced", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-048", "synthetic": true, "question": "settings", "text": "turn on debug logging in your settings", "label": "juno_advanced", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-049", "synthetic": true, "question": "settings", "text": "take me to Juno's advanced tab", "label": "juno_advanced", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-050", "synthetic": true, "question": "settings", "text": "open wifi settings", "label": "mac_wifi", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-051", "synthetic": true, "question": "settings", "text": "I want to join a different why fi network", "label": "mac_wifi", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-052", "synthetic": true, "question": "settings", "text": "take me to the settings", "label": "mac_wifi", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-053", "synthetic": true, "question": "settings", "text": "connect to another another wireless network", "label": "mac_wifi", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-054", "synthetic": true, "question": "settings", "text": "open system settings settings to wi-fi", "label": "mac_wifi", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-055", "synthetic": true, "question": "settings", "text": "open bluetooth settings", "label": "mac_bluetooth", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-056", "synthetic": true, "question": "settings", "text": "pair my new headphones", "label": "mac_bluetooth", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-057", "synthetic": true, "question": "settings", "text": "um i need to connect my AirPods, open bluetooth", "label": "mac_bluetooth", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-058", "synthetic": true, "question": "settings", "text": "show me the bluetooth devices", "label": "mac_bluetooth", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-059", "synthetic": true, "question": "settings", "text": "forget that bluetooth speaker in settings", "label": "mac_bluetooth", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-060", "synthetic": true, "question": "settings", "text": "open sound settings", "label": "mac_sound", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-061", "synthetic": true, "question": "settings", "text": "change my output device in in system settings", "label": "mac_sound", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-062", "synthetic": true, "question": "settings", "text": "pick a different microphone input in the sound setting", "label": "mac_sound", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-063", "synthetic": true, "question": "settings", "text": "take me to the sound preferences", "label": "mac_sound", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-064", "synthetic": true, "question": "settings", "text": "change the alert sound for the Mac", "label": "mac_sound", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-065", "synthetic": true, "question": "settings", "text": "open display display settings", "label": "mac_displays", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-066", "synthetic": true, "question": "settings", "text": "change my screen resolution", "label": "mac_displays", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-067", "synthetic": true, "question": "settings", "text": "set up my external monitor arrangement", "label": "mac_displays", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-068", "synthetic": true, "question": "settings", "text": "turn on night shift in the display setting", "label": "mac_displays", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-069", "synthetic": true, "question": "settings", "text": "make the text on my display bigger in display preferences", "label": "mac_displays", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-070", "synthetic": true, "question": "settings", "text": "open keyboard settings settings", "label": "mac_keyboard", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-071", "synthetic": true, "question": "settings", "text": "uh change the keyboard shortcuts for my Mac", "label": "mac_keyboard", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-072", "synthetic": true, "question": "settings", "text": "make key repeat in settings", "label": "mac_keyboard", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-073", "synthetic": true, "question": "settings", "text": "add a new keyboard language layout", "label": "mac_keyboard", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-074", "synthetic": true, "question": "settings", "text": "turn off autocorrect in the keyboard setting", "label": "mac_keyboard", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-075", "synthetic": true, "question": "settings", "text": "open mac notification settings", "label": "mac_notifications", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-076", "synthetic": true, "question": "settings", "text": "stop Slack notifications in system settings", "label": "mac_notifications", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-077", "synthetic": true, "question": "settings", "text": "change the notification style for Messages", "label": "mac_notifications", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-078", "synthetic": true, "question": "settings", "text": "turn off notifications for Mail in settings", "label": "mac_notifications", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-079", "synthetic": true, "question": "settings", "text": "show me the system notification center settings", "label": "mac_notifications", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-080", "synthetic": true, "question": "settings", "text": "open privacy and security", "label": "mac_privacy_security", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-081", "synthetic": true, "question": "settings", "text": "which apps have camera access, in system settings", "label": "mac_privacy_security", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-082", "synthetic": true, "question": "settings", "text": "allow Juno screen recording in privacy settings", "label": "mac_privacy_security", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-083", "synthetic": true, "question": "settings", "text": "turn on on FileVault", "label": "mac_privacy_security", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-084", "synthetic": true, "question": "settings", "text": "open the full disk access page", "label": "mac_privacy_security", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-085", "synthetic": true, "question": "settings", "text": "open battery settings", "label": "mac_battery", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-086", "synthetic": true, "question": "settings", "text": "turn on low power mode in setting", "label": "mac_battery", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-087", "synthetic": true, "question": "settings", "text": "show battery health in system settings", "label": "mac_battery", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-088", "synthetic": true, "question": "settings", "text": "change my Mac sleeps on battery", "label": "mac_battery", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-089", "synthetic": true, "question": "settings", "text": "open energy settings", "label": "mac_battery", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-090", "synthetic": true, "question": "settings", "text": "switch to dark mode in system settings", "label": "mac_appearance", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-091", "synthetic": true, "question": "settings", "text": "open appearance settings", "label": "mac_appearance", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-092", "synthetic": true, "question": "settings", "text": "change my accent color on the Mac", "label": "mac_appearance", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-093", "synthetic": true, "question": "settings", "text": "change the highlight color in setting", "label": "mac_appearance", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-094", "synthetic": true, "question": "settings", "text": "make scroll bars always show in appearance", "label": "mac_appearance", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-095", "synthetic": true, "question": "settings", "text": "okay so check for macOS updates", "label": "mac_software_update", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-096", "synthetic": true, "question": "settings", "text": "open software update", "label": "mac_software_update", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-097", "synthetic": true, "question": "settings", "text": "install the latest macOS update from settings", "label": "mac_software_update", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-098", "synthetic": true, "question": "settings", "text": "turn on automatic updates updates in system settings", "label": "mac_software_update", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-099", "synthetic": true, "question": "settings", "text": "is there a new version of macOS, open updates", "label": "mac_software_update", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-100", "synthetic": true, "question": "settings", "text": "open accessibility setting", "label": "mac_accessibility", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-101", "synthetic": true, "question": "settings", "text": "okay so turn on voiceover", "label": "mac_accessibility", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-102", "synthetic": true, "question": "settings", "text": "make the cursor bigger in accessibility settings", "label": "mac_accessibility", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-103", "synthetic": true, "question": "settings", "text": "turn on reduce motion", "label": "mac_accessibility", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-104", "synthetic": true, "question": "settings", "text": "enable live captions from settings", "label": "mac_accessibility", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-105", "synthetic": true, "question": "settings", "text": "open desktop dock settings", "label": "mac_desktop_dock", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-106", "synthetic": true, "question": "settings", "text": "make dock smaller in settings", "label": "mac_desktop_dock", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-107", "synthetic": true, "question": "settings", "text": "hide the dock automatically in settings", "label": "mac_desktop_dock", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-108", "synthetic": true, "question": "settings", "text": "change hot corners in system setting", "label": "mac_desktop_dock", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-109", "synthetic": true, "question": "settings", "text": "move the dock to the left side", "label": "mac_desktop_dock", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-110", "synthetic": true, "question": "settings", "text": "open focus settings", "label": "mac_focus", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-111", "synthetic": true, "question": "settings", "text": "um set up a work focus mode", "label": "mac_focus", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-112", "synthetic": true, "question": "settings", "text": "edit my do not disturb schedule", "label": "mac_focus", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-113", "synthetic": true, "question": "settings", "text": "change what's allowed through in focus", "label": "mac_focus", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-114", "synthetic": true, "question": "settings", "text": "open focus filters", "label": "mac_focus", "near_miss": false, "addressed": "for_juno", "component": "none"}
+{"id": "syn-settings-115", "synthetic": true, "question": "settings", "text": "how do i change my voice?", "label": "none", "near_miss": true}
+{"id": "syn-settings-116", "synthetic": true, "question": "settings", "text": "what's my wifi called", "label": "none", "near_miss": true, "component": "system_status"}
+{"id": "syn-settings-117", "synthetic": true, "question": "settings", "text": "the sound in this video is bad", "label": "none", "near_miss": true}
+{"id": "syn-settings-118", "synthetic": true, "question": "settings", "text": "my wifi is really slow today", "label": "none", "near_miss": true}
+{"id": "syn-settings-119", "synthetic": true, "question": "settings", "text": "what's the range on those blue tooth headphones", "label": "none", "near_miss": true}
+{"id": "syn-settings-120", "synthetic": true, "question": "settings", "text": "tell me about the history of the keyboard", "label": "none", "near_miss": true}
+{"id": "syn-settings-121", "synthetic": true, "question": "settings", "text": "the display on that TV looks great", "label": "none", "near_miss": true}
+{"id": "syn-settings-122", "synthetic": true, "question": "settings", "text": "what battery percentage do have", "label": "none", "near_miss": true, "component": "system_status"}
+{"id": "syn-settings-123", "synthetic": true, "question": "settings", "text": "is dark mode actually better for your eyes", "label": "none", "near_miss": true}
+{"id": "syn-settings-124", "synthetic": true, "question": "settings", "text": "the notifications from my phone are so annoying", "label": "none", "near_miss": true}
+{"id": "syn-settings-125", "synthetic": true, "question": "settings", "text": "I can't focus today", "label": "none", "near_miss": true}
+{"id": "syn-settings-126", "synthetic": true, "question": "settings", "text": "what's a good software update strategy for a company", "label": "none", "near_miss": true}
+{"id": "syn-settings-127", "synthetic": true, "question": "settings", "text": "the dock at harbor closes at six", "label": "none", "near_miss": true}
+{"id": "syn-settings-128", "synthetic": true, "question": "settings", "text": "turn the volume down", "label": "none", "near_miss": true}
+{"id": "syn-settings-129", "synthetic": true, "question": "settings", "text": "mute", "label": "none", "near_miss": true}
+{"id": "syn-settings-130", "synthetic": true, "question": "settings", "text": "play something on my bluetooth speaker", "label": "none", "near_miss": true}
+{"id": "syn-settings-131", "synthetic": true, "question": "settings", "text": "what's the weather", "label": "none", "near_miss": true, "component": "weather"}
+{"id": "syn-settings-132", "synthetic": true, "question": "settings", "text": "set a time her for ten minutes", "label": "none", "near_miss": true, "component": "timer"}
+{"id": "syn-settings-133", "synthetic": true, "question": "settings", "text": "how do do you spell accessibility", "label": "none", "near_miss": true}
+{"id": "syn-settings-134", "synthetic": true, "question": "settings", "text": "write an email about our our privacy policy", "label": "none", "near_miss": true}
+{"id": "syn-settings-135", "synthetic": true, "question": "settings", "text": "explain what end to end encryption means", "label": "none", "near_miss": true}
+{"id": "syn-settings-136", "synthetic": true, "question": "settings", "text": "the voice in this podcast is great", "label": "none", "near_miss": true}
+{"id": "syn-settings-137", "synthetic": true, "question": "settings", "text": "my keyboard is sticky, how do i clean it", "label": "none", "near_miss": true}
+{"id": "syn-settings-138", "synthetic": true, "question": "settings", "text": "who invented why fi", "label": "none", "near_miss": true}
+{"id": "syn-settings-139", "synthetic": true, "question": "settings", "text": "what model of mac do i have", "label": "none", "near_miss": true, "component": "system_status"}
+{"id": "syn-settings-140", "synthetic": true, "question": "settings", "text": "what's the best AI provider for coding coding", "label": "none", "near_miss": true}
+{"id": "syn-settings-141", "synthetic": true, "question": "settings", "text": "why is my battery draining so fast", "label": "none", "near_miss": true}
+{"id": "syn-settings-142", "synthetic": true, "question": "settings", "text": "i like your voice", "label": "none", "near_miss": true}
+{"id": "syn-settings-143", "synthetic": true, "question": "settings", "text": "what is automation testing", "label": "none", "near_miss": true}
+{"id": "syn-settings-144", "synthetic": true, "question": "settings", "text": "the permissions on this file are wrong, fix them", "label": "none", "near_miss": true}
+{"id": "syn-settings-145", "synthetic": true, "question": "settings", "text": "the advanced calculus homework is hard", "label": "none", "near_miss": true}
+{"id": "syn-settings-146", "synthetic": true, "question": "settings", "text": "general question, question, what year was the moon landing", "label": "none", "near_miss": true}
+{"id": "syn-settings-147", "synthetic": true, "question": "settings", "text": "how do models get trained", "label": "none", "near_miss": true}
+{"id": "syn-settings-148", "synthetic": true, "question": "settings", "text": "play the next track", "label": "none", "near_miss": true}
+{"id": "syn-settings-149", "synthetic": true, "question": "settings", "text": "what does a wake do", "label": "none", "near_miss": true}
+{"id": "syn-settings-150", "synthetic": true, "question": "settings", "text": "how do I change the notification settings on my phone", "label": "none", "near_miss": true}
+{"id": "syn-settings-151", "synthetic": true, "question": "settings", "text": "is my bluetooth on", "label": "none", "near_miss": true, "component": "system_status"}
+{"id": "syn-settings-152", "synthetic": true, "question": "settings", "text": "tell me about the new software update rumors", "label": "none", "near_miss": true}
+{"id": "syn-settings-153", "synthetic": true, "question": "settings", "text": "which shortcut do people use for screenshots", "label": "none", "near_miss": true}
+{"id": "syn-settings-154", "synthetic": true, "question": "settings", "text": "how do tools work in an agent", "label": "none", "near_miss": true}
+{"id": "syn-component-000", "synthetic": true, "question": "component", "text": "what is this", "label": "now_playing", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-001", "synthetic": true, "question": "component", "text": "whats playing right now", "label": "now_playing", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-002", "synthetic": true, "question": "component", "text": "who sings this", "label": "now_playing", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-003", "synthetic": true, "question": "component", "text": "what's this song called", "label": "now_playing", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-004", "synthetic": true, "question": "component", "text": "name that tune", "label": "now_playing", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-005", "synthetic": true, "question": "component", "text": "which album is this from", "label": "now_playing", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-006", "synthetic": true, "question": "component", "text": "what am I listening to", "label": "now_playing", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-007", "synthetic": true, "question": "component", "text": "set a timer for ten minutes", "label": "timer", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-008", "synthetic": true, "question": "component", "text": "how much time is left on my timer", "label": "timer", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-009", "synthetic": true, "question": "component", "text": "um start a five minute countdown", "label": "timer", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-010", "synthetic": true, "question": "component", "text": "time her for the pasta, eight minutes", "label": "timer", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-011", "synthetic": true, "question": "component", "text": "cancel the timer", "label": "timer", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-012", "synthetic": true, "question": "component", "text": "egg timer minutes please", "label": "timer", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-013", "synthetic": true, "question": "component", "text": "set a twenty minute timer", "label": "timer", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-014", "synthetic": true, "question": "component", "text": "what's the whether", "label": "weather", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-015", "synthetic": true, "question": "component", "text": "is it going to rain tomorrow tomorrow", "label": "weather", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-016", "synthetic": true, "question": "component", "text": "how cold is it outside", "label": "weather", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-017", "synthetic": true, "question": "component", "text": "do I need an umbrella", "label": "weather", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-018", "synthetic": true, "question": "component", "text": "weather in Denver this weekend", "label": "weather", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-019", "synthetic": true, "question": "component", "text": "what's the forecast for Charlotte", "label": "weather", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-020", "synthetic": true, "question": "component", "text": "will it snow tonight", "label": "weather", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-021", "synthetic": true, "question": "component", "text": "what's on my calendar today", "label": "calendar_day", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-022", "synthetic": true, "question": "component", "text": "what do I have tomorrow", "label": "calendar_day", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-023", "synthetic": true, "question": "component", "text": "am I I free at three", "label": "calendar_day", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-024", "synthetic": true, "question": "component", "text": "show me my schedule for Friday", "label": "calendar_day", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-025", "synthetic": true, "question": "component", "text": "what meetings do I have this afternoon", "label": "calendar_day", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-026", "synthetic": true, "question": "component", "text": "when's my next meeting", "label": "calendar_day", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-027", "synthetic": true, "question": "component", "text": "do I have anything on Monday", "label": "calendar_day", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-028", "synthetic": true, "question": "component", "text": "remind me to call mom at five", "label": "reminders", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-029", "synthetic": true, "question": "component", "text": "what are my reminders", "label": "reminders", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-030", "synthetic": true, "question": "component", "text": "add buy milk to reminders", "label": "reminders", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-031", "synthetic": true, "question": "component", "text": "remind me tomorrow to send the invoice", "label": "reminders", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-032", "synthetic": true, "question": "component", "text": "show to do list", "label": "reminders", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-033", "synthetic": true, "question": "component", "text": "uh don't let me forget the dentist", "label": "reminders", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-034", "synthetic": true, "question": "component", "text": "remind me to take the trash out tonight", "label": "reminders", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-035", "synthetic": true, "question": "component", "text": "what's 15 percent of 240", "label": "calculation", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-036", "synthetic": true, "question": "component", "text": "twelve times thirty four", "label": "calculation", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-037", "synthetic": true, "question": "component", "text": "split 86 dollars four ways", "label": "calculation", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-038", "synthetic": true, "question": "component", "text": "what's the square root of 144", "label": "calculation", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-039", "synthetic": true, "question": "component", "text": "256 divided by 16", "label": "calculation", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-040", "synthetic": true, "question": "component", "text": "what's 18 plus 27 minus 9", "label": "calculation", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-041", "synthetic": true, "question": "component", "text": "tip on 64 dollars at 20 percent", "label": "calculation", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-042", "synthetic": true, "question": "component", "text": "open Safari", "label": "app_opened", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-043", "synthetic": true, "question": "component", "text": "launch Spotify", "label": "app_opened", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-044", "synthetic": true, "question": "component", "text": "open the calculator", "label": "app_opened", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-045", "synthetic": true, "question": "component", "text": "bring up Notes", "label": "app_opened", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-046", "synthetic": true, "question": "component", "text": "open Slack for me", "label": "app_opened", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-047", "synthetic": true, "question": "component", "text": "start Zoom", "label": "app_opened", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-048", "synthetic": true, "question": "component", "text": "pull up Finder", "label": "app_opened", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-049", "synthetic": true, "question": "component", "text": "open Photos", "label": "app_opened", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-050", "synthetic": true, "question": "component", "text": "who won the game last night", "label": "web_answer", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-051", "synthetic": true, "question": "component", "text": "what's the price of Apple", "label": "web_answer", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-052", "synthetic": true, "question": "component", "text": "when is the next full moon", "label": "web_answer", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-053", "synthetic": true, "question": "component", "text": "how tall is mount everest", "label": "web_answer", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-054", "synthetic": true, "question": "component", "text": "uh what's the score of the Panthers game", "label": "web_answer", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-055", "synthetic": true, "question": "component", "text": "who is the CEO of Nvidia", "label": "web_answer", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-056", "synthetic": true, "question": "component", "text": "what time does Target close", "label": "web_answer", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-057", "synthetic": true, "question": "component", "text": "uh how do I get to the airport", "label": "directions", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-058", "synthetic": true, "question": "component", "text": "directions to Whole Foods", "label": "directions", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-059", "synthetic": true, "question": "component", "text": "navigate home", "label": "directions", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-060", "synthetic": true, "question": "component", "text": "how far is it to Raleigh", "label": "directions", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-061", "synthetic": true, "question": "component", "text": "um take me to the nearest gas station", "label": "directions", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-062", "synthetic": true, "question": "component", "text": "how long to drive to Atlanta", "label": "directions", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-063", "synthetic": true, "question": "component", "text": "whats the best route to work", "label": "directions", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-064", "synthetic": true, "question": "component", "text": "how much much battery do I have left", "label": "system_status", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-065", "synthetic": true, "question": "component", "text": "what's my wifi connection", "label": "system_status", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-066", "synthetic": true, "question": "component", "text": "how much storage is left", "label": "system_status", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-067", "synthetic": true, "question": "component", "text": "is my bluetooth on on", "label": "system_status", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-068", "synthetic": true, "question": "component", "text": "how much memory is being used", "label": "system_status", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-069", "synthetic": true, "question": "component", "text": "whats my ip address", "label": "system_status", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-070", "synthetic": true, "question": "component", "text": "how is my CPU doing", "label": "system_status", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-071", "synthetic": true, "question": "component", "text": "what Mac this", "label": "system_status", "near_miss": false, "addressed": "for_juno", "settings": "none"}
+{"id": "syn-component-072", "synthetic": true, "question": "component", "text": "tell me a joke", "label": "none", "near_miss": true}
+{"id": "syn-component-073", "synthetic": true, "question": "component", "text": "so what is a timer in programming", "label": "none", "near_miss": true}
+{"id": "syn-component-074", "synthetic": true, "question": "component", "text": "the weather in this movie is gloomy", "label": "none", "near_miss": true}
+{"id": "syn-component-075", "synthetic": true, "question": "component", "text": "I love this song", "label": "none", "near_miss": true}
+{"id": "syn-component-076", "synthetic": true, "question": "component", "text": "explain how a calendar works", "label": "none", "near_miss": true}
+{"id": "syn-component-077", "synthetic": true, "question": "component", "text": "i need to remind myself to breathe", "label": "none", "near_miss": true}
+{"id": "syn-component-078", "synthetic": true, "question": "component", "text": "uh calculus is hard", "label": "none", "near_miss": true}
+{"id": "syn-component-079", "synthetic": true, "question": "component", "text": "open my mind to new ideas", "label": "none", "near_miss": true}
+{"id": "syn-component-080", "synthetic": true, "question": "component", "text": "write an essay about giving directions", "label": "none", "near_miss": true}
+{"id": "syn-component-081", "synthetic": true, "question": "component", "text": "my system of filing is a mess mess", "label": "none", "near_miss": true}
+{"id": "syn-component-082", "synthetic": true, "question": "component", "text": "who sings better, Adele or Beyonce", "label": "none", "near_miss": true}
+{"id": "syn-component-083", "synthetic": true, "question": "component", "text": "tell me the history of the weather channel", "label": "none", "near_miss": true}
+{"id": "syn-component-084", "synthetic": true, "question": "component", "text": "this music is too loud", "label": "none", "near_miss": true}
+{"id": "syn-component-085", "synthetic": true, "question": "component", "text": "I'll be back in a few minutes", "label": "none", "near_miss": true}
+{"id": "syn-component-086", "synthetic": true, "question": "component", "text": "what does the word app mean", "label": "none", "near_miss": true}
+{"id": "syn-component-087", "synthetic": true, "question": "component", "text": "the web is such a time sink", "label": "none", "near_miss": true}
+{"id": "syn-component-088", "synthetic": true, "question": "component", "text": "uh how are you doing today", "label": "none", "near_miss": true}
+{"id": "syn-component-089", "synthetic": true, "question": "component", "text": "I got lost on the way here yesterday", "label": "none", "near_miss": true}
+{"id": "syn-component-090", "synthetic": true, "question": "component", "text": "do you like math", "label": "none", "near_miss": true}
+{"id": "syn-component-091", "synthetic": true, "question": "component", "text": "whats the meaning of life", "label": "none", "near_miss": true}
+{"id": "syn-midrun-000", "synthetic": true, "question": "midrun", "text": "stop", "label": "stop", "running_task": "Writing an email to Sam about the invoice", "addressed": "for_juno"}
+{"id": "syn-midrun-001", "synthetic": true, "question": "midrun", "text": "cancel that", "label": "stop", "running_task": "Writing an email to Sam about the invoice", "addressed": "for_juno"}
+{"id": "syn-midrun-002", "synthetic": true, "question": "midrun", "text": "never mind", "label": "stop", "running_task": "Organizing the Downloads folder", "addressed": "for_juno"}
+{"id": "syn-midrun-003", "synthetic": true, "question": "midrun", "text": "actually forget it", "label": "stop", "running_task": "Writing an email to Sam about the invoice", "addressed": "for_juno"}
+{"id": "syn-midrun-004", "synthetic": true, "question": "midrun", "text": "hold on, stop", "label": "stop", "running_task": "Playing chess in the Chess app", "addressed": "for_juno"}
+{"id": "syn-midrun-005", "synthetic": true, "question": "midrun", "text": "wait don't do that", "label": "stop", "running_task": "Filling out the expense form in Chrome", "addressed": "for_juno"}
+{"id": "syn-midrun-006", "synthetic": true, "question": "midrun", "text": "abort", "label": "stop", "running_task": "Summarizing the PDF on screen", "addressed": "for_juno"}
+{"id": "syn-midrun-007", "synthetic": true, "question": "midrun", "text": "kill it", "label": "stop", "running_task": "Researching flights to Denver", "addressed": "for_juno"}
+{"id": "syn-midrun-008", "synthetic": true, "question": "midrun", "text": "that's enough", "label": "stop", "running_task": "Organizing the Downloads folder", "addressed": "for_juno"}
+{"id": "syn-midrun-009", "synthetic": true, "question": "midrun", "text": "stop doing that", "label": "stop", "running_task": "Booking a table for four on Friday", "addressed": "for_juno"}
+{"id": "syn-midrun-010", "synthetic": true, "question": "midrun", "text": "no no no stop", "label": "stop", "running_task": "Organizing the Downloads folder", "addressed": "for_juno"}
+{"id": "syn-midrun-011", "synthetic": true, "question": "midrun", "text": "cancel the task", "label": "stop", "running_task": "Summarizing the PDF on screen", "addressed": "for_juno"}
+{"id": "syn-midrun-012", "synthetic": true, "question": "midrun", "text": "scratch that", "label": "stop", "running_task": "Organizing the Downloads folder", "addressed": "for_juno"}
+{"id": "syn-midrun-013", "synthetic": true, "question": "midrun", "text": "okay thats fine stop", "label": "stop", "running_task": "Booking a table for four on Friday", "addressed": "for_juno"}
+{"id": "syn-midrun-014", "synthetic": true, "question": "midrun", "text": "pause, leave it", "label": "stop", "running_task": "Researching flights to Denver", "addressed": "for_juno"}
+{"id": "syn-midrun-015", "synthetic": true, "question": "midrun", "text": "undo that and stop", "label": "stop", "running_task": "Researching flights to Denver", "addressed": "for_juno"}
+{"id": "syn-midrun-016", "synthetic": true, "question": "midrun", "text": "stop it Juno", "label": "stop", "running_task": "Searching for hotels in Austin", "addressed": "for_juno"}
+{"id": "syn-midrun-017", "synthetic": true, "question": "midrun", "text": "enough", "label": "stop", "running_task": "Organizing the Downloads folder", "addressed": "for_juno"}
+{"id": "syn-midrun-018", "synthetic": true, "question": "midrun", "text": "halt", "label": "stop", "running_task": "Organizing the Downloads folder", "addressed": "for_juno"}
+{"id": "syn-midrun-019", "synthetic": true, "question": "midrun", "text": "nope, cancel", "label": "stop", "running_task": "Writing an email to Sam about the invoice", "addressed": "for_juno"}
+{"id": "syn-midrun-020", "synthetic": true, "question": "midrun", "text": "forget the whole thing", "label": "stop", "running_task": "Filling out the expense form in Chrome", "addressed": "for_juno"}
+{"id": "syn-midrun-021", "synthetic": true, "question": "midrun", "text": "stop right there", "label": "stop", "running_task": "Searching for hotels in Austin", "addressed": "for_juno"}
+{"id": "syn-midrun-022", "synthetic": true, "question": "midrun", "text": "Juno stop", "label": "stop", "running_task": "Filling out the expense form in Chrome", "addressed": "for_juno"}
+{"id": "syn-midrun-023", "synthetic": true, "question": "midrun", "text": "cut it out", "label": "stop", "running_task": "Summarizing the PDF on screen", "addressed": "for_juno"}
+{"id": "syn-midrun-024", "synthetic": true, "question": "midrun", "text": "hang on cancel", "label": "stop", "running_task": "Organizing the Downloads folder", "addressed": "for_juno"}
+{"id": "syn-midrun-025", "synthetic": true, "question": "midrun", "text": "make it a window seat", "label": "add_to_task", "running_task": "Researching flights to Denver", "addressed": "for_juno"}
+{"id": "syn-midrun-026", "synthetic": true, "question": "midrun", "text": "and keep it under four hundred dollars", "label": "add_to_task", "running_task": "Researching flights to Denver", "addressed": "for_juno"}
+{"id": "syn-midrun-027", "synthetic": true, "question": "midrun", "text": "uh only direct flights please", "label": "add_to_task", "running_task": "Researching flights to Denver", "addressed": "for_juno"}
+{"id": "syn-midrun-028", "synthetic": true, "question": "midrun", "text": "also mention the due date", "label": "add_to_task", "running_task": "Writing an email to Sam about the invoice", "addressed": "for_juno"}
+{"id": "syn-midrun-029", "synthetic": true, "question": "midrun", "text": "make it sound more friendly", "label": "add_to_task", "running_task": "Writing an email to Sam about the invoice", "addressed": "for_juno"}
+{"id": "syn-midrun-030", "synthetic": true, "question": "midrun", "text": "cc Maria on it", "label": "add_to_task", "running_task": "Writing an email to Sam about the invoice", "addressed": "for_juno"}
+{"id": "syn-midrun-031", "synthetic": true, "question": "midrun", "text": "make it seven thirty", "label": "add_to_task", "running_task": "Booking a table for four on Friday", "addressed": "for_juno"}
+{"id": "syn-midrun-032", "synthetic": true, "question": "midrun", "text": "outside seating if possible", "label": "add_to_task", "running_task": "Booking a table for four on Friday", "addressed": "for_juno"}
+{"id": "syn-midrun-033", "synthetic": true, "question": "midrun", "text": "skip the screenshots folder", "label": "add_to_task", "running_task": "Organizing the Downloads folder", "addressed": "for_juno"}
+{"id": "syn-midrun-034", "synthetic": true, "question": "midrun", "text": "also sort them by date", "label": "add_to_task", "running_task": "Organizing the Downloads folder", "addressed": "for_juno"}
+{"id": "syn-midrun-035", "synthetic": true, "question": "midrun", "text": "keep it to three bullets", "label": "add_to_task", "running_task": "Summarizing the PDF on screen", "addressed": "for_juno"}
+{"id": "syn-midrun-036", "synthetic": true, "question": "midrun", "text": "focus on the pricing section", "label": "add_to_task", "running_task": "Summarizing the PDF on screen", "addressed": "for_juno"}
+{"id": "syn-midrun-037", "synthetic": true, "question": "midrun", "text": "play more aggressively", "label": "add_to_task", "running_task": "Playing chess in the Chess app", "addressed": "for_juno"}
+{"id": "syn-midrun-038", "synthetic": true, "question": "midrun", "text": "use the white pieces", "label": "add_to_task", "running_task": "Playing chess in the Chess app", "addressed": "for_juno"}
+{"id": "syn-midrun-039", "synthetic": true, "question": "midrun", "text": "use use the corporate card", "label": "add_to_task", "running_task": "Filling out the expense form in Chrome", "addressed": "for_juno"}
+{"id": "syn-midrun-040", "synthetic": true, "question": "midrun", "text": "so the date is October third", "label": "add_to_task", "running_task": "Filling out the expense form in Chrome", "addressed": "for_juno"}
+{"id": "syn-midrun-041", "synthetic": true, "question": "midrun", "text": "add priya as an attendee", "label": "add_to_task", "running_task": "Creating a calendar event for the team lunch", "addressed": "for_juno"}
+{"id": "syn-midrun-042", "synthetic": true, "question": "midrun", "text": "make it an hour long", "label": "add_to_task", "running_task": "Creating a calendar event for the team lunch", "addressed": "for_juno"}
+{"id": "syn-midrun-043", "synthetic": true, "question": "midrun", "text": "um near downtown", "label": "add_to_task", "running_task": "Searching for hotels in Austin", "addressed": "for_juno"}
+{"id": "syn-midrun-044", "synthetic": true, "question": "midrun", "text": "with with free parking", "label": "add_to_task", "running_task": "Searching for hotels in Austin", "addressed": "for_juno"}
+{"id": "syn-midrun-045", "synthetic": true, "question": "midrun", "text": "start with the vacation ones", "label": "add_to_task", "running_task": "Renaming photos on the desktop", "addressed": "for_juno"}
+{"id": "syn-midrun-046", "synthetic": true, "question": "midrun", "text": "use the date as the name", "label": "add_to_task", "running_task": "Renaming photos on the desktop", "addressed": "for_juno"}
+{"id": "syn-midrun-047", "synthetic": true, "question": "midrun", "text": "actually it five people", "label": "add_to_task", "running_task": "Booking a table for four on Friday", "addressed": "for_juno"}
+{"id": "syn-midrun-048", "synthetic": true, "question": "midrun", "text": "say ill send the file tomorrow", "label": "add_to_task", "running_task": "Writing an email to Sam about the invoice", "addressed": "for_juno"}
+{"id": "syn-midrun-049", "synthetic": true, "question": "midrun", "text": "and list the action items items", "label": "add_to_task", "running_task": "Summarizing the PDF on screen", "addressed": "for_juno"}
+{"id": "syn-midrun-050", "synthetic": true, "question": "midrun", "text": "okay so what's the weather in Denver", "label": "new_request", "running_task": "Researching flights to Denver", "addressed": "for_juno"}
+{"id": "syn-midrun-051", "synthetic": true, "question": "midrun", "text": "set a for ten minutes", "label": "new_request", "running_task": "Organizing the Downloads folder", "addressed": "for_juno"}
+{"id": "syn-midrun-052", "synthetic": true, "question": "midrun", "text": "hey what song is this", "label": "new_request", "running_task": "Renaming photos on the desktop", "addressed": "for_juno"}
+{"id": "syn-midrun-053", "synthetic": true, "question": "midrun", "text": "open Spotify", "label": "new_request", "running_task": "Booking a table for four on Friday", "addressed": "for_juno"}
+{"id": "syn-midrun-054", "synthetic": true, "question": "midrun", "text": "whats on my calendar tomorrow", "label": "new_request", "running_task": "Booking a table for four on Friday", "addressed": "for_juno"}
+{"id": "syn-midrun-055", "synthetic": true, "question": "midrun", "text": "how much battery do I have", "label": "new_request", "running_task": "Searching for hotels in Austin", "addressed": "for_juno"}
+{"id": "syn-midrun-056", "synthetic": true, "question": "midrun", "text": "tell a joke", "label": "new_request", "running_task": "Searching for hotels in Austin", "addressed": "for_juno"}
+{"id": "syn-midrun-057", "synthetic": true, "question": "midrun", "text": "who won the game last night", "label": "new_request", "running_task": "Renaming photos on the desktop", "addressed": "for_juno"}
+{"id": "syn-midrun-058", "synthetic": true, "question": "midrun", "text": "remind me to call mom", "label": "new_request", "running_task": "Organizing the Downloads folder", "addressed": "for_juno"}
+{"id": "syn-midrun-059", "synthetic": true, "question": "midrun", "text": "what's 15 percent of 80", "label": "new_request", "running_task": "Booking a table for four on Friday", "addressed": "for_juno"}
+{"id": "syn-midrun-060", "synthetic": true, "question": "midrun", "text": "turn turn the volume down", "label": "new_request", "running_task": "Writing an email to Sam about the invoice", "addressed": "for_juno"}
+{"id": "syn-midrun-061", "synthetic": true, "question": "midrun", "text": "open bluetooth settings", "label": "new_request", "running_task": "Researching flights to Denver", "addressed": "for_juno"}
+{"id": "syn-midrun-062", "synthetic": true, "question": "midrun", "text": "directions to the airport", "label": "new_request", "running_task": "Organizing the Downloads folder", "addressed": "for_juno"}
+{"id": "syn-midrun-063", "synthetic": true, "question": "midrun", "text": "what time is it in Tokyo", "label": "new_request", "running_task": "Researching flights to Denver", "addressed": "for_juno"}
+{"id": "syn-midrun-064", "synthetic": true, "question": "midrun", "text": "send a message to Sam", "label": "new_request", "running_task": "Writing an email to Sam about the invoice", "addressed": "for_juno"}
+{"id": "syn-midrun-065", "synthetic": true, "question": "midrun", "text": "play some jazz", "label": "new_request", "running_task": "Searching for hotels in Austin", "addressed": "for_juno"}
+{"id": "syn-midrun-066", "synthetic": true, "question": "midrun", "text": "what's the capital of Peru", "label": "new_request", "running_task": "Writing an email to Sam about the invoice", "addressed": "for_juno"}
+{"id": "syn-midrun-067", "synthetic": true, "question": "midrun", "text": "write me a haiku", "label": "new_request", "running_task": "Writing an email to Sam about the invoice", "addressed": "for_juno"}
+{"id": "syn-midrun-068", "synthetic": true, "question": "midrun", "text": "take a screenshot", "label": "new_request", "running_task": "Creating a calendar event for the team lunch", "addressed": "for_juno"}
+{"id": "syn-midrun-069", "synthetic": true, "question": "midrun", "text": "can you also check the news", "label": "new_request", "running_task": "Summarizing the PDF on screen", "addressed": "for_juno"}
+{"id": "syn-midrun-070", "synthetic": true, "question": "midrun", "text": "open the calculator", "label": "new_request", "running_task": "Organizing the Downloads folder", "addressed": "for_juno"}
+{"id": "syn-midrun-071", "synthetic": true, "question": "midrun", "text": "how do I get home", "label": "new_request", "running_task": "Creating a calendar event for the team lunch", "addressed": "for_juno"}
+{"id": "syn-midrun-072", "synthetic": true, "question": "midrun", "text": "what's the forecast this weekend", "label": "new_request", "running_task": "Filling out the expense form in Chrome", "addressed": "for_juno"}
+{"id": "syn-midrun-073", "synthetic": true, "question": "midrun", "text": "mute the mic", "label": "new_request", "running_task": "Summarizing the PDF on screen", "addressed": "for_juno"}
+{"id": "syn-midrun-074", "synthetic": true, "question": "midrun", "text": "start a focus session", "label": "new_request", "running_task": "Renaming photos on the desktop", "addressed": "for_juno"}
+{"id": "syn-midrun-075", "synthetic": true, "question": "midrun", "text": "hey honey did you take the dog out", "label": "not_for_juno", "running_task": "Organizing the Downloads folder", "addressed": "not_for_juno"}
+{"id": "syn-midrun-076", "synthetic": true, "question": "midrun", "text": "yeah i'll be there in five", "label": "not_for_juno", "running_task": "Playing chess in the Chess app", "addressed": "not_for_juno"}
+{"id": "syn-midrun-077", "synthetic": true, "question": "midrun", "text": "no I told him we'd call back", "label": "not_for_juno", "running_task": "Summarizing the PDF on screen", "addressed": "not_for_juno"}
+{"id": "syn-midrun-078", "synthetic": true, "question": "midrun", "text": "can you pass me the charger", "label": "not_for_juno", "running_task": "Booking a table for four on Friday", "addressed": "not_for_juno"}
+{"id": "syn-midrun-079", "synthetic": true, "question": "midrun", "text": "uh huh yeah", "label": "not_for_juno", "running_task": "Creating a calendar event for the team lunch", "addressed": "not_for_juno"}
+{"id": "syn-midrun-080", "synthetic": true, "question": "midrun", "text": "what do you want for dinner", "label": "not_for_juno", "running_task": "Writing an email to Sam about the invoice", "addressed": "not_for_juno"}
+{"id": "syn-midrun-081", "synthetic": true, "question": "midrun", "text": "turn the down", "label": "not_for_juno", "running_task": "Creating a calendar event for the team lunch", "addressed": "not_for_juno"}
+{"id": "syn-midrun-082", "synthetic": true, "question": "midrun", "text": "sorry I was talking to my wife", "label": "not_for_juno", "running_task": "Creating a calendar event for the team lunch", "addressed": "not_for_juno"}
+{"id": "syn-midrun-083", "synthetic": true, "question": "midrun", "text": "mm hm", "label": "not_for_juno", "running_task": "Writing an email to Sam about the invoice", "addressed": "not_for_juno"}
+{"id": "syn-midrun-084", "synthetic": true, "question": "midrun", "text": "yeah okay sounds good", "label": "not_for_juno", "running_task": "Searching for hotels in Austin", "addressed": "not_for_juno"}
+{"id": "syn-midrun-085", "synthetic": true, "question": "midrun", "text": "I'll I'll call you later", "label": "not_for_juno", "running_task": "Creating a calendar event for the team lunch", "addressed": "not_for_juno"}
+{"id": "syn-midrun-086", "synthetic": true, "question": "midrun", "text": "did you see the game", "label": "not_for_juno", "running_task": "Searching for hotels in Austin", "addressed": "not_for_juno"}
+{"id": "syn-midrun-087", "synthetic": true, "question": "midrun", "text": "oh my god that's hilarious", "label": "not_for_juno", "running_task": "Creating a calendar event for the team lunch", "addressed": "not_for_juno"}
+{"id": "syn-midrun-088", "synthetic": true, "question": "midrun", "text": "babe where are my keys", "label": "not_for_juno", "running_task": "Filling out the expense form in Chrome", "addressed": "not_for_juno"}
+{"id": "syn-midrun-089", "synthetic": true, "question": "midrun", "text": "tell Mike to call me back", "label": "not_for_juno", "running_task": "Writing an email to Sam about the invoice", "addressed": "not_for_juno"}
+{"id": "syn-midrun-090", "synthetic": true, "question": "midrun", "text": "ha ha ha", "label": "not_for_juno", "running_task": "Booking a table for four on Friday", "addressed": "not_for_juno"}
+{"id": "syn-midrun-091", "synthetic": true, "question": "midrun", "text": "that's what she said", "label": "not_for_juno", "running_task": "Summarizing the PDF on screen", "addressed": "not_for_juno"}
+{"id": "syn-midrun-092", "synthetic": true, "question": "midrun", "text": "are you coming to lunch", "label": "not_for_juno", "running_task": "Booking a table for four on Friday", "addressed": "not_for_juno"}
+{"id": "syn-midrun-093", "synthetic": true, "question": "midrun", "text": "thanks buddy see you tomorrow", "label": "not_for_juno", "running_task": "Searching for hotels in Austin", "addressed": "not_for_juno"}
+{"id": "syn-midrun-094", "synthetic": true, "question": "midrun", "text": "no no not you you Juno", "label": "not_for_juno", "running_task": "Playing chess in the Chess app", "addressed": "not_for_juno"}
+{"id": "syn-midrun-095", "synthetic": true, "question": "midrun", "text": "I know right right", "label": "not_for_juno", "running_task": "Researching flights to Denver", "addressed": "not_for_juno"}
+{"id": "syn-midrun-096", "synthetic": true, "question": "midrun", "text": "let me think", "label": "not_for_juno", "running_task": "Creating a calendar event for the team lunch", "addressed": "not_for_juno"}
+{"id": "syn-midrun-097", "synthetic": true, "question": "midrun", "text": "sorry, coughing", "label": "not_for_juno", "running_task": "Booking a table for four on Friday", "addressed": "not_for_juno"}
+{"id": "syn-midrun-098", "synthetic": true, "question": "midrun", "text": "can you close the door", "label": "not_for_juno", "running_task": "Filling out the expense form in Chrome", "addressed": "not_for_juno"}
+{"id": "syn-midrun-099", "synthetic": true, "question": "midrun", "text": "hold on one second im talking to someone", "label": "not_for_juno", "running_task": "Playing chess in the Chess app", "addressed": "not_for_juno"}

@@ -518,6 +518,16 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
         let matched_phrase: String =
             serde_json::from_str(event.payload()).unwrap_or_default();
 
+        // A phrase heard in the moment before setup disarmed the engine still
+        // starts nothing: no trigger acts while onboarding is open.
+        if app_handle_for_wake_word
+            .state::<state::AppState>()
+            .is_onboarding_active()
+        {
+            info!("[AlwaysListening] Wake phrase ignored during onboarding");
+            return;
+        }
+
         let app_handle_clone = app_handle_for_wake_word.clone();
         safe_spawn_async_task(move || async move {
             // A gentle chime the moment the wake phrase lands, so Juno answers
@@ -853,7 +863,7 @@ fn setup_agent_transcription_listeners(app_handle: &AppHandle) {
                     VoiceTarget::Agent,
                     hold,
                 );
-                handle_agent_transcription_start(&app_handle_clone, method).await;
+                handle_agent_transcription_start(&app_handle_clone, method, hold).await;
             });
         },
     );
@@ -916,7 +926,11 @@ fn setup_agent_stop_all_listener(app_handle: &AppHandle) {
 ///
 /// Retries up to 3 times with a short delay to handle transient lock contention
 /// (e.g., when stop_dictation from a prior operation is still releasing the lock).
-async fn handle_agent_transcription_start(app_handle: &AppHandle, method: VoiceStartMethod) {
+async fn handle_agent_transcription_start(
+    app_handle: &AppHandle,
+    method: VoiceStartMethod,
+    hold: Option<crate::hold_gate::HoldId>,
+) {
     const MAX_RETRIES: u32 = 3;
     const RETRY_DELAY_MS: u64 = 150;
 
@@ -941,6 +955,10 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle, method: VoiceS
             // anyway. The controls that really do mean "end this" are the bar's
             // stop and cancel, and they claim the session they end.
             info!("[Agent Mode] Ignoring an agent start: {}", refused.reason());
+            // A dictation holds the microphone, so this key's release must
+            // not reach it: a tap would cancel the dictation, a hold would
+            // commit it early. See `StartGate::disown`.
+            crate::hold_gate::disown_if_crossed(VoiceTarget::Agent, refused.standing.target, hold);
             // The bar-voice latch says "a bar-initiated agent query is open".
             // If what is standing is a dictation session it is not one, and
             // leaving the latch set would make the next activation edge end a
@@ -1275,11 +1293,14 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
     // does nothing at all: this is the push-to-talk resurrection, where a key
     // released after its session had been cancelled emitted a stop that
     // finalised and resubmitted it.
-    match app_state.claim_voice_commit(SessionClaim::Current) {
-        Ok(session) => info!(
-            "[Agent Mode] Committing voice session {}",
-            session.describe()
-        ),
+    let committed = match app_state.claim_voice_commit(SessionClaim::Current) {
+        Ok(session) => {
+            info!(
+                "[Agent Mode] Committing voice session {}",
+                session.describe()
+            );
+            session.id
+        }
         Err(rejection) => {
             info!("[Agent Mode] Nothing to stop: {}", rejection.reason());
             // The bar flag is cleared even so: it is a UI latch, not the
@@ -1287,7 +1308,18 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
             crate::agent_monitor::set_bar_voice_active(false);
             return;
         }
-    }
+    };
+
+    // Start the per-turn stage clock at the release itself. If the turn never
+    // reaches audio (TTS off, an error, nothing said) it is logged anyway
+    // once it has had long enough to.
+    // Keyed by the voice session, so the same release reported twice is one
+    // turn rather than a phantom `superseded` line.
+    let timing_turn = crate::turn_timing::begin(ptt_release_time, Some(committed));
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(crate::turn_timing::TURN_TIMEOUT).await;
+        crate::turn_timing::finish(Some(timing_turn), "timeout");
+    });
 
     // Any way this session ends (bar Stop, the agent or dictation shortcut,
     // a hotkey release) lands here — clear the bar-voice flag and show a
@@ -1314,6 +1346,10 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
                 controller_state,
             )
             .await;
+            match stt_result {
+                Ok(_) => crate::turn_timing::mark(crate::turn_timing::Stage::TranscriptFinal),
+                Err(_) => crate::turn_timing::finish(Some(timing_turn), "stt_failed"),
+            }
 
             // Collect screenshot result (it runs concurrently so it should already be done).
             let screenshot_elapsed = ptt_release_time.elapsed().as_millis();

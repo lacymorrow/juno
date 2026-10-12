@@ -117,10 +117,13 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
               ? "Saved."
               : settings.activeProvider === "claude_cli"
                 ? "Nothing to enter. Juno talks to Claude Code on this Mac."
-                : "Changes save when you leave a field."
+                : settings.activeProvider === "codex_cli"
+                  ? "Nothing to enter. Juno talks to Codex on this Mac."
+                  : "Changes save when you leave a field."
           }
         >
           <SettingsRow
+            id="api-key"
             below={
               settings.activeProvider === "claude_cli" ? (
                 <div className="rounded-md border border-border bg-muted/40 p-4">
@@ -168,6 +171,16 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                     )}
                   </p>
                 </div>
+              ) : settings.activeProvider === "codex_cli" ? (
+                <div className="rounded-md border border-border bg-muted/40 p-4">
+                  <p className="text-[13px] font-medium text-foreground">
+                    No API key needed
+                  </p>
+                  <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
+                    Juno is using your ChatGPT plan through Codex. Nothing else
+                    to set up.
+                  </p>
+                </div>
               ) : (
                 <EnvironmentVariables>
                   <EnvironmentVariablesHeader>
@@ -194,7 +207,8 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
           />
 
           {/* Max tokens / temperature — not applicable to Claude CLI (managed by the CLI) */}
-          {settings.activeProvider !== "claude_cli" && (
+          {settings.activeProvider !== "claude_cli" &&
+            settings.activeProvider !== "codex_cli" && (
             <>
               <SettingsRow advanced htmlFor="max-tokens" label="Max Tokens">
                 <Input
@@ -242,7 +256,8 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
               advanced
               htmlFor="load-account-mcp"
               label="Load account MCP connectors"
-              description="Use the connectors on your Claude account, like Slack, Gmail, and Drive, in Juno chats. Off limits Juno to its own tools."
+              description="Use your Claude account connectors in chats."
+            info="Use the connectors on your Claude account, like Slack, Gmail, and Drive, in Juno chats. Off limits Juno to its own tools."
             >
               <Switch
                 id="load-account-mcp"

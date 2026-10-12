@@ -98,6 +98,75 @@ pub async fn end_dictation_session(app_handle: &AppHandle, reason: &str) {
     }
 }
 
+/// What one press of the stop key ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EscapeScope {
+    /// A dictation is open: end it and leave everything else running.
+    Dictation,
+    /// The same press, seen a second time (the bar's own keydown and the
+    /// passive stop-key monitor both report one press while the bar is
+    /// focused). It was spent on the dictation.
+    SamePress,
+    /// Nothing is dictating: the coordinated stop of everything.
+    Everything,
+}
+
+/// Two reports of one Escape press arrive within this window.
+const SAME_PRESS_WINDOW: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Decide what an Escape press ends.
+///
+/// Escape peels one layer. A dictation held while the agent works is the thing
+/// the person is doing right now, so Escape cancels it and only it: the run,
+/// Juno's voice, armed timers and the wake phrase all carry on, and a second
+/// press stops those. It used to run the coordinated stop, which threw away a
+/// long agent run because the person changed their mind about a sentence they
+/// were dictating into another app.
+pub fn escape_scope(
+    dictation_open: bool,
+    since_dictation_escape: Option<std::time::Duration>,
+) -> EscapeScope {
+    if dictation_open {
+        EscapeScope::Dictation
+    } else if since_dictation_escape.is_some_and(|elapsed| elapsed < SAME_PRESS_WINDOW) {
+        EscapeScope::SamePress
+    } else {
+        EscapeScope::Everything
+    }
+}
+
+static LAST_DICTATION_ESCAPE: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+/// The Escape step that comes before the coordinated stop. Returns `true` when
+/// the press was spent here (a dictation was cancelled, or this is a second
+/// report of the press that cancelled it) and the caller must not stop
+/// anything else.
+pub async fn escape_spent_on_dictation(app_handle: &AppHandle) -> bool {
+    let app_state = app_handle.state::<AppState>();
+    let dictation_open = app_state.is_dictation_active()
+        || app_state
+            .current_voice_session()
+            .is_some_and(|session| session.target == crate::state::VoiceTarget::Dictation);
+    let since = LAST_DICTATION_ESCAPE
+        .lock()
+        .ok()
+        .and_then(|last| last.map(|at| at.elapsed()));
+
+    match escape_scope(dictation_open, since) {
+        EscapeScope::Everything => false,
+        EscapeScope::SamePress => true,
+        EscapeScope::Dictation => {
+            info!("[Dictation] Escape cancels the open dictation only");
+            if let Ok(mut last) = LAST_DICTATION_ESCAPE.lock() {
+                *last = Some(std::time::Instant::now());
+            }
+            end_dictation_session(app_handle, "Escape").await;
+            crate::commands::triggers::resume_voice_after_dictation(app_handle).await;
+            true
+        }
+    }
+}
+
 // Command to set the dictation copy-to-clipboard toggle. The name predates
 // the insertion-mode split: this toggle only controls whether the transcript
 // is copied to the clipboard after a successful insert.
@@ -470,6 +539,37 @@ pub async fn insert_dictation_text(app_handle: &AppHandle, text: &str) -> Result
 mod tests {
     use super::*;
     use crate::constants::settings::dictation_insertion_modes::{CLIPBOARD_FREE, PASTE};
+
+    #[test]
+    fn escape_during_a_dictation_ends_only_the_dictation() {
+        // A dictation is open (the agent may well be working underneath):
+        // Escape is spent on the dictation, not the coordinated stop.
+        assert_eq!(escape_scope(true, None), EscapeScope::Dictation);
+        assert_eq!(
+            escape_scope(true, Some(std::time::Duration::from_millis(10))),
+            EscapeScope::Dictation
+        );
+    }
+
+    #[test]
+    fn the_second_report_of_that_press_stops_nothing_else() {
+        // The bar's keydown and the passive monitor report one press twice.
+        // The second report must not go on to stop the agent.
+        assert_eq!(
+            escape_scope(false, Some(std::time::Duration::from_millis(50))),
+            EscapeScope::SamePress
+        );
+    }
+
+    #[test]
+    fn a_later_escape_with_no_dictation_stops_everything() {
+        assert_eq!(escape_scope(false, None), EscapeScope::Everything);
+        assert_eq!(
+            escape_scope(false, Some(SAME_PRESS_WINDOW)),
+            EscapeScope::Everything,
+            "a deliberate second press stops the run"
+        );
+    }
 
     // One case per row of the behaviour matrix in the issue.
 

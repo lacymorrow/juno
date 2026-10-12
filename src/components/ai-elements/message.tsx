@@ -31,6 +31,8 @@ import {
 } from "react";
 import { Streamdown } from "streamdown";
 
+import { junoLinkSafety, junoUrlTransform } from "@/lib/junoLinks";
+
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
 };
@@ -332,6 +334,8 @@ export const MessageResponse = memo(
         className
       )}
       plugins={streamdownPlugins}
+      urlTransform={junoUrlTransform}
+      linkSafety={junoLinkSafety}
       {...props}
     />
   ),

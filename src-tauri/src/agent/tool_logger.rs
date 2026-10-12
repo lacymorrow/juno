@@ -977,6 +977,7 @@ impl ToolMetadata {
                     ("🔧", "Basic operation", "standard", Some("short"))
                 }
             }
+            ToolCategory::MacApps => ("📅", "Using a Mac app", "standard", Some("short")),
             ToolCategory::MCP => ("🔌", "External tool", "standard", Some("medium")),
         };
 
@@ -1541,6 +1542,12 @@ pub fn emit_streaming_text_chunk(
         emit_cursor_point(app_handle, tag);
     }
 
+    // Keep what the person was shown or told, so a turn cut short can still
+    // be saved to the conversation history.
+    if let Some(id) = message_id.as_deref() {
+        crate::conversation_history::record_streamed(id, &cleaned_text, tts_content.as_deref());
+    }
+
     let event_data = serde_json::json!({
         "chunk": cleaned_text,
         "message_id": message_id,
@@ -1561,75 +1568,16 @@ pub fn emit_streaming_text_chunk(
     }
 }
 
-/// Process TTS content immediately with proper escape key management
-/// ARCHITECTURAL DESIGN: invoke_tts properly handles audio completion tracking:
-/// - Concurrency control (prevents overlapping TTS)
-/// - Escape key registration during entire audio lifecycle
-/// - Enhanced audio playback with completion validation
-/// - Proper cleanup only after audio actually finishes
+/// Queue a chunk of a turn's spoken reply.
+///
+/// Chunks play in the order they are handed in, one at a time and without a
+/// gap, so a reply spoken a sentence at a time sounds like one reply. The
+/// queue (see `tts::enqueue_speech`) keeps the echo guard and the Escape key
+/// held for the whole run, and Escape or a new turn empties it. Returns at
+/// once so agent execution carries on.
 pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: String) {
-    info!("Processing TTS content immediately: '{}'", tts_content);
-
-    // CRITICAL FIX: Use a single background task to prevent audio overlap
-    // invoke_tts now properly waits for actual audio completion before cleanup
-    tauri::async_runtime::spawn(async move {
-        // Get the app state for TTS invocation
-        let app_state = match app_handle.try_state::<crate::state::AppState>() {
-            Some(state) => state,
-            None => {
-                warn!("AppState not available for TTS processing, skipping");
-                return;
-            }
-        };
-
-        info!("Starting TTS processing with enhanced completion tracking...");
-
-        // ARCHITECTURAL DESIGN: invoke_tts now properly handles:
-        // - Text filtering and validation
-        // - Concurrency prevention with mutex
-        // - Escape key management throughout audio lifecycle
-        // - Enhanced audio generation and playback tracking
-        // - Proper cleanup only after actual audio completion
-        match crate::tts::invoke_tts(tts_content, app_state, app_handle.clone()).await {
-            Ok(status_result) => {
-                info!("TTS processing completed with status: {}", status_result);
-
-                // Handle the actual status results from invoke_tts
-                match status_result.as_str() {
-                    "TTS_COMPLETED" => {
-                        info!("✅ TTS audio played successfully");
-                    }
-                    "TTS_ALREADY_PLAYING" => {
-                        info!("🔊 TTS already playing, skipped to prevent overlap");
-                    }
-                    "TTS_DISABLED_BY_SETTING" => {
-                        info!("🔇 TTS is disabled by user setting");
-                    }
-                    "TTS_CONTENT_FILTERED" => {
-                        info!("🧹 TTS content was filtered out (code/unwanted content)");
-                    }
-                    "TTS_STOPPED_BY_USER" => {
-                        info!("⏹️ TTS was stopped by user (escape key)");
-                    }
-                    "TTS_SOUND_DISABLED" => {
-                        info!("🔇 Sound is disabled in settings");
-                    }
-                    _ => {
-                        // Unexpected status - this shouldn't happen with the current architecture
-                        warn!("Unexpected TTS status: '{}'. This may indicate an architectural mismatch.",
-                              status_result.chars().take(50).collect::<String>());
-                    }
-                }
-            }
-            Err(e) => {
-                warn!("❌ TTS processing failed: {}. Continuing without audio.", e);
-            }
-        }
-    });
-
-    // CRITICAL: Return immediately so agent execution continues
-    // invoke_tts now properly handles escape key management and audio completion
-    info!("TTS processing started in background with enhanced completion tracking...");
+    info!("Queueing TTS content: '{}'", tts_content);
+    crate::tts::enqueue_speech(tts_content, app_handle);
 }
 
 pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text: String) {

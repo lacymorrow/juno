@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils";
 import { useSystemTheme } from "@/hooks/useSystemTheme";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
-  Bell,
   Boxes,
   Cpu,
   CalendarClock,
@@ -19,7 +18,11 @@ import {
   Wrench,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { COMMANDS, SETTINGS } from "@/lib/constants.generated";
+import { useEventListener } from "@/hooks/useEventListener";
+import { revealRow } from "./revealRow";
 import {
   GeneralSettings,
   VoiceSettings,
@@ -29,7 +32,6 @@ import {
   AdvancedSettings,
   AutomationsSettings,
   NetworkSettings,
-  NotificationSettings,
   ToolsSettings,
   TriggersSettings,
 } from "./index";
@@ -38,7 +40,18 @@ import {
   useAdvancedSettings,
 } from "./AdvancedSettingsContext";
 import { SettingsCategory } from "./types";
-import { SETTINGS_ROW_ID_PREFIX } from "./ui";
+
+/**
+ * Where the agent's `settings` tool wants the window (Rust:
+ * `agent::tools::settings_tool::Navigation`). `pane` is a sidebar id, `row` a
+ * row anchor, and `reload` means the agent changed a setting, so every value
+ * is read back from Rust before it is pointed at.
+ */
+export interface SettingsNavigation {
+  pane: string | null;
+  row: string | null;
+  reload: boolean;
+}
 
 /**
  * Sidebar sections, styled like macOS System Settings: a coloured icon tile
@@ -59,11 +72,12 @@ export const settingsCategories: MacCategory[] = [
     icon: <Settings className="h-3.5 w-3.5" />,
     tile: "bg-[#8E8E93]",
     description: "Basic app settings and preferences",
-    keywords: "startup launch login cursor appearance look",
+    // Carries the retired Notifications pane's search terms: that row lives here now.
+    keywords: "startup launch login cursor appearance look notifications alerts banners notify",
   },
   {
     id: "triggers",
-    name: "Triggers",
+    name: "Shortcuts",
     icon: <Zap className="h-3.5 w-3.5" />,
     tile: "bg-[#00C7BE]",
     description: "How you summon Juno",
@@ -99,14 +113,6 @@ export const settingsCategories: MacCategory[] = [
     tile: "bg-[#5856D6]",
     description: "Dictation models",
     keywords: "dictation whisper parakeet stt speech model fast balanced accurate download on device",
-  },
-  {
-    id: "notifications",
-    name: "Notifications",
-    icon: <Bell className="h-3.5 w-3.5" />,
-    tile: "bg-[#FF3B30]",
-    description: "Alerts, sounds, and delivery",
-    keywords: "alerts banners sounds badges push notify",
   },
   {
     id: "tools",
@@ -193,10 +199,12 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   // General
   { sectionId: "general", rowId: "auto-launch", label: "Open at login", keywords: "startup login boot autostart launch" },
   { sectionId: "general", rowId: "big-cursor-enabled", label: "Enable big cursor", keywords: "cursor pointer magnify enlarge big" },
+  { sectionId: "general", rowId: "cursor-color", label: "Cursor color", keywords: "cursor color colour glow agent pointer accent blue pink green orange purple" },
   { sectionId: "general", rowId: "bar-appearance", label: "Bar appearance", keywords: "bar appearance look style pill island orb halo avatar persona floating preview" },
+  { sectionId: "general", rowId: "show-notifications", label: "Show notifications", keywords: "notifications alerts banners notify push test" },
   { sectionId: "advanced", rowId: "restart-onboarding", label: "Restart onboarding", keywords: "onboarding welcome guide tutorial restart setup", advanced: true },
   // Triggers
-  { sectionId: "triggers", rowId: "add-trigger", label: "Add trigger", keywords: "trigger activation summon hotkey shortcut mouse button voice push to talk toggle wake word phrase" },
+  { sectionId: "triggers", rowId: "add-trigger", label: "Add shortcut", keywords: "trigger shortcut activation summon hotkey shortcut mouse button voice push to talk toggle wake word phrase" },
   // Models
   { sectionId: "models", rowId: "model-row-parakeet-ctc", label: "Balanced dictation model", keywords: "parakeet balanced recommended dictation model download" },
   { sectionId: "models", rowId: "model-row-tiny-en", label: "Fast dictation model", keywords: "whisper tiny fast dictation model" },
@@ -204,7 +212,8 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   // Audio
   { sectionId: "voice", rowId: "audio-input-device", label: "Listen through", keywords: "microphone mic input device listen headphones airpods usb interface" },
   { sectionId: "voice", rowId: "audio-output-device", label: "Speak through", keywords: "speaker output device sound headphones airpods play" },
-  { sectionId: "voice", rowId: "juno-voice", label: "Juno's voice", keywords: "voice juno voice samantha alex daniel karen moira accent silent mute speak out loud" },
+  { sectionId: "voice", rowId: "dont-speak", label: "Don't speak", keywords: "silent silence mute quiet speak voice out loud talk" },
+  { sectionId: "voice", rowId: "juno-voice", label: "Juno's voice", keywords: "voice juno voice samantha alex daniel karen moira accent silent mute speak out loud", advanced: true },
   { sectionId: "voice", rowId: "voice-engine", label: "Voice engine", keywords: "tts text to speech voice engine elevenlabs kokoro local supertonic chatterbox replicate", advanced: true },
   // Providers
   { sectionId: "ai", rowId: "ai-provider", label: "Active Provider", keywords: "provider anthropic openai gemini claude" },
@@ -212,8 +221,6 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   { sectionId: "ai", rowId: "temperature", label: "Temperature", keywords: "temperature randomness creativity sampling", advanced: true },
   { sectionId: "ai", rowId: "system-prompt", label: "System Prompt", keywords: "system prompt instructions persona", advanced: true },
   // Notifications
-  { sectionId: "notifications", rowId: "notification-type", label: "Notification method", keywords: "banner alert method delivery" },
-  { sectionId: "notifications", rowId: "position", label: "Position", keywords: "position corner placement screen" },
   // Security & Privacy. The approval row carries the retired Tools row's search
   // terms, so searching "approval" still lands on the control that works.
   { sectionId: "security", rowId: "permission-mode", label: "When Juno needs permission", keywords: "permission permissions approval approve approvals confirm ask autonomy allow always risky safe tools bash terminal don't ask" },
@@ -226,7 +233,7 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   { sectionId: "advanced", rowId: "background-mode", label: "Work in the background", keywords: "background quiet no interruption cursor focus other apps" },
   { sectionId: "advanced", rowId: "mouse-control", label: "Mouse control", keywords: "mouse pointer cursor permission ask always takeover control" },
   { sectionId: "advanced", rowId: "show-juno-in", label: "Show Juno in", keywords: "dock icon menu bar menubar tray hide accessory app switcher missing disappeared" },
-  { sectionId: "advanced", rowId: "cli-persistent-session", label: "Persistent Claude session", keywords: "beta claude cli persistent session process faster follow-ups experimental" },
+  { sectionId: "advanced", rowId: "cli-persistent-session", label: "Persistent Claude session", keywords: "claude cli persistent session process faster follow-ups" },
   { sectionId: "advanced", rowId: "debug-mode", label: "Debug Mode", keywords: "debug logs verbose developer" },
   { sectionId: "advanced", rowId: "performance-monitoring", label: "Performance Monitoring", keywords: "performance monitoring metrics profiling" },
   { sectionId: "advanced", rowId: "reset-all-settings", label: "Reset all settings", keywords: "reset factory defaults erase wipe" },
@@ -264,6 +271,15 @@ export default function ModularSettingsWindow() {
 function SettingsWindowContent() {
   const [selectedCategory, setSelectedCategory] = useState("general");
   const [query, setQuery] = useState("");
+  // The agent's request, held until the pane it names is on the sidebar
+  // (advanced settings may still be loading or turning on).
+  const [navigation, setNavigation] = useState<SettingsNavigation | null>(null);
+  // The row to point at. Its own state, so clearing `navigation` does not
+  // cancel the wait for a section that is still loading.
+  const [revealTarget, setRevealTarget] = useState<{ row: string } | null>(null);
+  // Bumped when the agent changes a setting: the pane remounts and reads
+  // every value back from Rust, as if it had just been opened.
+  const [paneVersion, setPaneVersion] = useState(0);
   const settings = useSettingsContext();
   const theme = useSystemTheme();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -308,21 +324,52 @@ function SettingsWindowContent() {
     const target = rowMatches[0];
     if (!target) return;
     setSelectedCategory(target.sectionId);
-
-    // Wait for the target section to render, then scroll + flash the row.
-    const raf = requestAnimationFrame(() => {
-      const el = document.getElementById(
-        `${SETTINGS_ROW_ID_PREFIX}${target.rowId}`,
-      );
-      if (!el) return;
-      el.scrollIntoView?.({ block: "center", behavior: "smooth" });
-      const ring = ["ring-2", "ring-primary/50", "rounded-md"];
-      el.classList.add(...ring);
-      // Plain setTimeout — the local `window` is the Tauri window, not global.
-      setTimeout(() => el.classList.remove(...ring), 1600);
-    });
-    return () => cancelAnimationFrame(raf);
+    // Waits for the target section to render, then scrolls + flashes the row.
+    return revealRow(target.rowId);
   }, [rowMatches]);
+
+  // The agent's `settings` tool. A window it opened asks for the request it
+  // was opened with (the event went out before anything was listening); a
+  // window already open hears the event.
+  const receiveNavigation = (nav: SettingsNavigation) => {
+    if (nav.reload) {
+      void settings.loadAllSettings?.();
+      setPaneVersion((v) => v + 1);
+    }
+    if (nav.pane) {
+      setQuery("");
+      setNavigation(nav);
+    }
+  };
+  useEventListener<SettingsNavigation>(SETTINGS.EVENTS_SETTINGS_NAVIGATE, receiveNavigation);
+  useEffect(() => {
+    let alive = true;
+    invoke<SettingsNavigation | null>(COMMANDS.SETTINGS_TAKE_PENDING_SETTINGS_NAVIGATION)
+      .then((nav) => {
+        if (alive && nav) receiveNavigation(nav);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+    // Once, on mount: there is only ever one request to collect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Act on it once its pane is on the sidebar. A pane behind the advanced
+  // toggle appears when Rust's advanced-settings event arrives.
+  useEffect(() => {
+    if (!navigation?.pane || advancedLoading) return;
+    if (!categories.some((c) => c.id === navigation.pane)) return;
+    setSelectedCategory(navigation.pane);
+    if (navigation.row) setRevealTarget({ row: navigation.row });
+    setNavigation(null);
+  }, [navigation, categories, advancedLoading]);
+
+  useEffect(() => {
+    if (!revealTarget) return;
+    return revealRow(revealTarget.row);
+  }, [revealTarget]);
 
   // Scroll the content pane back to the top whenever the section changes.
   // Skip when a row is deep-linked — that effect scrolls to the row instead.
@@ -347,8 +394,6 @@ function SettingsWindowContent() {
         return <AIProviderSettings settings={settings} />;
       case "models":
         return <ModelsSettings />;
-      case "notifications":
-        return <NotificationSettings />;
       case "tools":
         return <ToolsSettings settings={settings} />;
       case "automations":
@@ -470,7 +515,7 @@ function SettingsWindowContent() {
               <h1 className="pb-4 pt-1 text-[22px] font-bold tracking-tight">
                 {current?.name}
               </h1>
-              {renderCategoryContent()}
+              <Fragment key={paneVersion}>{renderCategoryContent()}</Fragment>
             </div>
           </div>
         </main>

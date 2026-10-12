@@ -102,7 +102,7 @@ pub async fn check_permissions_status_native(app: AppHandle) -> Result<Permissio
         }
     }
 
-    info!("Checking macOS permissions status using native APIs (no password prompts)");
+    debug!("Checking macOS permissions status using native APIs (no password prompts)");
 
     let app_name = app.package_info().name.clone();
 
@@ -132,7 +132,7 @@ pub async fn check_permissions_status_native(app: AppHandle) -> Result<Permissio
         app_name,
     };
 
-    info!("Native permissions checked - no password prompts required");
+    debug!("Native permissions checked - no password prompts required");
     debug!("Permissions state: {:?}", permissions_state);
 
     // Store result in cache for subsequent calls within the TTL window.
@@ -647,6 +647,9 @@ fn emit_granted_if_flipped(
         clear_relaunch_pending(permission_type);
         // Whatever prompt was up has been answered.
         restore_bar_after_prompt(app);
+        // The person granted it in System Settings and is on their way back
+        // to setup. Meet them there rather than leave it behind Settings.
+        crate::window_management::bring_onboarding_forward(app);
         // The stop-key monitor skips its global half while untrusted (adding
         // it would raise the system Accessibility alert); complete it now.
         if permission_type == "accessibility" {

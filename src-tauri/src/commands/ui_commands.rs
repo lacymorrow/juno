@@ -199,6 +199,62 @@ pub(crate) fn escape_stops_work(state: &BarState) -> bool {
     )
 }
 
+// === DICTATION OVER A RUNNING AGENT ===
+//
+// Dictation can be held while the agent works. The bar then has two things to
+// show, and they stack: the agent's run underneath, the dictation on top while
+// the microphone is open. The run keeps reporting while it is covered (the
+// stream starts, it speaks, it finishes), and those reports must not knock the
+// dictation off the bar. When the dictation ends, the bar goes back to the
+// run, not to idle: it used to drop to `Default` (commit) or sit on
+// `Dictating` for the rest of the run (cancel, Escape), which hid the stop
+// control and the streaming answer of a run that was still going.
+
+/// What the bar shows when no dictation is on top of it.
+///
+/// `agent_view` is the last state the agent's run asked for. Juno speaking
+/// wins over both, as it always has.
+pub(crate) fn resting_state(
+    is_agent_working: bool,
+    agent_view: &BarState,
+    speaking: bool,
+) -> BarState {
+    if speaking {
+        BarState::Speaking
+    } else if is_agent_working {
+        agent_view.clone()
+    } else {
+        BarState::Default
+    }
+}
+
+/// A state only a voice capture puts on the bar.
+fn is_dictation_view(state: &BarState) -> bool {
+    matches!(
+        state,
+        BarState::Dictating | BarState::Listening | BarState::Transcribing
+    )
+}
+
+/// Where the bar goes when a dictation ends. `None` leaves it alone.
+///
+/// With nothing running the bar goes to rest unconditionally, as it always
+/// did. With a run going, only a bar that is showing the dictation goes back
+/// to the run, so a stale end-of-dictation from a cleanup path cannot collapse
+/// a composer or an error the run put up.
+pub(crate) fn state_after_dictation(
+    current: &BarState,
+    was_dictating: bool,
+    is_agent_working: bool,
+    resting: BarState,
+) -> Option<BarState> {
+    if !is_agent_working || was_dictating || is_dictation_view(current) {
+        Some(resting)
+    } else {
+        None
+    }
+}
+
 #[derive(Debug)]
 pub struct UIManager {
     pub app_handle: AppHandle,
@@ -215,6 +271,9 @@ pub struct UIManager {
     pub transcription_provisional: bool,
     pub spoken_text: String,
     pub is_agent_working: bool,
+    /// The last state the agent's run asked the bar for. Kept while a
+    /// dictation covers it, so the bar can go back to it.
+    agent_view: BarState,
     pub is_dictation_mode: bool,
     pub is_always_listening: bool,
     pub audio_level: f64,
@@ -244,6 +303,7 @@ impl UIManager {
             transcription_provisional: false,
             spoken_text: String::new(),
             is_agent_working: false,
+            agent_view: BarState::Loading,
             is_dictation_mode: false,
             is_always_listening: false,
             audio_level: 0.0,
@@ -289,12 +349,12 @@ impl UIManager {
             .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
         // Preserve fields this config view does not own (read-modify-write):
-        // follow_cursor_display is set only via the settings toggle.
-        let follow_cursor_display = settings_manager
+        // follow_cursor_display and agent_cursor_color are set only from
+        // Settings.
+        let saved = settings_manager
             .get_floating_bar_settings()
             .await
-            .map(|s| s.follow_cursor_display)
-            .unwrap_or_else(|_| crate::constants::settings::defaults::follow_cursor_display());
+            .unwrap_or_default();
         let settings = FloatingBarSettings {
             show_voice_indicator: self.bar_config.show_voice_indicator,
             enable_animations: self.bar_config.enable_animations,
@@ -302,8 +362,9 @@ impl UIManager {
             auto_hide_delay: self.bar_config.auto_hide_delay,
             opacity: self.bar_config.opacity,
             bar_appearance: self.bar_config.bar_appearance.clone(),
-            follow_cursor_display,
+            follow_cursor_display: saved.follow_cursor_display,
             show_glow_border: self.bar_config.show_glow_border,
+            agent_cursor_color: saved.agent_cursor_color,
         };
 
         settings_manager
@@ -345,6 +406,27 @@ impl UIManager {
         );
         self.bar_state = new_state;
         self.emit_bar_state_update().await;
+    }
+
+    /// The agent's run asks the bar for `state`. Remembered always, shown only
+    /// while no dictation covers the run; the flags still go out, so every
+    /// look knows the run is going.
+    async fn show_agent_view(&mut self, state: BarState) {
+        self.agent_view = state.clone();
+        if self.is_dictation_mode {
+            self.emit_bar_state_update().await;
+        } else {
+            self.set_bar_state(state).await;
+        }
+    }
+
+    /// What the bar shows with no dictation on top. See [`resting_state`].
+    fn resting(&self) -> BarState {
+        resting_state(
+            self.is_agent_working,
+            &self.agent_view,
+            !self.spoken_text.is_empty(),
+        )
     }
 
     /// Put the bar back to the idle bar after an Escape press.
@@ -496,7 +578,7 @@ impl UIManager {
         self.is_agent_working = true;
         self.voice_mode = ui::voice_modes::AGENT.to_string();
 
-        self.set_bar_state(BarState::Submitting).await;
+        self.show_agent_view(BarState::Submitting).await;
 
         // Emit unified agent query submission event
         let query_payload = serde_json::json!({ "query": query });
@@ -520,6 +602,18 @@ impl UIManager {
             "UI Manager: Handling backend response, agent_state: {}",
             agent_state
         );
+
+        // A dictation is on the bar. The run's outcome is recorded, not
+        // shown: a "Finished" or an error flashed over an open microphone, and
+        // the timer that follows it putting the bar to rest, would take the
+        // dictation off the bar while the person is still talking. When the
+        // dictation ends the bar goes to rest, since the run is over.
+        if self.is_dictation_mode {
+            self.agent_state = Some(agent_state);
+            self.current_transition_id = None;
+            self.emit_bar_state_update().await;
+            return Ok(());
+        }
 
         let transition_id = Uuid::new_v4().to_string();
         self.current_transition_id = Some(transition_id.clone());
@@ -590,7 +684,7 @@ impl UIManager {
         self.voice_mode = ui::voice_modes::AGENT.to_string();
 
         // Transition to Submitting for quicker perceived responsiveness
-        self.set_bar_state(BarState::Submitting).await;
+        self.show_agent_view(BarState::Submitting).await;
         Ok(())
     }
 
@@ -628,18 +722,31 @@ impl UIManager {
         debug!("UI Manager: Handling dictation mode change: {}", is_active);
 
         let previous_state = self.voice_mode.clone();
+        let was_dictating = self.is_dictation_mode;
         self.is_dictation_mode = is_active;
 
         if is_active {
             self.voice_mode = ui::voice_modes::DICTATION.to_string();
+            // A pending "put the bar to rest" from the run's last outcome
+            // must not land on top of the dictation.
+            self.current_transition_id = None;
             self.set_bar_state(BarState::Dictating).await;
         } else {
-            self.voice_mode = ui::voice_modes::IDLE.to_string();
+            self.voice_mode = if self.is_agent_working {
+                ui::voice_modes::AGENT.to_string()
+            } else {
+                ui::voice_modes::IDLE.to_string()
+            };
             // The mic is closed; the waveform returns to baseline even if the
             // plugin's final 0.0 level event never arrives.
             self.audio_level = 0.0;
-            if !self.is_agent_working {
-                self.set_bar_state(BarState::Default).await;
+            if let Some(next) = state_after_dictation(
+                &self.bar_state,
+                was_dictating,
+                self.is_agent_working,
+                self.resting(),
+            ) {
+                self.set_bar_state(next).await;
             }
         }
 
@@ -711,13 +818,18 @@ impl UIManager {
         // Clear the previous run's outcome so the label reads "working", not "Finished"
         self.agent_state = None;
         self.voice_mode = ui::voice_modes::AGENT.to_string();
-        self.set_bar_state(BarState::Loading).await;
+        self.show_agent_view(BarState::Loading).await;
         Ok(())
     }
 
     pub async fn handle_agent_stopped(&mut self) -> Result<(), String> {
         debug!("UI Manager: Handling agent stopped");
         self.is_agent_working = false;
+        if self.is_dictation_mode {
+            // The dictation stays on the bar; it goes to rest when it ends.
+            self.emit_bar_state_update().await;
+            return Ok(());
+        }
         self.voice_mode = ui::voice_modes::IDLE.to_string();
         if matches!(
             self.bar_state,
@@ -751,6 +863,12 @@ impl UIManager {
     pub async fn handle_tts_started(&mut self, text: String) -> Result<(), String> {
         debug!("UI Manager: Handling TTS started with text: '{}'", text);
         self.spoken_text = text;
+        if self.is_dictation_mode {
+            // Juno is held silent while the microphone is open (see
+            // `tts::hold_for_capture`); the dictation keeps the bar.
+            self.emit_bar_state_update().await;
+            return Ok(());
+        }
         self.voice_mode = ui::voice_modes::SPEAKING.to_string();
         self.set_bar_state(BarState::Speaking).await;
         Ok(())
@@ -759,7 +877,17 @@ impl UIManager {
     pub async fn handle_tts_finished(&mut self) -> Result<(), String> {
         debug!("UI Manager: Handling TTS finished");
         self.spoken_text.clear();
-        if !self.is_agent_working && !self.is_dictation_mode && !self.is_always_listening {
+        if self.is_dictation_mode {
+            return Ok(());
+        }
+        if self.is_agent_working {
+            // Done speaking with the run still going: back to the run.
+            if self.bar_state == BarState::Speaking {
+                self.voice_mode = ui::voice_modes::AGENT.to_string();
+                let view = self.agent_view.clone();
+                self.set_bar_state(view).await;
+            }
+        } else if !self.is_always_listening {
             self.voice_mode = ui::voice_modes::IDLE.to_string();
             self.set_bar_state(BarState::Default).await;
         }
@@ -812,15 +940,18 @@ impl UIManager {
                 if self.is_dictation_mode {
                     self.set_bar_state(BarState::Dictating).await;
                 } else {
-                    self.set_bar_state(BarState::Default).await;
+                    let next = self.resting();
+                    self.set_bar_state(next).await;
                 }
             }
         } else {
-            // No result, return to appropriate state
+            // No result: back to the dictation if one is still open,
+            // otherwise to the run (or to rest when nothing is running).
             if self.is_dictation_mode {
                 self.set_bar_state(BarState::Dictating).await;
             } else {
-                self.set_bar_state(BarState::Default).await;
+                let next = self.resting();
+                self.set_bar_state(next).await;
             }
         }
 
@@ -1225,7 +1356,7 @@ async fn setup_ui_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex
             safe_spawn_async_task(move || async move {
                 let mut manager = manager.lock().await;
                 if manager.is_agent_working {
-                    manager.set_bar_state(BarState::AgentResponding).await;
+                    manager.show_agent_view(BarState::AgentResponding).await;
                 }
             });
         },
@@ -1339,6 +1470,26 @@ pub async fn ui_handle_interaction(
             let app_handle = manager.lock().await.app_handle.clone();
             bar_escape_to_idle(&app_handle, "Escape key pressed via UI").await;
             return Ok(());
+        }
+
+        // A click on the bar while Claude's own turn ran in a conversation
+        // that is not on screen opens that conversation. Also before the
+        // lock: loading a conversation emits to every surface.
+        if is_bar && interaction.interaction_type == ui::interaction_types::CLICK {
+            let app_handle = manager.lock().await.app_handle.clone();
+            if let Some(state) = app_handle.try_state::<crate::state::AppState>() {
+                if let Err(e) = crate::commands::conversations::open_claude_turn_conversation_for(
+                    &app_handle,
+                    &state,
+                )
+                .await
+                {
+                    debug!(
+                        "Could not open the conversation Claude's turn ran in: {}",
+                        e
+                    );
+                }
+            }
         }
 
         let mut manager = manager.lock().await;
@@ -1469,6 +1620,11 @@ fn is_bar_element(element_id: &str) -> bool {
 /// way the bar ends at rest, and a press on a bar already at rest changes
 /// nothing.
 pub async fn bar_escape_to_idle(app_handle: &AppHandle, reason: &str) {
+    // An open dictation is cancelled on its own, and its end puts the bar back
+    // on the run underneath, so there is nothing more for this press to do.
+    if crate::commands::dictation::escape_spent_on_dictation(app_handle).await {
+        return;
+    }
     let state = match get_ui_manager().await {
         Some(manager) => manager.lock().await.bar_state.clone(),
         None => BarState::Default,
@@ -1488,15 +1644,29 @@ pub async fn bar_escape_to_idle(app_handle: &AppHandle, reason: &str) {
 
 // === FLOATING BAR CONFIGURATION COMMANDS ===
 
+/// The bar's config straight from settings, without the UI manager.
+///
+/// The bar's page now loads before the UI manager has finished initializing
+/// (it is built first, and nothing heavy is in front of it), so a read that
+/// needed the manager could fail and draw the default look over a saved one.
+/// Unreadable settings give the defaults, as the manager's own load does.
+pub fn bar_config_now(app_handle: &AppHandle) -> FloatingBarConfig {
+    crate::settings::manager::SettingsManager::new(app_handle.clone())
+        .and_then(|manager| manager.floating_bar_settings_now())
+        .map(|settings| UIManager::convert_settings_to_config(&settings))
+        .unwrap_or_default()
+}
+
 #[tauri::command]
-pub async fn ui_get_bar_config() -> Result<FloatingBarConfig, String> {
+pub async fn ui_get_bar_config(app_handle: AppHandle) -> Result<FloatingBarConfig, String> {
     debug!("Getting floating bar configuration");
 
     if let Some(manager) = get_ui_manager().await {
         let manager = manager.lock().await;
         Ok(manager.bar_config.clone())
     } else {
-        Err("UI Manager not initialized".to_string())
+        // Not up yet at launch: the settings are the same source it loads from.
+        Ok(bar_config_now(&app_handle))
     }
 }
 
@@ -1869,6 +2039,110 @@ mod tests {
             !body.contains("stop_all_operations"),
             "the coordinated stop must never run inside ui_handle_interaction"
         );
+    }
+
+    #[test]
+    fn a_dictation_ending_over_a_running_agent_returns_to_the_run() {
+        // Commit: the final result arrives with the bar on the decode
+        // spinner. Before, this went to Default and hid the run.
+        let resting = resting_state(true, &BarState::AgentResponding, false);
+        assert_eq!(resting, BarState::AgentResponding);
+        assert_eq!(
+            state_after_dictation(&BarState::Transcribing, false, true, resting.clone()),
+            Some(BarState::AgentResponding)
+        );
+        // Cancel, short tap, Escape: the bar is still on Dictating. Before,
+        // it stayed there for the rest of the run.
+        assert_eq!(
+            state_after_dictation(&BarState::Dictating, true, true, resting),
+            Some(BarState::AgentResponding)
+        );
+    }
+
+    #[test]
+    fn a_run_that_has_not_streamed_yet_comes_back_as_working() {
+        assert_eq!(
+            resting_state(true, &BarState::Loading, false),
+            BarState::Loading
+        );
+        assert_eq!(
+            resting_state(true, &BarState::Submitting, false),
+            BarState::Submitting
+        );
+    }
+
+    #[test]
+    fn juno_still_speaking_wins_when_the_dictation_ends() {
+        assert_eq!(
+            resting_state(true, &BarState::AgentResponding, true),
+            BarState::Speaking
+        );
+        assert_eq!(
+            resting_state(false, &BarState::Loading, true),
+            BarState::Speaking
+        );
+    }
+
+    #[test]
+    fn with_nothing_running_a_dictation_ends_at_rest() {
+        let resting = resting_state(false, &BarState::AgentResponding, false);
+        assert_eq!(resting, BarState::Default);
+        for current in [
+            BarState::Dictating,
+            BarState::Transcribing,
+            BarState::Input,
+            BarState::Error,
+        ] {
+            assert_eq!(
+                state_after_dictation(&current, false, false, resting.clone()),
+                Some(BarState::Default),
+                "unchanged from before: no run means rest, from {:?}",
+                current
+            );
+        }
+    }
+
+    #[test]
+    fn a_stale_dictation_end_leaves_a_working_bar_alone() {
+        // A cleanup path announcing "dictation over" when none was open must
+        // not collapse what the run put on the bar.
+        for current in [BarState::Input, BarState::Error, BarState::Finishing] {
+            assert_eq!(
+                state_after_dictation(&current, false, true, BarState::Loading),
+                None,
+                "{:?} is not the dictation's to clear",
+                current
+            );
+        }
+    }
+
+    #[test]
+    fn the_runs_reports_never_take_the_bar_from_an_open_dictation() {
+        // Pinned by source: each agent-side handler checks the dictation
+        // flag before it touches `bar_state`. A handler that sets the bar
+        // unconditionally is how the dictation display was knocked off.
+        let src = include_str!("ui_commands.rs");
+        for handler in [
+            "pub async fn handle_agent_stopped(&mut self)",
+            "pub async fn handle_backend_response(\n        &mut self,",
+            "pub async fn handle_tts_started(&mut self, text: String)",
+            "pub async fn handle_tts_finished(&mut self)",
+        ] {
+            let start = src.find(handler).expect("handler exists");
+            let body = &src[start..start + src[start..].find("\n    }\n").expect("ends")];
+            let guard = body
+                .find("if self.is_dictation_mode {")
+                .unwrap_or_else(|| panic!("{} checks the dictation flag", handler));
+            if let Some(set) = body.find("self.set_bar_state(") {
+                assert!(guard < set, "{} guards before it sets the bar", handler);
+            }
+        }
+        // Started, submitted and streaming go through `show_agent_view`,
+        // which remembers the state and shows it only with no dictation open.
+        let start = src.find("async fn show_agent_view(").expect("exists");
+        let body = &src[start..start + src[start..].find("\n    }\n").expect("ends")];
+        assert!(body.contains("if self.is_dictation_mode {"));
+        assert!(body.contains("self.agent_view = state.clone();"));
     }
 
     #[test]

@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { COMMANDS } from "@/lib/constants.generated";
+import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 
-import { armBarSnap, settleBarSnap, useBarDisplayFollow } from "./useBarSnapWells";
+import {
+  answerOverlayReady,
+  settleBarSnap,
+  startBarDrag,
+  useBarDisplayFollow,
+} from "./useBarSnapWells";
+import { useEventListener } from "./useEventListener";
 
 /**
  * Interactive element selectors that should NOT trigger window dragging on a
@@ -102,9 +108,13 @@ export interface BarDrag {
  * The one drag gesture for the bar window: drag from anywhere, land in a well.
  *
  * A mousedown anywhere except text entry arms a drag; moving past the
- * threshold hands the gesture to the OS window drag and swallows the click
- * that would otherwise fire on release. A press and release without movement
- * is an ordinary click on whatever was pressed.
+ * threshold starts the drag and swallows the click that would otherwise fire
+ * on release. Every look is then carried by Rust, which puts the spot pressed
+ * under the cursor on every mouse-dragged event until the release; a steady
+ * look (the Pill) first shrinks its window to the shape it is drawing, so the
+ * menu bar rule holds the pill and not its empty room (see `startBarDrag`).
+ * A press and release without movement is an ordinary click on whatever was
+ * pressed.
  *
  * On release the window glides into the nearest gravity well. That part is
  * gated on the window's label inside `armBarSnap`/`settleBarSnap`, so this
@@ -121,6 +131,8 @@ export function useBarDrag({
   // Where the press landed inside the window, in logical px. It is both the
   // threshold's origin and the grab offset the drop indicator needs.
   const grab = useRef<{ x: number; y: number } | null>(null);
+  // The same press on screen and when, for the `[Drag]` log lines.
+  const press = useRef<{ x: number; y: number; at: number } | null>(null);
   const dragged = useRef(false);
 
   const onMouseDownCapture = useCallback((e: React.MouseEvent) => {
@@ -129,26 +141,46 @@ export function useBarDrag({
     const target = e.target as HTMLElement;
     if (target.closest(BAR_NO_DRAG_SELECTOR)) return;
     grab.current = { x: e.clientX, y: e.clientY };
+    press.current = { x: e.screenX, y: e.screenY, at: performance.now() };
   }, []);
 
-  const onMouseMove = useCallback(
-    (e: React.MouseEvent) => {
+  // Takes moves from the element and from the window alike: a fast flick can
+  // leave a small shape before its first mousemove, and the drag should
+  // start on the first move past the threshold wherever the cursor is.
+  const considerMove = useCallback(
+    (e: MouseEvent | React.MouseEvent) => {
       const start = grab.current;
       if (!start) return;
       if (Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) < threshold) return;
       grab.current = null;
       dragged.current = true;
       e.preventDefault();
-      void armBarSnap(start);
-      getCurrentWindow()
-        .startDragging()
-        .catch((error) => console.debug("barDrag: startDragging failed:", error));
+      const now = performance.now();
+      const p = press.current;
+      press.current = null;
+      startBarDrag(start, {
+        pressX: p?.x ?? Number.NaN,
+        pressY: p?.y ?? Number.NaN,
+        crossX: e.screenX,
+        crossY: e.screenY,
+        pressToCrossMs: p ? now - p.at : Number.NaN,
+        crossedAt: now,
+      });
     },
     [threshold],
   );
 
+  const onMouseMove = useCallback((e: React.MouseEvent) => considerMove(e), [considerMove]);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => considerMove(e);
+    window.addEventListener("mousemove", onMove, true);
+    return () => window.removeEventListener("mousemove", onMove, true);
+  }, [considerMove]);
+
   const onMouseUp = useCallback(() => {
     grab.current = null;
+    press.current = null;
   }, []);
 
   // Right-click: the webview's own menu is never right on the bar, so it is
@@ -173,12 +205,20 @@ export function useBarDrag({
   // A drag that ends off the bar (a fast flick, a release outside the window)
   // never fires a click, so a window-level mouseup is the reliable settle
   // trigger. The settle itself is idempotent: whichever path fires first
-  // disarms the other.
+  // disarms the other. A release the page never hears is caught by the
+  // release watch in `startBarDrag`.
   useEffect(() => {
-    const onUp = () => void settleBarSnap();
+    const onUp = () => {
+      grab.current = null;
+      press.current = null;
+      void settleBarSnap();
+    };
     window.addEventListener("mouseup", onUp, true);
     return () => window.removeEventListener("mouseup", onUp, true);
   }, []);
+  // A display's overlay is built on its first drag and asks what to draw once
+  // it is listening.
+  useEventListener(EVENTS.SNAP_WELLS_READY, () => answerOverlayReady());
 
   useBarDisplayFollow(displayFollowPaused);
 

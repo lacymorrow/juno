@@ -114,6 +114,8 @@ export type ModelSelectorLogoProps = Omit<
 const providerLogoId = (provider: string): string => {
   // Claude CLI uses Anthropic's Claude models under the hood
   if (provider === "claude_cli") return "anthropic";
+  // Codex CLI runs OpenAI's models on the person's ChatGPT plan
+  if (provider === "codex_cli") return "openai";
   return provider;
 };
 

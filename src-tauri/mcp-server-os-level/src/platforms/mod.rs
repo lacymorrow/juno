@@ -93,6 +93,12 @@ pub trait AccessibilityEngine: Send + Sync + Any {
         None
     }
 
+    /// Hit-test inside one application's windows rather than the frontmost
+    /// app's. Default returns None.
+    fn element_at_position_in_app(&self, _pid: i32, _x: f64, _y: f64) -> Option<UIElement> {
+        None
+    }
+
     /// Get the current mouse cursor position.
     fn cursor_position(&self) -> Result<(f64, f64), AutomationError>;
 

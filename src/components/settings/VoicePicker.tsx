@@ -1,5 +1,6 @@
+import { invoke } from "@tauri-apps/api/core";
 import { AlertCircle, Check, Volume2 } from "lucide-react";
-import { EVENTS } from "@/lib/constants.generated";
+import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 import { cn } from "@/lib/utils";
 import type { JunoVoiceList, VoiceAudition } from "@/hooks/useSettings";
 
@@ -27,6 +28,9 @@ interface VoicePickerProps {
  * belong to and what the sound is doing. This draws what it was given, and it
  * computes nothing: a voice list computed here would be a second opinion about
  * what the engine can say.
+ *
+ * A row whose voice is set somewhere else carries a link (the Mac's row opens
+ * Read & Speak, where its Siri voice is chosen). Rust opens it.
  */
 export function VoicePicker({ list, onChange, onReplay, audition }: VoicePickerProps) {
   if (!list) {
@@ -58,57 +62,75 @@ export function VoicePicker({ list, onChange, onReplay, audition }: VoicePickerP
           const speaking = state === EVENTS.JUNO_VOICE_SPEAKING;
           const preparing = state === EVENTS.JUNO_VOICE_PREPARING;
           return (
-            <button
-              key={option.id}
-              type="button"
-              role="radio"
-              aria-checked={option.selected}
-              onClick={() => (option.selected ? onReplay() : onChange(option.id))}
-              className={cn(
-                "flex w-full items-center gap-3 px-4 py-2 text-left",
-                "hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60",
-              )}
-            >
-              <span
-                aria-hidden="true"
+            <div key={option.id}>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={option.selected}
+                onClick={() => (option.selected ? onReplay() : onChange(option.id))}
                 className={cn(
-                  "flex size-4 shrink-0 items-center justify-center",
-                  option.selected ? "text-[#007AFF]" : "text-transparent",
+                  "flex w-full items-center gap-3 px-4 py-2 text-left",
+                  "hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60",
                 )}
               >
-                <Check className="size-4" strokeWidth={2.5} />
-              </span>
-              <span className="min-w-0 flex-1 space-y-0.5">
-                <span className="block text-[13px] font-medium leading-tight">{option.name}</span>
-                <span className="block text-[12px] leading-snug text-muted-foreground">
-                  {option.descriptor}
-                </span>
-              </span>
-              {option.speaks && (
                 <span
+                  aria-hidden="true"
                   className={cn(
-                    "shrink-0 text-[11px] transition-opacity duration-150",
-                    speaking ? "text-[#007AFF]" : "text-muted-foreground/60",
+                    "flex size-4 shrink-0 items-center justify-center",
+                    option.selected ? "text-[#007AFF]" : "text-transparent",
                   )}
                 >
-                  {speaking || preparing ? (
-                    <span className="flex items-center gap-1">
-                      <Volume2 className="size-3.5" strokeWidth={2} aria-hidden="true" />
-                      {/* An engine that loads a model takes seconds. Saying
-                          "Speaking" through that would be a lie, and saying
-                          nothing is what reads as broken. */}
-                      {speaking ? "Speaking" : "Loading"}
-                    </span>
-                  ) : (
-                    <Volume2
-                      className="size-3.5"
-                      strokeWidth={2}
-                      aria-label="Plays when you pick it"
-                    />
-                  )}
+                  <Check className="size-4" strokeWidth={2.5} />
                 </span>
+                <span className="min-w-0 flex-1 space-y-0.5">
+                  <span className="block text-[13px] font-medium leading-tight">{option.name}</span>
+                  <span className="block text-[12px] leading-snug text-muted-foreground">
+                    {option.descriptor}
+                  </span>
+                </span>
+                {option.speaks && (
+                  <span
+                    className={cn(
+                      "shrink-0 text-[11px] transition-opacity duration-150",
+                      speaking ? "text-[#007AFF]" : "text-muted-foreground/60",
+                    )}
+                  >
+                    {speaking || preparing ? (
+                      <span className="flex items-center gap-1">
+                        <Volume2 className="size-3.5" strokeWidth={2} aria-hidden="true" />
+                        {/* An engine that loads a model takes seconds. Saying
+                            "Speaking" through that would be a lie, and saying
+                            nothing is what reads as broken. */}
+                        {speaking ? "Speaking" : "Loading"}
+                      </span>
+                    ) : (
+                      <Volume2
+                        className="size-3.5"
+                        strokeWidth={2}
+                        aria-label="Plays when you pick it"
+                      />
+                    )}
+                  </span>
+                )}
+              </button>
+              {option.link && (
+                // Beside the row, not inside it: a button cannot hold a button,
+                // and opening Settings is not picking the voice.
+                <div className="-mt-1.5 pb-2 pl-11 pr-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      invoke(COMMANDS.AUDIO_OPEN_READ_AND_SPEAK).catch((error) =>
+                        console.error("Failed to open Read & Speak:", error),
+                      );
+                    }}
+                    className="rounded-sm text-[12px] leading-snug text-[#007AFF] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                  >
+                    {option.link}
+                  </button>
+                </div>
               )}
-            </button>
+            </div>
           );
         })}
       </div>

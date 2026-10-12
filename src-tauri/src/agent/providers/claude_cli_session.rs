@@ -1,4 +1,4 @@
-//! # One long-lived `claude` process per conversation (experimental, off by default)
+//! # One long-lived `claude` process per conversation (on by default)
 //!
 //! The one-shot path in [`super::claude_cli`] spawns a whole `claude` process per
 //! message. Measured on an M-series Mac against CLI 2.1.278, that costs 1.6–3.1
@@ -28,8 +28,16 @@
 //!
 //! So every message Juno sends carries its own `uuid`, and the CLI echoes it back as
 //! `command_uuid` on `command_lifecycle` frames. A turn is Juno's if and only if such
-//! a frame opened it. Everything else on the stream is dropped. Unsolicited turns
-//! carry no lifecycle frames at all, which is what makes the test exact.
+//! a frame opened it. Unsolicited turns carry no lifecycle frames at all, which is
+//! what makes the test exact.
+//!
+//! A turn that is not Juno's is not hidden either: it can drive the desktop, so the
+//! person sees it. It is shown as a turn of its own in the conversation that owns
+//! the process, through the same renderer as any other turn (bar, streamed text,
+//! tool and cursor indicators, speech), and Escape interrupts it. A watcher reads
+//! the stream between Juno's turns so it appears as it happens; one already on the
+//! stream when Juno sends a message is shown by that turn, ahead of its own answer.
+//! See `claude_cli_own_turn` for the stage around it.
 //!
 //! ## 3. Nothing is lost when this fails
 //!
@@ -53,21 +61,42 @@
 //! - a reader task owning the child's stdout, parsing NDJSON into a channel;
 //! - `inbox`, the receiving half, behind the session's only `TokioMutex`. Locking it
 //!   both serializes turns and hands the turn its frames, so there is no second lock
-//!   to acquire and no ordering to get wrong.
+//!   to acquire and no ordering to get wrong. Between turns a watcher holds it, and
+//!   gives it up the moment a turn asks.
+//!
+//! ## The warm spare
+//!
+//! A persistent process removes the boot cost from every turn but the first one of
+//! a conversation, which still pays it in full: measured at 4.9 s from spawn to first
+//! token, against 1.5 s for a warm follow-up. So one extra process is kept booted
+//! and idle, pinned to a fresh `--session-id` and bound to no conversation. The first
+//! turn of a new conversation adopts it instead of spawning, and a replacement is
+//! started in the background.
+//!
+//! - It is spawned with exactly the [`LaunchConfig`] a turn would use, learned from
+//!   the last turn (and, across launches, from the system prompt remembered in
+//!   `cli_session.json`). Adoption compares fingerprints; a spare that does not
+//!   match is killed and the turn starts cold, exactly as it did before the spare.
+//! - It receives nothing on stdin until adopted, so it can never run a turn.
+//! - It lives outside the conversation registry: the idle reaper never reaps it and
+//!   it never evicts a conversation. At most `MAX_LIVE_SESSIONS + 1` processes.
+//! - A spare that fails to spawn, or exits on its own, backs off and is given up on
+//!   after [`MAX_SPARE_FAILURES`] until the configuration changes.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::{mpsc, Mutex as TokioMutex};
+use tokio::sync::{mpsc, Mutex as TokioMutex, MutexGuard as TokioMutexGuard, Notify};
 use tracing::{debug, info, warn};
 
 use super::claude_cli::claude_command;
+use super::claude_cli_own_turn::Stage;
 use crate::agent::core::AgentError;
 use crate::constants::settings::{store_keys, SETTINGS_STORE_FILE};
 
@@ -97,12 +126,52 @@ const IDLE_REAP_AFTER: Duration = Duration::from_secs(600);
 /// How often the reaper looks.
 const REAP_INTERVAL: Duration = Duration::from_secs(60);
 
+/// How often the watcher between turns looks again while a turn is taking the
+/// stream from it. Only ever waited out in the instant between a turn asking
+/// for the stream and getting it.
+const TURN_HANDOFF_POLL: Duration = Duration::from_millis(10);
+
 /// How many `claude` processes may be alive at once.
 ///
 /// Small on purpose. Each one is a Node process holding an MCP connection, and the
 /// session id is what actually carries the conversation — evicting a process costs
 /// one cold boot on the next message, not any context.
 const MAX_LIVE_SESSIONS: usize = 3;
+
+/// Environment that turns off the CLI's own background machinery for a
+/// persistent process. Verified against `claude` 2.1.289: `DISABLE_CRON`
+/// removes the Cron tools from the session; `DISABLE_BACKGROUND_TASKS` turns
+/// off `run_in_background` and background agent launches.
+const UNSOLICITED_TURN_ENV: [(&str, &str); 2] = [
+    ("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "1"),
+    ("CLAUDE_CODE_DISABLE_CRON", "1"),
+];
+
+/// Tools that exist to wake a session later, which is exactly what a
+/// persistent process must not do on its own. `--disallowedTools` removes
+/// them from the session (verified against `claude` 2.1.289).
+const WAKE_TOOLS: &str = "ScheduleWakeup,Monitor";
+
+/// How long after a turn starts before a replacement spare is spawned.
+///
+/// Long enough that its Node boot does not compete for CPU with the adopted
+/// process's first token, short enough that the next new conversation finds it.
+const SPARE_REFILL_DELAY: Duration = Duration::from_secs(3);
+
+/// Spare spawn failures (a spawn error, or a spare that exited on its own) in a
+/// row before Juno stops trying until the configuration changes.
+pub const MAX_SPARE_FAILURES: u32 = 3;
+
+/// Store file holding the system prompt the last turn ran with, so a spare can
+/// be started at launch with the prompt the first turn will use. Separate from
+/// the settings store: it is a cache, not a setting.
+const SPARE_STORE_FILE: &str = "cli_session.json";
+const SPARE_PROMPT_KEY: &str = "spare_system_prompt";
+/// Whether the remembered prompt was written for a spoken reply. The prompt
+/// carries the speech instructions only when Juno's voice is on
+/// (`agent::voice_policy`), so a spare primed from it at launch is only
+/// worth starting when the voice is still the same.
+const SPARE_VOICE_KEY: &str = "spare_voice";
 
 /// What a turn produced, or that there was no persistent session to run it in.
 pub enum TurnOutcome {
@@ -114,19 +183,37 @@ pub enum TurnOutcome {
     Unavailable,
 }
 
-/// Everything a turn needs. Borrowed, because the caller owns all of it already.
-pub struct TurnRequest<'a> {
-    pub binary: &'a Path,
-    pub model: &'a str,
-    pub system_prompt: Option<&'a str>,
-    pub mcp_config: Option<&'a Path>,
+/// Everything a `claude` process is born with except the session it is pinned
+/// to. A live process cannot be talked out of any of it, so it is also what a
+/// process is fingerprinted by ([`signature_of`]).
+#[derive(Clone, Debug)]
+pub struct LaunchConfig {
+    pub binary: PathBuf,
+    pub model: String,
+    /// The CLI's `--effort`, resolved the same way the one-shot path does.
+    pub effort: String,
+    /// Ask for raw streaming events, so text reaches the screen and the TTS
+    /// splitter a few words at a time instead of one whole block at a time.
+    /// False only for a `claude` build the one-shot path has already seen
+    /// reject the flag.
+    pub include_partial_messages: bool,
+    pub system_prompt: Option<String>,
+    pub mcp_config: Option<PathBuf>,
     /// Extra system-prompt guidance, appended only when `mcp_config` is present.
-    pub mcp_guidance: &'a str,
+    pub mcp_guidance: &'static str,
     /// Whether the CLI may load the MCP servers on the person's own Claude
     /// account. When false, `spawn_args` passes `--strict-mcp-config` so only
     /// what `mcp_config` names loads. Spawn-time: part of the session
     /// signature, so flipping the setting replaces the process (LAC-4056).
     pub load_account_mcp: bool,
+    /// Per-send approval (LAC-4058): route the CLI's permission prompts into
+    /// Juno's approval sheet instead of skipping permissions.
+    pub ask_before_send: bool,
+}
+
+/// Everything a turn needs. Borrowed, because the caller owns all of it already.
+pub struct TurnRequest<'a> {
+    pub launch: &'a LaunchConfig,
     pub conversation_id: &'a str,
     /// The CLI session this conversation runs in.
     pub session_id: &'a str,
@@ -136,28 +223,54 @@ pub struct TurnRequest<'a> {
     /// ("Session ID <id> is already in use"), verified against CLI 2.1.278.
     pub session_is_new: bool,
     pub query: &'a str,
+    /// The effort this turn runs at. Can differ from `launch.effort`, which is
+    /// only what the process was born with: a spoken turn runs lower than a
+    /// typed one, and the live process is switched with
+    /// [`effort_request`] rather than replaced, so the warm process and the
+    /// spare survive the switch.
+    pub effort: &'a str,
+    /// Images the person attached to this turn, as base64 data URLs. They ride
+    /// the stream-json user frame as image content blocks, the same shape the
+    /// Anthropic API path sends.
+    pub images: &'a [String],
     pub app_handle: &'a tauri::AppHandle,
     pub message_id: Option<String>,
     pub cancel_rx: Option<crate::state::CancelReceiver>,
-    /// Per-send approval (LAC-4058): route the CLI's permission prompts into
-    /// Juno's approval sheet instead of skipping permissions.
-    pub ask_before_send: bool,
 }
 
-/// Is the experimental persistent-session path turned on?
+/// What [`run_turn`] did, and in which CLI session.
+pub struct TurnResult {
+    /// The session the turn ran in. Usually the request's, but a new conversation
+    /// that adopted the warm spare runs in the spare's session, and the caller must
+    /// remember *this* id for the next message to resume.
+    pub session_id: String,
+    pub outcome: Result<TurnOutcome, AgentError>,
+}
+
+/// Is the persistent-session path turned on?
 ///
-/// Default false, and deliberately read fresh from the store rather than cached:
-/// the point of the flag is that it can be turned off without restarting the app.
+/// Default true. A person who has never touched the switch has no value in the
+/// store and gets the default; one who turned it off has an explicit `false`
+/// that is respected. Read fresh from the store rather than cached, so turning
+/// it off needs no restart.
 pub fn is_enabled(app: &tauri::AppHandle) -> bool {
     use tauri_plugin_store::StoreExt;
-    app.store(SETTINGS_STORE_FILE)
+    let stored = app
+        .store(SETTINGS_STORE_FILE)
         .ok()
-        .and_then(|store| store.get(store_keys::CLI_PERSISTENT_SESSION_ENABLED))
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
+        .and_then(|store| store.get(store_keys::CLI_PERSISTENT_SESSION_ENABLED));
+    enabled_from_store(stored.as_ref())
 }
 
-/// Read the experimental persistent-session flag.
+/// The flag's value given what the store holds. Anything but an explicit
+/// boolean, including nothing at all, is the default.
+fn enabled_from_store(stored: Option<&Value>) -> bool {
+    stored
+        .and_then(Value::as_bool)
+        .unwrap_or(crate::constants::settings::defaults::CLI_PERSISTENT_SESSION_ENABLED)
+}
+
+/// Read the persistent-session flag.
 #[tauri::command]
 pub async fn get_cli_persistent_session_enabled(
     app_handle: tauri::AppHandle,
@@ -165,7 +278,15 @@ pub async fn get_cli_persistent_session_enabled(
     Ok(is_enabled(&app_handle))
 }
 
-/// Turn the experimental persistent-session path on or off.
+/// Start a prewarm in the background. A plain fn, not inlined into the async
+/// command below: the prewarm reaches Juno's MCP server, whose settings tool
+/// calls that command, and spawning it inline makes the command's future type
+/// depend on itself (E0391).
+fn spawn_prewarm(app_handle: tauri::AppHandle) {
+    tauri::async_runtime::spawn(super::claude_cli::prewarm_persistent_session(app_handle));
+}
+
+/// Turn the persistent-session path on or off.
 ///
 /// Turning it off kills every live process immediately rather than waiting for the
 /// reaper, because "off" should mean off. Nothing is lost: each conversation's CLI
@@ -188,7 +309,10 @@ pub async fn set_cli_persistent_session_enabled(
         .save()
         .map_err(|e| format!("Failed to save settings store: {e}"))?;
 
-    if !enabled {
+    if enabled {
+        resume_spares();
+        spawn_prewarm(app_handle.clone());
+    } else {
         shutdown_all().await;
     }
     info!(
@@ -217,6 +341,16 @@ struct CliSession {
     child: std::sync::Mutex<tokio::process::Child>,
     /// Unix seconds of the last turn, for the idle reaper.
     last_used: AtomicU64,
+    /// The conversation this process runs, which is where a turn Claude starts
+    /// on its own is shown. `None` for the warm spare until it is adopted.
+    owner: std::sync::Mutex<Option<String>>,
+    /// Turns waiting for `inbox`, and the signal that asks the watcher holding
+    /// it between turns to step aside (see [`watch_between_turns`]).
+    turns_waiting: AtomicUsize,
+    turn_wanted: Notify,
+    /// The effort the process is running at now: born with `--effort`, then
+    /// whatever the last [`effort_request`] set.
+    live_effort: std::sync::Mutex<String>,
 }
 
 impl CliSession {
@@ -243,6 +377,34 @@ impl CliSession {
     fn idle_for(&self) -> Duration {
         Duration::from_secs(now_secs().saturating_sub(self.last_used.load(Ordering::Relaxed)))
     }
+
+    fn owner(&self) -> Option<String> {
+        self.owner.lock().ok().and_then(|owner| owner.clone())
+    }
+
+    fn set_owner(&self, conversation_id: &str) {
+        if let Ok(mut owner) = self.owner.lock() {
+            *owner = Some(conversation_id.to_string());
+        }
+    }
+
+    /// Take the stream for a turn. Between turns the watcher holds it; this
+    /// asks it to step aside, and it does unless it is showing a turn Claude
+    /// started, which the CLI would finish before running ours anyway.
+    async fn lock_for_turn(&self) -> TokioMutexGuard<'_, mpsc::UnboundedReceiver<Value>> {
+        // Counted down on drop, so a turn abandoned while it waits cannot
+        // leave the watcher stepping aside forever.
+        struct Waiting<'a>(&'a AtomicUsize);
+        impl Drop for Waiting<'_> {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+        self.turns_waiting.fetch_add(1, Ordering::SeqCst);
+        let _waiting = Waiting(&self.turns_waiting);
+        self.turn_wanted.notify_waiters();
+        self.inbox.lock().await
+    }
 }
 
 fn now_secs() -> u64 {
@@ -265,6 +427,9 @@ fn sessions() -> &'static Registry {
 /// `kill_on_drop` covers a drop on a live runtime; it does not cover the app being
 /// torn down around these processes, which is what this is for.
 pub async fn shutdown_all() {
+    // First, so a refill already scheduled cannot start a spare behind us.
+    SPARE_HALTED.store(true, Ordering::Relaxed);
+    stop_spare();
     let mut map = sessions().lock().await;
     for (conversation, session) in map.drain() {
         debug!("[CliSession] Shutting down session for conversation {conversation}");
@@ -284,6 +449,9 @@ fn ensure_reaper() {
             loop {
                 tokio::time::sleep(REAP_INTERVAL).await;
                 reap_idle().await;
+                // Also the spare's health check: one that exited on its own is
+                // counted and, within the backoff, replaced.
+                refill_spare_from_last();
             }
         });
     }
@@ -307,6 +475,285 @@ async fn evict(conversation_id: &str) {
     let mut map = sessions().lock().await;
     if let Some(session) = map.remove(conversation_id) {
         session.kill();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The warm spare (see the module docs)
+// ---------------------------------------------------------------------------
+
+/// The one idle process kept booted for the next new conversation, and what is
+/// needed to keep one there.
+///
+/// Behind a `std` mutex: nothing here awaits, and the spawn itself happens with
+/// the lock released.
+#[derive(Default)]
+struct SpareState {
+    slot: Option<Arc<CliSession>>,
+    /// What the next spare is spawned with: the most recent turn's configuration,
+    /// or the one primed at launch.
+    config: Option<LaunchConfig>,
+    /// For the reaper's refill, which has no turn to borrow a handle from.
+    app: Option<tauri::AppHandle>,
+    /// Spawn failures and spares that exited on their own, in a row.
+    failures: u32,
+    retry_after: Option<Instant>,
+    /// A spawn is in flight with the lock released.
+    spawning: bool,
+}
+
+impl SpareState {
+    /// Hand the spare to a turn, if it is alive and was born with `signature`.
+    ///
+    /// A dead spare counts as a failure; a mismatched one is killed and is not a
+    /// failure (the settings moved, the process did nothing wrong). Either way
+    /// the turn starts cold, exactly as it did before there was a spare.
+    fn take(&mut self, signature: &str) -> Option<Arc<CliSession>> {
+        let spare = self.slot.take()?;
+        if spare.is_dead() {
+            warn!("[CliSession] Warm spare had exited; starting this conversation cold");
+            spare.kill();
+            self.record_failure(Instant::now());
+            return None;
+        }
+        if spare.signature != signature {
+            info!("[CliSession] Warm spare was started with other settings; starting cold and replacing it");
+            spare.kill();
+            return None;
+        }
+        self.failures = 0;
+        self.retry_after = None;
+        Some(spare)
+    }
+
+    fn record_failure(&mut self, now: Instant) {
+        self.failures = self.failures.saturating_add(1);
+        self.retry_after = spare_retry_delay(self.failures).map(|delay| now + delay);
+        if self.failures >= MAX_SPARE_FAILURES {
+            warn!(
+                "[CliSession] Warm spare failed {} times in a row; not starting another until the settings change",
+                self.failures
+            );
+        }
+    }
+
+    /// Whether a spawn may start now.
+    fn may_spawn(&self, now: Instant) -> bool {
+        !self.spawning
+            && self.failures < MAX_SPARE_FAILURES
+            && self.retry_after.is_none_or(|at| now >= at)
+    }
+}
+
+/// How long to wait before the next spare after `failures` in a row, or `None`
+/// once Juno should stop trying. Never a tight loop: the reaper is the only
+/// thing that retries on its own, once a minute.
+fn spare_retry_delay(failures: u32) -> Option<Duration> {
+    match failures {
+        0 => Some(Duration::ZERO),
+        1 => Some(Duration::from_secs(30)),
+        2 => Some(Duration::from_secs(120)),
+        _ => None,
+    }
+}
+
+static SPARE: OnceLock<std::sync::Mutex<SpareState>> = OnceLock::new();
+
+/// Set by [`shutdown_all`] (exit, or the setting turned off) so a refill already
+/// scheduled cannot start a process after everything was killed. Cleared only
+/// by turning the setting back on.
+static SPARE_HALTED: AtomicBool = AtomicBool::new(false);
+
+fn spare_state() -> std::sync::MutexGuard<'static, SpareState> {
+    // The state is plain data; a panic elsewhere while holding it is no reason
+    // to stop keeping a spare.
+    SPARE
+        .get_or_init(|| std::sync::Mutex::new(SpareState::default()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Take the spare for a turn whose process will be born with `signature`.
+fn take_spare(signature: &str) -> Option<Arc<CliSession>> {
+    spare_state().take(signature)
+}
+
+/// Kill the spare and forget its configuration, so nothing refills it until a
+/// Claude CLI turn (or a launch-time prime) supplies a configuration again.
+/// For a provider switch away from the CLI, and for shutdown.
+pub fn stop_spare() {
+    let mut state = spare_state();
+    state.config = None;
+    if let Some(spare) = state.slot.take() {
+        info!("[CliSession] Stopping warm spare {}", spare.session_id);
+        spare.kill();
+    }
+}
+
+/// Allow spares again after [`shutdown_all`]. For the setting being turned on.
+pub fn resume_spares() {
+    SPARE_HALTED.store(false, Ordering::Relaxed);
+}
+
+/// Make sure a spare matching `config` exists, spawning one if needed. For
+/// launch and for settings changes; turns refill through [`schedule_spare`].
+pub fn prime_spare(app: &tauri::AppHandle, config: LaunchConfig) {
+    ensure_reaper();
+    fill_spare(app, config);
+}
+
+/// [`fill_spare`] after `delay`, off the caller's path.
+fn schedule_spare(app: &tauri::AppHandle, config: LaunchConfig, delay: Duration) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(delay).await;
+        fill_spare(&app, config);
+    });
+}
+
+/// The reaper's refill: replace a spare that died, using the last configuration.
+fn refill_spare_from_last() {
+    let (app, config) = {
+        let state = spare_state();
+        (state.app.clone(), state.config.clone())
+    };
+    if let (Some(app), Some(config)) = (app, config) {
+        fill_spare(&app, config);
+    }
+}
+
+/// Bring the spare in line with `config`: keep a matching live one, replace a
+/// mismatched or dead one, and spawn when there is none, within the backoff.
+fn fill_spare(app: &tauri::AppHandle, config: LaunchConfig) {
+    if SPARE_HALTED.load(Ordering::Relaxed) || !is_enabled(app) {
+        return;
+    }
+    let signature = signature_of(&config);
+    let now = Instant::now();
+
+    // `Some(persist_prompt)` when a spawn should start, with the lock released.
+    let spawn = {
+        let mut state = spare_state();
+        state.app = Some(app.clone());
+
+        let previous = state.config.as_ref();
+        let config_changed = previous.map(signature_of).as_deref() != Some(signature.as_str());
+        let prompt_changed =
+            previous.map(|c| c.system_prompt.as_deref()) != Some(config.system_prompt.as_deref());
+        if config_changed {
+            // New settings get a fresh set of attempts.
+            state.failures = 0;
+            state.retry_after = None;
+            state.config = Some(config.clone());
+        }
+
+        if let Some(spare) = state.slot.take() {
+            if spare.is_dead() {
+                warn!(
+                    "[CliSession] Warm spare {} exited on its own",
+                    spare.session_id
+                );
+                spare.kill();
+                state.record_failure(now);
+            } else if spare.signature != signature {
+                info!("[CliSession] Settings changed; replacing the warm spare");
+                spare.kill();
+            } else {
+                state.slot = Some(spare);
+            }
+        }
+
+        if state.slot.is_some() || !state.may_spawn(now) {
+            None
+        } else {
+            state.spawning = true;
+            Some(prompt_changed)
+        }
+    };
+
+    let Some(persist_prompt) = spawn else {
+        return;
+    };
+    let voice_now = crate::agent::voice_policy::voice_enabled_now(app);
+    if persist_prompt || remembered_voice(app) != Some(voice_now) {
+        remember_system_prompt(app, config.system_prompt.as_deref(), voice_now);
+    }
+
+    // Lock released: spawning forks a process.
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let spawned = spawn_session(
+        &config,
+        &session_id,
+        true,
+        "the warm spare",
+        signature.clone(),
+    );
+
+    let mut state = spare_state();
+    state.spawning = false;
+    match spawned {
+        Ok(session) => {
+            let still_wanted = !SPARE_HALTED.load(Ordering::Relaxed)
+                && state.slot.is_none()
+                && state.config.as_ref().map(signature_of).as_deref() == Some(signature.as_str());
+            if still_wanted {
+                let session = Arc::new(session);
+                watch_between_turns(&session, app);
+                state.slot = Some(session);
+            } else {
+                // Shut down, superseded by newer settings, or raced: not needed.
+                session.kill();
+            }
+        }
+        Err(e) => {
+            warn!("[CliSession] Could not start a warm spare: {e}");
+            state.record_failure(now);
+        }
+    }
+}
+
+/// The system prompt the last turn ran with, saved so a spare can be started at
+/// launch before any turn has run. `None` before the first turn ever.
+pub fn remembered_system_prompt(app: &tauri::AppHandle) -> Option<String> {
+    use tauri_plugin_store::StoreExt;
+    app.store(SPARE_STORE_FILE)
+        .ok()?
+        .get(SPARE_PROMPT_KEY)?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Whether Juno's voice was on when the remembered prompt was saved. `None`
+/// before the first turn, and for a store written before this was recorded.
+pub fn remembered_voice(app: &tauri::AppHandle) -> Option<bool> {
+    use tauri_plugin_store::StoreExt;
+    app.store(SPARE_STORE_FILE)
+        .ok()?
+        .get(SPARE_VOICE_KEY)?
+        .as_bool()
+}
+
+fn remember_system_prompt(app: &tauri::AppHandle, prompt: Option<&str>, voice: bool) {
+    use tauri_plugin_store::StoreExt;
+    let store = match app.store(SPARE_STORE_FILE) {
+        Ok(store) => store,
+        Err(e) => {
+            debug!("[CliSession] Could not open {SPARE_STORE_FILE}: {e}");
+            return;
+        }
+    };
+    match prompt {
+        Some(prompt) => {
+            store.set(SPARE_PROMPT_KEY, Value::String(prompt.to_string()));
+            store.set(SPARE_VOICE_KEY, Value::Bool(voice));
+        }
+        None => {
+            store.delete(SPARE_PROMPT_KEY);
+            store.delete(SPARE_VOICE_KEY);
+        }
+    }
+    if let Err(e) = store.save() {
+        debug!("[CliSession] Could not save {SPARE_STORE_FILE}: {e}");
     }
 }
 
@@ -336,23 +783,80 @@ fn signature_parts(
     )
 }
 
-fn signature_of(req: &TurnRequest<'_>) -> String {
-    signature_parts(
-        req.model,
-        req.system_prompt,
-        req.mcp_config,
-        req.load_account_mcp,
-        req.ask_before_send,
+fn signature_of(launch: &LaunchConfig) -> String {
+    // Effort, the partial-messages flag, the binary and the MCP guidance are
+    // spawn-time too. Appended rather than threaded through `signature_parts`,
+    // whose shape the tests pin.
+    format!(
+        "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
+        signature_parts(
+            &launch.model,
+            launch.system_prompt.as_deref(),
+            launch.mcp_config.as_deref(),
+            launch.load_account_mcp,
+            launch.ask_before_send,
+        ),
+        launch.effort,
+        launch.include_partial_messages,
+        launch.binary.to_string_lossy(),
+        launch.mcp_guidance
     )
 }
 
-/// The session for this conversation, spawning one if needed.
+/// Names the first spawn-time setting that differs between two signatures, in
+/// the order `signature_of` writes them.
+fn signature_change(old: &str, new: &str) -> &'static str {
+    const PARTS: [&str; 9] = [
+        "the model changed",
+        "the system prompt changed",
+        "the MCP config changed",
+        "account MCP loading changed",
+        "ask-before-send changed",
+        "the effort changed",
+        "the partial-messages flag changed",
+        "the CLI binary changed",
+        "the MCP guidance changed",
+    ];
+    let mut old_parts = old.split('\u{1f}');
+    let mut new_parts = new.split('\u{1f}');
+    for name in PARTS {
+        if old_parts.next() != new_parts.next() {
+            return name;
+        }
+    }
+    "the launch settings changed"
+}
+
+/// Where the process a turn runs in came from. Logged per turn, so cold, spare
+/// and warm first-token times are never averaged together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Origin {
+    /// Already running for this conversation.
+    Warm,
+    /// The warm spare, adopted by this conversation's first turn.
+    Spare,
+    /// Spawned for this turn.
+    Cold,
+}
+
+impl Origin {
+    fn timing_label(self) -> &'static str {
+        match self {
+            Origin::Warm => "claude_cli/persistent-warm",
+            Origin::Spare => "claude_cli/persistent-spare",
+            Origin::Cold => "claude_cli/persistent-cold",
+        }
+    }
+}
+
+/// The session for this conversation, spawning or adopting one if needed, and
+/// where it came from.
 ///
 /// Returns `None` when a persistent session could not be had, which is never fatal:
 /// the caller falls back to the one-shot path.
-async fn acquire(req: &TurnRequest<'_>) -> Option<Arc<CliSession>> {
+async fn acquire(req: &TurnRequest<'_>) -> Option<(Arc<CliSession>, Origin)> {
     ensure_reaper();
-    let signature = signature_of(req);
+    let signature = signature_of(req.launch);
 
     // Check-then-spawn, with the registry lock released across the spawn. The lock
     // is reacquired and rechecked afterwards so two turns racing on a cold
@@ -364,19 +868,63 @@ async fn acquire(req: &TurnRequest<'_>) -> Option<Arc<CliSession>> {
                 && existing.session_id == req.session_id
                 && !existing.is_dead();
             if usable {
-                return Some(Arc::clone(existing));
+                return Some((Arc::clone(existing), Origin::Warm));
             }
+            // A replaced process costs the next turn a cold boot. Say why.
+            let reason = if existing.is_dead() {
+                "the process exited"
+            } else if existing.session_id != req.session_id {
+                "the CLI session id changed"
+            } else {
+                signature_change(&existing.signature, &signature)
+            };
+            info!(
+                "[CliSession] Replacing the process for conversation {}: {reason}",
+                req.conversation_id
+            );
         }
     }
 
     // Whatever was there is stale, dead, or configured differently.
     evict(req.conversation_id).await;
 
-    let spawned = match spawn_session(req, signature.clone()) {
-        Ok(session) => Arc::new(session),
-        Err(e) => {
-            warn!("[CliSession] Could not start a persistent Claude CLI session: {e}");
-            return None;
+    // A conversation with no CLI session yet can run in the warm spare: it was
+    // pinned to a fresh id that nothing else has used. One with history cannot,
+    // because it has to `--resume` its own id.
+    let adopted = if req.session_is_new {
+        take_spare(&signature)
+    } else {
+        None
+    };
+
+    let (spawned, origin) = match adopted {
+        Some(spare) => {
+            info!(
+                "[CliSession] Adopted warm spare {} for conversation {}",
+                spare.session_id, req.conversation_id
+            );
+            spare.touch();
+            (spare, Origin::Spare)
+        }
+        None => {
+            let label = format!("conversation {}", req.conversation_id);
+            match spawn_session(
+                req.launch,
+                req.session_id,
+                req.session_is_new,
+                &label,
+                signature.clone(),
+            ) {
+                Ok(session) => {
+                    let session = Arc::new(session);
+                    watch_between_turns(&session, req.app_handle);
+                    (session, Origin::Cold)
+                }
+                Err(e) => {
+                    warn!("[CliSession] Could not start a persistent Claude CLI session: {e}");
+                    return None;
+                }
+            }
         }
     };
 
@@ -385,7 +933,7 @@ async fn acquire(req: &TurnRequest<'_>) -> Option<Arc<CliSession>> {
         if existing.signature == signature && !existing.is_dead() {
             // Another turn won the race. Ours is surplus.
             spawned.kill();
-            return Some(Arc::clone(existing));
+            return Some((Arc::clone(existing), Origin::Cold));
         }
     }
 
@@ -404,23 +952,41 @@ async fn acquire(req: &TurnRequest<'_>) -> Option<Arc<CliSession>> {
         }
     }
 
+    // From here on, a turn Claude starts in this process is shown in this
+    // conversation. A spare had no owner until now.
+    spawned.set_owner(req.conversation_id);
     map.insert(req.conversation_id.to_string(), Arc::clone(&spawned));
-    Some(spawned)
+    Some((spawned, origin))
 }
 
 /// Spawn the process and the two tasks that own its pipes.
-fn spawn_session(req: &TurnRequest<'_>, signature: String) -> Result<CliSession, AgentError> {
-    let args = spawn_args(req);
+///
+/// `owner` is only for the log line: a conversation, or the warm spare.
+fn spawn_session(
+    launch: &LaunchConfig,
+    session_id: &str,
+    session_is_new: bool,
+    owner: &str,
+    signature: String,
+) -> Result<CliSession, AgentError> {
+    let args = spawn_args(launch, session_id, session_is_new);
     info!(
-        "[CliSession] Starting persistent Claude CLI session {} ({}) for conversation {}",
-        req.session_id,
-        if req.session_is_new { "new" } else { "resumed" },
-        req.conversation_id
+        "[CliSession] Starting persistent Claude CLI session {} ({}) for {}",
+        session_id,
+        if session_is_new { "new" } else { "resumed" },
+        owner
     );
     debug!("[CliSession] args: {}", args.join(" "));
 
-    let mut child = claude_command(req.binary)
+    let mut child = claude_command(&launch.binary)
         .args(&args)
+        // A process that outlives its turn can be woken by its own background
+        // work: a finished background Bash task or subagent, a cron job, a
+        // scheduled wakeup. Each starts a turn nobody asked for, which Juno shows
+        // as Claude's own but cannot stop from spending tokens (spike, Q2a).
+        // Switch those sources off at the root.
+        // Unknown to an older CLI, which simply ignores them.
+        .envs(UNSOLICITED_TURN_ENV)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -503,18 +1069,22 @@ fn spawn_session(req: &TurnRequest<'_>, signature: String) -> Result<CliSession,
     }
 
     Ok(CliSession {
-        session_id: req.session_id.to_string(),
+        session_id: session_id.to_string(),
         signature,
         to_child,
         inbox: TokioMutex::new(frames_rx),
         child: std::sync::Mutex::new(child),
         last_used: AtomicU64::new(now_secs()),
+        owner: std::sync::Mutex::new(None),
+        turns_waiting: AtomicUsize::new(0),
+        turn_wanted: Notify::new(),
+        live_effort: std::sync::Mutex::new(launch.effort.clone()),
     })
 }
 
 /// The spawn arguments. Deliberately close to the one-shot path's `build_args`. The
 /// only real differences are the stdin input format and how the session is named.
-fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
+fn spawn_args(launch: &LaunchConfig, session_id: &str, session_is_new: bool) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
         // Messages arrive on stdin for the life of the process rather than as a
@@ -524,8 +1094,21 @@ fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--model".to_string(),
-        req.model.to_string(),
+        launch.model.clone(),
+        // Same per-turn effort as the one-shot path. Without it a persistent
+        // turn would run at the CLI's own default instead of Juno's.
+        "--effort".to_string(),
+        launch.effort.clone(),
+        "--disallowedTools".to_string(),
+        WAKE_TOOLS.to_string(),
     ];
+
+    // Raw streaming events, as on the one-shot path. Without them a persistent
+    // turn delivers each text block whole, once the model has finished it, so
+    // speech cannot start until the whole first block exists.
+    if launch.include_partial_messages {
+        args.push(super::claude_cli::PARTIAL_MESSAGES_FLAG.to_string());
+    }
 
     // Mirrors the one-shot path's build_args (LAC-4056): with "Load account
     // MCP connectors" off, --strict-mcp-config keeps the person's claude.ai
@@ -533,15 +1116,15 @@ fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
     // Same extra case as `build_args`: with no MCP server there is nothing
     // to answer a permission prompt, so connectors must not load into a
     // spawn that falls back to --dangerously-skip-permissions.
-    if !req.load_account_mcp || (req.ask_before_send && req.mcp_config.is_none()) {
+    if !launch.load_account_mcp || (launch.ask_before_send && launch.mcp_config.is_none()) {
         args.push("--strict-mcp-config".to_string());
     }
 
     // Permission posture (LAC-4058): same rule as the one-shot path's
     // `build_args`, through the same seam.
     args.extend(super::cli_approval::permission_args(
-        req.ask_before_send,
-        req.mcp_config.is_some(),
+        launch.ask_before_send,
+        launch.mcp_config.is_some(),
     ));
 
     // A fresh id is pinned; one that already exists must be resumed. Getting this
@@ -550,23 +1133,23 @@ fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
     // transcript to disk, so the one-shot path can `--resume` this exact id if the
     // process dies. `--no-session-persistence` would remove that safety net and must
     // never be passed here.
-    if req.session_is_new {
+    if session_is_new {
         args.push("--session-id".to_string());
     } else {
         args.push("--resume".to_string());
     }
-    args.push(req.session_id.to_string());
+    args.push(session_id.to_string());
 
-    if let Some(mcp_path) = req.mcp_config {
+    if let Some(mcp_path) = launch.mcp_config.as_ref() {
         args.push("--mcp-config".to_string());
         args.push(mcp_path.to_string_lossy().into_owned());
         args.push("--append-system-prompt".to_string());
-        args.push(req.mcp_guidance.to_string());
+        args.push(launch.mcp_guidance.to_string());
     }
 
-    if let Some(prompt) = req.system_prompt {
+    if let Some(prompt) = launch.system_prompt.as_ref() {
         args.push("--system-prompt".to_string());
-        args.push(prompt.to_string());
+        args.push(prompt.clone());
     }
 
     args
@@ -577,14 +1160,54 @@ fn spawn_args(req: &TurnRequest<'_>) -> Vec<String> {
 /// Emits the same Tauri streaming events as the one-shot path. Returns
 /// [`TurnOutcome::Unavailable`], having emitted nothing, whenever a persistent
 /// session could not be used — the caller then runs the turn the old way.
-pub async fn run_turn(req: TurnRequest<'_>) -> Result<TurnOutcome, AgentError> {
-    let Some(session) = acquire(&req).await else {
-        return Ok(TurnOutcome::Unavailable);
-    };
+pub async fn run_turn(req: TurnRequest<'_>) -> TurnResult {
+    let acquired = acquire(&req).await;
 
+    // Keep a spare ready for the next new conversation, whatever happened here:
+    // this turn's configuration is the best guess at the next one's.
+    schedule_spare(req.app_handle, req.launch.clone(), SPARE_REFILL_DELAY);
+
+    let Some((session, origin)) = acquired else {
+        return TurnResult {
+            session_id: req.session_id.to_string(),
+            outcome: Ok(TurnOutcome::Unavailable),
+        };
+    };
+    TurnResult {
+        session_id: session.session_id.clone(),
+        outcome: run_in_session(&req, session, origin).await,
+    }
+}
+
+/// Content blocks for one user turn on the stream-json stdin: attachments
+/// first, then the text, mirroring the Anthropic API path — a turn reads as
+/// "here is a picture, now do this". An attachment that is not a base64 image
+/// data URL is dropped rather than sent as a block the CLI would reject.
+fn user_content_blocks(query: &str, images: &[String]) -> Vec<Value> {
+    let mut blocks = Vec::with_capacity(images.len() + 1);
+    for url in images {
+        let Some((media_type, data)) = super::anthropic::parse_data_url(url) else {
+            warn!("[CliSession] Dropping an attachment that is not a base64 image data URL");
+            continue;
+        };
+        blocks.push(json!({
+            "type": "image",
+            "source": { "type": "base64", "media_type": media_type, "data": data }
+        }));
+    }
+    blocks.push(json!({ "type": "text", "text": query }));
+    blocks
+}
+
+/// [`run_turn`], once there is a process to run it in.
+async fn run_in_session(
+    req: &TurnRequest<'_>,
+    session: Arc<CliSession>,
+    origin: Origin,
+) -> Result<TurnOutcome, AgentError> {
     // Locking the inbox is what serializes turns: one at a time per process, which
     // is also the only order the CLI itself will run them in.
-    let mut inbox = session.inbox.lock().await;
+    let mut inbox = session.lock_for_turn().await;
 
     if session.is_dead() {
         drop(inbox);
@@ -592,16 +1215,9 @@ pub async fn run_turn(req: TurnRequest<'_>) -> Result<TurnOutcome, AgentError> {
         return Ok(TurnOutcome::Unavailable);
     }
 
-    // Anything still on the stream belongs to a turn that is over, or to a turn the
-    // CLI started by itself. Neither is ours. Clear it so the lifecycle scan below
-    // starts from a clean stream.
-    let mut discarded = 0usize;
-    while inbox.try_recv().is_ok() {
-        discarded += 1;
-    }
-    if discarded > 0 {
-        debug!("[CliSession] Discarded {discarded} stale frame(s) before this turn");
-    }
+    // Nothing is cleared off the stream first. Whatever is waiting there is a
+    // turn Claude started on its own (the watcher between turns had not reached
+    // it yet), and `stream_turn` shows it as one rather than throwing it away.
 
     let command_uuid = uuid::Uuid::new_v4().to_string();
     let message = json!({
@@ -610,7 +1226,7 @@ pub async fn run_turn(req: TurnRequest<'_>) -> Result<TurnOutcome, AgentError> {
         // It is the only thing that distinguishes this turn from one the CLI
         // decided to run on its own. Without it there is no safe reader.
         "uuid": command_uuid,
-        "message": { "role": "user", "content": [{ "type": "text", "text": req.query }] }
+        "message": { "role": "user", "content": user_content_blocks(req.query, req.images) }
     });
 
     let line = match serde_json::to_string(&message) {
@@ -622,14 +1238,21 @@ pub async fn run_turn(req: TurnRequest<'_>) -> Result<TurnOutcome, AgentError> {
         }
     };
 
+    // Before the message, on the same stdin, so the CLI applies it first.
+    align_effort(&session, req.effort);
+
     if session.to_child.send(line).is_err() {
         drop(inbox);
         evict(req.conversation_id).await;
         return Ok(TurnOutcome::Unavailable);
     }
     session.touch();
+    // A cold process pays its whole boot before the first token; a warm one
+    // does not. The timing line says which, so the two are never averaged.
+    crate::turn_timing::note_llm(origin.timing_label(), &req.launch.model);
+    crate::turn_timing::mark(crate::turn_timing::Stage::LlmRequestSent);
 
-    let outcome = stream_turn(&session, &mut inbox, &req, &command_uuid).await;
+    let outcome = stream_turn(&session, &mut inbox, req, &command_uuid).await;
     session.touch();
     drop(inbox);
 
@@ -655,20 +1278,537 @@ pub async fn run_turn(req: TurnRequest<'_>) -> Result<TurnOutcome, AgentError> {
 
 /// Whether a frame is the `command_lifecycle` acknowledgement of *our* turn.
 ///
-/// This is the correlation the whole persistent path hangs on: a turn is rendered
+/// This is the correlation the whole persistent path hangs on: a turn is Juno's
 /// if and only if a `command_lifecycle` frame carrying the exact `uuid` we put on
-/// the user message opens it. Anything else — a different uuid, a missing uuid, a
-/// non-string uuid, another frame type — is a turn the CLI started on its own
-/// (observed: a finishing background Bash task) and must stay invisible.
+/// the user message opens it. Anything else (a different uuid, a missing uuid, a
+/// non-string uuid, another frame type) belongs to a turn the CLI started on its
+/// own (observed: a finishing background Bash task). That turn is shown as its
+/// own turn, never as the answer to ours.
 fn lifecycle_frame_is_ours(frame: &Value, command_uuid: &str) -> bool {
     frame.get("type").and_then(Value::as_str) == Some("command_lifecycle")
         && frame.get("command_uuid").and_then(Value::as_str) == Some(command_uuid)
+}
+
+/// Where a frame belongs, seen from a turn waiting on its own uuid.
+#[derive(Debug, PartialEq, Eq)]
+enum Route {
+    /// A `command_lifecycle` frame for our uuid, with its state.
+    OurLifecycle(String),
+    /// Part of our turn, which has started.
+    Ours,
+    /// Part of a turn Claude started on its own.
+    Claude,
+    /// Protocol chatter with no turn behind it: someone else's lifecycle frame,
+    /// a control response.
+    Skip,
+}
+
+/// Sorts the stream for one of Juno's turns. Before our `started` frame,
+/// everything that is not protocol chatter is Claude's own turn; from it on,
+/// everything is ours (the CLI runs turns strictly in order).
+struct Correlator<'a> {
+    command_uuid: &'a str,
+    ours: bool,
+}
+
+impl<'a> Correlator<'a> {
+    fn new(command_uuid: &'a str) -> Self {
+        Self {
+            command_uuid,
+            ours: false,
+        }
+    }
+
+    fn route(&mut self, frame: &Value) -> Route {
+        match frame.get("type").and_then(Value::as_str).unwrap_or("") {
+            "command_lifecycle" => {
+                if !lifecycle_frame_is_ours(frame, self.command_uuid) {
+                    return Route::Skip;
+                }
+                let state = frame
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                if state == "started" {
+                    self.ours = true;
+                }
+                Route::OurLifecycle(state)
+            }
+            "control_response" => Route::Skip,
+            _ if self.ours => Route::Ours,
+            _ => Route::Claude,
+        }
+    }
+}
+
+/// Whether a frame proves a turn is running. A turn Claude starts is raised
+/// on the first of these, so a stray `system` frame or the `result` tail of a
+/// turn that is already over never flashes the bar.
+fn starts_a_turn(frame: &Value) -> bool {
+    matches!(
+        frame.get("type").and_then(Value::as_str),
+        Some("stream_event" | "assistant" | "user")
+    )
+}
+
+/// How a turn's `result` frame ended it.
+#[derive(Debug)]
+struct TurnEnd {
+    /// The interrupt landed: `aborted_streaming` (mid-generation) or
+    /// `aborted_tools` (mid-tool-call). Nothing more is shown or spoken.
+    aborted: bool,
+    /// The raw final text, tags included.
+    text: Option<String>,
+}
+
+/// Renders one turn's frames: the same frames, through the same one-shot path
+/// handlers, whether Juno asked for the turn or Claude started it. Text deltas
+/// reach the screen and the TTS splitter as they arrive, tool and reasoning
+/// indicators rise and fall, and the whole-message `assistant` frame is only a
+/// fallback.
+struct TurnRenderer {
+    app: Option<tauri::AppHandle>,
+    msg_id: String,
+    // Partial-message bookkeeping, exactly as the one-shot `process_stream`
+    // keeps it. Fresh per turn: block indices and message ids restart.
+    blocks: HashMap<u64, super::claude_cli::StreamBlock>,
+    pending_tools: HashMap<String, String>,
+    streamed_messages: std::collections::HashSet<String>,
+    partial_message_id: Option<String>,
+    saw_text_delta: bool,
+    // Whole-message fallback: `assistant` frames are cumulative per message, so
+    // the char cursor restarts for each new message in a tool loop.
+    fallback_message_id: Option<String>,
+    previous_chars: usize,
+    accumulated: String,
+    tts: crate::agent::tts_tags::TtsTagStream,
+    spoken: Vec<String>,
+    /// The person asked the turn to stop. Nothing more reaches the screen or
+    /// the speaker; tool indicators still come down.
+    muted: bool,
+}
+
+impl TurnRenderer {
+    fn new(app: Option<tauri::AppHandle>, msg_id: String) -> Self {
+        Self {
+            app,
+            msg_id,
+            blocks: HashMap::new(),
+            pending_tools: HashMap::new(),
+            streamed_messages: std::collections::HashSet::new(),
+            partial_message_id: None,
+            saw_text_delta: false,
+            fallback_message_id: None,
+            previous_chars: 0,
+            accumulated: String::new(),
+            tts: crate::agent::tts_tags::TtsTagStream::new(),
+            spoken: Vec::new(),
+            muted: false,
+        }
+    }
+
+    /// Render one frame. Returns how the turn ended when `frame` is its `result`.
+    fn feed(&mut self, frame: &Value) -> Option<TurnEnd> {
+        use super::claude_cli::{clear_finished_tools, ClaudeCliBrain};
+
+        match frame.get("type").and_then(Value::as_str).unwrap_or("") {
+            "stream_event" => {
+                if self.muted {
+                    return None;
+                }
+                if let Some(event) = frame.get("event") {
+                    ClaudeCliBrain::handle_stream_event(
+                        event,
+                        &self.app,
+                        &self.msg_id,
+                        &mut self.blocks,
+                        &mut self.pending_tools,
+                        &mut self.streamed_messages,
+                        &mut self.partial_message_id,
+                        &mut self.saw_text_delta,
+                        &mut self.tts,
+                        &mut self.accumulated,
+                        &mut self.spoken,
+                    );
+                }
+            }
+            // Tool results come back as a `user` turn; their indicators come down.
+            "user" => clear_finished_tools(frame, &self.app, &self.msg_id, &mut self.pending_tools),
+            "assistant" => {
+                if self.muted {
+                    return None;
+                }
+                let message = frame.get("message")?;
+                let message_id = message
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                // When the partial stream is live it has already shown and
+                // spoken every word of this message. Diffing it again would
+                // render each word twice and speak the answer twice over.
+                let already_streamed = match message_id.as_ref() {
+                    Some(id) => self.streamed_messages.contains(id),
+                    None => self.saw_text_delta,
+                };
+                if already_streamed {
+                    return None;
+                }
+                if self.fallback_message_id != message_id {
+                    self.fallback_message_id = message_id;
+                    self.previous_chars = 0;
+                }
+                let text = super::claude_cli::extract_text_from_message(message);
+                let chars = text.chars().count();
+                if chars <= self.previous_chars {
+                    return None;
+                }
+                // Char offsets, never byte offsets: slicing bytes panics on
+                // multi-byte UTF-8.
+                let delta: String = text.chars().skip(self.previous_chars).collect();
+                if self.previous_chars == 0 {
+                    ClaudeCliBrain::separate_text_block(
+                        &self.app,
+                        &self.msg_id,
+                        &mut self.tts,
+                        &mut self.accumulated,
+                        &mut self.spoken,
+                    );
+                }
+                self.previous_chars = chars;
+                ClaudeCliBrain::emit_display_text(
+                    &self.app,
+                    &self.msg_id,
+                    &delta,
+                    &mut self.tts,
+                    &mut self.accumulated,
+                    &mut self.spoken,
+                );
+            }
+            "result" => {
+                let subtype = frame.get("subtype").and_then(Value::as_str).unwrap_or("");
+                let terminal = frame
+                    .get("terminal_reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if let Some(ms) = frame.get("duration_ms").and_then(Value::as_u64) {
+                    info!("[CliSession] Turn duration: {ms}ms");
+                }
+                if let Some(cost) = frame.get("total_cost_usd").and_then(Value::as_f64) {
+                    info!("[CliSession] Turn cost: ${cost:.4}");
+                }
+                // `terminal_reason` is a closed protocol field, not an error
+                // message (LAC-3697).
+                let aborted = matches!(terminal, "aborted_streaming" | "aborted_tools");
+                if aborted {
+                    info!("[CliSession] Turn ended as {subtype}/{terminal}");
+                }
+                return Some(TurnEnd {
+                    aborted,
+                    text: frame
+                        .get("result")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                });
+            }
+            // `system/init` arrives at the head of every turn, not once per process.
+            // Nothing to do with it beyond noting the subtype.
+            "system" => {
+                // Hoisted out of the macro: tracing's expansion shadows `Value`
+                // with its own field trait of the same name (E0782).
+                let subtype = frame.get("subtype").and_then(Value::as_str).unwrap_or("?");
+                debug!("[CliSession] system/{subtype}");
+            }
+            other => debug!("[CliSession] frame '{other}' skipped"),
+        }
+        None
+    }
+
+    /// Nothing may be left spinning however the turn ended: a thinking block
+    /// the CLI never stopped, or a tool whose result never came.
+    fn wind_down(&mut self) {
+        super::claude_cli::close_open_thinking(&self.app, &mut self.blocks);
+        super::claude_cli::clear_pending_tools(&self.app, &self.msg_id, &mut self.pending_tools);
+    }
+
+    /// The text a completed turn leaves behind.
+    ///
+    /// Flushes the tag parser (a partial tag becomes display text, an
+    /// unterminated block is still spoken). The `result` frame carries the raw
+    /// final text, tags included: it is stripped for display, and spoken only
+    /// when the stream carried no text (see `claude_cli::result_text`).
+    fn complete(&mut self, raw: Option<String>) -> String {
+        super::claude_cli::ClaudeCliBrain::flush_display_text(
+            &self.app,
+            &self.msg_id,
+            &mut self.tts,
+            &mut self.accumulated,
+            &mut self.spoken,
+        );
+        let stream_carried_text = !self.spoken.is_empty() || !self.accumulated.trim().is_empty();
+        let display = raw.map(|raw| {
+            let (display, unspoken) = super::claude_cli::result_text(&raw, stream_carried_text);
+            if let Some(handle) = self.app.as_ref() {
+                emit_chunk(handle, String::new(), &self.msg_id, &unspoken);
+            }
+            self.spoken.extend(unspoken);
+            display
+        });
+        display.unwrap_or_else(|| self.accumulated.clone())
+    }
+}
+
+/// How a turn Claude started came to an end.
+enum OwnTurnEnd {
+    Finished(Option<String>),
+    /// Escape, or a turn that overran and was interrupted.
+    Cancelled,
+    /// The process went away mid-turn.
+    Lost,
+}
+
+/// A turn Claude started on its own, shown as it runs: its own bubble in the
+/// conversation that owns the process, speech, tool and cursor indicators, and
+/// (unless it is nested inside one of Juno's turns) the bar and Escape.
+struct OwnTurn {
+    stage: Stage,
+    renderer: TurnRenderer,
+    surface: TurnSurface,
+}
+
+impl OwnTurn {
+    async fn begin(app: &tauri::AppHandle, conversation_id: &str, nested: bool) -> Self {
+        let stage = Stage::begin(app, conversation_id, nested).await;
+        let msg_id = uuid::Uuid::new_v4().to_string();
+        // Off screen the bubble is not opened: the chat on screen belongs to
+        // another conversation. The text still streams to speech and the bar,
+        // and the history keeps it.
+        let mut surface = TurnSurface::new(app, msg_id.clone(), stage.on_screen());
+        surface.open();
+        Self {
+            stage,
+            renderer: TurnRenderer::new(Some(app.clone()), msg_id),
+            surface,
+        }
+    }
+
+    async fn finish(mut self, end: OwnTurnEnd) {
+        self.renderer.wind_down();
+        let (shown, kept, cancelled) = match end {
+            OwnTurnEnd::Finished(raw) => {
+                let text = self.renderer.complete(raw);
+                (text.clone(), text, false)
+            }
+            OwnTurnEnd::Cancelled => ("Cancelled".to_string(), String::new(), true),
+            // Fail silently: the bubble keeps what it already showed.
+            OwnTurnEnd::Lost => (self.renderer.accumulated.clone(), String::new(), true),
+        };
+        self.surface.close(shown);
+        self.stage.finish(kept, cancelled).await;
+    }
+}
+
+/// Resolves once `rx` reads true. Never, if its sender is gone.
+async fn until_set(rx: &mut tokio::sync::watch::Receiver<bool>) {
+    loop {
+        if *rx.borrow() {
+            return;
+        }
+        if rx.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
+/// Resolves once `rx` changes to true. A value already seen (the last Escape,
+/// still latched on the global channel) does not count: mark it seen with
+/// `borrow_and_update` once, before the first call.
+async fn until_raised(rx: &mut tokio::sync::watch::Receiver<bool>) {
+    loop {
+        if rx.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+        if *rx.borrow_and_update() {
+            return;
+        }
+    }
+}
+
+/// Read the stream between Juno's turns, so a turn Claude starts on its own
+/// is shown while it happens instead of being found, later, in front of the
+/// person's next question.
+///
+/// Holds `inbox` while idle and steps aside the moment a turn asks for it
+/// ([`CliSession::lock_for_turn`]). Ends with the process: the reader drops
+/// the stream at EOF.
+fn watch_between_turns(session: &Arc<CliSession>, app: &tauri::AppHandle) {
+    let session = Arc::clone(session);
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            // A turn wants the stream: let it take the lock before asking again.
+            if session.turns_waiting.load(Ordering::SeqCst) > 0 {
+                tokio::time::sleep(TURN_HANDOFF_POLL).await;
+                continue;
+            }
+            let mut inbox = session.inbox.lock().await;
+            // Armed before the check, so a turn arriving between the two is
+            // seen by one or the other.
+            let wanted = session.turn_wanted.notified();
+            tokio::pin!(wanted);
+            let _ = wanted.as_mut().enable();
+            if session.turns_waiting.load(Ordering::SeqCst) > 0 {
+                continue;
+            }
+            let frame = tokio::select! {
+                frame = inbox.recv() => frame,
+                _ = &mut wanted => continue,
+            };
+            let Some(frame) = frame else {
+                debug!("[CliSession] Stream closed; the watcher stops");
+                break;
+            };
+            if !starts_a_turn(&frame) {
+                let kind = frame.get("type").and_then(Value::as_str).unwrap_or("?");
+                debug!("[CliSession] Between turns: '{kind}' skipped");
+                continue;
+            }
+            match session.owner() {
+                Some(conversation_id) => {
+                    run_own_turn(&session, &mut inbox, &app, &conversation_id, frame).await;
+                }
+                None => {
+                    // The spare receives nothing until adopted, so it has no
+                    // reason to run a turn, and no conversation to show one in.
+                    debug!("[CliSession] The warm spare started a turn on its own; discarded");
+                }
+            }
+        }
+    });
+}
+
+/// Show a turn Claude started between Juno's turns, from its first frame to
+/// its `result`. Escape interrupts it like any other turn.
+async fn run_own_turn(
+    session: &CliSession,
+    inbox: &mut mpsc::UnboundedReceiver<Value>,
+    app: &tauri::AppHandle,
+    conversation_id: &str,
+    first: Value,
+) {
+    let mut turn = OwnTurn::begin(app, conversation_id, false).await;
+
+    // The roster row's stop (Escape on the focused row), and the global stop
+    // for when there is no row. A never-firing channel stands in for either.
+    let (_keep, never_cancels) = tokio::sync::watch::channel(false);
+    let mut row_rx = turn
+        .stage
+        .cancel_rx()
+        .unwrap_or_else(|| never_cancels.clone());
+    let mut global_rx = {
+        use tauri::Manager;
+        app.try_state::<crate::state::AppState>()
+            .map(|state| state.cancel_rx.clone())
+            .unwrap_or(never_cancels)
+    };
+    global_rx.borrow_and_update();
+
+    let turn_deadline = Instant::now() + TURN_TIMEOUT;
+    let mut cancel_deadline: Option<Instant> = None;
+    let mut end = turn.renderer.feed(&first);
+
+    let outcome = loop {
+        if let Some(done) = end.take() {
+            break if cancel_deadline.is_some() || done.aborted {
+                OwnTurnEnd::Cancelled
+            } else {
+                OwnTurnEnd::Finished(done.text)
+            };
+        }
+
+        let received = match cancel_deadline {
+            // Already interrupted: drain to the aborted result.
+            Some(deadline) => tokio::time::timeout_at(deadline.into(), inbox.recv()).await,
+            None => tokio::select! {
+                frame = tokio::time::timeout_at(turn_deadline.into(), inbox.recv()) => frame,
+                _ = async {
+                    tokio::select! {
+                        _ = until_set(&mut row_rx) => {}
+                        _ = until_raised(&mut global_rx) => {}
+                    }
+                } => {
+                    info!("[CliSession] Cancelled Claude's own turn; interrupting it");
+                    send_interrupt(session);
+                    turn.renderer.muted = true;
+                    cancel_deadline = Some(Instant::now() + INTERRUPT_GRACE);
+                    continue;
+                }
+            },
+        };
+
+        match received {
+            Ok(Some(frame)) => {
+                let kind = frame.get("type").and_then(Value::as_str).unwrap_or("");
+                if kind == "command_lifecycle" || kind == "control_response" {
+                    continue;
+                }
+                end = turn.renderer.feed(&frame);
+            }
+            Ok(None) => break OwnTurnEnd::Lost,
+            Err(_elapsed) => {
+                if cancel_deadline.is_some() {
+                    warn!("[CliSession] Interrupt went unanswered; killing the process");
+                    session.kill();
+                    break OwnTurnEnd::Cancelled;
+                }
+                warn!(
+                    "[CliSession] Claude's own turn exceeded {}s; interrupting",
+                    TURN_TIMEOUT.as_secs()
+                );
+                send_interrupt(session);
+                turn.renderer.muted = true;
+                cancel_deadline = Some(Instant::now() + INTERRUPT_GRACE);
+            }
+        }
+    };
+    session.touch();
+    turn.finish(outcome).await;
+}
+
+/// How a turn that Juno owns ended, when it did not complete.
+struct TurnFailure {
+    error: AgentError,
+    /// What the bubble is left showing.
+    shown: &'static str,
+}
+
+impl TurnFailure {
+    fn cancelled() -> Self {
+        Self {
+            error: AgentError::Terminated,
+            shown: "Cancelled",
+        }
+    }
+
+    fn timed_out() -> Self {
+        Self {
+            error: AgentError::Timeout(format!(
+                "Claude CLI timed out after {} seconds",
+                TURN_TIMEOUT.as_secs()
+            )),
+            shown: "Claude CLI timed out",
+        }
+    }
 }
 
 /// Read the turn off the stream, emitting as it goes.
 ///
 /// Split out from [`run_turn`] so every exit path there can decide whether the
 /// session survives, in one place.
+///
+/// A turn Claude starts on its own can be on the stream ahead of ours (the CLI
+/// runs it before our queued message). It is shown as its own turn, with its
+/// own bubble and its own result, and ours keeps waiting for its `started`.
 async fn stream_turn(
     session: &CliSession,
     inbox: &mut mpsc::UnboundedReceiver<Value>,
@@ -699,25 +1839,31 @@ async fn stream_turn(
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
+    // The bubble. Opened only at our `started` frame, and closed however this
+    // function is left once it is open, including a process that dies mid-turn.
+    let mut surface = TurnSurface::new(req.app_handle, msg_id.clone(), true);
+    let mut renderer = TurnRenderer::new(Some(req.app_handle.clone()), msg_id);
+    let mut correlator = Correlator::new(command_uuid);
+    // A turn Claude started on its own, in progress ahead of ours.
+    let mut own: Option<OwnTurn> = None;
+
     // "Ours" begins at the command_lifecycle `started` frame carrying our uuid, and
-    // nothing before it is rendered. Until then the turn can still fall back to the
-    // one-shot path without the UI having seen anything.
+    // nothing before it is rendered as ours. Until then the turn can still fall
+    // back to the one-shot path without its own bubble having been opened.
     let mut ours = false;
-    let mut announced = false;
     // Set once, when the interrupt goes out, so the grace window cannot be pushed
     // forward forever by a process that keeps talking but never ends the turn.
     let mut cancel_deadline: Option<Instant> = None;
-
-    let mut accumulated = String::new();
-    let mut previous_chars: usize = 0;
+    // The interrupt was ours, for running over TURN_TIMEOUT, not the person's.
+    let mut timed_out = false;
     let mut final_result: Option<String> = None;
-    let mut tts = crate::agent::tts_tags::TtsTagStream::new();
-    let mut spoken: Vec<String> = Vec::new();
 
-    let ack_deadline = Instant::now() + LIFECYCLE_ACK_TIMEOUT;
+    // Claude's own turn ahead of ours holds our message in the CLI's queue, so
+    // the acknowledgement window restarts with each of its frames.
+    let mut ack_deadline = Instant::now() + LIFECYCLE_ACK_TIMEOUT;
     let turn_deadline = Instant::now() + TURN_TIMEOUT;
 
-    loop {
+    let failure: Option<TurnFailure> = loop {
         let deadline = match (cancel_deadline, ours) {
             (Some(deadline), _) => deadline,
             (None, true) => turn_deadline,
@@ -730,18 +1876,13 @@ async fn stream_turn(
         } else {
             tokio::select! {
                 frame = tokio::time::timeout_at(deadline.into(), inbox.recv()) => frame,
-                // Loop on changed() + borrow() rather than wait_for(), to avoid
-                // holding a non-Send guard across the select boundary.
-                _ = async {
-                    loop {
-                        if *cancel_rx.borrow() { return; }
-                        if cancel_rx.changed().await.is_err() {
-                            std::future::pending::<()>().await;
-                        }
-                    }
-                } => {
+                _ = until_set(&mut cancel_rx) => {
                     info!("[CliSession] Cancelled; interrupting the turn (process stays alive)");
                     send_interrupt(session);
+                    renderer.muted = true;
+                    if let Some(turn) = own.as_mut() {
+                        turn.renderer.muted = true;
+                    }
                     cancel_deadline = Some(Instant::now() + INTERRUPT_GRACE);
                     continue;
                 }
@@ -752,13 +1893,18 @@ async fn stream_turn(
             Ok(Some(frame)) => frame,
             // The sender was dropped: the reader saw EOF, so the process is gone.
             Ok(None) => {
-                return if ours {
-                    Err(AgentError::LlmError(
+                if let Some(turn) = own.take() {
+                    turn.finish(OwnTurnEnd::Lost).await;
+                }
+                if !ours {
+                    return Ok(TurnOutcome::Unavailable);
+                }
+                break Some(TurnFailure {
+                    error: AgentError::LlmError(
                         "The Claude CLI session ended mid-turn".to_string(),
-                    ))
-                } else {
-                    Ok(TurnOutcome::Unavailable)
-                };
+                    ),
+                    shown: "Error: The Claude CLI session ended mid-turn",
+                });
             }
             Err(_elapsed) => {
                 if cancel_deadline.is_some() {
@@ -766,164 +1912,171 @@ async fn stream_turn(
                     // the conversation survives it via the session id.
                     warn!("[CliSession] Interrupt went unanswered; killing the process");
                     session.kill();
-                    finish_stream(req, &msg_id, announced, "Cancelled");
-                    return Err(AgentError::Terminated);
+                    if let Some(turn) = own.take() {
+                        turn.finish(OwnTurnEnd::Cancelled).await;
+                    }
+                    break Some(if timed_out {
+                        TurnFailure::timed_out()
+                    } else {
+                        TurnFailure::cancelled()
+                    });
                 }
                 if !ours {
                     // No lifecycle frame for our uuid within the window: an older CLI
-                    // without msg_lifecycle_v1, or a wedged process. Nothing was
-                    // emitted, so the one-shot path can take this turn — but only
-                    // because run_turn kills this process on the way out. The message
-                    // is already on its stdin, and a live process would still run it.
+                    // without msg_lifecycle_v1, or a wedged process. Our bubble was
+                    // never opened, so the one-shot path can take this turn, but
+                    // only because run_turn kills this process on the way out. The
+                    // message is already on its stdin, and a live process would
+                    // still run it.
                     warn!(
                         "[CliSession] No command_lifecycle frame after {}s; falling back",
                         LIFECYCLE_ACK_TIMEOUT.as_secs()
                     );
+                    if let Some(turn) = own.take() {
+                        turn.finish(OwnTurnEnd::Lost).await;
+                    }
                     return Ok(TurnOutcome::Unavailable);
                 }
-                // A turn that overran is interrupted, not killed.
+                // A turn that overran is interrupted, not killed, and its aborted
+                // result is drained so it cannot surface later as a turn of its own.
                 warn!(
                     "[CliSession] Turn exceeded {}s; interrupting",
                     TURN_TIMEOUT.as_secs()
                 );
                 send_interrupt(session);
-                finish_stream(req, &msg_id, announced, "Claude CLI timed out");
-                return Err(AgentError::Timeout(format!(
-                    "Claude CLI timed out after {} seconds",
-                    TURN_TIMEOUT.as_secs()
-                )));
+                renderer.muted = true;
+                timed_out = true;
+                cancel_deadline = Some(Instant::now() + INTERRUPT_GRACE);
+                continue;
             }
         };
 
-        let frame_type = frame.get("type").and_then(Value::as_str).unwrap_or("");
-
-        if frame_type == "command_lifecycle" {
-            if !lifecycle_frame_is_ours(&frame, command_uuid) {
-                continue;
+        match correlator.route(&frame) {
+            Route::Skip => {
+                if frame.get("type").and_then(Value::as_str) == Some("control_response") {
+                    debug!("[CliSession] control_response: {}", frame);
+                }
             }
-            match frame.get("state").and_then(Value::as_str) {
-                Some("started") => {
+            Route::OurLifecycle(state) => match state.as_str() {
+                "started" => {
                     ours = true;
-                    if !announced {
-                        crate::agent::tool_logger::emit_stream_start(
-                            req.app_handle,
-                            msg_id.clone(),
-                        );
-                        announced = true;
+                    // Claude's own turn is over by the time ours starts. One
+                    // that never sent its result is closed here.
+                    if let Some(turn) = own.take() {
+                        turn.finish(OwnTurnEnd::Lost).await;
+                    }
+                    surface.open();
+                }
+                "cancelled" => break Some(TurnFailure::cancelled()),
+                _ => {}
+            },
+            Route::Claude => {
+                ack_deadline = Instant::now() + LIFECYCLE_ACK_TIMEOUT;
+                if own.is_none() {
+                    if !starts_a_turn(&frame) {
+                        // The tail of a turn that is already over.
+                        if frame.get("type").and_then(Value::as_str) == Some("result") {
+                            debug!("[CliSession] A result with no turn in progress; skipped");
+                        }
+                        continue;
+                    }
+                    // Inside our turn: it already owns the bar and Escape, and
+                    // its conversation owns this process.
+                    let mut turn = OwnTurn::begin(req.app_handle, req.conversation_id, true).await;
+                    turn.renderer.muted = cancel_deadline.is_some();
+                    own = Some(turn);
+                }
+                let ended = own.as_mut().and_then(|turn| turn.renderer.feed(&frame));
+                if let Some(done) = ended {
+                    if let Some(turn) = own.take() {
+                        let end = if done.aborted || turn.renderer.muted {
+                            OwnTurnEnd::Cancelled
+                        } else {
+                            OwnTurnEnd::Finished(done.text)
+                        };
+                        turn.finish(end).await;
                     }
                 }
-                Some("cancelled") => {
-                    finish_stream(req, &msg_id, announced, "Cancelled");
-                    return Err(AgentError::Terminated);
-                }
-                _ => {}
             }
-            continue;
+            Route::Ours => {
+                if frame.get("type").and_then(Value::as_str) == Some("assistant") && !renderer.muted
+                {
+                    crate::turn_timing::mark(crate::turn_timing::Stage::LlmFirstToken);
+                }
+                if let Some(done) = renderer.feed(&frame) {
+                    if cancel_deadline.is_some() || done.aborted {
+                        break Some(if timed_out {
+                            TurnFailure::timed_out()
+                        } else {
+                            TurnFailure::cancelled()
+                        });
+                    }
+                    final_result = done.text;
+                    break None;
+                }
+            }
         }
+    };
 
-        if frame_type == "control_response" {
-            debug!("[CliSession] control_response: {}", frame);
-            continue;
-        }
-
-        if !ours {
-            // A turn the CLI started by itself, or the tail of an earlier one.
-            // Never rendered; see the module docs.
-            if frame_type == "result" {
-                debug!("[CliSession] Ignoring a result from a turn Juno did not ask for");
-            }
-            continue;
-        }
-
-        match frame_type {
-            "assistant" => {
-                if cancel_deadline.is_some() {
-                    // The user asked to stop. Nothing more reaches the screen.
-                    continue;
-                }
-                let Some(message) = frame.get("message") else {
-                    continue;
-                };
-                let text = super::claude_cli::extract_text_from_message(message);
-                let chars = text.chars().count();
-                if chars <= previous_chars {
-                    continue;
-                }
-                // Char offsets, never byte offsets: slicing bytes panics on
-                // multi-byte UTF-8.
-                let delta: String = text.chars().skip(previous_chars).collect();
-                previous_chars = chars;
-
-                let (display, blocks) = tts.push(&delta);
-                accumulated.push_str(&display);
-                emit_chunk(req.app_handle, display, &msg_id, &blocks);
-                spoken.extend(blocks);
-            }
-            "result" => {
-                let subtype = frame.get("subtype").and_then(Value::as_str).unwrap_or("");
-                let terminal = frame
-                    .get("terminal_reason")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-
-                if let Some(ms) = frame.get("duration_ms").and_then(Value::as_u64) {
-                    info!("[CliSession] Turn duration: {ms}ms");
-                }
-                if let Some(cost) = frame.get("total_cost_usd").and_then(Value::as_f64) {
-                    info!("[CliSession] Turn cost: ${cost:.4}");
-                }
-
-                // `terminal_reason` is a closed protocol field, not an error message:
-                // an interrupt ends a turn as `aborted_streaming` (mid-generation) or
-                // `aborted_tools` (mid-tool-call). Both mean the user's stop landed
-                // and nothing from this turn should be shown or spoken (LAC-3697).
-                let aborted = matches!(terminal, "aborted_streaming" | "aborted_tools");
-                if cancel_deadline.is_some() || aborted {
-                    info!("[CliSession] Turn ended as {subtype}/{terminal}");
-                    finish_stream(req, &msg_id, announced, "Cancelled");
-                    return Err(AgentError::Terminated);
-                }
-
-                if let Some(text) = frame.get("result").and_then(Value::as_str) {
-                    final_result = Some(text.to_string());
-                }
-                break;
-            }
-            // `system/init` arrives at the head of every turn, not once per process.
-            // Nothing to do with it beyond noting the subtype.
-            "system" => {
-                // Hoisted out of the macro: tracing's expansion shadows `Value`
-                // with its own field trait of the same name (E0782).
-                let subtype = frame.get("subtype").and_then(Value::as_str).unwrap_or("?");
-                debug!("[CliSession] system/{subtype}");
-            }
-            other => debug!("[CliSession] frame '{other}' skipped"),
-        }
+    // Claude's own turn, if one was still going when ours ended.
+    if let Some(turn) = own.take() {
+        turn.finish(OwnTurnEnd::Lost).await;
     }
 
-    // Flush the tag parser: a partial tag becomes display text, an unterminated
-    // block is still spoken.
-    let (tail_display, tail_spoken) = tts.finish();
-    if !tail_display.is_empty() || !tail_spoken.is_empty() {
-        accumulated.push_str(&tail_display);
-        emit_chunk(req.app_handle, tail_display, &msg_id, &tail_spoken);
-        spoken.extend(tail_spoken);
+    // Nothing may be left spinning however the turn ended.
+    renderer.wind_down();
+
+    if let Some(failure) = failure {
+        surface.close(failure.shown.to_string());
+        return Err(failure.error);
     }
 
-    // The `result` frame carries the raw final text, tags included. Strip it for
-    // display and speak any block the assistant frames did not already cover.
-    let final_result = final_result.map(|raw| {
-        let (display, blocks) = crate::agent::tts_tags::split_tts_tags(&raw);
-        let unspoken: Vec<String> = blocks.into_iter().filter(|b| !spoken.contains(b)).collect();
-        if !unspoken.is_empty() {
-            emit_chunk(req.app_handle, String::new(), &msg_id, &unspoken);
-        }
-        display
-    });
-
-    let complete = final_result.unwrap_or(accumulated);
-    crate::agent::tool_logger::emit_stream_end(req.app_handle, msg_id, complete.clone());
+    let complete = renderer.complete(final_result);
+    surface.close(complete.clone());
     Ok(TurnOutcome::Completed(complete))
+}
+
+/// The control request that switches a live process's effort. The CLI applies
+/// `effortLevel` from flag settings over its `--effort` argument and keeps it
+/// in memory only (verified against CLI 2.1.295 with `get_settings`: the
+/// applied effort went from "high" to "medium"). The process keeps the
+/// signature it was spawned with, so the warm process and the spare still
+/// match the next turn whichever effort it wants.
+fn effort_request(effort: &str, request_id: &str) -> Value {
+    json!({
+        "type": "control_request",
+        "request_id": request_id,
+        "request": {
+            "subtype": "apply_flag_settings",
+            "settings": { "effortLevel": effort }
+        }
+    })
+}
+
+/// Switch the process to `effort` when it is running at something else. A CLI
+/// that refuses answers with an error `control_response`, which is skipped
+/// like any other, and the turn runs at the effort the process already had.
+fn align_effort(session: &CliSession, effort: &str) {
+    let mut live = session
+        .live_effort
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if live.as_str() == effort {
+        return;
+    }
+    let request = effort_request(effort, &format!("juno_effort_{}", uuid::Uuid::new_v4()));
+    match serde_json::to_string(&request) {
+        Ok(line) => {
+            if session.to_child.send(format!("{line}\n")).is_ok() {
+                info!(
+                    "[CliSession] Effort {} -> {effort} for this turn",
+                    live.as_str()
+                );
+                *live = effort.to_string();
+            }
+        }
+        Err(e) => warn!("[CliSession] Could not encode the effort switch: {e}"),
+    }
 }
 
 /// Ask the CLI to end the running turn. The process stays alive and is immediately
@@ -945,14 +2098,65 @@ fn send_interrupt(session: &CliSession) {
     }
 }
 
-/// Close out the UI stream, but only if we ever opened it.
-fn finish_stream(req: &TurnRequest<'_>, msg_id: &str, announced: bool, reason: &str) {
-    if announced {
-        crate::agent::tool_logger::emit_stream_end(
-            req.app_handle,
-            msg_id.to_string(),
-            reason.to_string(),
-        );
+/// The assistant bubble for one persistent turn.
+///
+/// Opened late, at the `started` frame, because a turn that falls back before it
+/// must leave no trace (the one-shot path opens its own). Once open it is closed
+/// on every way out, including the ones nobody remembered: the frontend only
+/// stops a spinner on `stream_end`.
+///
+/// A bubble that is not `visible` never opens: a turn Claude started in a
+/// conversation that is not on screen has no chat to appear in.
+struct TurnSurface {
+    app_handle: tauri::AppHandle,
+    msg_id: String,
+    visible: bool,
+    started: bool,
+    open: bool,
+}
+
+impl TurnSurface {
+    fn new(app_handle: &tauri::AppHandle, msg_id: String, visible: bool) -> Self {
+        Self {
+            app_handle: app_handle.clone(),
+            msg_id,
+            visible,
+            started: false,
+            open: false,
+        }
+    }
+
+    /// Open the bubble, once. A second `started` frame must not append a second
+    /// empty bubble above the answer.
+    fn open(&mut self) {
+        if self.started {
+            return;
+        }
+        self.started = true;
+        if !self.visible {
+            return;
+        }
+        self.open = true;
+        crate::agent::tool_logger::emit_stream_start(&self.app_handle, self.msg_id.clone());
+    }
+
+    /// Close it on the text the person should be left looking at. A no-op if it
+    /// was never opened or is already closed.
+    fn close(&mut self, text: String) {
+        if !self.open {
+            return;
+        }
+        self.open = false;
+        crate::agent::tool_logger::emit_stream_end(&self.app_handle, self.msg_id.clone(), text);
+    }
+}
+
+impl Drop for TurnSurface {
+    fn drop(&mut self) {
+        if self.open {
+            warn!("[CliSession] Turn ended without closing its stream; closing it empty");
+            self.close(String::new());
+        }
     }
 }
 
@@ -981,6 +2185,31 @@ fn emit_chunk(handle: &tauri::AppHandle, display: String, msg_id: &str, blocks: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_frame_carries_the_attachment_as_an_image_block() {
+        let images = vec!["data:image/jpeg;base64,YQ==".to_string()];
+        let blocks = user_content_blocks("what is this?", &images);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0]["type"], "image");
+        assert_eq!(blocks[0]["source"]["type"], "base64");
+        assert_eq!(blocks[0]["source"]["media_type"], "image/jpeg");
+        assert_eq!(blocks[0]["source"]["data"], "YQ==");
+        assert_eq!(blocks[1]["type"], "text");
+        assert_eq!(blocks[1]["text"], "what is this?");
+    }
+
+    #[test]
+    fn user_frame_without_attachments_is_text_only() {
+        let blocks = user_content_blocks("hello", &[]);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "text");
+        // A paste that is not a real image is dropped, not sent as a block
+        // the CLI would reject.
+        let bad = user_content_blocks("hello", &["nonsense".to_string()]);
+        assert_eq!(bad.len(), 1);
+        assert_eq!(bad[0]["type"], "text");
+    }
 
     #[test]
     fn signature_separates_model_from_prompt() {
@@ -1014,6 +2243,28 @@ mod tests {
     }
 
     #[test]
+    fn a_replaced_process_names_what_changed() {
+        let base = launch("sonnet");
+        let mut prompt = launch("sonnet");
+        prompt.system_prompt = Some("a new memory".into());
+        let mut effort = launch("sonnet");
+        effort.effort = "low".into();
+        let sig = signature_of(&base);
+        assert_eq!(
+            signature_change(&sig, &signature_of(&launch("opus"))),
+            "the model changed"
+        );
+        assert_eq!(
+            signature_change(&sig, &signature_of(&prompt)),
+            "the system prompt changed"
+        );
+        assert_eq!(
+            signature_change(&sig, &signature_of(&effort)),
+            "the effort changed"
+        );
+    }
+
+    #[test]
     fn signature_is_stable_for_identical_arguments() {
         assert_eq!(
             signature_parts(
@@ -1031,6 +2282,206 @@ mod tests {
                 true
             )
         );
+    }
+
+    fn launch(model: &str) -> LaunchConfig {
+        LaunchConfig {
+            binary: PathBuf::from("/usr/local/bin/claude"),
+            model: model.to_string(),
+            effort: "high".to_string(),
+            include_partial_messages: true,
+            system_prompt: Some("be Juno".to_string()),
+            mcp_config: Some(PathBuf::from("/tmp/juno-mcp-1.json")),
+            mcp_guidance: "use the computer tool",
+            load_account_mcp: true,
+            ask_before_send: true,
+        }
+    }
+
+    /// A session around a real child process, alive (`sleep`) or already
+    /// exited (`true`, reaped), without any pipes behind it.
+    async fn fake_session(signature: &str, exited: bool) -> Arc<CliSession> {
+        let mut command = if exited {
+            tokio::process::Command::new("/usr/bin/true")
+        } else {
+            let mut sleep = tokio::process::Command::new("/bin/sleep");
+            sleep.arg("30");
+            sleep
+        };
+        let mut child = command
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn test child");
+        if exited {
+            child.wait().await.expect("reap test child");
+        }
+        let (to_child, _outbox) = mpsc::unbounded_channel();
+        let (_frames, inbox) = mpsc::unbounded_channel();
+        Arc::new(CliSession {
+            session_id: "spare-session".to_string(),
+            signature: signature.to_string(),
+            to_child,
+            inbox: TokioMutex::new(inbox),
+            child: std::sync::Mutex::new(child),
+            last_used: AtomicU64::new(now_secs()),
+            owner: std::sync::Mutex::new(None),
+            turns_waiting: AtomicUsize::new(0),
+            turn_wanted: Notify::new(),
+            live_effort: std::sync::Mutex::new("high".to_string()),
+        })
+    }
+
+    #[test]
+    fn the_fingerprint_covers_everything_a_process_is_born_with() {
+        let base = launch("sonnet");
+        assert_eq!(signature_of(&base), signature_of(&base.clone()));
+        let variants = [
+            LaunchConfig {
+                model: "opus".to_string(),
+                ..base.clone()
+            },
+            LaunchConfig {
+                effort: "low".to_string(),
+                ..base.clone()
+            },
+            LaunchConfig {
+                include_partial_messages: false,
+                ..base.clone()
+            },
+            LaunchConfig {
+                system_prompt: Some("other".to_string()),
+                ..base.clone()
+            },
+            LaunchConfig {
+                mcp_config: None,
+                ..base.clone()
+            },
+            LaunchConfig {
+                load_account_mcp: false,
+                ..base.clone()
+            },
+            LaunchConfig {
+                ask_before_send: false,
+                ..base.clone()
+            },
+            LaunchConfig {
+                binary: PathBuf::from("/opt/homebrew/bin/claude"),
+                ..base.clone()
+            },
+        ];
+        for variant in variants {
+            assert_ne!(signature_of(&base), signature_of(&variant), "{variant:?}");
+        }
+    }
+
+    #[test]
+    fn a_spare_is_pinned_to_a_fresh_session_and_born_like_a_turn() {
+        let config = launch("sonnet");
+        let spare = spawn_args(&config, "fresh-id", true);
+        // Adoptable by any new conversation: a fresh id, never a resume.
+        let pin = spare
+            .iter()
+            .position(|a| a == "--session-id")
+            .expect("pinned with --session-id");
+        assert_eq!(spare[pin + 1], "fresh-id");
+        assert!(!spare.iter().any(|a| a == "--resume"));
+        // Born with the turn's prompt, MCP wiring and wake-tool lockout.
+        for flag in ["--mcp-config", "--append-system-prompt", "--system-prompt"] {
+            assert!(spare.iter().any(|a| a == flag), "missing {flag}");
+        }
+        assert!(spare
+            .windows(2)
+            .any(|w| w[0] == "--disallowedTools" && w[1] == WAKE_TOOLS));
+    }
+
+    #[test]
+    fn spare_retries_back_off_and_then_stop() {
+        assert_eq!(spare_retry_delay(0), Some(Duration::ZERO));
+        let first = spare_retry_delay(1).expect("retries after one failure");
+        let second = spare_retry_delay(2).expect("retries after two failures");
+        assert!(first > Duration::ZERO && second > first);
+        assert_eq!(spare_retry_delay(MAX_SPARE_FAILURES), None);
+        assert_eq!(spare_retry_delay(MAX_SPARE_FAILURES + 5), None);
+
+        let now = Instant::now();
+        let mut state = SpareState::default();
+        assert!(state.may_spawn(now));
+        state.record_failure(now);
+        assert!(!state.may_spawn(now), "no immediate retry after a failure");
+        assert!(state.may_spawn(now + first));
+        for _ in 1..MAX_SPARE_FAILURES {
+            state.record_failure(now);
+        }
+        assert!(!state.may_spawn(now + Duration::from_secs(3600)), "gave up");
+        state.spawning = true;
+        state.failures = 0;
+        state.retry_after = None;
+        assert!(!state.may_spawn(now), "one spawn in flight at a time");
+    }
+
+    #[tokio::test]
+    async fn only_a_live_matching_spare_is_adopted() {
+        let config = launch("sonnet");
+        let signature = signature_of(&config);
+
+        // Live and matching: adopted, and adoption clears the failure count.
+        let mut state = SpareState {
+            slot: Some(fake_session(&signature, false).await),
+            failures: 2,
+            ..SpareState::default()
+        };
+        let adopted = state.take(&signature).expect("adopted");
+        assert_eq!(adopted.session_id, "spare-session");
+        assert!(state.slot.is_none());
+        assert_eq!(state.failures, 0);
+        adopted.kill();
+        // Nothing left to adopt.
+        assert!(state.take(&signature).is_none());
+
+        // Configured differently: not adopted, killed, and not a failure.
+        let other = fake_session(&signature_of(&launch("opus")), false).await;
+        state.slot = Some(Arc::clone(&other));
+        assert!(state.take(&signature).is_none());
+        assert!(state.slot.is_none());
+        assert_eq!(state.failures, 0);
+
+        // Exited on its own: not adopted, and counted.
+        state.slot = Some(fake_session(&signature, true).await);
+        assert!(state.take(&signature).is_none());
+        assert_eq!(state.failures, 1);
+        assert!(state.retry_after.is_some());
+    }
+
+    #[test]
+    fn spare_turns_are_labelled_apart_from_cold_and_warm() {
+        let labels = [Origin::Warm, Origin::Spare, Origin::Cold].map(Origin::timing_label);
+        assert_eq!(labels[1], "claude_cli/persistent-spare");
+        assert_ne!(labels[0], labels[1]);
+        assert_ne!(labels[1], labels[2]);
+    }
+
+    #[test]
+    fn the_flag_is_on_unless_someone_turned_it_off() {
+        // Never touched: nothing in the store.
+        assert!(enabled_from_store(None));
+        // Turned off: respected.
+        assert!(!enabled_from_store(Some(&Value::Bool(false))));
+        assert!(enabled_from_store(Some(&Value::Bool(true))));
+        // Junk in the store is not a decision.
+        assert!(enabled_from_store(Some(&json!("false"))));
+        assert!(enabled_from_store(Some(&Value::Null)));
+    }
+
+    #[test]
+    fn a_persistent_process_cannot_wake_itself() {
+        // The sources of turns nobody asked for are switched off at spawn.
+        let env: Vec<&str> = UNSOLICITED_TURN_ENV.iter().map(|(k, _)| *k).collect();
+        assert!(env.contains(&"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"));
+        assert!(env.contains(&"CLAUDE_CODE_DISABLE_CRON"));
+        assert!(UNSOLICITED_TURN_ENV.iter().all(|(_, v)| *v == "1"));
+        let tools: Vec<&str> = WAKE_TOOLS.split(',').collect();
+        assert!(tools.contains(&"ScheduleWakeup"));
+        assert!(tools.contains(&"Monitor"));
     }
 
     #[test]
@@ -1063,6 +2514,219 @@ mod tests {
         // Our uuid on a non-lifecycle frame opens nothing.
         let not_lifecycle = json!({ "type": "assistant", "command_uuid": uuid });
         assert!(!lifecycle_frame_is_ours(&not_lifecycle, uuid));
+    }
+
+    #[test]
+    fn a_turn_claude_started_is_its_own_turn_not_the_answer() {
+        let uuid = "3f2a77aa-0000-4000-8000-000000000002";
+        // What the spike saw: our message queued behind a turn Claude started
+        // when a background task finished, which carries no lifecycle frames.
+        let frames = [
+            json!({ "type": "command_lifecycle", "command_uuid": uuid, "state": "queued" }),
+            json!({ "type": "system", "subtype": "init" }),
+            json!({ "type": "assistant", "message": { "id": "msg-bg",
+                "content": [{ "type": "text", "text": "LATE_TASK has finished." }] } }),
+            json!({ "type": "result", "subtype": "success",
+                "result": "LATE_TASK has finished." }),
+            json!({ "type": "command_lifecycle", "command_uuid": "someone-else", "state": "started" }),
+            json!({ "type": "command_lifecycle", "command_uuid": uuid, "state": "started" }),
+            json!({ "type": "assistant", "message": { "id": "msg-ours",
+                "content": [{ "type": "text", "text": "It is 4pm." }] } }),
+            json!({ "type": "result", "subtype": "success", "result": "It is 4pm." }),
+        ];
+
+        let mut correlator = Correlator::new(uuid);
+        let mut claude = TurnRenderer::new(None, "claude".to_string());
+        let mut mine = TurnRenderer::new(None, "mine".to_string());
+        let (mut claude_end, mut my_end) = (None, None);
+        let mut routes = Vec::new();
+        for frame in &frames {
+            let route = correlator.route(frame);
+            match route {
+                Route::Claude => {
+                    if let Some(end) = claude.feed(frame) {
+                        claude_end = Some(end);
+                    }
+                }
+                Route::Ours => {
+                    if let Some(end) = mine.feed(frame) {
+                        my_end = Some(end);
+                    }
+                }
+                _ => {}
+            }
+            routes.push(route);
+        }
+
+        assert_eq!(routes[0], Route::OurLifecycle("queued".to_string()));
+        // No uuid at all: Claude's, never the waiting turn's.
+        assert_eq!(routes[2], Route::Claude);
+        assert_eq!(routes[3], Route::Claude);
+        // Someone else's lifecycle frame opens nothing.
+        assert_eq!(routes[4], Route::Skip);
+        assert_eq!(routes[5], Route::OurLifecycle("started".to_string()));
+        assert_eq!(routes[7], Route::Ours);
+
+        // Claude's turn ended with its own result, shown as its own text...
+        let claude_end = claude_end.expect("Claude's turn ended");
+        assert_eq!(claude_end.text.as_deref(), Some("LATE_TASK has finished."));
+        assert_eq!(claude.accumulated, "LATE_TASK has finished.");
+        // ...and the waiting turn still got exactly its own answer.
+        let my_end = my_end.expect("our turn ended");
+        assert!(!my_end.aborted);
+        assert_eq!(my_end.text.as_deref(), Some("It is 4pm."));
+        assert_eq!(mine.accumulated, "It is 4pm.");
+    }
+
+    #[test]
+    fn only_a_frame_with_a_turn_behind_it_raises_one() {
+        assert!(starts_a_turn(&json!({ "type": "stream_event" })));
+        assert!(starts_a_turn(&json!({ "type": "assistant" })));
+        assert!(starts_a_turn(&json!({ "type": "user" })));
+        // A stray system frame, or the result tail of a turn already over,
+        // must not flash the bar.
+        assert!(!starts_a_turn(
+            &json!({ "type": "system", "subtype": "init" })
+        ));
+        assert!(!starts_a_turn(
+            &json!({ "type": "result", "subtype": "success" })
+        ));
+        assert!(!starts_a_turn(&json!({ "type": "command_lifecycle" })));
+    }
+
+    /// The frames one assistant message streams with partial messages on,
+    /// followed by the whole-message `assistant` frame the CLI also sends.
+    fn message_frames(id: &str, chunks: &[&str], then_tool: bool) -> Vec<Value> {
+        let event = |e: Value| json!({ "type": "stream_event", "event": e });
+        let mut frames = vec![
+            event(json!({ "type": "message_start", "message": { "id": id } })),
+            event(json!({ "type": "content_block_start", "index": 0,
+                "content_block": { "type": "text", "text": "" } })),
+        ];
+        for chunk in chunks {
+            frames.push(event(json!({ "type": "content_block_delta", "index": 0,
+                "delta": { "type": "text_delta", "text": chunk } })));
+        }
+        frames.push(event(json!({ "type": "content_block_stop", "index": 0 })));
+        if then_tool {
+            frames.push(event(json!({ "type": "content_block_start", "index": 1,
+                "content_block": { "type": "tool_use", "id": "t1", "name": "Bash" } })));
+            frames.push(event(json!({ "type": "content_block_stop", "index": 1 })));
+        }
+        frames.push(event(json!({ "type": "message_stop" })));
+        frames.push(json!({ "type": "assistant", "message": { "id": id,
+            "content": [{ "type": "text", "text": chunks.concat() }] } }));
+        frames
+    }
+
+    #[test]
+    fn a_turn_speaks_only_its_tts_text_once() {
+        // Message one leaves its <TTS> open before a tool call; message two
+        // is well formed. Both the deltas and the whole-message frames arrive,
+        // and the result repeats the last message.
+        let first = ["<TTS>Sure, opening Ghost", "ty settings now"];
+        let second = [
+            "<TTS>Done. Settings are open on your scr",
+            "een.</TT",
+            "S>\n\nHere is more detail. It is display only.",
+        ];
+        let mut turn = TurnRenderer::new(None, "m".to_string());
+        for frame in message_frames("msg1", &first, true) {
+            assert!(turn.feed(&frame).is_none());
+        }
+        turn.feed(&json!({ "type": "user", "message": { "content": [
+            { "type": "tool_result", "tool_use_id": "t1", "content": "ok" }] } }));
+        for frame in message_frames("msg2", &second, false) {
+            assert!(turn.feed(&frame).is_none());
+        }
+        let end = turn
+            .feed(&json!({ "type": "result", "subtype": "success",
+                "result": second.concat() }))
+            .expect("ended");
+        let display = turn.complete(end.text);
+        assert_eq!(
+            turn.spoken,
+            vec![
+                "Sure, opening Ghostty settings now",
+                "Done. Settings are open on your screen."
+            ]
+        );
+        assert_eq!(display, "Here is more detail. It is display only.");
+        assert!(!turn.accumulated.contains("TTS"));
+    }
+
+    #[test]
+    fn the_result_speaks_only_when_nothing_streamed() {
+        let mut turn = TurnRenderer::new(None, "m".to_string());
+        let end = turn
+            .feed(&json!({ "type": "result", "subtype": "success",
+                "result": "<TTS>Only the result carried this.</TTS>Shown." }))
+            .expect("ended");
+        let display = turn.complete(end.text);
+        assert_eq!(turn.spoken, vec!["Only the result carried this."]);
+        assert_eq!(display, "Shown.");
+    }
+
+    #[test]
+    fn a_stopped_turn_shows_nothing_more_and_ends_aborted() {
+        let mut turn = TurnRenderer::new(None, "m".to_string());
+        turn.muted = true;
+        let more = json!({ "type": "assistant", "message": { "id": "a",
+            "content": [{ "type": "text", "text": "still talking" }] } });
+        assert!(turn.feed(&more).is_none());
+        assert!(turn.accumulated.is_empty());
+        let end = turn
+            .feed(
+                &json!({ "type": "result", "subtype": "error_during_execution",
+                "terminal_reason": "aborted_streaming" }),
+            )
+            .expect("ended");
+        assert!(end.aborted);
+    }
+
+    #[test]
+    fn effort_request_has_the_shape_the_cli_expects() {
+        let request = effort_request("medium", "juno_effort_1");
+        assert_eq!(request["type"], "control_request");
+        assert_eq!(request["request_id"], "juno_effort_1");
+        assert_eq!(request["request"]["subtype"], "apply_flag_settings");
+        assert_eq!(request["request"]["settings"]["effortLevel"], "medium");
+    }
+
+    #[tokio::test]
+    async fn a_live_process_switches_effort_only_when_it_changes() {
+        let (to_child, mut outbox) = mpsc::unbounded_channel();
+        let (_frames, inbox) = mpsc::unbounded_channel();
+        let child = tokio::process::Command::new("true")
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn test child");
+        let session = CliSession {
+            session_id: "s".to_string(),
+            signature: "sig".to_string(),
+            to_child,
+            inbox: TokioMutex::new(inbox),
+            child: std::sync::Mutex::new(child),
+            last_used: AtomicU64::new(now_secs()),
+            owner: std::sync::Mutex::new(None),
+            turns_waiting: AtomicUsize::new(0),
+            turn_wanted: Notify::new(),
+            live_effort: std::sync::Mutex::new("high".to_string()),
+        };
+        // Same effort as the process was born with: nothing is written.
+        align_effort(&session, "high");
+        assert!(outbox.try_recv().is_err());
+        // A spoken turn: one switch, then nothing while it stays the same.
+        align_effort(&session, "medium");
+        let line = outbox.try_recv().expect("switch written");
+        let frame: Value = serde_json::from_str(line.trim()).expect("json");
+        assert_eq!(frame["request"]["settings"]["effortLevel"], "medium");
+        align_effort(&session, "medium");
+        assert!(outbox.try_recv().is_err());
+        // A typed turn after it switches back.
+        align_effort(&session, "high");
+        let line = outbox.try_recv().expect("switch back written");
+        assert!(line.contains("\"high\""));
     }
 
     #[test]

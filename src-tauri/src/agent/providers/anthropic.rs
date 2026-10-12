@@ -194,7 +194,7 @@ struct ApiContentBlock {
 ///
 /// Returns `None` for anything that is not a base64 data URL, so a malformed
 /// paste is dropped rather than sent as a block the API will reject.
-fn parse_data_url(url: &str) -> Option<(String, String)> {
+pub(super) fn parse_data_url(url: &str) -> Option<(String, String)> {
     let rest = url.strip_prefix("data:")?;
     let (meta, data) = rest.split_once(',')?;
     let media_type = meta.strip_suffix(";base64")?;
@@ -202,6 +202,28 @@ fn parse_data_url(url: &str) -> Option<(String, String)> {
         return None;
     }
     Some((media_type.to_string(), data.to_string()))
+}
+
+/// Image content blocks for a user turn's attachments.
+///
+/// Anything that is not a base64 image data URL is dropped (with a log line)
+/// rather than sent as a block the API would reject.
+fn user_image_blocks(images: Option<&Vec<String>>) -> Vec<ApiContentBlock> {
+    let mut blocks = Vec::new();
+    for url in images.into_iter().flatten() {
+        let Some((media_type, data)) = parse_data_url(url) else {
+            tracing::warn!("Dropping an attachment that is not a base64 image data URL");
+            continue;
+        };
+        let mut block = ApiContentBlock::empty("image");
+        block.source = Some(ApiImageSource {
+            source_type: "base64".to_string(),
+            media_type,
+            data,
+        });
+        blocks.push(block);
+    }
+    blocks
 }
 
 impl ApiContentBlock {
@@ -479,9 +501,13 @@ impl AnthropicBrain {
         let max_tokens =
             max_tokens.unwrap_or(crate::constants::agent::config::DEFAULT_MAX_TOKENS_ANTHROPIC);
 
-        // Create HTTP client with proper timeout configuration to prevent hanging
+        // Create HTTP client with proper timeout configuration to prevent hanging.
+        // A read timeout, not a total one: it fires when the connection goes
+        // quiet (Wi-Fi dropped mid-answer), and never cuts off a long, healthy
+        // streamed turn. The API sends ping events while it works, so a quiet
+        // stream really is a dead one.
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(
+            .read_timeout(std::time::Duration::from_secs(
                 crate::constants::timeouts::HTTP_REQUEST_TIMEOUT_SECONDS,
             ))
             .connect_timeout(std::time::Duration::from_secs(
@@ -527,6 +553,19 @@ impl AnthropicBrain {
         )
     }
 
+    /// Statuses worth one more try before the turn fails: rate limited,
+    /// overloaded (529), or a server or gateway error.
+    fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+        matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504 | 529)
+    }
+
+    /// Pauses before the second and third tries of a request that never
+    /// started streaming.
+    const SEND_RETRY_DELAYS: [std::time::Duration; 2] = [
+        std::time::Duration::from_millis(800),
+        std::time::Duration::from_millis(2500),
+    ];
+
     fn format_anthropic_http_error_for_user(
         status: reqwest::StatusCode,
         error_body: &str,
@@ -538,6 +577,12 @@ impl AnthropicBrain {
             if let Some(message) = crate::demo::ended_message(status.as_u16(), error_body) {
                 return message.to_string();
             }
+        }
+
+        // Busy or briefly down: the request was already retried. Say so in
+        // words; the status and body are in the log.
+        if Self::is_retryable_status(status) {
+            return "Claude is busy right now. Try again in a moment.".to_string();
         }
 
         let trimmed = error_body.trim();
@@ -1085,6 +1130,7 @@ impl AnthropicBrain {
                             }
                         }
                         "content_block_delta" => {
+                            crate::turn_timing::mark(crate::turn_timing::Stage::LlmFirstToken);
                             if let Some(delta) = event_data.get("delta") {
                                 if let Some(delta_type) = delta.get("type").and_then(|t| t.as_str())
                                 {
@@ -1572,23 +1618,7 @@ impl AnthropicBrain {
         // Images first: a turn reads as "here is a picture, now do this", and
         // the API pays attention to order.
         if message.role == Role::User {
-            if let Some(images) = &message.images {
-                for url in images {
-                    let Some((media_type, data)) = parse_data_url(url) else {
-                        tracing::warn!(
-                            "Dropping an attachment that is not a base64 image data URL"
-                        );
-                        continue;
-                    };
-                    let mut block = ApiContentBlock::empty("image");
-                    block.source = Some(ApiImageSource {
-                        source_type: "base64".to_string(),
-                        media_type,
-                        data,
-                    });
-                    content_blocks.push(block);
-                }
-            }
+            content_blocks.extend(user_image_blocks(message.images.as_ref()));
         }
 
         // Add text content if present
@@ -1826,7 +1856,11 @@ impl AgentBrain for AnthropicBrain {
                     ) {
                         Ok(json_value) => {
                             // Check for computer tool with base64 screenshot data
-                            if tool_name == "computer" {
+                            // (`app_controls` returns window pictures the same way)
+                            if tool_name == "computer"
+                                || tool_name
+                                    == crate::agent::tools::anthropic_computer_use::APP_CONTROLS_TOOL
+                            {
                                 if let Some(base64_data) =
                                     json_value.get("base64_image").and_then(|v| v.as_str())
                                 {
@@ -1835,7 +1869,13 @@ impl AgentBrain for AnthropicBrain {
                                         block_type: "image".to_string(),
                                         source: Some(ApiImageSource {
                                             source_type: "base64".to_string(),
-                                            media_type: "image/jpeg".to_string(),
+                                            // Screenshots are JPEG; zoom crops are PNG.
+                                            media_type: if base64_data.starts_with("iVBOR") {
+                                                "image/png"
+                                            } else {
+                                                "image/jpeg"
+                                            }
+                                            .to_string(),
                                             data: base64_data.to_string(),
                                         }),
                                         text: None,
@@ -2181,20 +2221,44 @@ impl AgentBrain for AnthropicBrain {
             Self::sanitize_request_for_logging(&request_payload)
         );
 
-        let response = self
-            .client
-            .post(ANTHROPIC_API_URL)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01") // Current stable API version
-            // Computer use beta + prompt caching (+ server-side fallbacks on supported models),
-            // comma-separated in a single header. Prompt caching reduces input token costs by
-            // ~90% and latency by ~50-80% for the stable system prompt and tool definitions.
-            .header("anthropic-beta", self.beta_header_value())
-            .header("content-type", "application/json")
-            .json(&request_payload)
-            .send()
-            .await
-            .map_err(|e| AgentError::LlmError(format!("HTTP request failed: {}", e)))?;
+        crate::turn_timing::note_llm("anthropic", &self.model);
+        crate::turn_timing::mark(crate::turn_timing::Stage::LlmRequestSent);
+        // A blip (connect failure, 429, 5xx, 529) before anything streamed is
+        // retried twice with a short pause; nothing has reached the person
+        // yet, so a retry is invisible. Anything else returns at once.
+        let mut attempt = 0usize;
+        let response = loop {
+            let sent = self
+                .client
+                .post(ANTHROPIC_API_URL)
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", "2023-06-01") // Current stable API version
+                // Computer use beta + prompt caching (+ server-side fallbacks on supported models),
+                // comma-separated in a single header. Prompt caching reduces input token costs by
+                // ~90% and latency by ~50-80% for the stable system prompt and tool definitions.
+                .header("anthropic-beta", self.beta_header_value())
+                .header("content-type", "application/json")
+                .json(&request_payload)
+                .send()
+                .await;
+            let delay = Self::SEND_RETRY_DELAYS.get(attempt).copied();
+            match (sent, delay) {
+                (Ok(r), Some(delay)) if Self::is_retryable_status(r.status()) => {
+                    log::warn!("Anthropic answered {}; retrying in {:?}", r.status(), delay);
+                    drop(r);
+                    tokio::time::sleep(delay).await;
+                }
+                (Err(e), Some(delay)) if e.is_connect() => {
+                    log::warn!("Anthropic request failed ({}); retrying in {:?}", e, delay);
+                    tokio::time::sleep(delay).await;
+                }
+                (Ok(r), _) => break r,
+                (Err(e), _) => {
+                    return Err(AgentError::LlmError(format!("HTTP request failed: {}", e)))
+                }
+            }
+            attempt += 1;
+        };
 
         // --- 3. Parse API Response ---
         if !response.status().is_success() {
@@ -2718,6 +2782,25 @@ mod tests {
     use super::*;
 
     // --- Fixtures --------------------------------------------------------------------------
+
+    #[test]
+    fn user_attachment_becomes_an_image_block() {
+        let images = vec!["data:image/png;base64,aGk=".to_string()];
+        let blocks = user_image_blocks(Some(&images));
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].block_type, "image");
+        let source = blocks[0].source.as_ref().expect("image block has a source");
+        assert_eq!(source.source_type, "base64");
+        assert_eq!(source.media_type, "image/png");
+        assert_eq!(source.data, "aGk=");
+    }
+
+    #[test]
+    fn non_image_attachment_is_dropped_not_sent() {
+        let images = vec!["not a data url".to_string()];
+        assert!(user_image_blocks(Some(&images)).is_empty());
+        assert!(user_image_blocks(None).is_empty());
+    }
 
     fn image_block(seed: usize) -> ApiToolResultBlock {
         ApiToolResultBlock {

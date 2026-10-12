@@ -71,6 +71,11 @@ interface HarnessState {
    * (the app bar, the orbs) are laid out at their natural size instead.
    */
   driven: boolean;
+  /**
+   * What `get_bar_position` answers: the well the bar was "left in" last
+   * launch. Null is a fresh install, which lands top-right.
+   */
+  savedPosition: { x: number; y: number } | null;
 }
 
 // One monitor at the origin. Physical == logical at scaleFactor 1, which keeps
@@ -83,6 +88,7 @@ const DEFAULT_STATE: HarnessState = {
   cursor: { x: -1000, y: -1000 },
   freezeAutoResize: false,
   driven: false,
+  savedPosition: null,
 };
 
 let state: HarnessState = DEFAULT_STATE;
@@ -136,6 +142,9 @@ export const harness = {
   setFreezeAutoResize(freeze: boolean): void {
     commit({ ...state, freezeAutoResize: freeze });
   },
+  setSavedPosition(position: { x: number; y: number } | null): void {
+    commit({ ...state, savedPosition: position });
+  },
   reset(): void {
     commit(DEFAULT_STATE);
   },
@@ -146,12 +155,14 @@ function monitorObject() {
   const { width, height, scaleFactor } = state.monitor;
   const position = { x: 0, y: 0 };
   const size = { width, height };
+  // A standard 24 point menu bar and no Dock, scaled like the rest (physical).
+  const menuBar = Math.round(24 * scaleFactor);
   return {
     name: "Harness Display",
     scaleFactor,
     position,
     size,
-    workArea: { position, size },
+    workArea: { position: { x: 0, y: menuBar }, size: { width, height: height - menuBar } },
   };
 }
 
@@ -167,6 +178,14 @@ function unwrapValue(value: unknown): Record<string, number> | null {
   const obj = json as Record<string, unknown>;
   const inner = (obj.Physical ?? obj.Logical ?? obj) as Record<string, number>;
   return inner;
+}
+
+/** Whether a `set_position` value is a `LogicalPosition`. */
+function isLogical(value: unknown): boolean {
+  if (value == null || typeof value !== "object") return false;
+  const raw = value as { toJSON?: () => unknown };
+  const json = (typeof raw.toJSON === "function" ? raw.toJSON() : value) as Record<string, unknown>;
+  return "Logical" in json;
 }
 
 /**
@@ -203,7 +222,10 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     case "plugin:window|set_position": {
       const p = unwrapValue(args.value);
       if (p && typeof p.x === "number" && typeof p.y === "number") {
-        harness.setFrame({ x: Math.round(p.x), y: Math.round(p.y) });
+        // The store holds physical px; a logical move is in points.
+        const logical = isLogical(args.value);
+        const sf = logical ? state.monitor.scaleFactor : 1;
+        harness.setFrame({ x: Math.round(p.x * sf), y: Math.round(p.y * sf) });
       }
       return null;
     }
@@ -222,11 +244,11 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     // --- the bar's own frame command (resize + reposition in one shot) ---
     case COMMANDS.BAR_SET_BAR_FRAME: {
       const sf = state.monitor.scaleFactor;
-      // width/height arrive logical; x/y arrive physical. Normalize to the
-      // physical frame the store holds.
+      // Everything arrives in points. Normalize to the physical frame the
+      // store holds.
       const requested: HarnessFrame = {
-        x: Math.round(Number(args.x)),
-        y: Math.round(Number(args.y)),
+        x: Math.round(Number(args.x) * sf),
+        y: Math.round(Number(args.y) * sf),
         width: Math.round(Number(args.width) * sf),
         height: Math.round(Number(args.height) * sf),
       };
@@ -257,9 +279,16 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     case COMMANDS.STT_MODELS_GET_LIVE_PARTIAL_TRANSCRIPTION:
       return true;
     case COMMANDS.BAR_GET_BAR_POSITION:
-      return null;
+      return state.savedPosition;
     case COMMANDS.TRIGGERS_GET_TRIGGERS:
       return [];
+    case COMMANDS.TRIGGERS_GET_TRIGGER_HINTS:
+      return {
+        agent: { shortcut: "Control+Option", gesture: "Hold", sentence: "Hold to talk to Juno" },
+        dictation: null,
+      };
+    case COMMANDS.APP_GET_CONNECTIVITY:
+      return { status: "connected", label: "Connected to Claude", provider: "Claude" };
     case COMMANDS.AGENT_SESSIONS_LIST_AGENT_SESSIONS:
       return [];
     case COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_STATUS:

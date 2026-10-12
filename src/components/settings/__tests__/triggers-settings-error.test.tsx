@@ -351,7 +351,7 @@ describe("the add menu no longer offers a double tap", () => {
     renderScreen();
     await screen.findByLabelText("Enable Hold to talk to Juno");
 
-    const trigger = screen.getByRole("button", { name: /Add trigger/ });
+    const trigger = screen.getByRole("button", { name: /Add shortcut/ });
     trigger.focus();
     fireEvent.keyDown(trigger, { key: "Enter" });
 

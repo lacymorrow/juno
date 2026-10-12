@@ -1,5 +1,8 @@
 pub mod elevenlabs;
 pub mod kokoro;
+pub mod pcm_player;
+pub mod prerender;
+pub mod rate;
 pub mod replicate;
 pub mod speech_level;
 pub mod supertonic;
@@ -8,9 +11,10 @@ pub mod voices;
 
 use crate::state::AppState;
 use regex::Regex;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex, OnceLock};
-use tauri::{AppHandle, State};
+use std::sync::{Arc, Mutex as StdMutex};
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
@@ -21,33 +25,321 @@ static TTS_PLAYING: AtomicBool = AtomicBool::new(false);
 // Global mutex for preventing concurrent TTS operations
 static TTS_MUTEX: Mutex<()> = Mutex::const_new(());
 
-// Global registry of PIDs for Juno-spawned audio processes (not system-wide killall)
-static JUNO_AUDIO_PIDS: OnceLock<StdMutex<Vec<u32>>> = OnceLock::new();
-
-fn audio_pid_registry() -> &'static StdMutex<Vec<u32>> {
-    JUNO_AUDIO_PIDS.get_or_init(|| StdMutex::new(Vec::new()))
+/// What a turn has left to say, in order.
+///
+/// A reply is spoken a sentence at a time (see `agent::tts_tags`), so a second
+/// chunk usually arrives while the first is still playing. `invoke_tts` drops a
+/// request that arrives mid-speech, which is right for a greeting or an
+/// approval prompt and wrong for sentence two of an answer. Chunks from a turn
+/// go through this queue instead: one worker drains it in order, holding the
+/// speaking state (echo guard, Escape key) for the whole run so there is no
+/// unmute and re-mute between sentences.
+///
+/// Pure bookkeeping, so the ordering and cancel rules are unit-tested without
+/// an audio device.
+#[derive(Debug)]
+struct SpeechQueue {
+    items: VecDeque<String>,
+    /// A worker owns the queue and will keep popping until it is empty.
+    running: bool,
+    /// Bumped by every stop and every new turn. A chunk is only ever queued
+    /// under the generation it was produced in.
+    generation: u64,
+    /// False from a stop until the next turn begins. A cancelled turn keeps
+    /// streaming for a moment; its sentences must never reach the speaker.
+    turn_open: bool,
 }
 
+impl Default for SpeechQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SpeechQueue {
+    const fn new() -> Self {
+        Self {
+            items: VecDeque::new(),
+            running: false,
+            generation: 0,
+            turn_open: true,
+        }
+    }
+
+    /// Add a chunk of the current turn's reply. `None` when the turn was
+    /// stopped: the chunk is from a cancelled turn and is dropped.
+    fn push_turn(&mut self, text: String) -> Option<bool> {
+        if !self.turn_open {
+            return None;
+        }
+        Some(self.push(text))
+    }
+
+    /// Escape or any stop: drop what is queued and refuse the rest of the
+    /// turn that was running.
+    fn stop(&mut self) -> u64 {
+        self.items.clear();
+        self.generation += 1;
+        self.turn_open = false;
+        self.generation
+    }
+
+    /// A new turn: drop what is left of the last one and accept chunks again.
+    fn begin_turn(&mut self) -> u64 {
+        self.items.clear();
+        self.generation += 1;
+        self.turn_open = true;
+        self.generation
+    }
+
+    /// Add a chunk. True when the caller must start the worker.
+    fn push(&mut self, text: String) -> bool {
+        self.items.push_back(text);
+        if self.running {
+            false
+        } else {
+            self.running = true;
+            true
+        }
+    }
+
+    /// The worker's next chunk. An empty queue ends the worker's run, in the
+    /// same step, so a chunk pushed a moment later starts a new worker rather
+    /// than waiting on one that has already decided to leave.
+    fn pop_or_finish(&mut self) -> Option<String> {
+        let next = self.items.pop_front();
+        if next.is_none() {
+            self.running = false;
+        }
+        next
+    }
+
+    /// The next chunk, if one is already waiting. Does not end the run.
+    fn try_pop(&mut self) -> Option<String> {
+        self.items.pop_front()
+    }
+
+    /// Drop everything and release the worker slot (the worker is leaving).
+    fn abandon(&mut self) {
+        self.items.clear();
+        self.running = false;
+    }
+
+    fn is_busy(&self) -> bool {
+        self.running
+    }
+}
+
+static SPEECH_QUEUE: StdMutex<SpeechQueue> = StdMutex::new(SpeechQueue::new());
+
+/// Woken on every push, so the worker can start rendering the next chunk while
+/// the current one is still playing.
+static SPEECH_NOTIFY: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Run `f` on the queue. A poisoned lock still holds a usable queue.
+fn with_queue<R>(f: impl FnOnce(&mut SpeechQueue) -> R) -> R {
+    match SPEECH_QUEUE.lock() {
+        Ok(mut queue) => f(&mut queue),
+        Err(poisoned) => f(&mut poisoned.into_inner()),
+    }
+}
+
+/// True when a status string came back instead of audio. Base64 has no
+/// underscore, so the `TTS_` prefix cannot be audio.
+fn is_status_result(result: &str) -> bool {
+    result.starts_with("TTS_")
+}
+
+/// The processes playing Juno's speech, and whether she is being held silent.
+///
+/// # Juno does not talk into an open microphone
+///
+/// The echo guard (#567) mutes only the wake-phrase engine while Juno speaks.
+/// A dictation or a spoken query records through a different capture, which
+/// nothing muted, so dictating while Juno was answering typed her own words
+/// into the person's document. While a voice session is open her playback is
+/// held: every player is stopped with `SIGSTOP`, a player spawned meanwhile is
+/// stopped the moment it registers, and `SIGCONT` resumes all of them, mid
+/// word, when the session ends. Nothing is lost and nothing is re-rendered.
+///
+/// Pausing beats acoustic echo cancellation here because every player is a
+/// child process Juno owns: no audio-unit rewrite, no change to capture
+/// quality, and the cost is one signal per player. What it cannot stop is
+/// audio already inside the output buffer when the signal lands (tens of
+/// milliseconds), which is still well inside the time the microphone takes
+/// to open after the key goes down.
+///
+/// The hold is only ever changed under this lock, together with the pid
+/// list, so a player cannot register between "held" and "stop everything"
+/// and slip through, nor be stopped after the release that should free it.
+#[derive(Debug, Default)]
+struct AudioProcesses {
+    pids: Vec<u32>,
+    /// When the hold began, while Juno is being held silent.
+    held_since: Option<std::time::Instant>,
+}
+
+/// A hold older than this is a leak, not a dictation: some session ended
+/// without releasing it. Every real session is far shorter (a held key is
+/// force-stopped at 30 seconds), and a Juno that never speaks again is a
+/// worse failure than one that talks over a very long dictation.
+const STALE_HOLD: std::time::Duration = std::time::Duration::from_secs(300);
+
+impl AudioProcesses {
+    const fn new() -> Self {
+        Self {
+            pids: Vec::new(),
+            held_since: None,
+        }
+    }
+
+    /// A player started. `true`: stop it now, Juno is being held silent.
+    fn register(&mut self, pid: u32) -> bool {
+        self.pids.push(pid);
+        self.held_since.is_some()
+    }
+
+    fn unregister(&mut self, pid: u32) {
+        self.pids.retain(|&p| p != pid);
+    }
+
+    /// Hold Juno silent. Returns the players to stop; empty when already held.
+    fn hold(&mut self, now: std::time::Instant) -> Vec<u32> {
+        if self.held_since.is_some() {
+            return Vec::new();
+        }
+        self.held_since = Some(now);
+        self.pids.clone()
+    }
+
+    /// Let her speak again. Returns the players to resume; empty when she was
+    /// not held.
+    fn release(&mut self) -> Vec<u32> {
+        if self.held_since.take().is_none() {
+            return Vec::new();
+        }
+        self.pids.clone()
+    }
+
+    /// Release a hold that has outlived any real session. Returns the players
+    /// to resume, as [`AudioProcesses::release`] does.
+    fn release_if_stale(&mut self, now: std::time::Instant) -> Vec<u32> {
+        match self.held_since {
+            Some(since) if now.saturating_duration_since(since) >= STALE_HOLD => self.release(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+// Global registry of PIDs for Juno-spawned audio processes (not system-wide killall)
+static JUNO_AUDIO: StdMutex<AudioProcesses> = StdMutex::new(AudioProcesses::new());
+
+fn audio_processes() -> std::sync::MutexGuard<'static, AudioProcesses> {
+    JUNO_AUDIO
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The hold, readable without the lock. Audio played inside Juno (the
+/// greeting through `pcm_player`) has no process to `SIGSTOP`; its audio callback
+/// reads this instead, plays silence while it is set and resumes from the same
+/// sample when it clears. Written only under `JUNO_AUDIO`, next to
+/// `held_since`.
+static HELD_SILENT: AtomicBool = AtomicBool::new(false);
+
+fn sync_held(processes: &AudioProcesses) {
+    HELD_SILENT.store(processes.held_since.is_some(), Ordering::SeqCst);
+}
+
+/// True while a microphone is open and Juno must not be heard.
+pub(crate) fn is_held_silent() -> bool {
+    HELD_SILENT.load(Ordering::SeqCst)
+}
+
+/// In-process playback started: the same stale-hold check a spawned player
+/// gets in [`register_audio_pid`], so a leaked hold cannot silence it for good.
+pub(crate) fn release_stale_hold() {
+    let mut processes = audio_processes();
+    let stale = processes.release_if_stale(std::time::Instant::now());
+    sync_held(&processes);
+    if !stale.is_empty() {
+        warn!("[TTS] A capture hold outlived its session; letting Juno speak again");
+        #[cfg(unix)]
+        signal_players(&stale, libc::SIGCONT);
+    }
+}
+
+/// Send `signal` to each of Juno's players. Unix only; a no-op elsewhere.
+fn signal_players(pids: &[u32], signal: i32) {
+    #[cfg(unix)]
+    for &pid in pids {
+        // SAFETY: plain syscall on a pid Juno spawned; failure (ESRCH, the
+        // player already exited) is harmless and only logged.
+        let result = unsafe { libc::kill(pid as libc::pid_t, signal) };
+        if result != 0 {
+            debug!(
+                "[TTS] kill({}, {}) failed: {}",
+                pid,
+                signal,
+                std::io::Error::last_os_error()
+            );
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (pids, signal);
+}
+
+/// Every process that plays Juno's speech (`afplay`, `aplay`, `say`) passes
+/// through here the moment it is spawned, which makes it the one place that
+/// knows audio has started.
 pub(crate) fn register_audio_pid(pid: u32) {
-    match audio_pid_registry().lock() {
-        Ok(mut pids) => {
-            pids.push(pid);
-        }
-        Err(e) => {
-            warn!("[TTS] Failed to register audio PID {}: {}", pid, e);
-        }
+    crate::turn_timing::mark(crate::turn_timing::Stage::FirstAudio);
+    let mut processes = audio_processes();
+    let stale = processes.release_if_stale(std::time::Instant::now());
+    sync_held(&processes);
+    if !stale.is_empty() {
+        warn!("[TTS] A capture hold outlived its session; letting Juno speak again");
+        #[cfg(unix)]
+        signal_players(&stale, libc::SIGCONT);
+    }
+    if processes.register(pid) {
+        #[cfg(unix)]
+        signal_players(&[pid], libc::SIGSTOP);
     }
 }
 
 pub(crate) fn unregister_audio_pid(pid: u32) {
-    match audio_pid_registry().lock() {
-        Ok(mut pids) => {
-            pids.retain(|&p| p != pid);
-        }
-        Err(e) => {
-            warn!("[TTS] Failed to unregister audio PID {}: {}", pid, e);
-        }
+    audio_processes().unregister(pid);
+}
+
+/// A microphone opened for a voice session: hold Juno silent until it closes.
+/// Idempotent. Paired with [`release_after_capture`] by the voice session
+/// registry, so every way a session ends releases it.
+pub fn hold_for_capture() {
+    let mut processes = audio_processes();
+    let pids = processes.hold(std::time::Instant::now());
+    sync_held(&processes);
+    if !pids.is_empty() {
+        info!(
+            "[TTS] Holding {} player(s) while the microphone is open",
+            pids.len()
+        );
     }
+    #[cfg(unix)]
+    signal_players(&pids, libc::SIGSTOP);
+}
+
+/// The voice session ended: Juno carries on from where she stopped.
+/// Idempotent.
+pub fn release_after_capture() {
+    let mut processes = audio_processes();
+    let pids = processes.release();
+    sync_held(&processes);
+    if !pids.is_empty() {
+        info!("[TTS] Resuming {} held player(s)", pids.len());
+    }
+    #[cfg(unix)]
+    signal_players(&pids, libc::SIGCONT);
 }
 
 // Structure to track audio playback completion with error propagation
@@ -428,15 +720,26 @@ async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
 // all system-wide instances and interfered with other apps' audio.
 pub fn stop_speech() {
     info!("[TTS] Stop speech requested - killing Juno-owned audio processes");
-    TTS_STOP_REQUESTED.store(true, Ordering::SeqCst);
+    // Queue first, flag second, under the queue's lock: the worker resets the
+    // flag in the same lock when it takes a chunk, so a chunk is either
+    // already in flight (and killed by the flag) or still queued (and cleared
+    // here). Neither survives an Escape.
+    let generation = with_queue(|queue| {
+        let generation = queue.stop();
+        TTS_STOP_REQUESTED.store(true, Ordering::SeqCst);
+        generation
+    });
+    debug!("[TTS] Speech generation is now {} (stopped)", generation);
+    kill_audio_processes();
+}
 
-    let pids_to_kill: Vec<u32> = match audio_pid_registry().lock() {
-        Ok(pids) => pids.clone(),
-        Err(e) => {
-            warn!("[TTS] Failed to read audio PID registry: {}", e);
-            vec![]
-        }
-    };
+/// Stop everything Juno is playing: SIGTERM to every audio process it
+/// spawned, and the in-process player. Every stop
+/// (Escape, `stop_coordinator`, a new turn, an audition) comes through here.
+/// Does not touch the queue.
+fn kill_audio_processes() {
+    pcm_player::stop_all();
+    let pids_to_kill: Vec<u32> = audio_processes().pids.clone();
 
     if pids_to_kill.is_empty() {
         debug!("[TTS] No Juno-owned audio processes to stop");
@@ -462,6 +765,11 @@ pub fn stop_speech() {
                 std::io::Error::last_os_error()
             );
         }
+        // A player held by `hold_for_capture` is stopped, and a stopped
+        // process does not act on SIGTERM until it is continued: without
+        // this, Escape during a dictation would leave the killed sentence
+        // waiting to finish the moment the hold was released.
+        let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGCONT) };
     }
 }
 
@@ -688,6 +996,14 @@ pub async fn invoke_tts(
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
+    // A turn's sentences are being spoken (or about to be). Greetings and
+    // approval prompts do not wait their turn behind an answer; they skip,
+    // exactly as they did when only one thing could speak.
+    if is_tts_playing() || with_queue(|queue| queue.is_busy()) {
+        info!("TTS is already playing, ignoring new request to prevent overlapping audio");
+        return Ok("TTS_ALREADY_PLAYING".to_string());
+    }
+
     // CRITICAL FIX 1: Use mutex to prevent any race conditions in concurrent access
     let _guard = TTS_MUTEX.lock().await;
 
@@ -703,6 +1019,8 @@ pub async fn invoke_tts(
     let provider = state
         .get_tts_provider()
         .map_err(|e| format!("Failed to get tts_provider for invoke_tts: {}", e))?;
+    crate::turn_timing::mark(crate::turn_timing::Stage::FirstTtsText);
+    crate::turn_timing::note_tts_engine(&provider);
 
     if provider.is_empty() || provider.to_lowercase() == "off" {
         let short_text = text.chars().take(30).collect::<String>();
@@ -736,6 +1054,290 @@ pub async fn invoke_tts(
     result
 }
 
+/// Play a line rendered ahead of time (the launch greeting), with everything
+/// [`invoke_tts`] gives a spoken line: it skips when something is already
+/// speaking, honours speech being off, holds the echo guard and the Escape
+/// key while it plays, and stops on every stop path. The Mac's voice plays on
+/// the chosen speaker through the in-process player; other engines' audio
+/// plays the way theirs always does.
+///
+/// `Err` only when the audio could not be played at all, so the caller can
+/// speak the line the ordinary way instead.
+pub async fn speak_prerendered(
+    audio: prerender::Prerendered,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    if is_tts_playing() || with_queue(|queue| queue.is_busy()) {
+        return Ok("TTS_ALREADY_PLAYING".to_string());
+    }
+    let _guard = TTS_MUTEX.lock().await;
+    if is_tts_playing() {
+        return Ok("TTS_ALREADY_PLAYING".to_string());
+    }
+    reset_tts_stop_flag();
+
+    let provider = state
+        .get_tts_provider()
+        .map_err(|e| format!("Failed to get tts_provider: {}", e))?;
+    if provider.is_empty() || provider.eq_ignore_ascii_case("off") {
+        return Ok("TTS_DISABLED_BY_SETTING".to_string());
+    }
+    crate::turn_timing::mark(crate::turn_timing::Stage::FirstTtsText);
+    crate::turn_timing::note_tts_engine(&provider);
+
+    set_tts_playing(true);
+    register_tts_escape_key(&app_handle).await;
+
+    let result = match audio {
+        prerender::Prerendered::Pcm { samples, rate } => {
+            let device = state.get_output_device().ok().flatten();
+            match pcm_player::play_pcm(&samples, rate, device.as_deref()).await {
+                pcm_player::Spoken::Status(status) => Ok(status.to_string()),
+                pcm_player::Spoken::Unplayable(reason) => Err(reason),
+            }
+        }
+        prerender::Prerendered::Encoded(encoded) => play_rendered(Ok(encoded), &state).await,
+    };
+
+    set_tts_playing(false);
+    unregister_tts_escape_key(&app_handle).await;
+    result
+}
+
+/// Speak one chunk of a turn's reply, after whatever is already queued.
+///
+/// This is the path for streamed answers: each sentence arrives as soon as the
+/// model finishes writing it, and they play in the order they were queued with
+/// no gap beyond the engine's own. Callers that are not part of a turn
+/// (greeting, approval prompt) use `invoke_tts`, which skips when something is
+/// already speaking.
+///
+/// Returns immediately; the order of calls is the order of speech.
+pub fn enqueue_speech(text: String, app_handle: AppHandle) {
+    enqueue(text, app_handle, true);
+}
+
+/// Like [`enqueue_speech`] for speech that belongs to no turn (a finished
+/// timer): an earlier Escape does not silence it.
+pub fn enqueue_speech_always(text: String, app_handle: AppHandle) {
+    enqueue(text, app_handle, false);
+}
+
+fn enqueue(text: String, app_handle: AppHandle, part_of_turn: bool) {
+    let spawn_worker = {
+        let Some(state) = app_handle.try_state::<AppState>() else {
+            warn!("AppState not available for TTS processing, skipping");
+            return;
+        };
+        match state.get_tts_provider() {
+            Ok(provider) if !provider.is_empty() && !provider.eq_ignore_ascii_case("off") => {}
+            Ok(provider) => {
+                info!("TTS is set to '{}'. Not queueing speech.", provider);
+                crate::turn_timing::mark(crate::turn_timing::Stage::FirstTtsText);
+                crate::turn_timing::finish(None, "tts_off");
+                return;
+            }
+            Err(e) => {
+                warn!("Failed to read tts_provider for enqueue_speech: {}", e);
+                return;
+            }
+        }
+        let filtered = filter_tts_content(&text);
+        if filtered.is_empty() {
+            info!("TTS content was filtered out, nothing to queue");
+            return;
+        }
+        let queued = with_queue(|queue| {
+            if part_of_turn {
+                queue.push_turn(filtered)
+            } else {
+                Some(queue.push(filtered))
+            }
+        });
+        match queued {
+            Some(spawn) => {
+                // First chunk of the turn reaching the queue; the tracker
+                // keeps only the first mark.
+                crate::turn_timing::mark(crate::turn_timing::Stage::FirstTtsText);
+                if let Ok(provider) = state.get_tts_provider() {
+                    crate::turn_timing::note_tts_engine(&provider);
+                }
+                spawn
+            }
+            None => {
+                info!("[TTS] Dropping speech from a stopped turn");
+                return;
+            }
+        }
+    };
+
+    SPEECH_NOTIFY.notify_one();
+    if spawn_worker {
+        tauri::async_runtime::spawn(async move {
+            drain_speech_queue(app_handle).await;
+        });
+    }
+}
+
+/// A new turn begins: whatever the last one had left to say is not wanted.
+/// Silent when nothing is speaking.
+pub fn begin_turn() {
+    // Queue, latch and stop flag change under one lock, as in `stop_speech`.
+    let (speaking, generation) = with_queue(|queue| {
+        let speaking = is_tts_playing() || queue.is_busy();
+        let generation = queue.begin_turn();
+        if speaking {
+            TTS_STOP_REQUESTED.store(true, Ordering::SeqCst);
+        }
+        (speaking, generation)
+    });
+    debug!("[TTS] Speech generation is now {} (new turn)", generation);
+    if speaking {
+        info!("[TTS] New turn: dropping the previous turn's speech");
+        kill_audio_processes();
+    }
+}
+
+/// Take the next chunk for the worker. Taking a chunk clears the stop flag in
+/// the same lock `stop_speech` clears the queue under, so a stop that came
+/// before this chunk was queued cannot silence it, and a stop that comes after
+/// still reaches it.
+fn next_speech_chunk(finish_when_empty: bool) -> Option<String> {
+    with_queue(|queue| {
+        let next = if finish_when_empty {
+            queue.pop_or_finish()
+        } else {
+            queue.try_pop()
+        };
+        if next.is_some() {
+            TTS_STOP_REQUESTED.store(false, Ordering::SeqCst);
+        }
+        next
+    })
+}
+
+type PendingRender = (
+    String,
+    tauri::async_runtime::JoinHandle<Result<String, String>>,
+);
+
+/// Start rendering `text` in the background, for a chunk that plays next.
+fn spawn_prefetch(text: String, provider: &str, app_state: &AppState) -> PendingRender {
+    let provider = provider.to_string();
+    let state = app_state.clone();
+    let task_text = text.clone();
+    let handle = tauri::async_runtime::spawn(async move {
+        execute_tts_with_fallback(task_text, &provider, state, false).await
+    });
+    (text, handle)
+}
+
+/// The one worker that speaks a turn's queued chunks, in order.
+///
+/// Holds `TTS_MUTEX`, the playing flag (echo guard) and the Escape key for the
+/// whole run. While chunk N plays, chunk N+1 is already being rendered when
+/// the engine returns audio (Kokoro, Supertonic, ElevenLabs, Replicate), so
+/// the next sentence starts the moment the last one ends. The Mac's own voice
+/// speaks straight out of `say`, which starts in about a tenth of a second,
+/// so it has nothing to render ahead.
+async fn drain_speech_queue(app_handle: AppHandle) {
+    let _guard = TTS_MUTEX.lock().await;
+
+    let Some(state) = app_handle.try_state::<AppState>() else {
+        with_queue(|queue| queue.abandon());
+        return;
+    };
+    let app_state: AppState = (*state).clone();
+
+    set_tts_playing(true);
+    register_tts_escape_key(&app_handle).await;
+
+    let mut prefetched: Option<PendingRender> = None;
+    loop {
+        let provider = state.get_tts_provider().unwrap_or_default();
+        if provider.is_empty() || provider.eq_ignore_ascii_case("off") {
+            with_queue(|queue| queue.abandon());
+            break;
+        }
+
+        let (text, rendered) = match prefetched.take() {
+            Some((text, handle)) => match handle.await {
+                Ok(Ok(audio)) => (text, Ok(audio)),
+                // A failed render-ahead gets the full chain, system voice included.
+                _ => {
+                    let rendered =
+                        execute_tts_with_fallback(text.clone(), &provider, app_state.clone(), true)
+                            .await;
+                    (text, rendered)
+                }
+            },
+            None => {
+                let Some(text) = next_speech_chunk(true) else {
+                    break;
+                };
+                let rendered =
+                    execute_tts_with_fallback(text.clone(), &provider, app_state.clone(), true)
+                        .await;
+                (text, rendered)
+            }
+        };
+        debug!(
+            "[TTS] Queue: playing chunk of {} chars",
+            text.chars().count()
+        );
+
+        // Audio that came back (not a status) can be played while the next
+        // chunk is rendered. The system voice is never rendered ahead.
+        let can_render_ahead = !provider.eq_ignore_ascii_case("system")
+            && matches!(&rendered, Ok(result) if !is_status_result(result));
+
+        let play = play_rendered(rendered, &app_state);
+        tokio::pin!(play);
+        let result = loop {
+            if can_render_ahead && prefetched.is_none() {
+                if let Some(next) = next_speech_chunk(false) {
+                    prefetched = Some(spawn_prefetch(next, &provider, &app_state));
+                }
+            }
+            tokio::select! {
+                result = &mut play => break result,
+                _ = SPEECH_NOTIFY.notified(), if can_render_ahead && prefetched.is_none() => {}
+            }
+        };
+
+        match result.as_deref() {
+            Ok("TTS_STOPPED_BY_USER") => {
+                // Escape already emptied the queue; what was rendered ahead
+                // belongs to the speech that was just stopped.
+                if let Some((_, handle)) = prefetched.take() {
+                    handle.abort();
+                }
+            }
+            Ok("TTS_DISABLED_BY_SETTING") | Ok("TTS_SOUND_DISABLED") => {
+                let outcome = if matches!(result.as_deref(), Ok("TTS_SOUND_DISABLED")) {
+                    "sound_off"
+                } else {
+                    "tts_off"
+                };
+                crate::turn_timing::finish(None, outcome);
+                if let Some((_, handle)) = prefetched.take() {
+                    handle.abort();
+                }
+                with_queue(|queue| queue.abandon());
+                break;
+            }
+            Ok(_) => {}
+            // One sentence failing must not silence the rest of the answer.
+            Err(e) => warn!("[TTS] Queued chunk failed, moving on: {}", e),
+        }
+    }
+
+    set_tts_playing(false);
+    unregister_tts_escape_key(&app_handle).await;
+    info!("[TTS] Speech queue drained, flags and escape key cleaned up");
+}
+
 // Execute TTS with proper completion tracking and cleanup
 async fn execute_tts_with_completion_tracking(
     text: String,
@@ -748,8 +1350,28 @@ async fn execute_tts_with_completion_tracking(
     // Clone AppState (cheap — all fields are Arc<>) so settings propagate to provider dispatch
     let app_state = (**state).clone();
 
-    // Execute TTS with fallback logic
-    let result = match execute_tts_with_fallback(text, primary_provider, app_state).await {
+    // Execute TTS with fallback logic, then play what came back
+    let rendered = execute_tts_with_fallback(text, primary_provider, app_state, true).await;
+    let result = play_rendered(rendered, state).await;
+
+    // CRITICAL FIX: Always clean up after actual completion (not just function completion)
+    set_tts_playing(false);
+    unregister_tts_escape_key(app_handle).await;
+    info!("TTS operation completed, flags and escape key cleaned up");
+
+    result
+}
+
+/// Turn what an engine returned into sound, and wait until it has finished.
+///
+/// `rendered` is either a status (`TTS_COMPLETED` when the engine already
+/// spoke, as `say` does) or base64 audio to play. Shared by `invoke_tts` and
+/// the turn queue so both play, stop and fail the same way.
+async fn play_rendered(
+    rendered: Result<String, String>,
+    state: &AppState,
+) -> Result<String, String> {
+    match rendered {
         Ok(result) => {
             if result == "TTS_STOPPED_BY_USER" {
                 info!("TTS was stopped by user during execution");
@@ -759,6 +1381,9 @@ async fn execute_tts_with_completion_tracking(
                 Ok(result)
             } else if result == "TTS_CONTENT_FILTERED" {
                 info!("TTS content was filtered out");
+                Ok(result)
+            } else if result == NO_VOICE {
+                // Nothing allowed to speak it; the text is on screen.
                 Ok(result)
             } else if result == "TTS_COMPLETED" {
                 // Already spoken. The system provider streams out of `say`
@@ -866,21 +1491,115 @@ async fn execute_tts_with_completion_tracking(
             error!("TTS failed: {}", e);
             Err(e)
         }
+    }
+}
+
+/// The status for a sentence nothing was allowed to speak: the System Voice
+/// is not a Siri voice and no other engine could take it. The text is on
+/// screen; nothing is said about the silence (Juno fails silently).
+pub(crate) const NO_VOICE: &str = "TTS_NO_VOICE";
+
+/// The engines tried for one utterance, in order. Pure.
+///
+/// Every chain ends in the Mac's own voice, which needs nothing, so a failing
+/// engine never means silence, but only while that voice is a Siri voice
+/// (`mac_voice_allowed`, see `voices::mac_voice_is_siri_or_unknown`). When it
+/// is not, the Mac's voice is dropped from every chain, and a chain left empty
+/// (the Mac was the engine) falls to Kokoro when its model is on disk, or to
+/// nothing at all: silence beats a voice that is not Siri.
+pub(crate) fn fallback_chain(
+    primary_provider: &str,
+    mac_voice_allowed: bool,
+    kokoro_on_disk: bool,
+) -> Vec<&'static str> {
+    let mut chain = match primary_provider.to_lowercase().as_str() {
+        "replicate" => vec!["replicate", "kokoro", "system"],
+        "elevenlabs" => vec!["elevenlabs", "kokoro", "system"],
+        "chatterbox" => vec!["chatterbox", "kokoro", "system"],
+        "supertonic" => vec!["supertonic", "kokoro", "system"],
+        "kokoro" => vec!["kokoro", "system"],
+        "system" => vec!["system"],
+        _ => {
+            warn!(
+                "Unknown primary TTS provider: '{}'. Using system fallback only.",
+                primary_provider
+            );
+            vec!["system"]
+        }
     };
+    if !mac_voice_allowed {
+        chain.retain(|engine| *engine != "system");
+        if chain.is_empty() && kokoro_on_disk {
+            chain.push("kokoro");
+        }
+    }
+    chain
+}
 
-    // CRITICAL FIX: Always clean up after actual completion (not just function completion)
-    set_tts_playing(false);
-    unregister_tts_escape_key(app_handle).await;
-    info!("TTS operation completed, flags and escape key cleaned up");
+/// The local engine that speaks when the chosen one cannot (offline, or a
+/// network error): the Mac's own voice when it may speak, else Kokoro when its
+/// model is on disk, else nothing. Pure.
+pub(crate) fn local_floor(mac_voice_allowed: bool, kokoro_on_disk: bool) -> Option<&'static str> {
+    if mac_voice_allowed {
+        Some("system")
+    } else if kokoro_on_disk {
+        Some("kokoro")
+    } else {
+        None
+    }
+}
 
-    result
+/// Whether the Mac's voice may stand in while Kokoro downloads. When it may
+/// not, the stand-in line is never said, so "Ah, that's better." never
+/// follows it either (`kokoro::STAND_IN_HEARD` stays false). Pure.
+pub(crate) fn mac_stands_in_for_download(mac_voice_allowed: bool) -> bool {
+    mac_voice_allowed
+}
+
+/// What the Mac's voice may do, logged once each time the answer changes.
+static MAC_VOICE_DECISION: StdMutex<Option<bool>> = StdMutex::new(None);
+
+/// Whether the Mac's own voice may speak now, logging the decision when it
+/// changes so a silent Juno can be explained from the log.
+async fn mac_voice_allowed_logged() -> bool {
+    let allowed = voices::mac_voice_allowed().await;
+    let changed = MAC_VOICE_DECISION
+        .lock()
+        .map(|mut last| last.replace(allowed) != Some(allowed))
+        .unwrap_or(false);
+    if changed {
+        if allowed {
+            info!("[TTS] The Mac's voice may speak: the System Voice is Siri or unread");
+        } else {
+            info!(
+                "[TTS] The System Voice is not a Siri voice: the Mac's voice is left out; Kokoro speaks if it is on disk, else nothing"
+            );
+        }
+    }
+    allowed
+}
+
+/// Speak with the local floor (see [`local_floor`]), or stay silent.
+async fn speak_with_local_floor(text: String, app_state: AppState) -> Result<String, String> {
+    let mac_allowed = mac_voice_allowed_logged().await;
+    match local_floor(mac_allowed, voices::kokoro_model_on_disk()) {
+        Some(engine) => invoke_tts_for_provider(text, Some(app_state), engine).await,
+        None => Ok(NO_VOICE.to_string()),
+    }
 }
 
 // Execute TTS with fallback logic (no blocking, no race conditions)
+//
+// `allow_direct` is false when this render runs while another chunk is still
+// playing. The Mac's own voice speaks straight out of `say` instead of
+// returning audio, so rendering it early would talk over the chunk in
+// progress: it is left out of the chain, and a failure here just means the
+// chunk is rendered again, with the full chain, when its turn comes.
 async fn execute_tts_with_fallback(
     text: String,
     primary_provider: &str,
     app_state: AppState,
+    allow_direct: bool,
 ) -> Result<String, String> {
     // Check network connectivity for cloud-based providers
     let is_cloud_provider = matches!(
@@ -891,30 +1610,58 @@ async fn execute_tts_with_fallback(
     // If it's a cloud provider, do a quick network check first
     if is_cloud_provider {
         info!("Cloud TTS provider detected, checking network connectivity...");
-        let is_online = crate::utils::network::is_online().await;
+        // The network monitor already knows when there is no route, and
+        // answers at once; the slower probe only runs when it thinks there is.
+        let is_online =
+            crate::connectivity::network_up() && crate::utils::network::is_online().await;
         if !is_online {
-            warn!("Device appears offline, using system TTS directly");
-            return invoke_tts_for_provider(text, Some(app_state), "system").await;
+            if !allow_direct {
+                return Err("offline; system voice cannot be rendered ahead".to_string());
+            }
+            warn!("Device appears offline, using a local voice directly");
+            return speak_with_local_floor(text, app_state).await;
         }
     }
 
-    // Define the provider fallback order based on the primary provider
-    let fallback_providers = match primary_provider.to_lowercase().as_str() {
-        "replicate" => vec!["replicate", "kokoro", "system"],
-        "elevenlabs" => vec!["elevenlabs", "kokoro", "system"],
-        "chatterbox" => vec!["chatterbox", "kokoro", "system"],
-        "supertonic" => vec!["supertonic", "kokoro", "system"],
-        "kokoro" => vec!["kokoro", "system"],
-        "system" => vec!["system"],
-        "off" => return Ok("TTS_DISABLED_BY_SETTING".to_string()),
-        _ => {
-            warn!(
-                "Unknown primary TTS provider: '{}'. Using system fallback only.",
-                primary_provider
-            );
-            vec!["system"]
+    if primary_provider.eq_ignore_ascii_case("off") {
+        return Ok("TTS_DISABLED_BY_SETTING".to_string());
+    }
+
+    // Kokoro still downloading is a wait of a minute or more, not seconds.
+    // The Mac's voice speaks meanwhile and says why, once; Kokoro says it is
+    // back when the download lands (`kokoro::announce_return`). Only when the
+    // Mac's voice is a Siri voice: otherwise nothing speaks until Kokoro can,
+    // and neither line is said.
+    if primary_provider.eq_ignore_ascii_case("kokoro") && kokoro::downloading() {
+        if !allow_direct {
+            return Err("Kokoro is downloading; system voice cannot be rendered ahead".to_string());
         }
-    };
+        if !mac_stands_in_for_download(mac_voice_allowed_logged().await) {
+            kokoro::keep_downloading();
+            return Ok(NO_VOICE.to_string());
+        }
+        info!("[Kokoro] Still downloading; the Mac's voice stands in");
+        let line = kokoro::stand_in(&text);
+        return invoke_tts_for_provider(line, Some(app_state), "system").await;
+    }
+
+    let mac_allowed = mac_voice_allowed_logged().await;
+    let fallback_providers = fallback_chain(
+        primary_provider,
+        mac_allowed,
+        voices::kokoro_model_on_disk(),
+    );
+    if fallback_providers.is_empty() {
+        return Ok(NO_VOICE.to_string());
+    }
+
+    let fallback_providers: Vec<&str> = fallback_providers
+        .into_iter()
+        .filter(|provider| allow_direct || *provider != "system")
+        .collect();
+    if fallback_providers.is_empty() {
+        return Err("no engine can render ahead of playback".to_string());
+    }
 
     let mut last_error = String::new();
 
@@ -932,9 +1679,9 @@ async fn execute_tts_with_fallback(
             if is_primary { "primary" } else { "fallback" }
         );
 
-        match invoke_tts_for_provider(text.clone(), Some(app_state.clone()), fallback_provider)
-            .await
-        {
+        let attempt =
+            invoke_tts_for_provider(text.clone(), Some(app_state.clone()), fallback_provider).await;
+        match attempt {
             Ok(result) => {
                 if result == "TTS_STOPPED_BY_USER" {
                     return Ok(result);
@@ -953,19 +1700,20 @@ async fn execute_tts_with_fallback(
                 // Check if this is a network-related error
                 let is_network_error = crate::utils::network::is_network_error(&e);
 
+                if !allow_direct && is_network_error {
+                    return Err(e);
+                }
                 if is_primary && is_network_error {
-                    warn!("Primary TTS provider '{}' failed with network error: {}. Trying system TTS immediately.", fallback_provider, e);
-                    // For network errors, skip other cloud providers and go straight to system
-                    match invoke_tts_for_provider(text.clone(), Some(app_state.clone()), "system")
-                        .await
-                    {
-                        Ok(system_result) => {
-                            warn!("Network error detected, successfully fell back to system TTS");
-                            return Ok(system_result);
+                    warn!("Primary TTS provider '{}' failed with network error: {}. Trying a local voice immediately.", fallback_provider, e);
+                    // For network errors, skip other cloud providers and go straight to a local voice
+                    match speak_with_local_floor(text.clone(), app_state.clone()).await {
+                        Ok(local_result) => {
+                            warn!("Network error detected, fell back to a local voice");
+                            return Ok(local_result);
                         }
-                        Err(system_error) => {
-                            error!("Even system TTS failed: {}", system_error);
-                            return Err(format!("Network error with primary provider and system TTS also failed: {}", system_error));
+                        Err(local_error) => {
+                            error!("Even the local voice failed: {}", local_error);
+                            return Err(format!("Network error with primary provider and the local voice also failed: {}", local_error));
                         }
                     }
                 } else {
@@ -1002,6 +1750,7 @@ pub async fn render_sample(
             | "TTS_CONTENT_FILTERED"
             | "TTS_ALREADY_PLAYING"
             | "TTS_SOUND_DISABLED"
+            | NO_VOICE
     );
     Ok(if already_done { None } else { Some(rendered) })
 }
@@ -1010,6 +1759,13 @@ pub async fn render_sample(
 pub async fn play_sample(base64_audio: &str) -> Result<(), String> {
     let handle = play_base64_audio_with_tracking(base64_audio).await?;
     handle.wait_for_completion().await
+}
+
+/// The stored voice rate, or normal pace when state is unavailable.
+fn stored_rate(state: Option<&AppState>) -> f64 {
+    state
+        .and_then(|s| s.get_voice_rate().ok())
+        .unwrap_or(rate::DEFAULT_RATE)
 }
 
 // Invoke TTS for a specific provider name
@@ -1027,7 +1783,10 @@ pub async fn invoke_tts_for_provider(
     }
 
     match provider.to_lowercase().as_str() {
-        "elevenlabs" => elevenlabs::invoke_elevenlabs_tts(text).await,
+        "elevenlabs" => {
+            let speed = rate::effective("elevenlabs", stored_rate(_state.as_ref()));
+            elevenlabs::invoke_elevenlabs_tts(text, speed).await
+        }
         "kokoro" => {
             // An embedding that is not on disk is not a slow voice: `any_tts`
             // loads `voices/<id>.pt` straight off disk and never fetches a
@@ -1037,7 +1796,9 @@ pub async fn invoke_tts_for_provider(
             // been open to have resolved it.
             let stored = _state.as_ref().and_then(|s| s.get_kokoro_voice().ok());
             let voice = voices::resolve_kokoro_voice(stored.as_deref());
-            kokoro::invoke_kokoro_tts(text, voice).await
+            let speed = rate::effective("kokoro", stored_rate(_state.as_ref()))
+                .unwrap_or(rate::DEFAULT_RATE);
+            kokoro::invoke_kokoro_tts(text, voice, speed).await
         }
         "replicate" => replicate::invoke_replicate_tts(text).await,
         "chatterbox" => {
@@ -1071,26 +1832,30 @@ pub async fn invoke_tts_for_provider(
                     supertonic::DEFAULT_VOICE.to_string(),
                     supertonic::DEFAULT_SPEED,
                 ));
+            // The Supertonic setting is the engine's own trim; the voice rate
+            // scales it, so 1.0x leaves it exactly where it was.
+            let speed = (speed
+                * rate::effective("supertonic", stored_rate(_state.as_ref()))
+                    .unwrap_or(rate::DEFAULT_RATE))
+            .clamp(0.5, 2.0);
             supertonic::invoke_supertonic_tts(text, server_url, voice, speed).await
         }
-        // Straight to the speakers rather than to a file and back. This is the
-        // one provider that can start talking immediately, and making it wait
-        // on a full render was what put several seconds between the reply
-        // appearing and Juno saying it.
-        //
-        // It is also the only provider that can be pointed at a chosen
-        // speaker: `say` takes an output device, `afplay` plays to the system
-        // one and takes no device at all.
+        // The System Voice, through `say` with no `-v`: the only way to speak
+        // with a Siri voice. Straight to the speakers rather than to a file
+        // and back, and pointed at the chosen speaker (`say -a`). Refused
+        // outright when the System Voice is not a Siri voice, so no caller
+        // can reach a non-Siri Mac voice by naming this engine.
         "system" => {
-            let voice = _state
-                .as_ref()
-                .and_then(|s| s.get_system_voice().ok())
-                .flatten();
+            if !mac_voice_allowed_logged().await {
+                return Err("the System Voice is not a Siri voice".to_string());
+            }
             let device = _state
                 .as_ref()
                 .and_then(|s| s.get_output_device().ok())
                 .flatten();
-            system::speak_directly(text, voice, device).await
+            let words_per_minute = rate::effective("system", stored_rate(_state.as_ref()))
+                .and_then(rate::say_words_per_minute);
+            system::speak_with_say(text, device, words_per_minute).await
         }
         "off" => {
             warn!("invoke_tts_for_provider called with 'off', this should ideally be handled by invoke_tts. Skipping.");
@@ -1185,6 +1950,145 @@ pub async fn set_supertonic_settings_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Kokoro is the default, and when it cannot speak the Mac does, while
+    /// the Mac's voice is Siri.
+    #[test]
+    fn the_default_engine_falls_back_to_the_mac() {
+        let default = crate::constants::settings::defaults::TTS_PROVIDER;
+        assert_eq!(default, "kokoro");
+        assert_eq!(
+            fallback_chain(default, true, false),
+            vec!["kokoro", "system"]
+        );
+    }
+
+    /// While the Mac's voice is Siri (or unread), every chain ends in it.
+    #[test]
+    fn every_chain_ends_in_the_mac_voice_when_it_is_siri() {
+        for engine in crate::tts::voices::ENGINES
+            .iter()
+            .copied()
+            .chain(["KOKORO", "unknown"])
+        {
+            for kokoro_on_disk in [true, false] {
+                assert_eq!(
+                    fallback_chain(engine, true, kokoro_on_disk).last(),
+                    Some(&"system"),
+                    "{engine}"
+                );
+            }
+        }
+    }
+
+    /// A System Voice that is not Siri is in no chain at all.
+    #[test]
+    fn a_non_siri_mac_voice_is_in_no_chain() {
+        for engine in crate::tts::voices::ENGINES
+            .iter()
+            .copied()
+            .chain(["KOKORO", "unknown"])
+        {
+            for kokoro_on_disk in [true, false] {
+                assert!(
+                    !fallback_chain(engine, false, kokoro_on_disk).contains(&"system"),
+                    "{engine}"
+                );
+            }
+        }
+    }
+
+    /// The Mac as the engine, with its voice not Siri: Kokoro when it is on
+    /// disk, otherwise nothing speaks.
+    #[test]
+    fn the_mac_as_engine_without_siri_is_kokoro_or_silence() {
+        assert_eq!(fallback_chain("system", false, true), vec!["kokoro"]);
+        assert!(fallback_chain("system", false, false).is_empty());
+        assert_eq!(fallback_chain("kokoro", false, true), vec!["kokoro"]);
+        assert_eq!(fallback_chain("kokoro", false, false), vec!["kokoro"]);
+        assert_eq!(
+            fallback_chain("elevenlabs", false, false),
+            vec!["elevenlabs", "kokoro"]
+        );
+        assert_eq!(fallback_chain("system", true, true), vec!["system"]);
+    }
+
+    /// Offline or on a network error: the Mac's voice when it is Siri, then
+    /// Kokoro on disk, then nothing.
+    #[test]
+    fn the_local_floor_is_never_a_non_siri_mac_voice() {
+        assert_eq!(local_floor(true, false), Some("system"));
+        assert_eq!(local_floor(false, true), Some("kokoro"));
+        assert_eq!(local_floor(false, false), None);
+    }
+
+    /// While Kokoro downloads, the Mac stands in (and says why) only when its
+    /// voice is Siri; otherwise neither line is said.
+    #[test]
+    fn the_download_stand_in_needs_a_siri_voice() {
+        assert!(mac_stands_in_for_download(true));
+        assert!(!mac_stands_in_for_download(false));
+    }
+
+    /// Silence is a status, so it is never mistaken for audio to decode.
+    #[test]
+    fn no_voice_is_a_status_not_audio() {
+        assert!(is_status_result(NO_VOICE));
+    }
+
+    #[test]
+    fn holding_stops_every_player_once_and_releasing_resumes_them() {
+        let now = std::time::Instant::now();
+        let mut audio = AudioProcesses::new();
+        assert!(!audio.register(11), "nothing held: the player runs");
+        assert_eq!(audio.hold(now), vec![11]);
+        assert!(audio.hold(now).is_empty(), "a second hold signals nothing");
+        assert_eq!(audio.release(), vec![11]);
+        assert!(
+            audio.release().is_empty(),
+            "a second release signals nothing"
+        );
+    }
+
+    #[test]
+    fn a_player_started_while_held_is_stopped_at_once_and_resumed_with_the_rest() {
+        // The next sentence of the answer starts while the person is still
+        // dictating. It must not play into the open microphone.
+        let mut audio = AudioProcesses::new();
+        assert!(audio.hold(std::time::Instant::now()).is_empty());
+        assert!(audio.register(21), "held: stop it the moment it registers");
+        assert_eq!(audio.release(), vec![21]);
+        assert!(!audio.register(22), "released: the next player runs");
+    }
+
+    #[test]
+    fn a_finished_player_is_not_resumed() {
+        let mut audio = AudioProcesses::new();
+        audio.register(31);
+        audio.register(32);
+        audio.hold(std::time::Instant::now());
+        audio.unregister(31);
+        assert_eq!(audio.release(), vec![32]);
+    }
+
+    #[test]
+    fn a_leaked_hold_cannot_silence_juno_for_good() {
+        let start = std::time::Instant::now();
+        let mut audio = AudioProcesses::new();
+        audio.register(41);
+        audio.hold(start);
+        assert!(
+            audio
+                .release_if_stale(start + std::time::Duration::from_secs(30))
+                .is_empty(),
+            "a dictation-length hold is honoured"
+        );
+        assert_eq!(audio.release_if_stale(start + STALE_HOLD), vec![41]);
+        assert!(
+            !audio.register(42),
+            "after the stale release the next player runs"
+        );
+    }
 
     #[test]
     fn test_filter_code_blocks() {
@@ -1325,5 +2229,133 @@ mod tests {
         let result = filter_tts_content(input);
         assert!(result.contains("myVariable = 42"));
         assert!(result.contains("config: value"));
+    }
+    #[test]
+    fn queue_speaks_chunks_in_the_order_they_arrived() {
+        let mut queue = SpeechQueue::new();
+        assert!(
+            queue.push("one".to_string()),
+            "first push starts the worker"
+        );
+        assert!(!queue.push("two".to_string()), "worker already running");
+        assert!(!queue.push("three".to_string()));
+        assert_eq!(queue.pop_or_finish().as_deref(), Some("one"));
+        assert_eq!(queue.pop_or_finish().as_deref(), Some("two"));
+        assert_eq!(queue.pop_or_finish().as_deref(), Some("three"));
+        assert!(
+            queue.is_busy(),
+            "worker is still in its run until it finds the queue empty"
+        );
+        assert_eq!(queue.pop_or_finish(), None);
+        assert!(!queue.is_busy());
+    }
+
+    #[test]
+    fn a_chunk_after_the_worker_left_starts_a_new_worker() {
+        let mut queue = SpeechQueue::new();
+        assert!(queue.push("a".to_string()));
+        assert_eq!(queue.pop_or_finish().as_deref(), Some("a"));
+        assert_eq!(queue.pop_or_finish(), None);
+        assert!(queue.push("b".to_string()));
+        assert_eq!(queue.pop_or_finish().as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn clear_drops_pending_chunks_but_keeps_the_worker_slot() {
+        let mut queue = SpeechQueue::new();
+        queue.push("playing".to_string());
+        queue.push("pending one".to_string());
+        queue.push("pending two".to_string());
+        assert_eq!(queue.pop_or_finish().as_deref(), Some("playing"));
+        queue.stop();
+        assert!(
+            queue.is_busy(),
+            "the worker is still finishing the chunk in flight"
+        );
+        assert!(!queue.push("next turn".to_string()), "no second worker");
+        assert_eq!(queue.pop_or_finish().as_deref(), Some("next turn"));
+        assert_eq!(queue.pop_or_finish(), None);
+    }
+
+    #[test]
+    fn abandon_empties_the_queue_and_frees_the_slot() {
+        let mut queue = SpeechQueue::new();
+        queue.push("x".to_string());
+        queue.push("y".to_string());
+        queue.abandon();
+        assert!(!queue.is_busy());
+        assert_eq!(queue.try_pop(), None);
+        assert!(
+            queue.push("z".to_string()),
+            "a new worker starts for the next chunk"
+        );
+    }
+
+    #[test]
+    fn try_pop_takes_the_next_chunk_without_ending_the_run() {
+        let mut queue = SpeechQueue::new();
+        queue.push("a".to_string());
+        queue.push("b".to_string());
+        assert_eq!(queue.pop_or_finish().as_deref(), Some("a"));
+        assert_eq!(queue.try_pop().as_deref(), Some("b"));
+        assert_eq!(queue.try_pop(), None);
+        assert!(queue.is_busy(), "only pop_or_finish ends the run");
+    }
+
+    #[test]
+    fn statuses_are_told_apart_from_audio() {
+        for status in [
+            "TTS_COMPLETED",
+            "TTS_STOPPED_BY_USER",
+            "TTS_DISABLED_BY_SETTING",
+            "TTS_CONTENT_FILTERED",
+            "TTS_SOUND_DISABLED",
+        ] {
+            assert!(is_status_result(status));
+        }
+        assert!(!is_status_result("UklGRiQAAABXQVZFZm10IBAAAAABAAEA+/8="));
+    }
+    #[test]
+    fn chunks_from_a_stopped_turn_are_dropped() {
+        let mut queue = SpeechQueue::new();
+        assert_eq!(queue.push_turn("first".to_string()), Some(true));
+        queue.stop();
+        assert_eq!(queue.try_pop(), None, "stop cleared what was queued");
+        assert_eq!(
+            queue.push_turn("still streaming from the cancelled turn".to_string()),
+            None
+        );
+        assert_eq!(queue.try_pop(), None);
+    }
+
+    #[test]
+    fn a_new_turn_speaks_after_a_stop() {
+        let mut queue = SpeechQueue::new();
+        queue.stop();
+        assert_eq!(queue.push_turn("old".to_string()), None);
+        let before = queue.generation;
+        queue.begin_turn();
+        assert!(queue.generation > before);
+        assert_eq!(queue.push_turn("new".to_string()), Some(true));
+        assert_eq!(queue.pop_or_finish().as_deref(), Some("new"));
+    }
+
+    #[test]
+    fn begin_turn_drops_the_previous_turns_pending_speech() {
+        let mut queue = SpeechQueue::new();
+        queue.push_turn("old one".to_string());
+        queue.push_turn("old two".to_string());
+        queue.begin_turn();
+        assert_eq!(queue.push_turn("new".to_string()), Some(false));
+        assert_eq!(queue.try_pop().as_deref(), Some("new"));
+        assert_eq!(queue.try_pop(), None);
+    }
+
+    #[test]
+    fn speech_outside_a_turn_ignores_the_stop_latch() {
+        let mut queue = SpeechQueue::new();
+        queue.stop();
+        assert!(queue.push("timer done".to_string()));
+        assert_eq!(queue.pop_or_finish().as_deref(), Some("timer done"));
     }
 }

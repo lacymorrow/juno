@@ -130,6 +130,17 @@ pub struct AgentCursorState {
     pub state: String,
     /// CSS color string for this agent's cursor sprite
     pub color: String,
+    /// True when the action moved the person's real cursor: the overlay draws
+    /// a glow behind it. False when Juno worked in the background: the overlay
+    /// draws a ghost cursor at the point instead.
+    #[serde(default)]
+    pub foreground: bool,
+    /// Top left of the display the overlay window covers, in the same global
+    /// points as `x` and `y`; the page subtracts it to draw.
+    #[serde(default)]
+    pub origin_x: f64,
+    #[serde(default)]
+    pub origin_y: f64,
 }
 
 /// Risk level for tool approval requests
@@ -159,6 +170,18 @@ pub struct ToolApprovalRequest {
     /// scoped to it and a new conversation starts clean.
     #[serde(default = "default_conversation_key")]
     pub conversation_key: String,
+    /// For a send (a text or an email): the message as it will go out, with
+    /// the recipient as Contacts resolved them. The approval is drawn as a
+    /// message card from this and answered by "send it" or the Send button.
+    /// `None` for every other kind of ask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<Value>,
+    /// For a permission ask (`mac_apps::preflight`): the one line the card
+    /// shows and the prompt that is spoken. The approval is drawn as a
+    /// PermissionAskCard and answered by "continue" or its Continue button.
+    /// `None` for every other kind of ask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission: Option<Value>,
 }
 
 /// The conversation key for a runner with no session id of its own.
@@ -182,6 +205,8 @@ impl ToolApprovalRequest {
             target_app: None,
             timeout_seconds: 60,
             conversation_key: default_conversation_key(),
+            message: None,
+            permission: None,
         }
     }
 
@@ -199,6 +224,31 @@ impl ToolApprovalRequest {
     pub fn with_target_app(mut self, app: String) -> Self {
         self.target_app = Some(app);
         self
+    }
+
+    /// Mark this ask as a send, carrying the message card's data.
+    pub fn with_message(mut self, message: Value) -> Self {
+        self.message = Some(message);
+        self
+    }
+
+    /// Mark this ask as a permission ask, carrying the card's line and prompt.
+    pub fn with_permission(mut self, permission: Value) -> Self {
+        self.permission = Some(permission);
+        self
+    }
+
+    /// Whether this ask is "I need X for that", answered by "continue" or the
+    /// Continue button. It is about the tool's permissions, never the send.
+    pub fn is_permission(&self) -> bool {
+        self.permission.is_some()
+    }
+
+    /// Whether this ask is a send, answered only by "send it" or the button.
+    pub fn is_send(&self) -> bool {
+        !self.is_permission()
+            && (self.message.is_some()
+                || crate::agent::tools::risk_classifier::is_send_tool(&self.tool_name))
     }
 
     pub fn with_timeout(mut self, seconds: u64) -> Self {
@@ -226,6 +276,8 @@ pub struct AudioSettings {
     pub supertonic_server_url: String,
     pub supertonic_voice: String,
     pub supertonic_speed: f64,
+    /// How fast Juno speaks; see `tts::rate`.
+    pub voice_rate: f64,
     /// Whether a dictation session is running right now.
     ///
     /// A liveness flag and nothing more: it goes false the moment the session
@@ -269,6 +321,7 @@ impl Default for AudioSettings {
             supertonic_server_url: crate::tts::supertonic::DEFAULT_SERVER_URL.to_string(),
             supertonic_voice: crate::tts::supertonic::DEFAULT_VOICE.to_string(),
             supertonic_speed: crate::tts::supertonic::DEFAULT_SPEED,
+            voice_rate: crate::tts::rate::DEFAULT_RATE,
             dictation_active: false,
             dictation_clipboard_enabled: true,
             dictation_insertion_mode:
@@ -730,6 +783,20 @@ impl AppState {
             .map_err(|e| format_error(templates::FAILED_TO_SET, "Supertonic speed", e))
     }
 
+    pub fn get_voice_rate(&self) -> Result<f64, String> {
+        self.audio_settings
+            .lock()
+            .map(|settings| settings.voice_rate)
+            .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "voice rate", e))
+    }
+
+    pub fn set_voice_rate(&self, rate: f64) -> Result<(), String> {
+        self.audio_settings
+            .lock()
+            .map(|mut settings| settings.voice_rate = crate::tts::rate::sanitize(rate))
+            .map_err(|e| format_error(templates::FAILED_TO_SET, "voice rate", e))
+    }
+
     pub fn get_dictation_active(&self) -> Result<bool, String> {
         self.audio_settings
             .lock()
@@ -756,12 +823,22 @@ impl AppState {
     /// start that clobbers the session holding it leaves a live recording with
     /// nobody to stop it. The caller treats a refusal as "already listening"
     /// and does nothing at all.
+    ///
+    /// An opened session also holds Juno's speech silent until it ends, so
+    /// her own voice is not recorded into what the person is saying (see
+    /// [`crate::tts::hold_for_capture`]). Tied to the registry rather than to
+    /// each start and stop path because every session ends through a claim
+    /// or a transcript below, and so every ending releases her.
     pub fn begin_voice_session(
         &self,
         target: VoiceTarget,
         method: VoiceStartMethod,
     ) -> Result<VoiceSession, StartRefused> {
-        self.voice_sessions().begin(target, method)
+        let opened = self.voice_sessions().begin(target, method);
+        if opened.is_ok() {
+            crate::tts::hold_for_capture();
+        }
+        opened
     }
 
     /// The session that is open now, if any.
@@ -771,18 +848,31 @@ impl AppState {
 
     /// Claim a session in order to finalise it. The transcript that follows
     /// belongs to the returned session.
+    ///
+    /// Juno stays held through the commit: the microphone is still taking
+    /// the last of the audio until the engine stops, and resuming here would
+    /// put her first words onto the end of the transcript. She is released
+    /// when the transcript arrives, or by the discard a failed finalise ends in.
     pub fn claim_voice_commit(&self, claim: SessionClaim) -> Result<VoiceSession, ClaimRejection> {
         self.voice_sessions().claim_commit(claim)
     }
 
     /// Claim a session in order to throw it away. Nothing is typed or sent.
     pub fn claim_voice_discard(&self, claim: SessionClaim) -> Result<VoiceSession, ClaimRejection> {
-        self.voice_sessions().claim_discard(claim)
+        let claimed = self.voice_sessions().claim_discard(claim);
+        if claimed.is_ok() {
+            crate::tts::release_after_capture();
+        }
+        claimed
     }
 
     /// Hand the arriving transcript to the session that owns it.
     pub fn take_voice_transcript_owner(&self) -> Option<VoiceSession> {
-        self.voice_sessions().take_transcript_owner()
+        let owner = self.voice_sessions().take_transcript_owner();
+        if owner.is_some() {
+            crate::tts::release_after_capture();
+        }
+        owner
     }
 
     pub fn set_dictation_active(&self, active: bool) -> Result<(), String> {
@@ -2328,7 +2418,10 @@ mod tests {
         assert!(!state.is_cloud_enabled());
 
         // Test getter methods - using unwrap in tests is acceptable
-        assert_eq!(state.get_tts_provider().unwrap(), "system");
+        assert_eq!(
+            state.get_tts_provider().unwrap(),
+            crate::constants::settings::defaults::TTS_PROVIDER
+        );
         assert!(!state.get_dictation_active().unwrap());
         assert!(state.get_sound_enabled().unwrap());
         assert!(!state.get_always_listening_active().unwrap());
@@ -2558,7 +2651,10 @@ mod tests {
         let state = AppState::new(None);
 
         // Check initial value
-        assert_eq!(state.get_tts_provider().unwrap(), "system");
+        assert_eq!(
+            state.get_tts_provider().unwrap(),
+            crate::constants::settings::defaults::TTS_PROVIDER
+        );
 
         // Update TTS provider using new setter method
         state.set_tts_provider("openai".to_string()).unwrap();

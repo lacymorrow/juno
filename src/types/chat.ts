@@ -25,6 +25,12 @@ export type ChatMessage = {
    * and share "Setup complete. Welcome to Juno!".
    */
   notice?: boolean;
+  /**
+   * Pictures the person attached to this message, as data URLs. Shown as
+   * thumbnails in their own bubble so an attachment is visibly part of what
+   * they sent.
+   */
+  images?: string[];
   screenshot_base64?: string;
   tool_name?: string;
   tool_args?: any;
@@ -62,6 +68,30 @@ export type ChatMessage = {
    * says.
    */
   always_allow_label?: string | null;
+  /**
+   * Set only for a send (a text or an email): the message as it will go out,
+   * recipient as Contacts resolved them. The approval is drawn as a
+   * MessageCard and answered by "send it" or its Send button.
+   */
+  message?: {
+    kind?: "text" | "email" | string;
+    to?: string;
+    address?: string;
+    service?: string;
+    subject?: string;
+    body?: string;
+    prompt?: string;
+  } | null;
+  /**
+   * Set only for a permission ask (`mac_apps::preflight`): the one line, and
+   * the prompt that was spoken. Drawn as a PermissionAskCard with one button,
+   * Continue, answered by that button or by saying "continue".
+   */
+  permission?: {
+    line?: string;
+    prompt?: string;
+    permissions?: string[];
+  } | null;
   continuation_request_id?: string;
   continuation_state?: "pending" | "stopped" | "continued";
   tts_metadata?: {

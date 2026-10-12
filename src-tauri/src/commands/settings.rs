@@ -7,7 +7,7 @@ use crate::settings::{
     manager::SettingsManager, AgentSettings, AppSettings, AudioSettings, CloudSettings,
     FloatingBarSettings, KeyboardShortcuts, OnboardingSettings, ProviderSettings, ToolSettings,
 };
-use tauri::{command, AppHandle};
+use tauri::{command, AppHandle, Emitter};
 
 use crate::constants::errors::actions;
 use crate::constants::errors::components;
@@ -434,6 +434,31 @@ pub async fn set_advanced_settings_enabled(
     // row that is still switched on.
     crate::commands::triggers::set_voice_triggers_allowed(enabled);
     crate::commands::triggers::reapply_voice_triggers(&app_handle).await;
+
+    // An open Settings window follows, whoever flipped it: the sidebar switch
+    // or the agent's `settings` tool.
+    if let Err(e) = app_handle.emit(
+        crate::constants::settings::events::ADVANCED_SETTINGS_CHANGED,
+        enabled,
+    ) {
+        tracing::warn!("Could not announce the advanced settings change: {}", e);
+    }
+    Ok(())
+}
+
+/// The pane and row the agent pointed the Settings window at before the
+/// window existed. Taken once, by the window, when it mounts.
+#[command]
+pub async fn take_pending_settings_navigation(
+) -> Result<Option<crate::agent::tools::settings_tool::Navigation>, String> {
+    Ok(crate::agent::tools::settings_tool::take_pending_navigation())
+}
+
+/// Follow a `juno://` link the person clicked in a reply. The window hands over
+/// the href and Rust decides; a link that is not one Juno knows does nothing.
+#[command]
+pub async fn open_juno_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    crate::deep_link::handle_url(&app, &url, 0);
     Ok(())
 }
 

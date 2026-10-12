@@ -209,6 +209,10 @@ async fn initialize_audio_state(app_handle: AppHandle) -> Result<(), String> {
 
     let app_state = app_handle.state::<AppState>();
 
+    // First impressions: on a new Mac Kokoro still has to download. Start it
+    // before anything else so it is ready by the end of onboarding.
+    crate::tts::voices::warm_engine_at_launch(&app_handle).await;
+
     // Load audio settings from centralized settings
     if let Err(e) =
         crate::commands::load_audio_settings_from_centralized_settings(&app_handle, &app_state)
@@ -324,6 +328,16 @@ async fn initialize_onboarding_state(app_handle: AppHandle) -> Result<(), String
         // falls back to asking, which is the pre-existing behaviour.
         warn!("Could not settle the default provider: {}", e);
     }
+
+    // With the provider settled, start watching whether Juno can reach it
+    // (and the network at all), for the bar's dot and for submit_query.
+    crate::connectivity::start(app_handle.clone());
+
+    // With the provider settled, keep a booted `claude` process ready for the
+    // next new conversation when the CLI is the provider. Spawned, never awaited.
+    crate::agent::providers::claude_cli::start_warm_spare(app_handle.clone());
+    // Same for Codex: one warm `codex app-server` thread when it is the provider.
+    crate::agent::providers::codex_session::start_warm(app_handle.clone());
 
     if let Err(e) =
         crate::commands::onboarding::initialize_onboarding_system(app_handle.clone()).await

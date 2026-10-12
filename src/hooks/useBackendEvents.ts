@@ -4,7 +4,7 @@ import { stopTTS } from "@/lib/ttsService";
 import type { ChatMessage } from "@/types/chat";
 import { EVENTS, COMMANDS } from "@/lib/constants.generated";
 import { useEventListener } from "@/hooks/useEventListener";
-import { hasMixedContent } from "@/components/ui/mixed-content-renderer";
+import { hasMixedContent } from "@/lib/mixedContent";
 
 /** Index of the last element matching `predicate`, or -1. */
 function findLastIndex<T>(items: T[], predicate: (item: T) => boolean): number {
@@ -381,6 +381,10 @@ export function useBackendEvents({
 		timeout_seconds?: number;
 		/** What "Always allow" would cover. Null when it is not on offer. */
 		always_allow_label?: string | null;
+		/** Set for a send: the message card's data. */
+		message?: ChatMessage["message"];
+		/** Set for a permission ask: the line the card shows. */
+		permission?: ChatMessage["permission"];
 	}>(
 		EVENTS.TOOLS_APPROVAL_REQUEST,
 		(payload) => {
@@ -395,6 +399,8 @@ export function useBackendEvents({
 					risk_level: payload.risk_level,
 					target_app: payload.target_app,
 					always_allow_label: payload.always_allow_label ?? null,
+					message: payload.message ?? null,
+					permission: payload.permission ?? null,
 					approval_timeout_seconds: payload.timeout_seconds ?? 60,
 					timestamp: payload.timestamp,
 			}));
@@ -684,11 +690,11 @@ export function useBackendEvents({
 	// (typed, voice, bar, rendered component, cloud, scheduled). This is the
 	// only place a user message enters the conversation and the only place
 	// processing switches on, so every source looks identical to the user.
-	useEventListener<{ content: string; timestamp: number }>(
+	useEventListener<{ content: string; timestamp: number; images?: string[] | null }>(
 		EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED,
 		(payload) => {
 			console.log("User message submitted event received:", payload);
-			const { content, timestamp } = payload;
+			const { content, timestamp, images } = payload;
 
 			setConversationWithPruning((prev) => [
 				...prev,
@@ -696,6 +702,7 @@ export function useBackendEvents({
 					role: "user",
 					content,
 					timestamp,
+					...(images && images.length > 0 ? { images } : {}),
 				}
 			]);
 			setIsProcessing(true);

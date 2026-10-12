@@ -18,7 +18,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -98,7 +98,7 @@ fn forget_session(conversation_id: &str) {
 }
 
 /// Which Juno conversation this run belongs to.
-async fn conversation_id_for(app_handle: &Option<tauri::AppHandle>) -> Option<String> {
+pub(super) async fn conversation_id_for(app_handle: &Option<tauri::AppHandle>) -> Option<String> {
     use tauri::Manager;
     let handle = app_handle.as_ref()?;
     let state = handle.try_state::<crate::state::AppState>()?;
@@ -122,13 +122,18 @@ pub mod model_aliases {
 /// Claude CLI may run multi-step agent loops, so this is generous.
 const CLI_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// How many attached images to keep on disk for the one-shot CLI path.
+/// Generous next to the handful a single turn writes, small enough that the
+/// dir cannot grow without bound.
+const ATTACHMENT_CACHE_MAX_FILES: usize = 64;
+
 /// Asks the CLI for the raw streaming events rather than finished messages
 /// only. Everything the user sees while Juno works depends on it.
 ///
 /// Older `claude` builds do not know this flag and exit non-zero on it, which
 /// is why `run_streaming` retries once without it — Juno users install the
 /// CLI themselves, so there is no floor version to assume.
-const PARTIAL_MESSAGES_FLAG: &str = "--include-partial-messages";
+pub(super) const PARTIAL_MESSAGES_FLAG: &str = "--include-partial-messages";
 
 /// Start building a `claude` invocation, rooted at the user's home directory.
 ///
@@ -360,14 +365,163 @@ fn write_mcp_config(endpoint: &juno_mcp::Endpoint) -> Result<PathBuf, AgentError
     Ok(path)
 }
 
+/// The per-run inputs a `claude` spawn needs beyond the brain itself: the
+/// `--mcp-config` file and the approval posture.
+///
+/// Shared by every turn and by the warm spare, so the spare is born with the
+/// same MCP config path and permission flags the turn that adopts it would use.
+async fn turn_environment(app_handle: Option<&tauri::AppHandle>) -> (Option<PathBuf>, bool) {
+    // Hand the CLI Juno's own computer tool. Done per run rather than when
+    // the brain is built, because the server lives in the running app and
+    // the brain is constructed without an app handle (and rebuilt on every
+    // query). Without a handle there is no desktop to drive anyway, which
+    // is the headless and test case, so the CLI simply runs toolless.
+    let mcp_config = match app_handle {
+        Some(handle) => match juno_mcp::ensure_running(handle).await {
+            Ok(endpoint) => write_mcp_config(&endpoint)
+                .map_err(|e| warn!("Juno's tool server is up but its config is not: {e}"))
+                .ok(),
+            Err(e) => {
+                // Non-fatal, and deliberately loud: the CLI still answers,
+                // it just cannot touch the desktop.
+                warn!("Could not offer Juno's computer tool to the CLI: {e}");
+                None
+            }
+        },
+        None => None,
+    };
+
+    // Per-send approval (LAC-4058): with the setting on, the CLI's
+    // permission prompts route into Juno's approval sheet instead of
+    // being skipped. Read per run, so flipping the setting needs no
+    // restart. Without an app handle there is no sheet to route to.
+    let ask_before_send = app_handle.is_some_and(cli_approval::is_enabled);
+
+    (mcp_config, ask_before_send)
+}
+
+/// How long settings must sit still before the warm spare is re-primed, so a
+/// burst of saves from the Settings window replaces the spare once, not per save.
+const SPARE_SETTINGS_DEBOUNCE: Duration = Duration::from_millis(1500);
+
+/// Start keeping a warm spare: prime one now if the CLI is the active provider,
+/// and re-prime (or stop it) whenever provider settings change.
+///
+/// Call once, off the launch path. Never blocks: the work runs on spawned tasks.
+pub fn start_warm_spare(app: tauri::AppHandle) {
+    use std::sync::atomic::AtomicU64;
+    use tauri::Listener;
+
+    let generation = std::sync::Arc::new(AtomicU64::new(0));
+    let listener_app = app.clone();
+    let reprime = std::sync::Arc::new(move || {
+        let mine = generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let generation = std::sync::Arc::clone(&generation);
+        let app = listener_app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(SPARE_SETTINGS_DEBOUNCE).await;
+            if generation.load(Ordering::Relaxed) == mine {
+                prewarm_persistent_session(app).await;
+            }
+        });
+    });
+    // Audio settings count too: turning Juno's voice off (or on) changes the
+    // system prompt, and with it the fingerprint a spare is adopted by.
+    for event in [
+        crate::constants::settings::events::PROVIDER_SETTINGS_CHANGED,
+        crate::constants::settings::events::AUDIO_SETTINGS_CHANGED,
+    ] {
+        let reprime = std::sync::Arc::clone(&reprime);
+        app.listen_any(event, move |_| (*reprime)());
+    }
+
+    tauri::async_runtime::spawn(prewarm_persistent_session(app));
+}
+
+/// Prime the warm spare for the configured Claude CLI provider, or stop it when
+/// there should not be one.
+///
+/// A spare is only started when the CLI is the active provider, persistent
+/// sessions are on, the CLI is signed in, and a previous turn has left behind the
+/// system prompt Juno runs it with. Without that prompt the spare could not match
+/// the first turn, so none is started and the first conversation starts cold.
+pub async fn prewarm_persistent_session(app: tauri::AppHandle) {
+    use crate::agent::providers::factory::BrainFactory;
+    use crate::agent::providers::types::Provider;
+
+    if !claude_cli_session::is_enabled(&app) {
+        claude_cli_session::stop_spare();
+        return;
+    }
+    let on_cli = matches!(
+        BrainFactory::active_provider_and_model(Some(&app)),
+        Some((Provider::ClaudeCli, _))
+    );
+    if !on_cli {
+        claude_cli_session::stop_spare();
+        return;
+    }
+    let Some(system_prompt) = claude_cli_session::remembered_system_prompt(&app) else {
+        debug!("[CliSession] No turn has run yet; no warm spare until one has");
+        return;
+    };
+    // The remembered prompt asks for speech, or deliberately does not, to match
+    // Juno's voice at the time. If the voice has been switched since, a spare
+    // started from it could never be adopted, so none is kept. The next turn
+    // starts cold, remembers the prompt it ran with and primes from that.
+    if claude_cli_session::remembered_voice(&app)
+        != Some(crate::agent::voice_policy::voice_enabled_now(&app))
+    {
+        debug!("[CliSession] Juno's voice changed since the last turn; no warm spare until a turn has run");
+        claude_cli_session::stop_spare();
+        return;
+    }
+
+    let config = crate::agent::providers::config::load_provider_config(Some(&app));
+    let Some(mut provider_config) = config.resolve_provider(Provider::ClaudeCli) else {
+        return;
+    };
+    // The prompt the last turn ran with, which is what the next turn will run
+    // with unless something changed. If it did, adoption sees the mismatch and
+    // the turn starts cold, as it would have anyway.
+    provider_config.system_prompt = Some(system_prompt);
+    let brain = match ClaudeCliBrain::from_config(&provider_config) {
+        Ok(brain) => brain,
+        Err(e) => {
+            debug!("[CliSession] No warm spare: {e}");
+            return;
+        }
+    };
+    if let Err(e) = check_auth_status(&brain.binary_path).await {
+        debug!("[CliSession] No warm spare, the CLI is not ready: {e}");
+        return;
+    }
+
+    let (mcp_config, ask_before_send) = turn_environment(Some(&app)).await;
+    claude_cli_session::prime_spare(&app, brain.launch_config(mcp_config, ask_before_send));
+}
+
 /// System-prompt guidance appended when Juno's tool server is wired in.
 /// Without this, models tend to fall back to `cliclick`/`screencapture` via
 /// Bash even when MCP computer-use tools are available (LAC-3692).
-const MCP_TOOL_GUIDANCE: &str = "You have a desktop automation tool from the \"juno\" MCP \
-server: `computer`, which takes screenshots and moves, clicks, types, scrolls and presses keys. \
-For ANY desktop or GUI automation use it. Do NOT use shell commands like cliclick, \
-screencapture, or osascript for desktop automation: they bypass Juno, so the pointer moves with \
-nothing on screen saying that Juno is the one moving it.";
+pub(super) const MCP_TOOL_GUIDANCE: &str =
+    "You have a desktop automation tool from the \"juno\" MCP \
+server: `computer`. For ANY desktop or GUI automation use it. Do NOT use shell commands like \
+cliclick, screencapture, or osascript for desktop automation: they bypass Juno, so the pointer \
+moves with nothing on screen saying that Juno is the one moving it. \
+Work through accessibility first: list a window's controls with {\"action\": \"elements\", \
+\"window\": \"<app or window title>\"} and press them by id ({\"action\": \"left_click\", \
+\"element\": \"e7\"}); read results from the listed values. Name the window on every action. \
+Only fall back to screenshots and coordinates when a window lists no controls, and then take \
+the screenshot with 'window' so it shows just that window. The person keeps using their \
+computer while you work: never bring a window to the front or click into their apps to get \
+something done. For Juno's own settings (its voice, shortcuts, devices, or where a setting is) \
+use the `settings` tool from the same server, never the desktop: it changes them live and \
+points the Settings window at them. \
+For Reminders, Calendar and Contacts use the juno server's reminders_, calendar_ and contacts_ \
+tools, never AppleScript, osascript or other shell commands. \
+For music, directions, the person's own shortcuts and Do Not Disturb use music_play, \
+maps_directions, shortcuts_run and focus_set from the same server.";
 
 /// Check if Claude CLI is both installed and authenticated.
 /// Runs `claude auth status --json` and returns Ok(()) if logged in.
@@ -439,6 +593,107 @@ async fn check_auth_status(binary_path: &PathBuf) -> Result<(), AgentError> {
     }
 }
 
+/// Write each attached image to a file under `~/Library/Caches/Juno/attachments`,
+/// so a one-shot `claude -p` spawn can read it from disk. An attachment that is
+/// not a base64 image data URL, or that fails to decode or write, is skipped —
+/// the turn still runs on whatever text and images remain.
+fn save_attachment_files(images: &[String]) -> Vec<PathBuf> {
+    use base64::Engine as _;
+
+    let Some(dir) = dirs::cache_dir().map(|d| d.join("Juno").join("attachments")) else {
+        return Vec::new();
+    };
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        warn!("Could not create the attachments cache dir: {e}");
+        return Vec::new();
+    }
+
+    let mut paths = Vec::new();
+    for url in images {
+        let Some((media_type, data)) = super::anthropic::parse_data_url(url) else {
+            warn!("Dropping an attachment that is not a base64 image data URL");
+            continue;
+        };
+        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&data) else {
+            warn!("Dropping an attachment whose base64 payload did not decode");
+            continue;
+        };
+        // "image/png" → "png"; anything exotic falls back to a safe suffix.
+        let ext: String = media_type
+            .strip_prefix("image/")
+            .unwrap_or("png")
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect();
+        let ext = if ext.is_empty() {
+            "png".to_string()
+        } else {
+            ext
+        };
+        let path = dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
+        match std::fs::write(&path, bytes) {
+            Ok(()) => paths.push(path),
+            Err(e) => warn!("Could not write an attachment to {}: {e}", path.display()),
+        }
+    }
+    prune_attachment_cache(&dir);
+    paths
+}
+
+/// Delete the oldest files in the attachments dir beyond
+/// [`ATTACHMENT_CACHE_MAX_FILES`].
+///
+/// Nothing else ever cleans this dir up, and the files are the person's own
+/// screenshots and photos, so without a cap every picture they ever pasted
+/// would sit on disk forever. Pruning on the newest-first ordering can only
+/// reach files from earlier turns: the ones this turn just wrote are the
+/// newest, so the CLI never loses a file out from under it.
+fn prune_attachment_cache(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let meta = entry.metadata().ok()?;
+            if !meta.is_file() {
+                return None;
+            }
+            Some((meta.modified().ok()?, entry.path()))
+        })
+        .collect();
+    if files.len() <= ATTACHMENT_CACHE_MAX_FILES {
+        return;
+    }
+    files.sort();
+    for (_, path) in files.iter().take(files.len() - ATTACHMENT_CACHE_MAX_FILES) {
+        if let Err(e) = std::fs::remove_file(path) {
+            debug!("Could not prune attachment {}: {e}", path.display());
+        }
+    }
+}
+
+/// Extend a one-shot query to point at the attachment files on disk.
+///
+/// The note is addressed to the model, never shown to the person, so a turn
+/// whose attachments all failed to save degrades to the bare query.
+fn query_with_image_paths(query: &str, paths: &[PathBuf]) -> String {
+    if paths.is_empty() {
+        return query.to_string();
+    }
+    let list = paths
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{query}\n\n[The person attached {count} image{plural} to this message. \
+Read these files to see them:\n{list}]",
+        count = paths.len(),
+        plural = if paths.len() == 1 { "" } else { "s" },
+    )
+}
+
 /// Claude CLI-based AgentBrain implementation.
 ///
 /// Spawns `claude -p --output-format=stream-json` as a subprocess for each query,
@@ -461,6 +716,9 @@ pub struct ClaudeCliBrain {
     /// at construction from the hidden `providers[].effort` setting, so the
     /// stream loop never has to reach for the store.
     effort: String,
+    /// The person set `providers[].effort` themselves. Their level is then used
+    /// for every turn, spoken or typed; see [`effort_for_turn`].
+    effort_explicit: bool,
     /// Whether the CLI may load the MCP servers on the person's own Claude
     /// account — claude.ai connectors (Slack, Gmail, Drive) and user-level
     /// servers. When false, `build_args` passes `--strict-mcp-config` so
@@ -488,6 +746,7 @@ impl ClaudeCliBrain {
             .unwrap_or_else(|| model_aliases::SONNET.to_string());
 
         let effort = resolve_effort(config.effort.as_deref());
+        let effort_explicit = effort_is_explicit(config.effort.as_deref());
 
         info!(
             "Initializing Claude CLI brain (binary: {}, model: {}, effort: {})",
@@ -501,9 +760,30 @@ impl ClaudeCliBrain {
             model,
             system_prompt: config.system_prompt.clone(),
             effort,
+            effort_explicit,
             load_account_mcp: config.load_account_mcp,
             observed_session: std::sync::Mutex::new(None),
         })
+    }
+
+    /// What a persistent process for this brain is born with. One function, so a
+    /// turn and the warm spare primed for it cannot disagree about any of it.
+    fn launch_config(
+        &self,
+        mcp_config: Option<PathBuf>,
+        ask_before_send: bool,
+    ) -> claude_cli_session::LaunchConfig {
+        claude_cli_session::LaunchConfig {
+            binary: self.binary_path.clone(),
+            model: self.model.clone(),
+            effort: self.effort.clone(),
+            include_partial_messages: !PARTIAL_MESSAGES_UNSUPPORTED.load(Ordering::Relaxed),
+            system_prompt: self.system_prompt.clone(),
+            mcp_config,
+            mcp_guidance: MCP_TOOL_GUIDANCE,
+            load_account_mcp: self.load_account_mcp,
+            ask_before_send,
+        }
     }
 
     /// Build the subprocess command arguments.
@@ -608,6 +888,19 @@ impl ClaudeCliBrain {
             .unwrap_or_else(|| "Hello".to_string())
     }
 
+    /// Images attached to the latest user message, as base64 data URLs.
+    ///
+    /// Only the latest turn's attachments travel: the CLI keeps earlier
+    /// turns, pictures included, in its own session transcript.
+    fn extract_images(messages: &[Message]) -> Vec<String> {
+        messages
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::User)
+            .and_then(|m| m.images.clone())
+            .unwrap_or_default()
+    }
+
     /// Run the Claude CLI subprocess and stream output to the Tauri frontend.
     ///
     /// Validates auth, spawns the subprocess with a timeout, drains stderr
@@ -616,6 +909,7 @@ impl ClaudeCliBrain {
     async fn run_streaming(
         &self,
         query: &str,
+        images: &[String],
         app_handle: Option<tauri::AppHandle>,
         message_id: Option<String>,
         cancel_rx: Option<crate::state::CancelReceiver>,
@@ -627,33 +921,20 @@ impl ClaudeCliBrain {
         let conversation = conversation_id_for(&app_handle).await;
         let resume = conversation.as_deref().and_then(resume_id_for);
 
-        // Hand the CLI Juno's own computer tool. Done per run rather than when
-        // the brain is built, because the server lives in the running app and
-        // the brain is constructed without an app handle (and rebuilt on every
-        // query). Without a handle there is no desktop to drive anyway, which
-        // is the headless and test case, so the CLI simply runs toolless.
-        let mcp_config = match app_handle.as_ref() {
-            Some(handle) => match juno_mcp::ensure_running(handle).await {
-                Ok(endpoint) => write_mcp_config(&endpoint)
-                    .map_err(|e| warn!("Juno's tool server is up but its config is not: {e}"))
-                    .ok(),
-                Err(e) => {
-                    // Non-fatal, and deliberately loud: the CLI still answers,
-                    // it just cannot touch the desktop.
-                    warn!("Could not offer Juno's computer tool to the CLI: {e}");
-                    None
-                }
-            },
-            None => None,
-        };
+        let (mcp_config, ask_before_send) = turn_environment(app_handle.as_ref()).await;
 
-        // Per-send approval (LAC-4058): with the setting on, the CLI's
-        // permission prompts route into Juno's approval sheet instead of
-        // being skipped. Read per run, so flipping the setting needs no
-        // restart. Without an app handle there is no sheet to route to.
-        let ask_before_send = app_handle.as_ref().is_some_and(cli_approval::is_enabled);
+        // A spoken turn runs at a lower effort than a typed one, unless the
+        // person chose a level. Logged on the [TurnTiming] line for A/B.
+        let voice = crate::turn_timing::open_turn_is_voice();
+        let turn_effort = effort_for_turn(&self.effort, self.effort_explicit, voice);
+        crate::turn_timing::note_effort(&turn_effort);
+        info!(
+            "Claude CLI turn effort: {} ({})",
+            turn_effort,
+            if voice { "voice" } else { "typed" }
+        );
 
-        // Experimental (off by default): run this turn in one long-lived process
+        // On unless the person turned it off: run this turn in one long-lived process
         // kept alive for the conversation, instead of spawning a fresh one here.
         // Worth ~1.6-3.1s per follow-up — see docs/plans/cli-persistent-session-spike.md.
         //
@@ -672,26 +953,27 @@ impl ClaudeCliBrain {
                     None => (uuid::Uuid::new_v4().to_string(), true),
                 };
 
+                let launch = self.launch_config(mcp_config.clone(), ask_before_send);
                 let request = claude_cli_session::TurnRequest {
-                    binary: &self.binary_path,
-                    model: &self.model,
-                    system_prompt: self.system_prompt.as_deref(),
-                    mcp_config: mcp_config.as_deref(),
-                    mcp_guidance: MCP_TOOL_GUIDANCE,
-                    load_account_mcp: self.load_account_mcp,
+                    launch: &launch,
                     conversation_id,
                     session_id: &session_id,
                     session_is_new,
                     query,
+                    effort: &turn_effort,
+                    images,
                     app_handle: handle,
                     message_id: message_id.clone(),
                     cancel_rx: cancel_rx.clone(),
-                    ask_before_send,
                 };
 
-                match claude_cli_session::run_turn(request).await {
+                // The session the turn actually ran in, which is not `session_id`
+                // when a new conversation adopted the warm spare. That is the id
+                // the next message has to resume.
+                let turn = claude_cli_session::run_turn(request).await;
+                match turn.outcome {
                     Ok(claude_cli_session::TurnOutcome::Completed(text)) => {
-                        remember_session(conversation_id, &session_id);
+                        remember_session(conversation_id, &turn.session_id);
                         return Ok(text);
                     }
                     Ok(claude_cli_session::TurnOutcome::Unavailable) => {
@@ -700,12 +982,26 @@ impl ClaudeCliBrain {
                     Err(e) => {
                         // The turn actually started and then failed. Re-running it on
                         // the one-shot path would bill the user twice for one message.
-                        remember_session(conversation_id, &session_id);
+                        remember_session(conversation_id, &turn.session_id);
                         return Err(e);
                     }
                 }
             }
         }
+
+        // The one-shot spawn passes the query as a single argv string and
+        // gives the child no stdin, so an attachment cannot ride inline the
+        // way the persistent session's stream-json frame carries it. Instead
+        // each image is written under Juno's cache dir and the prompt says
+        // where to look — the CLI reads image files natively. When nothing
+        // could be saved the person's text still goes through unchanged.
+        let query_with_images;
+        let query = if images.is_empty() {
+            query
+        } else {
+            query_with_images = query_with_image_paths(query, &save_attachment_files(images));
+            query_with_images.as_str()
+        };
 
         let msg_id = message_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
@@ -752,6 +1048,7 @@ impl ClaudeCliBrain {
                 mcp_config.as_deref(),
                 ask_before_send,
             );
+            set_effort_arg(&mut args, &turn_effort);
             if !include_partial_messages {
                 strip_partial_messages(&mut args);
             }
@@ -779,6 +1076,8 @@ impl ClaudeCliBrain {
                     .spawn()
             };
 
+            crate::turn_timing::note_llm("claude_cli/oneshot", &self.model);
+            crate::turn_timing::mark(crate::turn_timing::Stage::LlmRequestSent);
             let mut child = match spawn(&args) {
                 Ok(child) => child,
                 // A session id we stored can stop being resumable: the CLI
@@ -1110,36 +1409,10 @@ impl ClaudeCliBrain {
                         // is over, so whatever indicator it raised comes down
                         // — otherwise a finished tool spins forever.
                         "user" => {
-                            if let Some(content) = parsed
-                                .get("message")
-                                .and_then(|m| m.get("content"))
-                                .and_then(|c| c.as_array())
-                            {
-                                for block in content {
-                                    if block.get("type").and_then(|v| v.as_str())
-                                        != Some("tool_result")
-                                    {
-                                        continue;
-                                    }
-                                    let tool_use_id = block
-                                        .get("tool_use_id")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    let label = pending_tools
-                                        .remove(tool_use_id)
-                                        .unwrap_or_else(|| "tool".to_string());
-                                    if let Some(ref handle) = app_handle {
-                                        crate::agent::tool_logger::emit_tool_pending_cleared(
-                                            handle,
-                                            msg_id,
-                                            tool_use_id,
-                                            &label,
-                                        );
-                                    }
-                                }
-                            }
+                            clear_finished_tools(&parsed, app_handle, msg_id, &mut pending_tools);
                         }
                         "assistant" => {
+                            crate::turn_timing::mark(crate::turn_timing::Stage::LlmFirstToken);
                             // Fallback path. Kept for CLI builds that do not
                             // support --include-partial-messages, where this
                             // whole-message diff is the only source of text.
@@ -1186,6 +1459,15 @@ impl ClaudeCliBrain {
                                         // multi-byte UTF-8.
                                         let delta: String =
                                             text.chars().skip(previous_char_count).collect();
+                                        if previous_char_count == 0 {
+                                            Self::separate_text_block(
+                                                app_handle,
+                                                msg_id,
+                                                &mut tts_stream,
+                                                &mut accumulated_text,
+                                                &mut spoken_blocks,
+                                            );
+                                        }
                                         previous_char_count = char_count;
                                         Self::emit_display_text(
                                             app_handle,
@@ -1257,16 +1539,11 @@ impl ClaudeCliBrain {
         }
 
         // The `result` event carries the raw final text, tags included. Strip
-        // it for display and speak any block the assistant events did not
-        // already cover (older CLI builds emit no assistant events).
+        // it for display, and speak from it only when the stream carried no
+        // text at all (older CLI builds emit no assistant events).
+        let stream_carried_text = !spoken_blocks.is_empty() || !accumulated_text.trim().is_empty();
         let final_result = final_result.map(|raw| {
-            // Named apart from the content-block map above, which is a
-            // different `blocks` entirely.
-            let (display, tts_blocks) = crate::agent::tts_tags::split_tts_tags(&raw);
-            let unspoken: Vec<String> = tts_blocks
-                .into_iter()
-                .filter(|b| !spoken_blocks.contains(b))
-                .collect();
+            let (display, unspoken) = result_text(&raw, stream_carried_text);
             if !unspoken.is_empty() {
                 info!(
                     "Speaking {} TTS block(s) found only in the Claude CLI result",
@@ -1287,7 +1564,7 @@ impl ClaudeCliBrain {
     /// The inner event mirrors the Anthropic streaming API exactly, so the
     /// shapes here are the same ones `anthropic.rs` parses.
     #[allow(clippy::too_many_arguments)]
-    fn handle_stream_event(
+    pub(super) fn handle_stream_event(
         event: &Value,
         app_handle: &Option<tauri::AppHandle>,
         msg_id: &str,
@@ -1302,6 +1579,12 @@ impl ClaudeCliBrain {
     ) {
         let inner_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
         let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        // A new content block, or the end of the message, ends the text block
+        // before it. A `<TTS>` the model left open there stops being spoken.
+        if matches!(inner_type, "content_block_start" | "message_stop") {
+            Self::end_text_block(app_handle, msg_id, tts_stream, spoken_blocks);
+        }
 
         match inner_type {
             "message_start" => {
@@ -1379,12 +1662,23 @@ impl ClaudeCliBrain {
                             },
                         );
                     }
-                    // Plain text needs no bookkeeping: its deltas go straight
-                    // out, and nothing has to be closed when it stops.
+                    // A new text block is a new paragraph. Between two
+                    // blocks there is usually a tool call, and the model
+                    // starts the next one with no leading space, so without
+                    // this "window." and "That went" render as "window.That".
+                    "text" => Self::separate_text_block(
+                        app_handle,
+                        msg_id,
+                        tts_stream,
+                        accumulated_text,
+                        spoken_blocks,
+                    ),
+                    // Other blocks need no bookkeeping.
                     _ => {}
                 }
             }
             "content_block_delta" => {
+                crate::turn_timing::mark(crate::turn_timing::Stage::LlmFirstToken);
                 let delta = match event.get("delta") {
                     Some(delta) => delta,
                     None => return,
@@ -1495,7 +1789,7 @@ impl ClaudeCliBrain {
     /// around this would silently break voice output: `TtsTagStream` is a
     /// running parser, and text that skips it takes its `<TTS>` tags along
     /// into the visible answer.
-    fn emit_display_text(
+    pub(super) fn emit_display_text(
         app_handle: &Option<tauri::AppHandle>,
         msg_id: &str,
         delta: &str,
@@ -1516,6 +1810,74 @@ impl ClaudeCliBrain {
             Self::emit_chunk_with_tts(handle, display_delta, msg_id, &tts_blocks);
         }
         spoken_blocks.extend(tts_blocks);
+    }
+
+    /// Start a new text block on its own paragraph. A no-op at the start of
+    /// the answer and when the text already ends in whitespace, so it never
+    /// stacks blank lines. Goes through [`Self::emit_display_text`] so the
+    /// break stays in sequence with the `<TTS>` parser.
+    pub(super) fn separate_text_block(
+        app_handle: &Option<tauri::AppHandle>,
+        msg_id: &str,
+        tts_stream: &mut crate::agent::tts_tags::TtsTagStream,
+        accumulated_text: &mut String,
+        spoken_blocks: &mut Vec<String>,
+    ) {
+        Self::end_text_block(app_handle, msg_id, tts_stream, spoken_blocks);
+        if let Some(separator) = text_block_separator(accumulated_text) {
+            Self::emit_display_text(
+                app_handle,
+                msg_id,
+                separator,
+                tts_stream,
+                accumulated_text,
+                spoken_blocks,
+            );
+        }
+    }
+
+    /// A text block ended. Speak what is left of a `<TTS>` block the model
+    /// never closed, and close it, so the text that follows (the next
+    /// message's display text, after a tool call) is shown, not read aloud.
+    pub(super) fn end_text_block(
+        app_handle: &Option<tauri::AppHandle>,
+        msg_id: &str,
+        tts_stream: &mut crate::agent::tts_tags::TtsTagStream,
+        spoken_blocks: &mut Vec<String>,
+    ) {
+        let released = tts_stream.end_block();
+        if released.is_empty() {
+            return;
+        }
+        info!(
+            "Closed a <TTS> block the model left open at the end of a text block: {:?}",
+            released
+        );
+        if let Some(handle) = app_handle {
+            Self::emit_chunk_with_tts(handle, String::new(), msg_id, &released);
+        }
+        spoken_blocks.extend(released);
+    }
+
+    /// End-of-stream companion to [`Self::emit_display_text`]: flush what the
+    /// `<TTS>` parser is still holding (a partial tag becomes display text, an
+    /// unterminated block is still spoken). Used by the Codex CLI provider.
+    pub(super) fn flush_display_text(
+        app_handle: &Option<tauri::AppHandle>,
+        msg_id: &str,
+        tts_stream: &mut crate::agent::tts_tags::TtsTagStream,
+        accumulated_text: &mut String,
+        spoken_blocks: &mut Vec<String>,
+    ) {
+        let (tail_display, tail_spoken) = tts_stream.finish();
+        if tail_display.is_empty() && tail_spoken.is_empty() {
+            return;
+        }
+        accumulated_text.push_str(&tail_display);
+        if let Some(handle) = app_handle {
+            Self::emit_chunk_with_tts(handle, tail_display, msg_id, &tail_spoken);
+        }
+        spoken_blocks.extend(tail_spoken);
     }
 
     /// Emit one display chunk plus every spoken block. The first block rides on
@@ -1555,7 +1917,10 @@ impl AgentBrain for ClaudeCliBrain {
         _available_tools: &[ToolDefinition],
     ) -> Result<AgentAction, AgentError> {
         let query = Self::extract_query(messages);
-        let result = self.run_streaming(&query, None, None, None).await?;
+        let images = Self::extract_images(messages);
+        let result = self
+            .run_streaming(&query, &images, None, None, None)
+            .await?;
         Ok(AgentAction::Finish(result))
     }
 
@@ -1572,8 +1937,9 @@ impl AgentBrain for ClaudeCliBrain {
         cancel_rx: Option<crate::state::CancelReceiver>,
     ) -> Result<AgentAction, AgentError> {
         let query = Self::extract_query(messages);
+        let images = Self::extract_images(messages);
         let result = self
-            .run_streaming(&query, app_handle, message_id, cancel_rx)
+            .run_streaming(&query, &images, app_handle, message_id, cancel_rx)
             .await?;
         Ok(AgentAction::Finish(result))
     }
@@ -1641,7 +2007,7 @@ impl Drop for StreamSurface {
 /// closing, so the kind has to be remembered from its `content_block_start`.
 /// Plain text blocks are not tracked: their deltas go straight to the UI and
 /// there is nothing to close.
-enum StreamBlock {
+pub(super) enum StreamBlock {
     Thinking {
         /// The reasoning surface this block is streaming into. Always its own
         /// id, never the run's `msg_id`.
@@ -1667,7 +2033,7 @@ enum StreamBlock {
 ///
 /// Called when a message ends and when the stream does: a thinking block the
 /// CLI never stopped would otherwise sit spinning in the UI for good.
-fn close_open_thinking(
+pub(super) fn close_open_thinking(
     app_handle: &Option<tauri::AppHandle>,
     blocks: &mut std::collections::HashMap<u64, StreamBlock>,
 ) {
@@ -1681,9 +2047,49 @@ fn close_open_thinking(
     }
 }
 
+/// Take down the indicator of every tool whose result is in this `user` frame.
+///
+/// Tool results come back as a `user` turn. The action is over, so whatever
+/// indicator it raised comes down, otherwise a finished tool spins forever.
+/// Shared with the persistent-session reader, which sees the same frames.
+pub(super) fn clear_finished_tools(
+    frame: &Value,
+    app_handle: &Option<tauri::AppHandle>,
+    msg_id: &str,
+    pending_tools: &mut std::collections::HashMap<String, String>,
+) {
+    let Some(content) = frame
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_array())
+    else {
+        return;
+    };
+    for block in content {
+        if block.get("type").and_then(|v| v.as_str()) != Some("tool_result") {
+            continue;
+        }
+        let tool_use_id = block
+            .get("tool_use_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let label = pending_tools
+            .remove(tool_use_id)
+            .unwrap_or_else(|| "tool".to_string());
+        if let Some(handle) = app_handle {
+            crate::agent::tool_logger::emit_tool_pending_cleared(
+                handle,
+                msg_id,
+                tool_use_id,
+                &label,
+            );
+        }
+    }
+}
+
 /// Take down every pending-tool indicator that never got a result — a
 /// cancelled run, a tool that errored, a stream that simply ended.
-fn clear_pending_tools(
+pub(super) fn clear_pending_tools(
     app_handle: &Option<tauri::AppHandle>,
     msg_id: &str,
     pending_tools: &mut std::collections::HashMap<String, String>,
@@ -1720,6 +2126,54 @@ fn resolve_effort(configured: Option<&str>) -> String {
             CLAUDE_CLI_EFFORT.to_string()
         }
         None => CLAUDE_CLI_EFFORT.to_string(),
+    }
+}
+
+/// What a turn's `result` frame adds: its display text (tags stripped), and
+/// the spoken blocks to say now.
+///
+/// The result is only a fallback voice, for a CLI that streamed no text at
+/// all. When the stream carried text it already spoke every block once, and
+/// re-splitting the result to find "unspoken" blocks is how a turn talks past
+/// its spoken line: the result's split can disagree with the stream's (a block
+/// the stream closed at a content-block boundary reads to the end of the
+/// result, a sentence that spans two text blocks splits differently), and every
+/// disagreement was spoken a second time or read display text aloud.
+pub(super) fn result_text(raw: &str, stream_carried_text: bool) -> (String, Vec<String>) {
+    let (display, blocks) = crate::agent::tts_tags::split_tts_tags(raw);
+    if stream_carried_text {
+        (display, Vec::new())
+    } else {
+        (display, blocks)
+    }
+}
+
+/// Whether `configured` is a level the person set and the CLI accepts. An
+/// unknown value was dropped by [`resolve_effort`], so it is not a choice to
+/// respect.
+fn effort_is_explicit(configured: Option<&str>) -> bool {
+    use crate::constants::settings::defaults::CLAUDE_CLI_EFFORT_LEVELS;
+    configured.is_some_and(|level| CLAUDE_CLI_EFFORT_LEVELS.contains(&level))
+}
+
+/// The effort one turn runs at. A spoken turn gets
+/// [`CLAUDE_CLI_VOICE_EFFORT`](crate::constants::settings::defaults::CLAUDE_CLI_VOICE_EFFORT)
+/// so the first spoken line is not held behind a long plan; a typed turn keeps
+/// `base`. A level the person set themselves wins either way.
+fn effort_for_turn(base: &str, explicit: bool, voice: bool) -> String {
+    if voice && !explicit {
+        crate::constants::settings::defaults::CLAUDE_CLI_VOICE_EFFORT.to_string()
+    } else {
+        base.to_string()
+    }
+}
+
+/// Replace the value after `--effort` in a built argument list.
+fn set_effort_arg(args: &mut [String], effort: &str) {
+    if let Some(idx) = args.iter().position(|a| a == "--effort") {
+        if let Some(value) = args.get_mut(idx + 1) {
+            *value = effort.to_string();
+        }
     }
 }
 
@@ -1980,6 +2434,15 @@ fn describe_computer_action(input: &Value) -> Option<String> {
 
 /// Extract text content from a Claude CLI assistant message JSON object.
 /// Handles both `content` array format and direct `content` string.
+/// What goes between the text so far and a new text block: a paragraph
+/// break, unless there is no text yet or it already ends in whitespace.
+pub(super) fn text_block_separator(text_so_far: &str) -> Option<&'static str> {
+    match text_so_far.chars().last() {
+        Some(last) if !last.is_whitespace() => Some("\n\n"),
+        _ => None,
+    }
+}
+
 pub(super) fn extract_text_from_message(message: &Value) -> String {
     // Try content array format: {"content": [{"type": "text", "text": "..."}]}
     if let Some(content_array) = message.get("content").and_then(|v| v.as_array()) {
@@ -1987,6 +2450,9 @@ pub(super) fn extract_text_from_message(message: &Value) -> String {
         for block in content_array {
             if block.get("type").and_then(|v| v.as_str()) == Some("text") {
                 if let Some(t) = block.get("text").and_then(|v| v.as_str()) {
+                    if let Some(separator) = text_block_separator(&text) {
+                        text.push_str(separator);
+                    }
                     text.push_str(t);
                 }
             }
@@ -2100,6 +2566,74 @@ mod tests {
     }
 
     #[test]
+    fn text_blocks_in_one_message_do_not_run_together() {
+        let message = serde_json::json!({
+            "content": [
+                {"type": "text", "text": "I'll redo it in the Calculator window."},
+                {"type": "tool_use", "name": "computer", "input": {}},
+                {"type": "text", "text": "That went into Zed instead."}
+            ]
+        });
+        assert_eq!(
+            extract_text_from_message(&message),
+            "I'll redo it in the Calculator window.\n\nThat went into Zed instead."
+        );
+    }
+
+    #[test]
+    fn separator_only_between_text_that_needs_one() {
+        assert_eq!(text_block_separator(""), None);
+        assert_eq!(text_block_separator("Done. "), None);
+        assert_eq!(text_block_separator("Done.\n"), None);
+        assert_eq!(text_block_separator("Done."), Some("\n\n"));
+        assert_eq!(text_block_separator("世界"), Some("\n\n"));
+    }
+
+    /// The live path: text blocks separated by a tool call, streamed as
+    /// deltas, reach the answer as two paragraphs. This is the
+    /// "window.That went into Zed" bug from the 2026-10-08 Calculator run.
+    #[test]
+    fn streamed_text_blocks_across_a_tool_call_are_separate_paragraphs() {
+        let mut blocks = std::collections::HashMap::new();
+        let mut pending_tools = std::collections::HashMap::new();
+        let mut streamed_messages = std::collections::HashSet::new();
+        let mut partial_message_id = None;
+        let mut saw_text_delta = false;
+        let mut tts_stream = crate::agent::tts_tags::TtsTagStream::new();
+        let mut accumulated = String::new();
+        let mut spoken = Vec::new();
+
+        let events = [
+            serde_json::json!({"type": "message_start", "message": {"id": "m1"}}),
+            serde_json::json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            serde_json::json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Redoing it in the Calculator window."}}),
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+            serde_json::json!({"type": "message_start", "message": {"id": "m2"}}),
+            serde_json::json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            serde_json::json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "That went into Zed instead."}}),
+        ];
+        for event in &events {
+            ClaudeCliBrain::handle_stream_event(
+                event,
+                &None,
+                "msg",
+                &mut blocks,
+                &mut pending_tools,
+                &mut streamed_messages,
+                &mut partial_message_id,
+                &mut saw_text_delta,
+                &mut tts_stream,
+                &mut accumulated,
+                &mut spoken,
+            );
+        }
+        assert_eq!(
+            accumulated,
+            "Redoing it in the Calculator window.\n\nThat went into Zed instead."
+        );
+    }
+
+    #[test]
     fn test_extract_text_from_content_string() {
         let message = serde_json::json!({
             "content": "Hello world!"
@@ -2168,12 +2702,73 @@ mod tests {
     }
 
     #[test]
+    fn extract_images_takes_the_latest_user_turn() {
+        let messages = vec![
+            Message::from_user("look", Some(vec!["data:image/png;base64,YQ==".to_string()])),
+            Message::new(Role::Assistant, "ok"),
+            Message::from_user(
+                "and this",
+                Some(vec!["data:image/jpeg;base64,Yg==".to_string()]),
+            ),
+        ];
+        assert_eq!(
+            ClaudeCliBrain::extract_images(&messages),
+            vec!["data:image/jpeg;base64,Yg==".to_string()]
+        );
+        assert!(ClaudeCliBrain::extract_images(&[Message::new(Role::Assistant, "hi")]).is_empty());
+    }
+
+    #[test]
+    fn one_shot_query_names_the_saved_image_files() {
+        let paths = vec![PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.jpg")];
+        let query = query_with_image_paths("what are these?", &paths);
+        assert!(query.starts_with("what are these?"));
+        assert!(query.contains("attached 2 images"));
+        assert!(query.contains("/tmp/a.png"));
+        assert!(query.contains("/tmp/b.jpg"));
+        // No attachments saved: the person's text goes through untouched.
+        assert_eq!(query_with_image_paths("hello", &[]), "hello");
+    }
+
+    #[test]
+    fn attachment_prune_keeps_the_newest_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = dir.path();
+        let total = ATTACHMENT_CACHE_MAX_FILES + 3;
+        for i in 0..total {
+            let path = dir.join(format!("{:03}.png", i));
+            std::fs::write(&path, b"x").expect("write");
+            let mtime = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_000 + i as u64);
+            std::fs::File::open(&path)
+                .expect("open")
+                .set_modified(mtime)
+                .expect("set mtime");
+        }
+        prune_attachment_cache(dir);
+        let mut left: Vec<String> = std::fs::read_dir(dir)
+            .expect("read_dir")
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(left.len(), ATTACHMENT_CACHE_MAX_FILES);
+        // The three oldest went; the newest, which is what a live turn just
+        // wrote, stayed.
+        assert_eq!(left.first().map(String::as_str), Some("003.png"));
+        assert_eq!(
+            left.last().map(String::as_str),
+            Some(format!("{:03}.png", total - 1).as_str())
+        );
+    }
+
+    #[test]
     fn test_build_args_basic() {
         let brain = ClaudeCliBrain {
             binary_path: PathBuf::from("/usr/bin/claude"),
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2198,6 +2793,7 @@ mod tests {
             model: "opus".to_string(),
             system_prompt: Some("You are helpful.".to_string()),
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2218,6 +2814,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2241,6 +2838,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2267,6 +2865,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             // Connectors off: the strict flag must ride with the config.
             load_account_mcp: false,
             observed_session: std::sync::Mutex::new(None),
@@ -2298,6 +2897,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2315,6 +2915,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2343,6 +2944,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2362,6 +2964,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         };
@@ -2400,6 +3003,7 @@ mod tests {
             model: "sonnet".to_string(),
             system_prompt: None,
             effort: "high".to_string(),
+            effort_explicit: false,
             load_account_mcp: defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
             observed_session: std::sync::Mutex::new(None),
         }
@@ -2426,7 +3030,7 @@ mod tests {
         });
 
         let result = brain
-            .run_streaming("test query", None, None, Some(cancel_rx))
+            .run_streaming("test query", &[], None, None, Some(cancel_rx))
             .await;
         let _ = canceller.await;
 
@@ -2454,7 +3058,7 @@ mod tests {
         let start = std::time::Instant::now();
 
         let result = brain
-            .run_streaming("test query", None, None, Some(cancel_rx))
+            .run_streaming("test query", &[], None, None, Some(cancel_rx))
             .await;
 
         assert!(
@@ -2480,7 +3084,7 @@ mod tests {
 
         let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         let result = brain
-            .run_streaming("test query", None, None, Some(cancel_rx))
+            .run_streaming("test query", &[], None, None, Some(cancel_rx))
             .await;
 
         assert_eq!(result.expect("run should succeed"), "hello from cli");
@@ -2573,7 +3177,9 @@ echo '{{"type":"result","result":"answered the old way"}}'"#,
         PARTIAL_MESSAGES_UNSUPPORTED.store(false, Ordering::Relaxed);
 
         let brain = test_brain(script.clone());
-        let result = brain.run_streaming("test query", None, None, None).await;
+        let result = brain
+            .run_streaming("test query", &[], None, None, None)
+            .await;
 
         assert_eq!(
             result.expect("an old CLI must still answer"),
@@ -2665,6 +3271,50 @@ echo '{{"type":"result","result":"answered the old way"}}'"#,
         assert_eq!(resolve_effort(Some("xhigh")), "xhigh");
         assert_eq!(resolve_effort(Some("banana")), "high");
         assert_eq!(resolve_effort(None), "high");
+    }
+
+    #[test]
+    fn the_result_is_spoken_only_when_the_stream_carried_no_text() {
+        // The stream closed the first block at its content-block boundary;
+        // the result alone would read the display text after it aloud.
+        let raw = "<TTS>Opening it now\n\nHere is the list. One. Two.";
+        let (_, fallback) = result_text(raw, false);
+        assert!(!fallback.is_empty());
+        let (display, spoken) = result_text(raw, true);
+        assert!(spoken.is_empty());
+        assert_eq!(display, "");
+        let (display, spoken) = result_text("<TTS>Hi there.</TTS>Shown.", true);
+        assert!(spoken.is_empty());
+        assert_eq!(display, "Shown.");
+    }
+
+    #[test]
+    fn a_spoken_turn_runs_at_voice_effort_unless_the_person_chose_one() {
+        use crate::constants::settings::defaults::{CLAUDE_CLI_EFFORT, CLAUDE_CLI_VOICE_EFFORT};
+        assert_eq!(CLAUDE_CLI_VOICE_EFFORT, "medium");
+        // Default: typed keeps high, spoken drops to medium.
+        assert_eq!(effort_for_turn(CLAUDE_CLI_EFFORT, false, false), "high");
+        assert_eq!(effort_for_turn(CLAUDE_CLI_EFFORT, false, true), "medium");
+        // An explicit level is respected for both.
+        assert_eq!(effort_for_turn("xhigh", true, true), "xhigh");
+        assert_eq!(effort_for_turn("low", true, false), "low");
+        // Only a valid stored level counts as a choice.
+        assert!(effort_is_explicit(Some("high")));
+        assert!(!effort_is_explicit(Some("banana")));
+        assert!(!effort_is_explicit(None));
+    }
+
+    #[test]
+    fn the_turn_effort_replaces_the_spawn_effort_in_one_shot_args() {
+        let brain = test_brain(PathBuf::from("/usr/bin/claude"));
+        let mut args = brain.build_args("hello", None, None, false);
+        set_effort_arg(&mut args, "medium");
+        let idx = args
+            .iter()
+            .position(|a| a == "--effort")
+            .expect("--effort is always passed");
+        assert_eq!(args[idx + 1], "medium");
+        assert_eq!(args.iter().filter(|a| *a == "--effort").count(), 1);
     }
 
     #[test]

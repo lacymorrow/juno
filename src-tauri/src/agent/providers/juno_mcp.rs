@@ -44,7 +44,13 @@ use tracing::{debug, error, info, warn};
 use crate::agent::core::AgentError;
 use crate::agent::providers::cli_approval;
 use crate::agent::tools::anthropic_computer_use::{create_versioned_tools, run_computer_action};
+use crate::agent::tools::mac_apps;
+use crate::agent::tools::permission_policy::{self, PermissionMode};
+use crate::agent::tools::risk_classifier;
+use crate::agent::tools::settings_tool;
 use crate::agent::tools::tool_versioning::{ApiVersion, ToolVersionConfig};
+use crate::constants::agent::tool_names;
+use crate::state::ToolApprovalRequest;
 
 /// The MCP protocol revision this server speaks.
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -54,14 +60,11 @@ const PROTOCOL_VERSION: &str = "2025-06-18";
 /// One identity, because the CLI is one agent however many turns it takes.
 const CLI_CURSOR_ID: &str = "claude-cli";
 
-/// macOS `systemPink`.
-///
-/// Asked for by name: the pointer should say, while it is moving on its own,
-/// that something other than your hand is moving it. Pink because nothing else
-/// in Juno is pink, so it cannot be mistaken for ordinary chrome, and this
-/// particular pink because it is an Apple system colour rather than an invented
-/// one.
-const CLI_CURSOR_COLOR: &str = "#FF2D55";
+/// The primary cursor slot: the CLI is one agent, so its cursor wears the
+/// color chosen in Settings, Appearance, like any single run (see
+/// `cursor_overlay::cursor_color`). This used to be a fixed systemPink; pink
+/// is now one of the choices.
+const CLI_CURSOR_COLOR: &str = crate::constants::ui::agent_session_colors::SLOT_0;
 
 /// Where the server is listening, and the token that gets you in.
 #[derive(Clone, Debug)]
@@ -189,10 +192,11 @@ fn authorized(headers: &HeaderMap, token: &str) -> bool {
 
 /// The tools this server offers, in MCP's shape.
 ///
-/// `computer`, plus `approve` (LAC-4058). Bash and file editing are the
-/// CLI's own, and better there: it already has them, they need no desktop,
-/// and routing them through Juno would add a hop for nothing. What Juno has
-/// that the CLI does not is a pointer people can see — and a person to ask
+/// `computer`, the Mac app tools (LAC-4233), and `approve` (LAC-4058). Bash
+/// and file editing are the CLI's own, and better there: it already has them,
+/// they need no desktop, and routing them through Juno would add a hop for
+/// nothing. What Juno has that the CLI does not is a pointer people can see,
+/// typed access to Reminders, Calendar and Contacts, and a person to ask
 /// before something goes out: `approve` is the CLI's
 /// `--permission-prompt-tool`, routed into Juno's approval sheet.
 fn tool_list() -> Vec<Value> {
@@ -210,6 +214,22 @@ fn tool_list() -> Vec<Value> {
                 })
             })
             .collect();
+    // The same definitions the API providers register: one schema, two roads.
+    tools.extend(mac_apps::tool_definitions().into_iter().map(|tool| {
+        json!({
+            "name": tool.name,
+            "description": tool.description,
+            "inputSchema": tool.input_schema,
+        })
+    }));
+    // Juno's own settings: find, show and change them, with the guardrail
+    // settings refused (`settings::registry`).
+    let settings = settings_tool::definition();
+    tools.push(json!({
+        "name": settings.name,
+        "description": settings.description,
+        "inputSchema": settings.input_schema,
+    }));
     tools.push(json!({
         "name": cli_approval::APPROVE_TOOL_NAME,
         "description": "Internal: Juno's permission prompt. The Claude CLI calls this \
@@ -239,6 +259,32 @@ async fn call_tool(app: &tauri::AppHandle, request: &Value) -> Result<Value, Rpc
     if name == cli_approval::APPROVE_TOOL_NAME {
         return Ok(cli_approval::handle_approve(app, &arguments).await);
     }
+    if name == tool_names::SETTINGS {
+        return Ok(match settings_tool::run(app, arguments).await {
+            Ok(value) => to_mcp_content(value),
+            Err(e) => json!({
+                "content": [{ "type": "text", "text": e }],
+                "isError": true
+            }),
+        });
+    }
+    if is_mac_app_tool(name) {
+        // Before anything else, and before the send gate resolves a name through
+        // Contacts: no system dialog lands unannounced.
+        if let Some(early) = permissions_first(app, name, &arguments).await {
+            return Ok(early);
+        }
+        let mode = permission_mode(app).await;
+        return Ok(run_gated(
+            name,
+            arguments,
+            mode,
+            mac_apps::preview_send,
+            |request| cli_approval::ask_person(app, request),
+            mac_apps::dispatch,
+        )
+        .await);
+    }
     if name != "computer" {
         return Err(RpcError::method_not_found(name));
     }
@@ -255,6 +301,177 @@ async fn call_tool(app: &tauri::AppHandle, request: &Value) -> Result<Value, Rpc
     }
 }
 
+/// The permission preflight for one Mac app tool (`mac_apps::preflight`).
+///
+/// `None`: everything it needs is allowed (or was just allowed), so run it.
+/// `Some(answer)`: hand this back as the tool's answer and do not run it. A
+/// permission that was never asked becomes one line and a Continue button; the
+/// system dialog comes up only after "continue" or the button.
+async fn permissions_first(app: &tauri::AppHandle, name: &str, input: &Value) -> Option<Value> {
+    use mac_apps::preflight::{self, Preflight};
+
+    let asked = match preflight::preflight(name, input).await {
+        Preflight::Clear => return None,
+        Preflight::Blocked(answer) => return Some(to_mcp_content(answer)),
+        Preflight::Ask(asked) => asked,
+    };
+    let request = preflight::ask_request(name, input, &asked);
+    info!(
+        "[JunoMCP] Asking before a system dialog: {}",
+        request.description
+    );
+    match cli_approval::ask_person(app, request).await {
+        Some(true) => match preflight::continue_after_ask(name, input, asked).await {
+            Preflight::Clear => None,
+            Preflight::Blocked(answer) => Some(to_mcp_content(answer)),
+            Preflight::Ask(_) => Some(tool_error(preflight::NOT_ALLOWED_YET)),
+        },
+        Some(false) => Some(tool_error(preflight::NOT_CONTINUED)),
+        None => Some(tool_error(preflight::NOT_ANSWERED)),
+    }
+}
+
+fn is_mac_app_tool(name: &str) -> bool {
+    mac_apps::tool_definitions()
+        .iter()
+        .any(|tool| tool.name == name)
+}
+
+/// The person's permission mode, read fresh so a change in Settings applies to
+/// the next call. Unreadable settings fall back to the default, which asks more
+/// than "do not ask", never less.
+async fn permission_mode(app: &tauri::AppHandle) -> PermissionMode {
+    use tauri::Manager;
+    let Some(manager) = app.try_state::<crate::settings::manager::SettingsManager>() else {
+        return PermissionMode::default();
+    };
+    match manager.get_agent_settings().await {
+        Ok(settings) => PermissionMode::from_setting(&settings.permission_mode),
+        Err(e) => {
+            warn!(
+                "[JunoMCP] Could not read the permission mode, using the default: {}",
+                e
+            );
+            PermissionMode::default()
+        }
+    }
+}
+
+/// Run one Mac app tool behind Juno's own permission gate.
+///
+/// The CLI runs MCP tools without prompting, so without this a CLI turn could
+/// delete a calendar event in a mode that promises to ask. The decision is the
+/// same one the in-process runner makes: [`risk_classifier::classify_risk`]
+/// then [`permission_policy::requires_approval`]. There is no standing "do not
+/// ask again" on this path (the CLI's conversation is not one Juno keys grants
+/// to), so `granted` is false; Critical asks regardless.
+///
+/// A send (a text or an email) asks the same way the in-process runner does:
+/// the recipient is resolved first (`preview`), the ask carries the message
+/// card, and the only answers that send are "send it" and the Send button. A
+/// name that matches more than one person is answered with the candidates and
+/// never asked about.
+///
+/// `preview` resolves a send, `ask` shows the sheet and `exec` runs the tool.
+/// They are parameters so a test can pin the order without an app: a declined
+/// ask never reaches `exec`.
+async fn run_gated<Preview, PreviewFut, Ask, AskFut, Exec, ExecFut>(
+    name: &str,
+    input: Value,
+    mode: PermissionMode,
+    preview: Preview,
+    ask: Ask,
+    exec: Exec,
+) -> Value
+where
+    Preview: FnOnce(String, Value) -> PreviewFut,
+    PreviewFut: std::future::Future<Output = Result<mac_apps::send::SendDraft, Value>>,
+    Ask: FnOnce(ToolApprovalRequest) -> AskFut,
+    AskFut: std::future::Future<Output = Option<bool>>,
+    Exec: FnOnce(String, Value) -> ExecFut,
+    ExecFut: std::future::Future<Output = Result<Value, String>>,
+{
+    let risk = risk_classifier::classify_risk(name, &input);
+    if permission_policy::requires_approval_for(name, mode, &risk, false) {
+        let mut description = permission_policy::describe_action(name, &input);
+        let mut timeout = cli_approval::APPROVAL_TIMEOUT_SECS;
+        let mut message: Option<Value> = None;
+        if risk_classifier::is_send_tool(name) {
+            match preview(name.to_string(), input.clone()).await {
+                Ok(draft) => {
+                    description = draft.description();
+                    timeout = mac_apps::send::SEND_TIMEOUT_SECS;
+                    message = Some(draft.approval_payload());
+                }
+                // Nothing to ask about: ambiguous, unknown, no address.
+                Err(answer) => return to_mcp_content(answer),
+            }
+        }
+        let approval_id = uuid::Uuid::new_v4().to_string();
+        let mut request = ToolApprovalRequest::new(
+            approval_id.clone(),
+            name.to_string(),
+            input.clone(),
+            description.clone(),
+        )
+        .with_risk(risk)
+        .with_timeout(timeout);
+        if let Some(target) = risk_classifier::extract_target_app(name, &input) {
+            request = request.with_target_app(target);
+        }
+        if let Some(message) = message {
+            request = request.with_message(message);
+        }
+        let is_send = request.is_send();
+
+        let answer = ask(request).await;
+        let correction = if is_send {
+            mac_apps::send::take_correction(&approval_id)
+        } else {
+            None
+        };
+        match answer {
+            Some(true) => info!("[JunoMCP] Approved: {}", description),
+            Some(false) if is_send => {
+                info!("[JunoMCP] Not sent: {}", description);
+                return tool_error(&mac_apps::send::not_sent_text(correction.as_deref(), false));
+            }
+            None if is_send => {
+                info!("[JunoMCP] No answer to a send: {}", description);
+                return tool_error(&mac_apps::send::not_sent_text(None, true));
+            }
+            Some(false) => {
+                info!("[JunoMCP] Declined: {}", description);
+                return tool_error(
+                    "The person declined, so Juno did not do this. Tell them it was not done; \
+                     they can ask again if they change their mind.",
+                );
+            }
+            None => {
+                info!("[JunoMCP] No answer in time: {}", description);
+                return tool_error(
+                    "No answer within 60 seconds, so Juno did not do this. Tell the person \
+                     their approval was needed and no answer arrived; they can ask again.",
+                );
+            }
+        }
+    }
+
+    match exec(name.to_string(), input).await {
+        Ok(value) => to_mcp_content(value),
+        Err(e) => tool_error(&e),
+    }
+}
+
+/// A tool that failed or was refused, in the shape the model reads and moves on
+/// from. Never a JSON-RPC error: that would end the CLI's turn.
+fn tool_error(text: &str) -> Value {
+    json!({
+        "content": [{ "type": "text", "text": text }],
+        "isError": true
+    })
+}
+
 /// Turn a computer-tool result into MCP content blocks.
 ///
 /// A screenshot comes back as a struct carrying base64 PNG data, and MCP has a
@@ -262,14 +479,18 @@ async fn call_tool(app: &tauri::AppHandle, request: &Value) -> Result<Value, Rpc
 /// look at rather than as a wall of base64 in a text block.
 fn to_mcp_content(value: Value) -> Value {
     if let Some(image) = value.get("base64_image").and_then(Value::as_str) {
-        return json!({
-            "content": [{
-                "type": "image",
-                "data": image,
-                "mimeType": "image/png"
-            }],
-            "isError": false
-        });
+        let mut content = vec![json!({
+            "type": "image",
+            "data": image,
+            "mimeType": image_mime_type(image)
+        })];
+        // What the picture is and how to read coordinates in it ("This
+        // picture is only the Calculator window..."). Dropping it left the
+        // model guessing which frame its coordinates were in.
+        if let Some(note) = value.get("output").and_then(Value::as_str) {
+            content.push(json!({ "type": "text", "text": note }));
+        }
+        return json!({ "content": content, "isError": false });
     }
 
     let text = match value.as_str() {
@@ -280,6 +501,16 @@ fn to_mcp_content(value: Value) -> Value {
         "content": [{ "type": "text", "text": text }],
         "isError": false
     })
+}
+
+/// Screenshots are JPEG and zoom crops are PNG; label each as what it is,
+/// read from the first bytes of the base64.
+fn image_mime_type(base64: &str) -> &'static str {
+    if base64.starts_with("/9j/") {
+        "image/jpeg"
+    } else {
+        "image/png"
+    }
 }
 
 struct RpcError {
@@ -304,10 +535,43 @@ impl RpcError {
 mod tests {
     use super::*;
 
+    fn served(name: &str) -> Value {
+        tool_list()
+            .into_iter()
+            .find(|tool| tool["name"] == name)
+            .unwrap_or(Value::Null)
+    }
+
     #[test]
-    fn the_computer_and_approve_tools_are_offered() {
+    fn a_window_picture_carries_its_note_and_its_real_type() {
+        let result = to_mcp_content(json!({
+            "base64_image": "/9j/4AAQ",
+            "output": "This picture is only the Calculator window"
+        }));
+        assert_eq!(result["content"][0]["mimeType"], "image/jpeg");
+        assert_eq!(
+            result["content"][1]["text"],
+            "This picture is only the Calculator window"
+        );
+    }
+
+    #[test]
+    fn the_computer_tool_offers_elements_first() {
         let tools = tool_list();
-        assert_eq!(tools.len(), 2);
+        let schema = &tools[0]["inputSchema"]["properties"];
+        assert!(schema["action"]["enum"]
+            .as_array()
+            .is_some_and(|actions| actions.contains(&json!("elements"))));
+        assert!(schema["element"].is_object());
+        assert!(tools[0]["description"]
+            .as_str()
+            .is_some_and(|d| d.contains("accessibility first")));
+    }
+
+    #[test]
+    fn the_computer_settings_and_approve_tools_are_offered() {
+        let tools = tool_list();
+        assert_eq!(tools.len(), 3 + mac_apps::tool_definitions().len());
         assert_eq!(tools[0]["name"], "computer");
         assert!(
             tools[0]["inputSchema"]["properties"]["action"].is_object(),
@@ -315,8 +579,230 @@ mod tests {
         );
         // The permission prompt tool (LAC-4058) must exist on the server the
         // CLI is pointed at, or every gated call would hang and die.
-        assert_eq!(tools[1]["name"], "approve");
-        assert!(tools[1]["inputSchema"]["properties"]["tool_name"].is_object());
+        // Juno's own settings, so "change my voice" works on the CLI path.
+        let settings = served("settings");
+        assert!(settings["inputSchema"]["properties"]["action"].is_object());
+        let approve = served("approve");
+        assert!(approve["inputSchema"]["properties"]["tool_name"].is_object());
+    }
+
+    /// For tests where no send is involved: a preview must never be asked for.
+    async fn no_preview(name: String, _input: Value) -> Result<mac_apps::send::SendDraft, Value> {
+        panic!("{name} is not a send, so it is never previewed");
+    }
+
+    fn doug_draft(kind: mac_apps::send::SendKind) -> mac_apps::send::SendDraft {
+        mac_apps::send::SendDraft {
+            kind,
+            recipient: mac_apps::recipients::Recipient {
+                name: "Doug Keesler".to_string(),
+                address: "+17045550100".to_string(),
+                service: None,
+            },
+            subject: Some("Late".to_string()),
+            body: "I'm running late".to_string(),
+        }
+    }
+
+    /// The send gate on the CLI path: both send tools ask in every mode, the
+    /// ask carries the message card, and a no never sends.
+    #[tokio::test]
+    async fn a_send_over_mcp_asks_in_every_mode_with_the_message_card() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        for (name, kind) in [
+            ("messages_send", mac_apps::send::SendKind::Text),
+            ("mail_send", mac_apps::send::SendKind::Email),
+        ] {
+            for mode in [
+                PermissionMode::AskFirst,
+                PermissionMode::AskWhenRisky,
+                PermissionMode::DontAsk,
+            ] {
+                let ran = Arc::new(AtomicBool::new(false));
+                let ran_in = Arc::clone(&ran);
+                let result = run_gated(
+                    name,
+                    json!({"to": "Doug", "body": "I'm running late", "subject": "Late"}),
+                    mode,
+                    move |_n: String, _i: Value| async move { Ok(doug_draft(kind)) },
+                    move |request: ToolApprovalRequest| {
+                        assert!(request.is_send(), "{name} {mode:?}");
+                        let message = request.message.clone().unwrap_or(Value::Null);
+                        assert_eq!(message["to"], "Doug Keesler");
+                        assert!(message["prompt"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .ends_with("Say send it."));
+                        async { Some(false) }
+                    },
+                    move |_name: String, _input: Value| {
+                        ran_in.store(true, Ordering::SeqCst);
+                        async { Ok(json!({"sent": true})) }
+                    },
+                )
+                .await;
+                assert!(
+                    !ran.load(Ordering::SeqCst),
+                    "{name} {mode:?} sent after a no"
+                );
+                assert_eq!(result["isError"], true);
+                let text = result["content"][0]["text"].as_str().unwrap_or("");
+                assert!(text.starts_with("Not sent"), "{name}: {text}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn an_ambiguous_recipient_is_answered_without_asking_or_sending() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let touched = Arc::new(AtomicBool::new(false));
+        let asked_in = Arc::clone(&touched);
+        let ran_in = Arc::clone(&touched);
+        let result = run_gated(
+            "messages_send",
+            json!({"to": "Doug", "body": "hi"}),
+            PermissionMode::DontAsk,
+            |_n: String, _i: Value| async {
+                Err(json!({"ok": false, "sent": false, "candidates": ["Doug A", "Doug B"]}))
+            },
+            move |_request: ToolApprovalRequest| {
+                asked_in.store(true, Ordering::SeqCst);
+                async { Some(true) }
+            },
+            move |_name: String, _input: Value| {
+                ran_in.store(true, Ordering::SeqCst);
+                async { Ok(json!({"sent": true})) }
+            },
+        )
+        .await;
+        assert!(
+            !touched.load(Ordering::SeqCst),
+            "asked about or sent to an ambiguous name"
+        );
+        let text = result["content"][0]["text"].as_str().unwrap_or("");
+        assert!(text.contains("Doug B"), "{text}");
+    }
+
+    #[test]
+    fn every_mac_app_tool_is_offered() {
+        let names = [
+            "reminders_list",
+            "reminders_create",
+            "reminders_complete",
+            "calendar_events",
+            "calendar_create_event",
+            "calendar_move_event",
+            "calendar_delete_event",
+            "contacts_find",
+            "messages_send",
+            "messages_recent",
+            "facetime_call",
+            "mail_unread",
+            "mail_search",
+            "mail_send",
+            "mail_draft",
+            "notes_create",
+            "notes_append",
+            "notes_search",
+            "music_play",
+            "maps_directions",
+            "shortcuts_list",
+            "shortcuts_run",
+            "focus_set",
+        ];
+        for name in names {
+            let tool = served(name);
+            assert_eq!(tool["name"], name, "{name} is not served to the CLI");
+            assert_eq!(
+                tool["inputSchema"]["type"], "object",
+                "{name} has no schema"
+            );
+            assert!(is_mac_app_tool(name));
+        }
+        assert_eq!(mac_apps::tool_definitions().len(), names.len());
+        // Nothing else of Juno's rides along: the CLI has its own shell and files.
+        for name in ["bash", "execute_bash", "browser_interact", "write_file"] {
+            assert!(served(name).is_null(), "{name} must not be served");
+            assert!(!is_mac_app_tool(name));
+        }
+    }
+
+    /// The gate that matters on this path: the CLI never prompts for an MCP
+    /// tool, so a Critical tool must reach Juno's sheet here, in every mode,
+    /// and a no must mean it never runs.
+    #[tokio::test]
+    async fn a_critical_tool_over_mcp_asks_and_does_not_run_when_declined() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let name = "calendar_delete_event";
+        assert_eq!(
+            risk_classifier::classify_risk(name, &json!({"id": "abc@1"})),
+            crate::state::RiskLevel::Critical
+        );
+
+        for mode in [
+            PermissionMode::AskFirst,
+            PermissionMode::AskWhenRisky,
+            PermissionMode::DontAsk,
+        ] {
+            let asked = Arc::new(AtomicBool::new(false));
+            let ran = Arc::new(AtomicBool::new(false));
+            let asked_in = Arc::clone(&asked);
+            let ran_in = Arc::clone(&ran);
+
+            let result = run_gated(
+                name,
+                json!({"id": "abc@1"}),
+                mode,
+                no_preview,
+                move |request: ToolApprovalRequest| {
+                    asked_in.store(true, Ordering::SeqCst);
+                    assert_eq!(request.tool_name, name);
+                    assert_eq!(request.risk_level, crate::state::RiskLevel::Critical);
+                    async { Some(false) }
+                },
+                move |_name: String, _input: Value| {
+                    ran_in.store(true, Ordering::SeqCst);
+                    async { Ok(json!({"deleted": true})) }
+                },
+            )
+            .await;
+
+            assert!(asked.load(Ordering::SeqCst), "{mode:?}: never asked");
+            assert!(!ran.load(Ordering::SeqCst), "{mode:?}: ran after a no");
+            assert_eq!(result["isError"], true, "{mode:?}");
+            let text = result["content"][0]["text"].as_str().unwrap_or("");
+            assert!(text.contains("declined"), "{mode:?}: {text}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_runs_without_asking_and_a_failure_is_an_is_error() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let asked = Arc::new(AtomicBool::new(false));
+        let asked_in = Arc::clone(&asked);
+        let result = run_gated(
+            "reminders_list",
+            json!({}),
+            PermissionMode::AskFirst,
+            no_preview,
+            move |_request: ToolApprovalRequest| {
+                asked_in.store(true, Ordering::SeqCst);
+                async { Some(true) }
+            },
+            |_name: String, _input: Value| async { Err("Reminders is off.".to_string()) },
+        )
+        .await;
+        assert!(!asked.load(Ordering::SeqCst), "a read must not ask");
+        assert_eq!(result["isError"], true);
+        assert_eq!(result["content"][0]["text"], "Reminders is off.");
     }
 
     #[test]

@@ -17,7 +17,7 @@ interface AppearancePickerProps {
 }
 
 // If the frame has not painted by then, the preview is not coming; the stage
-// stays a quiet blank (no words, no error).
+// stays its plain ground (no words, no error, no placeholder).
 const PREVIEW_TIMEOUT_MS = 4000;
 
 type PreviewStatus = "loading" | "ready" | "failed";
@@ -36,23 +36,6 @@ function usePrefersReducedMotion(): boolean {
     return () => query.removeEventListener("change", onChange);
   }, []);
   return reduced;
-}
-
-/**
- * What the stage shows while a look is still loading: the exact frame, no
- * words. A faint neutral shimmer, or nothing under reduced motion.
- */
-export function PreviewPlaceholder({ animated }: { animated: boolean }) {
-  return (
-    <div
-      data-testid="appearance-preview-placeholder"
-      aria-hidden="true"
-      className={cn(
-        "absolute inset-0",
-        animated && "animate-pulse bg-black/[0.03] dark:bg-white/[0.04]",
-      )}
-    />
-  );
 }
 
 /**
@@ -157,7 +140,6 @@ export function AppearancePicker({ value, onChange, disabled = false }: Appearan
             "bg-[#E9E9EB] dark:bg-[#1C1C1E]",
           )}
         >
-          {status === "loading" && <PreviewPlaceholder animated={!reducedMotion} />}
           {mounted.map((item) => {
             const current = item.value === entry.value;
             const shown = current && status === "ready";
@@ -172,9 +154,10 @@ export function AppearancePicker({ value, onChange, disabled = false }: Appearan
                 className={cn(
                   "absolute inset-0 h-full w-full border-0 bg-transparent",
                   "pointer-events-none select-none",
+                  // Opacity alone, never visibility: the outgoing look fades
+                  // out while the incoming one fades in once it has painted.
                   shown ? "opacity-100" : "opacity-0",
-                  !current && "invisible",
-                  !reducedMotion && "transition-opacity duration-150 ease-out",
+                  !reducedMotion && "transition-opacity duration-300 ease-in-out",
                 )}
               />
             );

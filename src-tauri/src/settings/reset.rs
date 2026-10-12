@@ -90,7 +90,9 @@ pub async fn apply_reset(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::providers::default_selection::{decide, Decision, SelectionState};
+    use crate::agent::providers::default_selection::{
+        decide, CliCandidate, Decision, SelectionState,
+    };
     use crate::agent::providers::types::Provider;
 
     /// What the rule is handed immediately after a reset, read out of the real
@@ -98,7 +100,7 @@ mod tests {
     /// shows up as a failure in these tests instead of passing quietly.
     ///
     /// This mirrors the construction in [`startup_default::apply`], which is
-    /// the production path; everything except the two CLI booleans comes from
+    /// the production path; everything except the per-CLI booleans comes from
     /// `AppSettings::default()`.
     fn state_after_reset(cli_installed: bool, cli_signed_in: bool) -> SelectionState {
         let providers = AppSettings::default().providers;
@@ -109,12 +111,25 @@ mod tests {
             .and_then(|p| p.api_key.as_deref())
             .is_some_and(|key| !key.is_empty());
 
+        // These tests predate Codex and read Claude as "the CLI". The second
+        // candidate stays absent so the rule's answer is unchanged in cases
+        // where Claude alone is signed in.
         SelectionState {
             active_provider: providers.active_provider,
             chosen_by_user: providers.provider_chosen_by_user,
             active_has_credential,
-            cli_installed,
-            cli_signed_in,
+            cli_candidates: vec![
+                CliCandidate {
+                    provider_id: Provider::ClaudeCli.id(),
+                    installed: cli_installed,
+                    signed_in: cli_signed_in,
+                },
+                CliCandidate {
+                    provider_id: Provider::CodexCli.id(),
+                    installed: false,
+                    signed_in: false,
+                },
+            ],
         }
     }
 
@@ -186,6 +201,13 @@ mod tests {
                 .iter()
                 .any(|p| p.id == Provider::ClaudeCli.id()),
             "the rule can switch a reset onto the Claude CLI, so it needs an entry"
+        );
+        assert!(
+            providers
+                .providers
+                .iter()
+                .any(|p| p.id == Provider::CodexCli.id()),
+            "the rule can switch a reset onto the Codex CLI, so it needs an entry"
         );
     }
 

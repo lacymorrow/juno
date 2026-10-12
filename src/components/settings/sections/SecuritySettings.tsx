@@ -236,7 +236,8 @@ function PermissionModeGroup() {
       <SettingsRow
         id="permission-mode"
         label="When Juno needs permission"
-        description="Pick how often Juno stops to check with you. Changing this also clears anything you told it not to ask about again."
+        description="How often Juno checks with you."
+          info="Pick how often Juno stops to check with you. Changing this also clears anything you told it not to ask about again."
         below={
           <RadioGroup
             value={mode}
@@ -324,7 +325,8 @@ function ApprovalsGroup() {
         id="cli-ask-before-send"
         htmlFor="cli-ask-before-send-switch"
         label="Ask before Juno sends"
-        description="When Juno is about to send an email or message, create or delete something in a connected account, or put something on your calendar, she shows you what is about to go out and waits for your OK. Declining sends nothing."
+        description="Review emails, messages and calendar changes first."
+            info="When Juno is about to send an email or message, create or delete something in a connected account, or put something on your calendar, she shows you what is about to go out and waits for your OK. Declining sends nothing."
       >
         <Switch
           id="cli-ask-before-send-switch"
@@ -438,7 +440,6 @@ export default function SecuritySettings() {
 
       <SettingsGroup
         title="macOS Permissions"
-        footer="Manage system permissions required for AI computer use features"
       >
         {permissionsError && (
           <SettingsRow

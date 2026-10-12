@@ -9,13 +9,21 @@
 //! lets the following `type`/`key` reach the same app instead of whatever happens
 //! to be frontmost.
 
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 
 /// Mirrors `AgentSettings.background_mode`, whose default is true.
 static BACKGROUND_MODE: AtomicBool = AtomicBool::new(true);
 
 /// 0 means "no process targeted yet".
 static LAST_TARGET_PID: AtomicI32 = AtomicI32::new(0);
+
+/// The window inside `LAST_TARGET_PID` the agent last acted on. 0 means unknown.
+///
+/// Keystrokes posted to a process go to that process's key window, which is not
+/// necessarily the window the agent just clicked: a click posted to a background
+/// process does not make its window key. Remembering the window lets keyboard
+/// input make it key (without raising it) first.
+static LAST_TARGET_WINDOW: AtomicU32 = AtomicU32::new(0);
 
 /// Mirror the app's `background_mode` setting into the platform layer.
 pub fn set_background_mode(enabled: bool) {
@@ -35,7 +43,14 @@ pub fn is_background_mode() -> bool {
 /// Record the process a background action just reached, so keystrokes that
 /// follow can be routed to the same app.
 pub fn remember_target_pid(pid: i32) {
+    remember_target_window(pid, None);
+}
+
+/// Record the process and, when known, the window a background action reached.
+/// A pid without a window clears any window remembered for an earlier target.
+pub fn remember_target_window(pid: i32, window_id: Option<u32>) {
     if pid > 0 {
+        LAST_TARGET_WINDOW.store(window_id.unwrap_or(0), Ordering::Relaxed);
         LAST_TARGET_PID.store(pid, Ordering::Relaxed);
     }
 }
@@ -43,6 +58,36 @@ pub fn remember_target_pid(pid: i32) {
 /// Forget the remembered process (used when a target is known to be gone).
 pub fn forget_target_pid() {
     LAST_TARGET_PID.store(0, Ordering::Relaxed);
+    LAST_TARGET_WINDOW.store(0, Ordering::Relaxed);
+}
+
+/// Where coordinate-free input (keys, typing) should go.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InputTarget {
+    pub pid: i32,
+    pub window_id: Option<u32>,
+}
+
+/// The target for keyboard input: a window pinned for this action wins, then
+/// the process (and window) the agent last acted on.
+///
+/// `None` while background mode is off, exactly like `target_pid`.
+pub fn input_target() -> Option<InputTarget> {
+    if !is_background_mode() {
+        return None;
+    }
+    if let Some(pinned) = crate::window_target::pinned() {
+        return Some(InputTarget {
+            pid: pinned.pid,
+            window_id: Some(pinned.window_id),
+        });
+    }
+    let pid = target_pid()?;
+    let window = LAST_TARGET_WINDOW.load(Ordering::Relaxed);
+    Some(InputTarget {
+        pid,
+        window_id: (window > 0).then_some(window),
+    })
 }
 
 /// The process the agent last acted on, if it is still alive.
@@ -125,6 +170,54 @@ mod tests {
             let own_pid = std::process::id() as i32;
             remember_target_pid(own_pid);
             assert_eq!(target_pid(), Some(own_pid));
+        });
+    }
+
+    #[test]
+    fn the_clicked_window_is_remembered_with_its_process() {
+        with_clean_state(true, || {
+            let own_pid = std::process::id() as i32;
+            remember_target_window(own_pid, Some(42));
+            assert_eq!(
+                input_target(),
+                Some(InputTarget {
+                    pid: own_pid,
+                    window_id: Some(42)
+                })
+            );
+            // A later target with no known window must not inherit the old one.
+            remember_target_pid(own_pid);
+            assert_eq!(input_target().and_then(|t| t.window_id), None);
+        });
+    }
+
+    #[test]
+    fn a_pinned_window_beats_the_remembered_target() {
+        with_clean_state(true, || {
+            let own_pid = std::process::id() as i32;
+            remember_target_window(own_pid, Some(42));
+            let _pin = crate::window_target::pin(Some(crate::window_target::PinnedWindow {
+                pid: 777,
+                window_id: 9,
+            }));
+            assert_eq!(
+                input_target(),
+                Some(InputTarget {
+                    pid: 777,
+                    window_id: Some(9)
+                })
+            );
+        });
+    }
+
+    #[test]
+    fn no_input_target_while_background_mode_is_off_even_when_pinned() {
+        with_clean_state(false, || {
+            let _pin = crate::window_target::pin(Some(crate::window_target::PinnedWindow {
+                pid: 777,
+                window_id: 9,
+            }));
+            assert_eq!(input_target(), None);
         });
     }
 

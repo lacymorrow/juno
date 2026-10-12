@@ -276,18 +276,21 @@ pub(crate) async fn resolve_installed(name: &str) -> Option<InstalledApp> {
     match_app(&app_key(name), &apps).cloned()
 }
 
-pub(super) async fn handle(_app_handle: &AppHandle, intent: AppIntent) -> Option<Reply> {
+pub(super) async fn handle(app_handle: &AppHandle, intent: AppIntent) -> Option<Reply> {
     match intent {
         AppIntent::Website { domain } => {
             let url = format!("https://{}", domain);
+            // Speak first; the acknowledgement does not depend on the result.
+            super::speak_ahead(app_handle, &format!("Opening {}.", domain));
             Some(match run("open", vec![url.clone()]).await {
                 Ok(_) => Reply::card(
                     format!("<LinkCard url=\"{}\" />", url),
                     format!("Opening {}.", domain),
-                ),
+                )
+                .unspoken(),
                 Err(e) => {
                     log::warn!("local_intents: open {} failed: {}", url, e);
-                    Reply::failure(format!("I couldn't open {}.", domain))
+                    Reply::failure(format!("I couldn't open {}.", domain)).unspoken()
                 }
             })
         }
@@ -295,11 +298,12 @@ pub(super) async fn handle(_app_handle: &AppHandle, intent: AppIntent) -> Option
             let apps = installed_apps().await;
             let app = match_app(&query, &apps)?;
             let path = app.path.to_string_lossy().into_owned();
+            super::speak_ahead(app_handle, &format!("Opening {}.", app.name));
             Some(match run("open", vec!["-a".into(), path]).await {
-                Ok(_) => Reply::text(format!("Opening {}.", app.name)),
+                Ok(_) => Reply::text(format!("Opening {}.", app.name)).unspoken(),
                 Err(e) => {
                     log::warn!("local_intents: open -a {} failed: {}", app.name, e);
-                    Reply::failure(format!("I couldn't open {}.", app.name))
+                    Reply::failure(format!("I couldn't open {}.", app.name)).unspoken()
                 }
             })
         }

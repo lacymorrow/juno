@@ -121,7 +121,8 @@ function App() {
         });
       } catch (error) {
         console.error("❌ Failed to submit query:", error);
-        conversation.addSystemMessage(`Failed to submit query: ${error}`);
+        // The reason goes to the console; the person gets one plain line.
+        conversation.addSystemMessage("That didn't go through. Try again.");
         playError();
       }
     },
@@ -148,7 +149,7 @@ function App() {
       conversation.addSystemMessage("🛑 All operations stopped by user");
     } catch (error) {
       console.error("❌ Error stopping operations:", error);
-      conversation.addSystemMessage(`❌ Error stopping operations: ${error}`);
+      // Nothing to tell the person: the stop is retried by pressing it again.
     }
   }, [conversation.addSystemMessage]);
 
@@ -163,7 +164,7 @@ function App() {
       await checkNow();
     } catch (error) {
       console.error("❌ Error checking for updates:", error);
-      toast.error(`Could not check for updates: ${error}`);
+      toast.error("Couldn't check for updates right now. Juno will try again later.");
     }
   }, [checkNow, updateStatus?.stage]);
 
@@ -183,7 +184,8 @@ function App() {
           label: "Restart",
           onClick: () => {
             void restart().catch((error) => {
-              toast.error(`Could not restart: ${error}`);
+              console.error("❌ Restart after update failed:", error);
+              toast.error("Couldn't restart. Quit Juno and open it again.");
             });
           },
         },

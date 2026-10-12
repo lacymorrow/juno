@@ -21,6 +21,18 @@ impl DesktopWrapper {
             .and_then(|d| d.element_at_position(x, y))
     }
 
+    /// Hit-test inside the windows of application `pid`, not the frontmost app.
+    pub fn element_at_position_in_app(
+        &self,
+        pid: i32,
+        x: f64,
+        y: f64,
+    ) -> Option<computer_use_ai_sdk::UIElement> {
+        self.desktop
+            .as_ref()
+            .and_then(|d| d.element_at_position_in_app(pid, x, y))
+    }
+
     pub fn applications(&self) -> Result<Vec<computer_use_ai_sdk::UIElement>, String> {
         match &self.desktop {
             Some(desktop) => desktop.applications().map_err(|e| e.to_string()),

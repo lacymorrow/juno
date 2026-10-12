@@ -11,6 +11,12 @@ pub mod window_labels {
     pub const APP_BAR: &str = "app-bar";
     pub const VOICE_BAR: &str = "voice-bar";
     pub const DYNAMIC_BAR: &str = "dynamic-bar";
+    /// The snap-well drop indicator for the first display. Every other display
+    /// gets its own copy, labelled with this plus a dash and the display index.
+    pub const SNAP_WELLS_OVERLAY: &str = "snap-wells-overlay";
+    /// The smoke around the bar the first time it appears. Built for the
+    /// occasion by `intro.rs`, not declared in tauri.conf.json.
+    pub const INTRO: &str = "intro";
 }
 
 /// Agent session identity colors (LAC-1432 / LAC-2830 spec section 2).
@@ -28,6 +34,77 @@ pub mod agent_session_colors {
     pub const SLOT_5: &str = "#06B6D4"; // cyan
     pub const SLOT_6: &str = "#F97316"; // orange
     pub const SLOT_7: &str = "#EC4899"; // pink
+}
+
+/// The color of the glow around Juno's cursor, chosen in Settings, Appearance.
+/// Persisted as the id; the hex values are the macOS system colors.
+/// The primary agent's cursor wears this color. Parallel sessions after the
+/// first keep their roster identity color from agent_session_colors, so the
+/// cursor on screen matches the dot beside that session.
+/// NOTE: keep doc comments in this module free of curly braces, the
+/// generate-ts-constants.js module parser drops constants that follow one.
+pub mod agent_cursor_colors {
+    pub const BLUE: &str = "blue";
+    pub const PINK: &str = "pink";
+    pub const GREEN: &str = "green";
+    pub const ORANGE: &str = "orange";
+    pub const PURPLE: &str = "purple";
+
+    pub const BLUE_HEX: &str = "#0A84FF";
+    pub const PINK_HEX: &str = "#FF375F";
+    pub const GREEN_HEX: &str = "#30D158";
+    pub const ORANGE_HEX: &str = "#FF9F0A";
+    pub const PURPLE_HEX: &str = "#BF5AF2";
+
+    /// System blue, the one accent Juno uses everywhere else.
+    pub const DEFAULT: &str = BLUE;
+
+    /// Every choice, in the order the swatch row shows them.
+    pub const ALL: &[&str] = &[BLUE, PINK, GREEN, ORANGE, PURPLE];
+
+    /// The hex for a saved id. Anything unknown is the default blue, silently.
+    pub fn hex(id: &str) -> &'static str {
+        match id {
+            PINK => PINK_HEX,
+            GREEN => GREEN_HEX,
+            ORANGE => ORANGE_HEX,
+            PURPLE => PURPLE_HEX,
+            _ => BLUE_HEX,
+        }
+    }
+
+    /// The id to keep for a saved value. Anything unknown becomes the default.
+    pub fn resolve(id: &str) -> &'static str {
+        ALL.iter().copied().find(|c| *c == id).unwrap_or(DEFAULT)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn default_is_system_blue() {
+            assert_eq!(DEFAULT, BLUE);
+            assert_eq!(hex(DEFAULT), "#0A84FF");
+        }
+
+        #[test]
+        fn every_choice_has_its_own_color() {
+            let mut seen = std::collections::HashSet::new();
+            for id in ALL {
+                assert_eq!(resolve(id), *id);
+                assert!(seen.insert(hex(id)), "{id} shares a color");
+            }
+            assert_eq!(ALL.len(), 5);
+        }
+
+        #[test]
+        fn unknown_values_fall_back_to_blue() {
+            assert_eq!(resolve("chartreuse"), BLUE);
+            assert_eq!(resolve(""), BLUE);
+            assert_eq!(hex("chartreuse"), BLUE_HEX);
+        }
+    }
 }
 
 /// UI element IDs used for element targeting and interactions

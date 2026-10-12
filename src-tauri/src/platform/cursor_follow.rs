@@ -7,7 +7,10 @@
 //!
 //! A single background task polls Tauri's own cursor position (no unsafe Cocoa,
 //! no accessibility permission) and, only when the containing display changes,
-//! emits `cursor-display-changed` with the cursor's physical position. The
+//! emits `cursor-display-changed` with the cursor's position in global points
+//! (see `platform::desktop_points`; tao's raw cursor and monitor numbers are in
+//! different scales on a mixed-density desk, which made this miss the second
+//! display or pick the wrong one). The
 //! frontend owns the well math, so it re-homes the bar to the same drag-well
 //! slot on the new display. The task runs for the app's life and is gated by an
 //! atomic flag mirroring the user's setting, so toggling never spawns a second
@@ -19,6 +22,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::constants;
+use crate::platform::desktop_points;
 use crate::state::AppState;
 
 /// Poll cadence. Fast enough that the bar is already there when the user looks,
@@ -39,8 +43,8 @@ fn is_enabled() -> bool {
     FOLLOW_ENABLED.load(Ordering::Relaxed)
 }
 
-/// A monitor identity stable enough to detect a change: its top-left in physical
-/// pixels. Distinct displays never share an origin in the global layout.
+/// A monitor identity stable enough to detect a change: its top-left in
+/// points. Distinct displays never share an origin in the global layout.
 type MonitorKey = (i32, i32);
 
 /// Start the single poll task. Safe to call once at setup; later calls no-op.
@@ -66,30 +70,23 @@ pub fn start(app: AppHandle) {
                 }
             }
 
-            let Ok(pos) = app.cursor_position() else {
+            let Some(pos) = desktop_points::cursor_points(&app) else {
                 continue;
             };
             let Some(window) = app.get_webview_window(constants::ui::window_labels::FLOATING_BAR)
             else {
                 continue;
             };
-            let Ok(monitors) = window.available_monitors() else {
-                continue;
-            };
+            let monitors = desktop_points::monitors_in_points(&window);
 
             // The display whose bounds contain the cursor.
-            let containing = monitors.iter().find(|m| {
-                let mp = m.position();
-                let ms = m.size();
-                let x = pos.x as i32;
-                let y = pos.y as i32;
-                x >= mp.x && x < mp.x + ms.width as i32 && y >= mp.y && y < mp.y + ms.height as i32
-            });
-            let Some(monitor) = containing else {
+            let Some(monitor) =
+                desktop_points::monitor_index_at(&monitors, pos).and_then(|i| monitors.get(i))
+            else {
                 continue;
             };
 
-            let key = (monitor.position().x, monitor.position().y);
+            let key = (monitor.x.round() as i32, monitor.y.round() as i32);
             if last_key == Some(key) {
                 continue;
             }
@@ -103,7 +100,7 @@ pub fn start(app: AppHandle) {
 
             if let Err(e) = app.emit(
                 constants::events::bar::CURSOR_DISPLAY_CHANGED,
-                serde_json::json!({ "x": pos.x, "y": pos.y }),
+                serde_json::json!({ "x": pos.0, "y": pos.1 }),
             ) {
                 log::warn!("[CursorFollow] failed to emit display change: {e}");
             }

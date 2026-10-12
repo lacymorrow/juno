@@ -142,7 +142,6 @@ export default function AssistantModelPicker({
     <SettingsGroup
       title="Provider Selection"
       advanced={advanced}
-      footer="Choose your AI provider and model"
     >
       <SettingsRow
         htmlFor="ai-provider"
@@ -200,6 +199,7 @@ export default function AssistantModelPicker({
 
       {/* Model selector — same component as chat input */}
       <SettingsRow
+        id="ai-model"
         label="Model"
         below={
           <div className="space-y-2">
