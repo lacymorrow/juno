@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.175] - 2026-10-12
+
+### Fixed
+
+- **macos:** restore hardened-runtime Contacts, Calendars and Location entitlements (#792) (cca36bf6)
+
 ## [0.8.174] - 2026-10-12
 
 ### Fixed
@@ -1325,7 +1331,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.174...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.175...HEAD
+[0.8.175]: https://github.com/lacymorrow/juno/compare/cua-v0.8.174...v0.8.175
 [0.8.174]: https://github.com/lacymorrow/juno/compare/cua-v0.8.173...v0.8.174
 [0.8.173]: https://github.com/lacymorrow/juno/compare/cua-v0.8.172...v0.8.173
 [0.8.172]: https://github.com/lacymorrow/juno/compare/cua-v0.8.171...v0.8.172
