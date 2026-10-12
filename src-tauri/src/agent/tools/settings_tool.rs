@@ -163,22 +163,21 @@ async fn advanced_on(app: &AppHandle) -> bool {
     }
 }
 
-/// Debug mode, as the Settings window sees it.
-fn debug_on(app: &AppHandle) -> bool {
-    app.try_state::<AppState>()
-        .is_some_and(|state| crate::commands::core::debug_mode_active(&state))
+/// Beta features, as the Settings window sees them.
+fn beta_on(app: &AppHandle) -> bool {
+    crate::settings::beta_features_active(app)
 }
 
-/// Whether the agent is offered a setting right now: a debug-only one (speaking
-/// speed) exists only while debug mode is on, so it is not listed, read or set
-/// otherwise, matching the window, which hides the row.
-fn offered(spec: &SettingSpec, debug: bool) -> bool {
-    !spec.debug_only || debug
+/// Whether the agent is offered a setting right now: a beta-only one (speaking
+/// speed) exists only while beta features are on, so it is not listed, read or
+/// set otherwise, matching the window, which hides the row.
+fn offered(spec: &SettingSpec, beta: bool) -> bool {
+    !spec.beta_only || beta
 }
 
 fn ensure_offered(app: &AppHandle, key: SettingKey) -> Result<(), String> {
     let spec = key.spec();
-    if offered(&spec, debug_on(app)) {
+    if offered(&spec, beta_on(app)) {
         Ok(())
     } else {
         Err(format!(
@@ -189,9 +188,9 @@ fn ensure_offered(app: &AppHandle, key: SettingKey) -> Result<(), String> {
 }
 
 async fn list(app: &AppHandle) -> Result<Value, String> {
-    let debug = debug_on(app);
+    let beta = beta_on(app);
     let settings: Vec<Value> = all_specs()
-        .filter(|spec| offered(spec, debug))
+        .filter(|spec| offered(spec, beta))
         .map(|spec| spec.describe())
         .collect();
     Ok(json!({
@@ -310,8 +309,8 @@ pub async fn follow_name(app: &AppHandle, name: &str) -> Result<Value, String> {
 /// path for the tool's `highlight` and for `juno://settings?highlight=` links.
 pub async fn highlight(app: &AppHandle, key: SettingKey) -> Result<Value, String> {
     let spec = key.spec();
-    // A debug-only row is not on screen without debug mode: open its pane.
-    if !offered(&spec, debug_on(app)) {
+    // A beta-only row is not on screen without beta features: open its pane.
+    if !offered(&spec, beta_on(app)) {
         return open_pane(app, Some(spec.pane)).await;
     }
     // A row behind the advanced toggle does not exist on screen until the
@@ -812,6 +811,23 @@ mod tests {
             );
         }
         assert!(def.description.contains("protected"));
+    }
+
+    #[test]
+    fn beta_only_settings_are_offered_only_with_beta_features() {
+        for key in SettingKey::ALL {
+            let spec = key.spec();
+            assert!(offered(&spec, true), "{} offered with beta on", spec.id);
+            assert_eq!(
+                offered(&spec, false),
+                !spec.beta_only,
+                "{} with beta off",
+                spec.id
+            );
+        }
+        assert!(!offered(&SettingKey::SpeakingSpeed.spec(), false));
+        assert!(offered(&SettingKey::SpeakingSpeed.spec(), true));
+        assert!(offered(&SettingKey::JunoVoice.spec(), false));
     }
 
     #[test]

@@ -243,10 +243,10 @@ pub struct SettingSpec {
     pub advanced: bool,
     /// The agent may show this setting and must not change it.
     pub protected: bool,
-    /// Offered (listed, readable, settable, highlightable) only while debug
-    /// mode is on, because it is known to be broken for most voices and
+    /// Offered (listed, readable, settable, highlightable) only while beta
+    /// features are on, because it is known to be broken for most voices and
     /// providers. The Settings window hides the row on the same condition.
-    pub debug_only: bool,
+    pub beta_only: bool,
     /// The store field the UI's write path changes, as `section.field`. Read by
     /// the tests that keep guardrails protected, so it must be the truth.
     pub writes: &'static str,
@@ -390,7 +390,7 @@ impl SettingKey {
             kind,
             advanced: false,
             protected: false,
-            debug_only: false,
+            beta_only: false,
             writes,
         };
         match self {
@@ -404,7 +404,7 @@ impl SettingKey {
                 "audio.system_voice",
             ),
             K::SpeakingSpeed => SettingSpec {
-                debug_only: true,
+                beta_only: true,
                 ..row(
                     self,
                     "audio.speaking_speed",
@@ -1241,10 +1241,10 @@ mod tests {
     }
 
     #[test]
-    fn speaking_speed_is_debug_only_and_nothing_else_is() {
+    fn speaking_speed_is_beta_only_and_nothing_else_is() {
         for key in SettingKey::ALL {
             assert_eq!(
-                key.spec().debug_only,
+                key.spec().beta_only,
                 *key == SettingKey::SpeakingSpeed,
                 "{}",
                 key.spec().id

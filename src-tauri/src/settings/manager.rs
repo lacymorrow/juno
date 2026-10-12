@@ -120,6 +120,10 @@ impl SettingsManager {
                 .get(store_keys::ADVANCED_SETTINGS_ENABLED)
                 .and_then(|v| v.as_bool())
                 .unwrap_or(defaults::ADVANCED_SETTINGS_ENABLED),
+            beta_features_enabled: store
+                .get(store_keys::BETA_FEATURES_ENABLED)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(defaults::BETA_FEATURES_ENABLED),
             cli: self.get_cli_settings_from_store(&store)?,
             voice_transcription: self.get_voice_transcription_settings_from_store(&store)?,
             triggers,
@@ -177,6 +181,10 @@ impl SettingsManager {
             (
                 store_keys::ADVANCED_SETTINGS_ENABLED,
                 Value::Bool(settings.advanced_settings_enabled),
+            ),
+            (
+                store_keys::BETA_FEATURES_ENABLED,
+                Value::Bool(settings.beta_features_enabled),
             ),
             (store_keys::CLI, to_json("CLI settings", &settings.cli)?),
             (
@@ -273,6 +281,16 @@ impl SettingsManager {
             .get(store_keys::ADVANCED_SETTINGS_ENABLED)
             .and_then(|v| v.as_bool())
             .unwrap_or(defaults::ADVANCED_SETTINGS_ENABLED))
+    }
+
+    /// Whether beta features are on. Reads the store directly, so it needs no
+    /// manager and no await. Use [`crate::settings::beta_features_active`].
+    pub fn read_beta_features(app: &AppHandle) -> bool {
+        app.store(SETTINGS_STORE_FILE)
+            .ok()
+            .and_then(|store| store.get(store_keys::BETA_FEATURES_ENABLED))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(defaults::BETA_FEATURES_ENABLED)
     }
 
     /// Auto-update behaviour. A store written before this shipped has no
@@ -463,6 +481,17 @@ impl SettingsManager {
     pub async fn set_advanced_settings_enabled(&self, enabled: bool) -> Result<(), String> {
         self.write_entries(vec![(
             store_keys::ADVANCED_SETTINGS_ENABLED,
+            Value::Bool(enabled),
+        )])
+        .await?;
+
+        self.emit_settings_changed().await;
+        Ok(())
+    }
+
+    pub async fn set_beta_features(&self, enabled: bool) -> Result<(), String> {
+        self.write_entries(vec![(
+            store_keys::BETA_FEATURES_ENABLED,
             Value::Bool(enabled),
         )])
         .await?;

@@ -51,13 +51,16 @@ function list(overrides: Partial<JunoVoiceList> = {}): JunoVoiceList {
 function renderSection(
   voices: JunoVoiceList,
   handleJunoVoiceRateChange = vi.fn(async (_rate: number) => {}),
-  debug = true,
+  beta = true,
+  debug = false,
 ) {
   invokeMock.mockImplementation(((command: string) =>
     Promise.resolve(
-      command === "get_debug_mode"
-        ? debug
-        : command === COMMANDS.SETTINGS_GET_ADVANCED_SETTINGS_ENABLED,
+      command === COMMANDS.SETTINGS_GET_BETA_FEATURES
+        ? beta
+        : command === "get_debug_mode"
+          ? debug
+          : command === COMMANDS.SETTINGS_GET_ADVANCED_SETTINGS_ENABLED,
     )) as typeof invoke);
   const settings = {
     audioDevices: null,
@@ -111,11 +114,17 @@ describe("Audio: how fast Juno speaks", () => {
     expect(vi.mocked(loadJunoVoices).mock.calls.length).toBe(before + 1);
   });
 
-  it("hides the speed unless debug mode is on", async () => {
+  it("hides the speed unless beta features are on", async () => {
     renderSection(list(), undefined, false);
     await screen.findByText("Your Mac's voice");
     expect(screen.queryByText("Speaking speed")).not.toBeInTheDocument();
     expect(screen.queryByRole("slider")).not.toBeInTheDocument();
+  });
+
+  it("debug mode alone does not show the speed", async () => {
+    renderSection(list(), undefined, false, true);
+    await screen.findByText("Your Mac's voice");
+    expect(screen.queryByText("Speaking speed")).not.toBeInTheDocument();
   });
 
   it("draws no speed control when the engine has none", async () => {
