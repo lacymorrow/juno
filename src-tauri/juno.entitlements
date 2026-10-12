@@ -23,10 +23,22 @@
     <key>com.apple.security.device.camera</key>
     <true/>
 
+    <!-- Hardened-runtime personal information. Without these, macOS refuses
+         Contacts, Calendars/Reminders and Location requests silently: no
+         dialog appears and Juno never shows up in the Privacy list, which
+         has no "+" button to add it by hand. These are Hardened Runtime
+         resource-access entitlements, not App Sandbox-only keys. -->
+    <key>com.apple.security.personal-information.addressbook</key>
+    <true/>
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
+    <key>com.apple.security.personal-information.location</key>
+    <true/>
+
     <!-- 2026-09 security audit cleanup. Removed:
          - cs.allow-unsigned-executable-memory and cs.allow-dyld-environment-variables
            (code-injection vectors; not needed for accessibility APIs)
-         - device.microphone, personal-information.location, network.client,
+         - device.microphone, network.client,
            files.user-selected.read-write, files.downloads.read-write
            (App Sandbox-only keys; inert without com.apple.security.app-sandbox)
          - input-monitoring (not a real entitlement; Input Monitoring is TCC-only)
