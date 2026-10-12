@@ -319,9 +319,11 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
         </SettingsRow>
       </SettingsGroup>
 
-      <SettingsGroup title="Dictation">
-        <DictationCleanupRow />
-      </SettingsGroup>
+      {debugMode && (
+        <SettingsGroup title="Dictation">
+          <DictationCleanupRow />
+        </SettingsGroup>
+      )}
 
       <SettingsGroup
         title="After you finish speaking"
