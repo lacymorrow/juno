@@ -260,15 +260,52 @@ impl SettingSpec {
 
     /// The listing the agent reads.
     pub fn describe(&self) -> Value {
-        json!({
+        let mut out = json!({
             "key": self.id,
             "label": self.label,
             "pane": self.pane.name(),
             "value": self.kind.describe(),
             "advanced": self.needs_advanced(),
             "protected": self.protected,
-        })
+        });
+        if self.key == SettingKey::BetaFeatures {
+            out["note"] = json!(format!(
+                "Beta features are still being finished and are not fully tested. Tell the \
+                 person that before or when you turn this on, and when they ask about it. \
+                 It unlocks: {}.",
+                beta_unlocks_text()
+            ));
+        }
+        out
     }
+}
+
+/// Labels of the settings that exist only while beta features are on, read
+/// from the specs so a new `beta_only` setting is named without an edit here.
+pub fn beta_unlocks() -> Vec<&'static str> {
+    all_specs()
+        .filter(|spec| spec.beta_only)
+        .map(|spec| spec.label)
+        .collect()
+}
+
+fn beta_unlocks_text() -> String {
+    let labels = beta_unlocks();
+    if labels.is_empty() {
+        "nothing yet".to_string()
+    } else {
+        labels.join(", ")
+    }
+}
+
+/// What the agent must put in front of the person when it turns beta features
+/// on. Returned in the `set` result so the words are in hand.
+pub fn beta_notice() -> String {
+    format!(
+        "Beta features are on. They are still being finished and are not fully tested, so \
+         they may not work well. Tell the person this plainly. This unlocked: {}.",
+        beta_unlocks_text()
+    )
 }
 
 macro_rules! setting_keys {
@@ -304,6 +341,7 @@ setting_keys! {
     AccountConnectors,
     ToolCategories,
     McpServers,
+    BetaFeatures,
     // Protected from here down.
     PermissionMode,
     AskBeforeSend,
@@ -462,6 +500,15 @@ impl SettingKey {
                 "cursor-color",
                 V::Choice(crate::constants::ui::agent_cursor_colors::ALL),
                 "floating_bar.agent_cursor_color",
+            ),
+            K::BetaFeatures => row(
+                self,
+                "general.beta_features",
+                "Beta features",
+                Pane::General,
+                "beta-features",
+                V::Bool,
+                "beta_features_enabled",
             ),
             K::AgentShortcut => row(
                 self,
