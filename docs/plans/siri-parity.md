@@ -49,7 +49,8 @@ Nothing typed exists for Reminders, Calendar, Contacts, Messages, Mail, Notes, M
 | Shortcuts | run by name | nothing | `shortcuts run` | none for the CLI |
 | Focus / DND, alarms, HomeKit | yes | cut (no public API) | a signed Juno shortcut imported once, then `shortcuts run` | one click in Shortcuts |
 | Wi-Fi | on/off | agent can via `networksetup` | keep in tier 1 | none |
-| Brightness, Bluetooth | yes | cut | tier 2 drives System Settings; not promised | Accessibility |
+| Brightness | yes | cut | slice 5: built-in display via DisplayServices, brightness keys as fallback (LAC-4302) | none |
+| Bluetooth | yes | cut | tier 2 drives System Settings; not promised | Accessibility |
 | Timers | yes | tier 0, lost on quit | keep | none |
 | Open app, files, dark mode, lock, sleep, volume | yes | tier 0 | keep | none |
 | Knowledge, weather, web | yes, with daily caps | the model | keep; measure before building anything | none |
@@ -164,16 +165,21 @@ Neither is built until the scorecard says it is needed.
 
 **Slice 4: Speed and close-out.** Fill every scorecard row with a number and a recording. Pull the two speed levers only where rows miss 1.5 s. Then record the three "beyond Siri" demos (compound, any-app, files) as the proof the floor was worth building. This slice produces the growth-push recording (LAC-4173), decided by Lacy 2026-10-08: the recording shows the whole floor plus what is above it, not one slice.
 
+**Slice 5: uncut, decided by Lacy 2026-10-12.** Four things moved out of "Considered and cut", in this order:
+
+1. **Weather (LAC-4301).** Open-Meteo, no key, current location through the preflight, the existing `WeatherCard`, and tier-0 phrasings ("what's the weather", "do I need an umbrella"). The model answering from web results was slow and stale.
+2. **Brightness (LAC-4302).** Built-in display only: DisplayServices loaded at runtime with a self-test, synthetic brightness keys as the silent fallback. External displays later, over DDC.
+3. **Universal now playing, spike (LAC-4303).** macOS 15.4 blocked third-party MediaRemote; `mediaremote-adapter` reads it through `/usr/bin/perl`. One day to prove it on macOS 26 for browsers, Podcasts and Spotify. AppleScript stays the fallback.
+4. **Juno as an App Intent, build spike (LAC-4304).** The only door Siri opens to third-party apps. First prove a Tauri build can ship the Swift intents and the Xcode-generated metadata; one "Ask Juno" intent. This changes the goal from matching Siri to being reachable from inside it.
+
 Build rule: one agent per slice, Sonnet unless the send gate is in scope (slice 2 gets Opus for the classifier work). Each slice is one PR against `main`, CI only, no local cargo (juno-remote-builds).
 
 ## Considered and cut
 
 | Candidate | Why it was cut |
 | --- | --- |
-| Registering Juno's own App Intents so Siri can call Juno | A different product (being a Siri extension). Revisit after parity. |
-| MediaRemote for now-playing | Private API, notarization risk. Music AppleScript already works. |
-| Brightness and Bluetooth typed tools | No public API. Tier 2 can drive System Settings; not promised, not in the scorecard as a pass. |
-| Weather, Stocks, Translate tools | The model answers all three. Measure latency first; build only if a row misses. |
+| Bluetooth typed tool | No public API. Tier 2 can drive System Settings; not promised, not in the scorecard as a pass. |
+| Stocks, Translate tools | The model answers both. Measure latency first; build only if a row misses. (Weather moved to slice 5.) |
 | Spotify "play X" by search | Spotify's AppleScript has no search. Needs the Web API and OAuth. Composio has a Spotify toolkit if it is ever asked for. |
 | Own slot-filling NLU | The model fills slots. Tier 0 stays bounded-type so a misfire is impossible by construction. |
 | Siri Suggestions, proactive anything | Not a request. Out of scope for a request-driven assistant. |
