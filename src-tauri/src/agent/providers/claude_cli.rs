@@ -620,7 +620,11 @@ fn save_attachment_files(images: &[String]) -> Vec<PathBuf> {
             .chars()
             .filter(|c| c.is_ascii_alphanumeric())
             .collect();
-        let ext = if ext.is_empty() { "png".to_string() } else { ext };
+        let ext = if ext.is_empty() {
+            "png".to_string()
+        } else {
+            ext
+        };
         let path = dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
         match std::fs::write(&path, bytes) {
             Ok(()) => paths.push(path),
@@ -1875,7 +1879,9 @@ impl AgentBrain for ClaudeCliBrain {
     ) -> Result<AgentAction, AgentError> {
         let query = Self::extract_query(messages);
         let images = Self::extract_images(messages);
-        let result = self.run_streaming(&query, &images, None, None, None).await?;
+        let result = self
+            .run_streaming(&query, &images, None, None, None)
+            .await?;
         Ok(AgentAction::Finish(result))
     }
 
@@ -2954,7 +2960,7 @@ mod tests {
         });
 
         let result = brain
-            .run_streaming("test query", None, None, Some(cancel_rx))
+            .run_streaming("test query", &[], None, None, Some(cancel_rx))
             .await;
         let _ = canceller.await;
 
@@ -2982,7 +2988,7 @@ mod tests {
         let start = std::time::Instant::now();
 
         let result = brain
-            .run_streaming("test query", None, None, Some(cancel_rx))
+            .run_streaming("test query", &[], None, None, Some(cancel_rx))
             .await;
 
         assert!(
@@ -3008,7 +3014,7 @@ mod tests {
 
         let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         let result = brain
-            .run_streaming("test query", None, None, Some(cancel_rx))
+            .run_streaming("test query", &[], None, None, Some(cancel_rx))
             .await;
 
         assert_eq!(result.expect("run should succeed"), "hello from cli");
@@ -3101,7 +3107,9 @@ echo '{{"type":"result","result":"answered the old way"}}'"#,
         PARTIAL_MESSAGES_UNSUPPORTED.store(false, Ordering::Relaxed);
 
         let brain = test_brain(script.clone());
-        let result = brain.run_streaming("test query", None, None, None).await;
+        let result = brain
+            .run_streaming("test query", &[], None, None, None)
+            .await;
 
         assert_eq!(
             result.expect("an old CLI must still answer"),
