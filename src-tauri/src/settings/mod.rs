@@ -784,8 +784,10 @@ mod tests {
 
     #[test]
     fn an_explicit_cleanup_off_survives_a_round_trip() {
-        let mut settings = AudioSettings::default();
-        settings.dictation_cleanup = false;
+        let settings = AudioSettings {
+            dictation_cleanup: false,
+            ..AudioSettings::default()
+        };
         let json = serde_json::to_value(&settings).expect("serializes");
         let back: AudioSettings = serde_json::from_value(json).expect("parses");
         assert!(!back.dictation_cleanup);

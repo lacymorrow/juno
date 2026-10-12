@@ -457,7 +457,7 @@ pub(crate) fn downmix_i16_to_mono(data: &[i16], channels: usize) -> Vec<f32> {
 
 #[cfg(test)]
 mod transcription_filter_tests {
-    use super::{filter_transcription_text, strip_pause_ellipses};
+    use super::filter_transcription_text;
 
     #[test]
     fn a_sound_description_is_not_something_someone_said() {
@@ -588,6 +588,11 @@ mod downmix_tests {
         let mono = downmix_i16_to_mono(&[0, i16::MIN], 1);
         assert_eq!(mono, vec![0.0, -1.0]);
     }
+}
+
+#[cfg(test)]
+mod pause_ellipsis_tests {
+    use super::{filter_transcription_text, strip_pause_ellipses};
 
     #[test]
     fn a_pause_before_a_lowercase_word_becomes_a_space() {
