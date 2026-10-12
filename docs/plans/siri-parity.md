@@ -4,6 +4,8 @@ Status: plan, 2026-10-08. DRI: Lacy (decisions), one agent per slice (build). Ba
 
 **One sentence: give the agent typed, native tools for the seven apps the Mac already syncs (Reminders, Calendar, Contacts, Messages, Mail, Notes, Music), add "send" as a consequence class so a text or an email always stops and asks, and ship it in four slices, each one demoable by voice.**
 
+**The rule (Lacy, 2026-10-12): Juno drives the Mac's own apps and features. It never rebuilds one.** If a request is not served by a Mac app, a Mac system control, or the Shortcuts app, Juno does not support it as a feature. No Juno-made weather service, no Juno timers.
+
 Parity is the floor. Juno already beats Siri at everything Siri cannot touch: any app, any file, compound requests, no daily cap. What Juno cannot do today is the ordinary stuff a person expects from a Mac assistant on day one. This plan closes that gap and nothing else.
 
 ## The first ten seconds
@@ -51,7 +53,7 @@ Nothing typed exists for Reminders, Calendar, Contacts, Messages, Mail, Notes, M
 | Wi-Fi | on/off | agent can via `networksetup` | keep in tier 1 | none |
 | Brightness | yes | cut | slice 5: built-in display via DisplayServices, brightness keys as fallback (LAC-4302) | none |
 | Bluetooth | yes | cut | tier 2 drives System Settings; not promised | Accessibility |
-| Timers | yes | tier 0, lost on quit | keep | none |
+| Timers | yes | tier 0, Juno's own, lost on quit | cut: no Mac feature to drive (Clock is not scriptable); open Clock instead | none |
 | Open app, files, dark mode, lock, sleep, volume | yes | tier 0 | keep | none |
 | Knowledge, weather, web | yes, with daily caps | the model | keep; measure before building anything | none |
 | On-screen awareness | "add this to my calendar" | screenshot + AX text exist | the prompt names the new tools as targets | Screen Recording |
@@ -167,9 +169,9 @@ Neither is built until the scorecard says it is needed.
 
 **Slice 5: uncut, decided by Lacy 2026-10-12.** Four things moved out of "Considered and cut", in this order:
 
-1. **Weather (LAC-4301).** Open-Meteo, no key, current location through the preflight, the existing `WeatherCard`, and tier-0 phrasings ("what's the weather", "do I need an umbrella"). The model answering from web results was slow and stale.
-2. **Brightness (LAC-4302).** Built-in display only: DisplayServices loaded at runtime with a self-test, synthetic brightness keys as the silent fallback. External displays later, over DDC.
-3. **Universal now playing, spike (LAC-4303).** macOS 15.4 blocked third-party MediaRemote; `mediaremote-adapter` reads it through `/usr/bin/perl`. One day to prove it on macOS 26 for browsers, Podcasts and Spotify. AppleScript stays the fallback.
+1. **Weather (LAC-4301), through the Mac's weather.** The Weather app exposes only "open" actions (air quality, sunrise, conditions) to Shortcuts and has no scripting dictionary. Juno reads the forecast through a bundled, signed "Juno Weather" shortcut built on Shortcuts' own weather actions, imported with one click the way Juno Focus is, and opens the Weather app for anything more. No third-party weather service.
+2. **Brightness (LAC-4302), the Mac's own display brightness.** Built-in display only: DisplayServices loaded at runtime with a self-test, synthetic brightness keys as the silent fallback. External displays later, over DDC.
+3. **Universal now playing, spike (LAC-4303), the Mac's own Now Playing.** macOS 15.4 blocked third-party MediaRemote; `mediaremote-adapter` reads it through `/usr/bin/perl`. One day to prove it on macOS 26 for browsers, Podcasts and Spotify. AppleScript stays the fallback.
 4. **Juno as an App Intent, build spike (LAC-4304).** The only door Siri opens to third-party apps. First prove a Tauri build can ship the Swift intents and the Xcode-generated metadata; one "Ask Juno" intent. This changes the goal from matching Siri to being reachable from inside it.
 
 Build rule: one agent per slice, Sonnet unless the send gate is in scope (slice 2 gets Opus for the classifier work). Each slice is one PR against `main`, CI only, no local cargo (juno-remote-builds).
@@ -179,6 +181,9 @@ Build rule: one agent per slice, Sonnet unless the send gate is in scope (slice 
 | Candidate | Why it was cut |
 | --- | --- |
 | Bluetooth typed tool | No public API. Tier 2 can drive System Settings; not promised, not in the scorecard as a pass. |
+| Juno's own timers | Clock.app has no scripting dictionary and exposes only an "open tab" action, so there is no Mac feature to drive. Cut by the rule above (Lacy 2026-10-12); Juno can open Clock to its Timers tab. |
+| Siri as a backend (Juno asks Siri) | Siri has no scripting dictionary and no Shortcuts action on the Mac. Only UI automation of Type to Siri, which cannot read the answer back reliably. The reverse, Siri calling Juno, is LAC-4304. |
+| A third-party weather service | Cut by the rule above. |
 | Stocks, Translate tools | The model answers both. Measure latency first; build only if a row misses. (Weather moved to slice 5.) |
 | Spotify "play X" by search | Spotify's AppleScript has no search. Needs the Web API and OAuth. Composio has a Spotify toolkit if it is ever asked for. |
 | Own slot-filling NLU | The model fills slots. Tier 0 stays bounded-type so a misfire is impossible by construction. |
