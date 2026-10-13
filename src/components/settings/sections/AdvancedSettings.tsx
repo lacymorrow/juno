@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 import { COMMANDS } from "@/lib/constants.generated";
+import { useBetaFeatures } from "@/hooks/useBetaFeatures";
 import { cn } from "@/lib/utils";
 import type { MouseControlMode } from "@/lib/inputControl";
 import { AgentModeGroup } from "../AgentModeGroup";
@@ -99,6 +100,7 @@ export default function AdvancedSettings({
   settings,
   onNavigateToPermissions,
 }: AdvancedSettingsProps) {
+  const { enabled: betaFeatures, setEnabled: setBetaFeatures } = useBetaFeatures();
   const [debugMode, setDebugMode] = useState(false);
 
   // Background operation. Loaded together so the group has one loading state
@@ -395,10 +397,18 @@ export default function AdvancedSettings({
         </SettingsRow>
       </SettingsGroup>
 
-      <SettingsGroup
-        title="Beta"
-        footer="Beta features can be turned off any time."
-      >
+      <SettingsGroup title="Beta">
+        <SettingsRow
+          htmlFor="beta-features"
+          label="Beta features"
+          description="Try features that are still being finished. Each one is marked Beta."
+        >
+          <Switch
+            id="beta-features"
+            checked={betaFeatures}
+            onCheckedChange={(checked) => void setBetaFeatures(checked)}
+          />
+        </SettingsRow>
         <SettingsRow
           htmlFor="smart-routing"
           label="Smart routing"
