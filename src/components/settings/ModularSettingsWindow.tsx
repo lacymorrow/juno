@@ -201,8 +201,8 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   { sectionId: "general", rowId: "big-cursor-enabled", label: "Enable big cursor", keywords: "cursor pointer magnify enlarge big" },
   { sectionId: "general", rowId: "cursor-color", label: "Cursor color", keywords: "cursor color colour glow agent pointer accent blue pink green orange purple" },
   { sectionId: "general", rowId: "bar-appearance", label: "Bar appearance", keywords: "bar appearance look style pill island orb halo avatar persona floating preview" },
-  { sectionId: "general", rowId: "beta-features", label: "Beta features", keywords: "beta experimental unfinished preview early features speaking speed" },
   { sectionId: "general", rowId: "show-notifications", label: "Show notifications", keywords: "notifications alerts banners notify push test" },
+  { sectionId: "advanced", rowId: "beta-features", label: "Beta features", keywords: "beta experimental unfinished preview early features speaking speed dictation cleanup", advanced: true },
   { sectionId: "advanced", rowId: "restart-onboarding", label: "Restart onboarding", keywords: "onboarding welcome guide tutorial restart setup", advanced: true },
   // Triggers
   { sectionId: "triggers", rowId: "add-trigger", label: "Add shortcut", keywords: "trigger shortcut activation summon hotkey shortcut mouse button voice push to talk toggle wake word phrase" },

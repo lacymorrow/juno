@@ -823,11 +823,12 @@ mod tests {
     }
 
     #[test]
-    fn beta_features_is_settable_visible_and_in_general() {
+    fn beta_features_is_settable_and_advanced() {
         let spec = SettingKey::BetaFeatures.spec();
         assert!(!spec.protected);
-        assert!(!spec.needs_advanced());
-        assert_eq!(spec.pane, registry::Pane::General);
+        // Lives in Advanced > Beta, so it is behind "Show advanced settings".
+        assert!(spec.needs_advanced());
+        assert_eq!(spec.pane, registry::Pane::Advanced);
         assert!(!spec.beta_only);
         assert!(offered(&spec, false));
         for raw in [json!(true), json!(false)] {

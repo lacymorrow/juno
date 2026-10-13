@@ -58,6 +58,7 @@ function SpeedRow({
     <SettingsRow
       htmlFor="voice-speed"
       label="Speaking speed"
+      beta
       description="How fast Juno talks."
     >
       <div className="flex w-[210px] items-center gap-3">

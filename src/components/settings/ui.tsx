@@ -1,4 +1,5 @@
 import React from "react";
+import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { HelpCircle } from "lucide-react";
@@ -115,6 +116,24 @@ interface SettingsRowProps {
   advanced?: boolean;
   /** Render the label in the destructive colour (danger actions). */
   destructive?: boolean;
+  /**
+   * Unlocked by the Beta features switch: marks the label with a "Beta" badge
+   * so the person can see what the switch turned on. The caller still gates
+   * the row on `useBetaFeatures`.
+   */
+  beta?: boolean;
+}
+
+/** The small flat tag beside a beta row's label. */
+export function BetaBadge() {
+  return (
+    <Badge
+      variant="outline"
+      className="rounded-[4px] px-1 py-0 text-[10px] font-medium leading-[14px] text-muted-foreground"
+    >
+      Beta
+    </Badge>
+  );
 }
 
 export function SettingsRow({
@@ -128,6 +147,7 @@ export function SettingsRow({
   className,
   advanced = false,
   destructive = false,
+  beta = false,
 }: SettingsRowProps) {
   const { advanced: showAdvanced } = useAdvancedSettings();
   if (advanced && !showAdvanced) return null;
@@ -162,6 +182,7 @@ export function SettingsRow({
                   >
                     {label}
                   </Label>
+                  {beta && <BetaBadge />}
                   {info && (
                     <InfoTip>{info}</InfoTip>
                   )}

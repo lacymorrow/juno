@@ -59,6 +59,7 @@ export function DictationCleanupRow() {
     <SettingsRow
       htmlFor="dictation-cleanup"
       label="Clean up dictation"
+      beta
       description={
         usable ? (
           COPY
