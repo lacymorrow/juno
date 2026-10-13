@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.196] - 2026-10-13
+
+### Changed
+
+- **whisper:** decode tiny on the CPU, where it is 2-4x faster than Metal (#812) (1a38027a)
+
 ## [0.8.195] - 2026-10-13
 
 ### Added
@@ -1422,7 +1428,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.195...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.196...HEAD
+[0.8.196]: https://github.com/lacymorrow/juno/compare/cua-v0.8.195...v0.8.196
 [0.8.195]: https://github.com/lacymorrow/juno/compare/cua-v0.8.194...v0.8.195
 [0.8.194]: https://github.com/lacymorrow/juno/compare/cua-v0.8.193...v0.8.194
 [0.8.193]: https://github.com/lacymorrow/juno/compare/cua-v0.8.192...v0.8.193
