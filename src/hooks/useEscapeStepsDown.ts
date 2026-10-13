@@ -5,8 +5,7 @@ import { useEffect, useRef } from "react";
  * a menu, a listbox, or a popover. Its own dismissal comes first.
  */
 const OWNS_ESCAPE =
-  '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
-const POPPER = "[data-radix-popper-content-wrapper]";
+  '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-radix-popper-content-wrapper]';
 /**
  * A tooltip or hover card is a popper too, but it only shows because the
  * pointer is resting on something (Settings' info icons open on hover with no
@@ -14,12 +13,21 @@ const POPPER = "[data-radix-popper-content-wrapper]";
  */
 const HOVER_ONLY =
   '[role="tooltip"], [data-slot="tooltip-content"], [data-slot="hover-card-content"]';
+/**
+ * A layer that was just dismissed stays mounted while it fades out, marked
+ * closed. It already used its Escape; the next one is the window's.
+ */
+const CLOSING = '[data-state="closed"]';
+
+function holdsEscape(layer: Element): boolean {
+  if (layer.closest(CLOSING) || layer.querySelector(`:scope > ${CLOSING}`)) {
+    return false;
+  }
+  return !layer.querySelector(HOVER_ONLY);
+}
 
 function somethingOwnsEscape(): boolean {
-  if (document.querySelector(OWNS_ESCAPE)) return true;
-  return Array.from(document.querySelectorAll(POPPER)).some(
-    (popper) => !popper.querySelector(HOVER_ONLY),
-  );
+  return Array.from(document.querySelectorAll(OWNS_ESCAPE)).some(holdsEscape);
 }
 
 /**

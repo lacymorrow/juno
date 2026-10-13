@@ -62,6 +62,18 @@ describe("useEscapeStepsDown", () => {
     expect(onEscape).toHaveBeenCalledTimes(1);
   });
 
+  it("closes the window while a dismissed dropdown is still fading out", () => {
+    const onEscape = vi.fn();
+    renderHook(() => useEscapeStepsDown(onEscape));
+    const popper = document.createElement("div");
+    popper.setAttribute("data-radix-popper-content-wrapper", "");
+    popper.innerHTML =
+      '<div data-state="closed" role="menu"><div role="menuitem">Pick one</div></div>';
+    document.body.appendChild(popper);
+    press();
+    expect(onEscape).toHaveBeenCalledTimes(1);
+  });
+
   it("ignores chords and key repeat", () => {
     const onEscape = vi.fn();
     renderHook(() => useEscapeStepsDown(onEscape));
