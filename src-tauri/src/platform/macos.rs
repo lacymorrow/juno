@@ -85,6 +85,7 @@ pub fn apply_bar_stacking(
     app_handle: &AppHandle,
     stacking: BarStacking,
     front_label: Option<&'static str>,
+    over_menu_bar: bool,
 ) {
     let Some(bar) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) else {
         return;
@@ -105,7 +106,7 @@ pub fn apply_bar_stacking(
         None
     };
 
-    let level = stacking.ns_window_level();
+    let level = stacking.bar_level(over_menu_bar);
     let bar_addr = bar_ptr as usize;
     let front_addr = front_ptr.map(|ptr| ptr as usize);
 
@@ -133,6 +134,7 @@ pub fn apply_bar_stacking(
     _app_handle: &AppHandle,
     _stacking: BarStacking,
     _front_label: Option<&'static str>,
+    _over_menu_bar: bool,
 ) {
 }
 

@@ -61,6 +61,12 @@ export interface SteadySpec {
    * widest, without panes. Anchored at the same docked edges as `rest`.
    */
   stage: Size;
+  /**
+   * Which wells the look lands in. "grid" (the default) is every look's
+   * inset grid with the centre; "notch" is the Notch's own five, flush with
+   * the display's edges (`src/lib/notchWells.ts`).
+   */
+  wells?: "grid" | "notch";
 }
 
 /** Where a look's window sits for one well, and where its content goes inside it. */
@@ -105,8 +111,10 @@ export function steadyLayout(
   const slot = { fx: well.fx, fy: well.fy };
   const anchorX = dockAnchorX(slot);
   const growUp = dockGrowsUp(slot);
-  const rw = spec.rest.width;
-  const rh = spec.rest.height;
+  // The well is sized for the resting footprint. Every grid well is
+  // `spec.rest`; the Notch's differ per well (a wide notch, small corners).
+  const rw = well.width || spec.rest.width;
+  const rh = well.height || spec.rest.height;
   // One pixel wider when the room either side of a centred footprint would
   // otherwise be uneven: a centre column then sits on a whole pixel, and so
   // does every edge that grows symmetrically around it.
@@ -120,7 +128,9 @@ export function steadyLayout(
   // The window's ideal top-left, then clamped inside the inset area: the
   // display's real work area, so the top edge sits under this display's own
   // menu bar and the window stays clear of the Dock.
-  const inset = screenInsets(monitor, insets);
+  // Flush wells (the Notch) may use the whole display, menu bar included.
+  const inset =
+    spec.wells === "notch" ? { top: 0, right: 0, bottom: 0, left: 0 } : screenInsets(monitor, insets);
   const minX = monitor.position.x + inset.left;
   const maxX = monitor.position.x + monitor.size.width - inset.right - W;
   const minY = monitor.position.y + inset.top;

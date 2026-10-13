@@ -26,7 +26,10 @@ vi.mock("@tauri-apps/api/event", () => ({ listen, emit: vi.fn(async () => {}) })
 
 vi.mock("@/components/FloatingBar", () => ({ FloatingBar: stub("pill") }));
 vi.mock("@/components/bar/app-bar", () => ({ AppBar: stub("bar") }));
-vi.mock("@/components/bar/island/IslandBar", () => ({ IslandBar: stub("island") }));
+// One component, two looks: the Notch is the Island with `frame="notch"`.
+vi.mock("@/components/bar/island/IslandBar", () => ({
+  IslandBar: ({ frame }: { frame?: string }) => stub(frame === "notch" ? "notch" : "island")(),
+}));
 vi.mock("@/components/bar/voice-ai-bar", () => ({ VoiceAIBar: stub("studio") }));
 vi.mock("@/components/bar/elevenlabs-orb-bar", () => ({ ElevenLabsOrbBar: stub("elevenlabs-orb") }));
 vi.mock("@/components/bar/react-orb-bar", () => ({ ReactOrbBar: stub("halo-ring") }));
@@ -45,6 +48,7 @@ const STORED: readonly { value: string; name: string; look: string }[] = [
   { value: "shader_orb", name: "Orb", look: "react-bits-orb" },
   { value: "orb", name: "Presence", look: "elevenlabs-orb" },
   { value: "react_orb", name: "Halo", look: "halo-ring" },
+  { value: "notch", name: "Notch", look: "notch" },
 ];
 
 async function mount(stored: string | null) {

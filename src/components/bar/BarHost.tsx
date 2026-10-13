@@ -109,6 +109,12 @@ export function BarHost() {
             <IslandBar />
           </Suspense>
         );
+      case UI.BAR_APPEARANCES_NOTCH:
+        return () => (
+          <Suspense fallback={null}>
+            <IslandBar frame="notch" />
+          </Suspense>
+        );
       case UI.BAR_APPEARANCES_ORB:
         return () => (
           <Suspense fallback={null}>

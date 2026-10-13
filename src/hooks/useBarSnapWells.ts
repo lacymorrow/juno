@@ -46,6 +46,7 @@ import {
   type Well,
   type WellSlot,
 } from "@/lib/snapWells";
+import { nearestNotchWell, notchWells } from "@/lib/notchWells";
 import {
   getDockSlot,
   monitorIndexAt,
@@ -240,6 +241,8 @@ function steadyLayoutFor(
 
 /** Wells for a steady look: computed for the resting footprint, not the window. */
 export function steadyWells(rects: MonitorRect[], spec: SteadySpec): Well[] {
+  // The Notch has its own five, flush with the edges, and no centre.
+  if (spec.wells === "notch") return notchWells(rects);
   return computeWells(rects, {
     windowWidth: spec.rest.width,
     windowHeight: spec.rest.height,
@@ -404,10 +407,12 @@ export async function armBarSnap(grabOffset: { x: number; y: number }): Promise<
         y: grabOffset.y - steady.layout.anchor.y,
       };
       lastShowPayload = {
-        windowWidth: steady.spec.rest.width,
-        windowHeight: steady.spec.rest.height,
+        windowWidth: steady.layout.anchor.width,
+        windowHeight: steady.layout.anchor.height,
         grabOffsetX: footprintGrab.x,
         grabOffsetY: footprintGrab.y,
+        // The overlay draws the Notch's own wells, not the grid.
+        notchWells: steady.spec.wells === "notch" ? 1 : 0,
       };
     } else {
       const logical = await logicalWindowSize(win);
@@ -594,13 +599,18 @@ async function settleSteady(win: AppWindow, spec: SteadySpec, layout: SteadyLayo
     x: origin.x + layout.anchor.x,
     y: origin.y + layout.anchor.y,
   };
-  const target = nearestWell(anchorNow, steadyWells(rects, spec));
+  const wells = steadyWells(rects, spec);
+  const target =
+    spec.wells === "notch"
+      ? nearestNotchWell(anchorNow, layout.anchor, wells)
+      : nearestWell(anchorNow, wells);
   if (!target) return;
   const next = steadyLayoutFor(target, rects, spec);
   if (!next) return;
+  const landing = glideTarget(target, layout.anchor);
   await animateWindowTo(win, origin, {
-    x: target.x - layout.anchor.x,
-    y: target.y - layout.anchor.y,
+    x: landing.x - layout.anchor.x,
+    y: landing.y - layout.anchor.y,
   });
   await swapSteadyLayout(win.label, next, applySteadyFrame);
   setDockSlot(win.label, { fx: target.fx, fy: target.fy });
@@ -609,6 +619,28 @@ async function settleSteady(win: AppWindow, spec: SteadySpec, layout: SteadyLayo
   } catch (error) {
     console.debug("barSnap: persist well failed:", error);
   }
+}
+
+/**
+ * Where the dragged footprint's top-left glides to so it meets the well on
+ * the well's docked edges: flush right in a right-hand well, flush bottom in a
+ * bottom one, centred in a centre column. For a grid look the footprint is the
+ * well's size and this is the well's own top-left; the Notch's footprint
+ * changes size between its notch and its corners, and this lands the shape it
+ * is carrying in the corner it is about to become.
+ */
+export function glideTarget(
+  well: Well,
+  footprint: { width: number; height: number },
+): { x: number; y: number } {
+  const x =
+    well.fx === 1
+      ? well.x + well.width - footprint.width
+      : well.fx === 0.5
+        ? Math.round(well.x + well.width / 2 - footprint.width / 2)
+        : well.x;
+  const y = well.fy === 1 ? well.y + well.height - footprint.height : well.y;
+  return { x, y };
 }
 
 /** True while a drag is armed or the glide is still running. */

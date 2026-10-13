@@ -31,6 +31,11 @@ const ALL_APPEARANCES: readonly AppearanceEntry[] = [
     descriptor: "One small shape that grows to hold the answer, then settles back.",
   },
   {
+    value: UI.BAR_APPEARANCES_NOTCH,
+    name: "Notch",
+    descriptor: "Lives in the notch and opens downward. Drag it to a corner and it peels back like a page.",
+  },
+  {
     value: UI.BAR_APPEARANCES_APP,
     name: "Bar",
     descriptor: "A wide strip that tells each turn step by step, left to right.",

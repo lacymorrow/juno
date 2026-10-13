@@ -29,7 +29,8 @@
  * grows around an anchor is seen holding still, as on hardware, instead of
  * being re-centred on every resize), and `dock=low` to park the fake window
  * in the bottom half of the display before the bar mounts (looks that grow
- * upward when docked low can then be seen doing so).
+ * upward when docked low can then be seen doing so). The Notch takes
+ * `dock=corner` (bottom-right) or `dock=top-left` to show its page curl.
  *
  * A look on the steady frame (the Pill, see `lib/steadyFrame.ts`) never
  * resizes its window, so the preview frames the strip the look grows within
@@ -155,6 +156,8 @@ function readQuery(): {
   theme: "light" | "dark" | null;
   pinFrame: boolean;
   dockLow: boolean;
+  /** The Notch's corner, or null for the notch itself. */
+  dockCorner: { x: number; y: number } | null;
 } {
   const params = new URLSearchParams(window.location.search);
   const appearance = appearanceEntry(params.get("appearance")).value;
@@ -171,6 +174,12 @@ function readQuery(): {
     theme: params.get("theme") === "dark" ? "dark" : params.get("theme") === "light" ? "light" : null,
     pinFrame: params.get("pin") === "frame",
     dockLow: params.get("dock") === "low",
+    dockCorner:
+      params.get("dock") === "corner"
+        ? { x: 1, y: 1 }
+        : params.get("dock") === "top-left"
+          ? { x: 0, y: 0 }
+          : null,
   };
 }
 
@@ -644,7 +653,7 @@ function useNaturalSize() {
 }
 
 export default function AppearancePreview() {
-  const { appearance, reducedMotion, holdState, demo, manualStart, background, theme, pinFrame, dockLow } =
+  const { appearance, reducedMotion, holdState, demo, manualStart, background, theme, pinFrame, dockLow, dockCorner } =
     useMemo(readQuery, []);
 
   // With `start=manual` the script waits for the bench to say go.
@@ -678,10 +687,15 @@ export default function AppearancePreview() {
         y: dockLow ? monitor.height : 0,
       });
     }
+    // The Notch lands in the notch unless it was left in a corner.
+    if (appearance === UI.BAR_APPEARANCES_NOTCH && dockCorner) {
+      const { monitor } = harness.snapshot();
+      harness.setSavedPosition({ x: dockCorner.x * monitor.width, y: dockCorner.y * monitor.height });
+    }
     document.documentElement.style.background = background ?? "transparent";
     document.body.style.background = background ?? "transparent";
     setReady(true);
-  }, [appearance, theme, dockLow]);
+  }, [appearance, theme, dockLow, dockCorner]);
 
   // Drive the script. Listening breathes the audio level; dictating reveals
   // the sentence a word at a time. Everything else is a single emit.
@@ -862,6 +876,14 @@ export default function AppearancePreview() {
     scale = fit;
     left = (viewport.w - stage.width * fit) / 2 - stage.x * fit;
     top = (viewport.h - stage.height * fit) / 2 - stage.y * fit;
+    // The Notch belongs to the tile's edges, as it does to the screen's: the
+    // top edge in the notch, the corner in a curl.
+    if (steady?.spec.wells === "notch" && steady.layout) {
+      const { anchorX, growUp } = steady.layout;
+      if (anchorX === "start") left = -stage.x * fit;
+      if (anchorX === "end") left = viewport.w - (stage.x + stage.width) * fit;
+      top = growUp ? viewport.h - (stage.y + stage.height) * fit : -stage.y * fit;
+    }
   } else if (pinFrame && driven) {
     if (!originRef.current) {
       const seatTop = dockLow ? viewport.h * 0.82 - box.height : viewport.h * 0.18;
