@@ -20,6 +20,9 @@ import type {
 
 /** One microphone or speaker, as `list_audio_devices` reports it. */
 export interface AudioDeviceEntry {
+	/** The stable CoreAudio UID. This is what a choice is stored and matched by. */
+	id: string;
+	/** Display only. Two devices can share one. */
 	name: string;
 	is_default: boolean;
 }
@@ -28,14 +31,16 @@ export interface AudioDeviceEntry {
 export interface AudioDeviceChoices {
 	inputs: AudioDeviceEntry[];
 	outputs: AudioDeviceEntry[];
+	/** The id of the chosen microphone, or null to follow the system. */
 	chosen_input: string | null;
+	/** The id of the chosen speaker, or null to follow the system. */
 	chosen_output: string | null;
 	/** What the next dictation will actually open. */
 	effective_input: string | null;
 	/** The chosen microphone, when it is not connected. */
-	missing_input: string | null;
+	missing_input: AudioDeviceEntry | null;
 	/** The chosen speaker, when it is not connected. */
-	missing_output: string | null;
+	missing_output: AudioDeviceEntry | null;
 }
 
 /** The speed row. Present only when the engine in force can change speed. */
@@ -725,13 +730,13 @@ export function useSettings() {
 	}, [applyVoiceList]);
 
 	const handleAudioInputDeviceChange = useCallback(
-		async (name: string | null) => {
+		async (id: string | null) => {
 			// Optimistic, because the pickers are the one place a wrong answer
 			// is obvious: the list reloads from Rust straight after.
-			setAudioDevices((prev) => (prev ? { ...prev, chosen_input: name } : prev));
+			setAudioDevices((prev) => (prev ? { ...prev, chosen_input: id } : prev));
 			setCaptureFailure(null);
 			try {
-				await invoke(COMMANDS.AUDIO_SET_AUDIO_INPUT_DEVICE, { name });
+				await invoke(COMMANDS.AUDIO_SET_AUDIO_INPUT_DEVICE, { id });
 			} catch (error) {
 				console.error("Failed to set the microphone:", error);
 				toast.error(String(error));
@@ -742,10 +747,10 @@ export function useSettings() {
 	);
 
 	const handleAudioOutputDeviceChange = useCallback(
-		async (name: string | null) => {
-			setAudioDevices((prev) => (prev ? { ...prev, chosen_output: name } : prev));
+		async (id: string | null) => {
+			setAudioDevices((prev) => (prev ? { ...prev, chosen_output: id } : prev));
 			try {
-				await invoke(COMMANDS.AUDIO_SET_AUDIO_OUTPUT_DEVICE, { name });
+				await invoke(COMMANDS.AUDIO_SET_AUDIO_OUTPUT_DEVICE, { id });
 			} catch (error) {
 				console.error("Failed to set the speaker:", error);
 				toast.error(String(error));

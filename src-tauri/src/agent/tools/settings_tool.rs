@@ -431,14 +431,28 @@ async fn read(app: &AppHandle, key: SettingKey) -> Result<(Value, Option<Value>)
         }
         K::InputDevice | K::OutputDevice => {
             let devices = crate::commands::audio_devices::list_audio_devices(app.clone()).await?;
-            let (chosen, entries) = if key == K::InputDevice {
-                (devices.chosen_input, devices.inputs)
+            let (chosen, entries, missing) = if key == K::InputDevice {
+                (devices.chosen_input, devices.inputs, devices.missing_input)
             } else {
-                (devices.chosen_output, devices.outputs)
+                (
+                    devices.chosen_output,
+                    devices.outputs,
+                    devices.missing_output,
+                )
             };
+            // The person is told device names; the id is what is stored.
+            let chosen_name = chosen.and_then(|id| {
+                entries
+                    .iter()
+                    .chain(missing.iter())
+                    .find(|d| d.id == id)
+                    .map(|d| d.name.clone())
+            });
             let mut choices = vec![json!("system")];
             choices.extend(entries.into_iter().map(|d| json!(d.name)));
-            let current = chosen.map(Value::String).unwrap_or_else(|| json!("system"));
+            let current = chosen_name
+                .map(Value::String)
+                .unwrap_or_else(|| json!("system"));
             return Ok((current, Some(json!(choices))));
         }
         K::PlaySounds => json!(manager(app)?.get_audio_settings().await?.sound_enabled),
@@ -600,7 +614,7 @@ async fn apply(app: &AppHandle, change: &AuthorizedChange) -> Result<(), String>
         }
         K::InputDevice | K::OutputDevice => {
             let wanted = want_text(change)?;
-            let name = if follows_system(wanted) {
+            let id = if follows_system(wanted) {
                 None
             } else {
                 let devices =
@@ -610,29 +624,27 @@ async fn apply(app: &AppHandle, change: &AuthorizedChange) -> Result<(), String>
                 } else {
                     devices.outputs
                 };
-                let choices: Vec<(String, String)> = entries
-                    .into_iter()
-                    .map(|d| (d.name.clone(), d.name))
-                    .collect();
-                let (name, _) = pick(wanted, &choices).ok_or_else(|| {
-                    let names: Vec<&str> = choices.iter().map(|(n, _)| n.as_str()).collect();
+                let choices: Vec<(String, String)> =
+                    entries.into_iter().map(|d| (d.id, d.name)).collect();
+                let (id, _) = pick(wanted, &choices).ok_or_else(|| {
+                    let names: Vec<&str> = choices.iter().map(|(_, n)| n.as_str()).collect();
                     format!(
                         "No device called \"{wanted}\". Connected: system, {}.",
                         names.join(", ")
                     )
                 })?;
-                Some(name.clone())
+                Some(id.clone())
             };
             if key == K::InputDevice {
                 crate::commands::audio_devices::set_audio_input_device(
-                    name,
+                    id,
                     app.clone(),
                     app_state(app)?,
                 )
                 .await?;
             } else {
                 crate::commands::audio_devices::set_audio_output_device(
-                    name,
+                    id,
                     app.clone(),
                     app_state(app)?,
                 )

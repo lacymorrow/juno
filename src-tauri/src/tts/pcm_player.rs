@@ -31,6 +31,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
 use std::time::{Duration, Instant};
+use tauri_plugin_voice_transcription::DeviceChoice;
 
 /// A render that stopped sending samples without its end marker is treated
 /// as finished once everything it sent has played and this long has passed.
@@ -345,6 +346,7 @@ pub enum Spoken {
 mod mac {
     use super::*;
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+    use tauri_plugin_voice_transcription::find_device;
     use tracing::{info, warn};
 
     static SPEAKER: Speaker = Speaker::new();
@@ -368,19 +370,20 @@ mod mac {
         Failed(String),
     }
 
-    /// The speaker chosen in Settings, or the system output when none was
-    /// chosen or the chosen one is not connected.
-    fn output_device(name: Option<&str>) -> Option<cpal::Device> {
+    /// The speaker chosen in Settings, found by its UID, or the system output
+    /// when none was chosen or the chosen one is not connected.
+    fn output_device(choice: Option<&DeviceChoice>) -> Option<cpal::Device> {
         let host = cpal::default_host();
-        if let Some(name) = name.map(str::trim).filter(|n| !n.is_empty()) {
+        if let Some(choice) = choice {
             if let Ok(devices) = host.output_devices() {
-                for device in devices {
-                    if device.name().ok().as_deref() == Some(name) {
-                        return Some(device);
-                    }
+                if let Some(device) = find_device(devices, choice) {
+                    return Some(device);
                 }
             }
-            warn!("[Player] Speaker {name} is not connected; using the system output");
+            warn!(
+                "[Player] Speaker {} is not connected; using the system output",
+                choice.label()
+            );
         }
         host.default_output_device()
     }
@@ -422,11 +425,11 @@ mod mac {
     /// `Send`, so it is opened, watched and closed here.
     fn run_player(
         session: Arc<Session>,
-        device_name: Option<String>,
+        choice: Option<DeviceChoice>,
         events: tokio::sync::mpsc::UnboundedSender<PlayerEvent>,
     ) {
         let opened = Instant::now();
-        let Some(device) = output_device(device_name.as_deref()) else {
+        let Some(device) = output_device(choice.as_ref()) else {
             let _ = events.send(PlayerEvent::Failed("no output device".to_string()));
             return;
         };
@@ -508,7 +511,7 @@ mod mac {
         started: Instant,
         engine: &str,
         detail: &str,
-        device: Option<&str>,
+        device: Option<&DeviceChoice>,
     ) -> Spoken {
         crate::tts::release_stale_hold();
         let mut level: Option<crate::tts::speech_level::SpeechLevelSession> = None;
@@ -527,7 +530,9 @@ mod mac {
                         started.elapsed().as_millis(),
                         device_open_ms,
                         detail,
-                        device.unwrap_or("system"),
+                        device
+                            .map(DeviceChoice::label)
+                            .unwrap_or_else(|| "system".to_string()),
                     );
                 }
                 PlayerEvent::Finished => break,
@@ -550,21 +555,25 @@ mod mac {
     /// Spawn the player thread for a session.
     fn start_player(
         session: &Arc<Session>,
-        device: Option<&str>,
+        device: Option<&DeviceChoice>,
     ) -> Result<tokio::sync::mpsc::UnboundedReceiver<PlayerEvent>, String> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let player_session = session.clone();
-        let device_name = device.map(str::to_string);
+        let choice = device.cloned();
         std::thread::Builder::new()
             .name("juno-voice-out".to_string())
-            .spawn(move || run_player(player_session, device_name, tx))
+            .spawn(move || run_player(player_session, choice, tx))
             .map(|_| rx)
             .map_err(|e| format!("could not start the player: {e}"))
     }
 
     /// Play audio rendered ahead of time (the greeting) on the chosen speaker,
     /// with the same stop, hold and first-audio handling as live speech.
-    pub async fn play_pcm(samples: &[f32], sample_rate: f64, device: Option<&str>) -> Spoken {
+    pub async fn play_pcm(
+        samples: &[f32],
+        sample_rate: f64,
+        device: Option<&DeviceChoice>,
+    ) -> Spoken {
         let started = Instant::now();
         let session = Arc::new(Session::new());
         {
@@ -599,12 +608,16 @@ pub fn stop_all() {}
 
 /// Play samples rendered ahead on the chosen speaker and wait for them.
 #[cfg(target_os = "macos")]
-pub async fn play_pcm(samples: &[f32], sample_rate: f64, device: Option<&str>) -> Spoken {
+pub async fn play_pcm(samples: &[f32], sample_rate: f64, device: Option<&DeviceChoice>) -> Spoken {
     mac::play_pcm(samples, sample_rate, device).await
 }
 
 #[cfg(not(target_os = "macos"))]
-pub async fn play_pcm(_samples: &[f32], _sample_rate: f64, _device: Option<&str>) -> Spoken {
+pub async fn play_pcm(
+    _samples: &[f32],
+    _sample_rate: f64,
+    _device: Option<&DeviceChoice>,
+) -> Spoken {
     Spoken::Unplayable("not macOS".to_string())
 }
 
