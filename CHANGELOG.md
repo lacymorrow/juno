@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.190] - 2026-10-13
+
+### Fixed
+
+- identify microphones and speakers by CoreAudio UID, not display name (#806) (a402a299)
+- **settings:** Escape always closes Settings (tooltips, fading dropdowns) (#807) (41f5ac7a)
+
 ## [0.8.189] - 2026-10-13
 
 ### Fixed
@@ -1385,7 +1392,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.189...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.190...HEAD
+[0.8.190]: https://github.com/lacymorrow/juno/compare/cua-v0.8.189...v0.8.190
 [0.8.189]: https://github.com/lacymorrow/juno/compare/cua-v0.8.188...v0.8.189
 [0.8.188]: https://github.com/lacymorrow/juno/compare/cua-v0.8.187...v0.8.188
 [0.8.187]: https://github.com/lacymorrow/juno/compare/cua-v0.8.186...v0.8.187
