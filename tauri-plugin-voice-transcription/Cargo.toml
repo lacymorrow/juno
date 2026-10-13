@@ -55,6 +55,9 @@ block = "0.1"
 # new rate), so the dictation input is rebuilt before the press. The same
 # crate and features cpal already uses, so nothing new is compiled.
 coreaudio-rs = { version = "0.11", default-features = false, features = ["audio_unit", "core_audio"] }
+# Reads a device's UID (a CFString) so devices are identified by it, not by
+# name. The version already in Cargo.lock via tauri, so nothing new compiles.
+core-foundation = "0.10"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

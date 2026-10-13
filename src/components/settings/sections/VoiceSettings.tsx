@@ -137,7 +137,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
   // person most needs to know: a choice that is not connected, then what is
   // actually being used.
   const microphoneNote = audioDevices?.missing_input
-    ? `${audioDevices.missing_input} is not connected. Juno is using ${audioDevices.effective_input ?? "nothing"} instead.`
+    ? `${audioDevices.missing_input.name} is not connected. Juno is using ${audioDevices.effective_input ?? "nothing"} instead.`
     : audioDevices?.effective_input
       ? `Juno hears you through ${audioDevices.effective_input}.`
       : "Juno cannot find a microphone.";
@@ -149,7 +149,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     : undefined;
 
   const speakerNote = audioDevices?.missing_output
-    ? `${audioDevices.missing_output} is not connected. Juno is using your Mac's output instead.`
+    ? `${audioDevices.missing_output.name} is not connected. Juno is using your Mac's output instead.`
     : undefined;
 
   return (
@@ -264,7 +264,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
                 Default microphone
               </SelectItem>
               {inputs.map((device) => (
-                <SelectItem key={device.name} value={device.name}>
+                <SelectItem key={device.id} value={device.id}>
                   {device.name}
                 </SelectItem>
               ))}
@@ -273,8 +273,8 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
                   something the person never picked. That it is not connected
                   is said once, underneath, not twice. */}
               {audioDevices?.missing_input && (
-                <SelectItem value={audioDevices.missing_input}>
-                  {audioDevices.missing_input}
+                <SelectItem value={audioDevices.missing_input.id}>
+                  {audioDevices.missing_input.name}
                 </SelectItem>
               )}
             </SelectContent>
@@ -306,13 +306,13 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
                 Default speaker
               </SelectItem>
               {outputs.map((device) => (
-                <SelectItem key={device.name} value={device.name}>
+                <SelectItem key={device.id} value={device.id}>
                   {device.name}
                 </SelectItem>
               ))}
               {audioDevices?.missing_output && (
-                <SelectItem value={audioDevices.missing_output}>
-                  {audioDevices.missing_output}
+                <SelectItem value={audioDevices.missing_output.id}>
+                  {audioDevices.missing_output.name}
                 </SelectItem>
               )}
             </SelectContent>

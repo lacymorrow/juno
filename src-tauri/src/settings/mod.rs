@@ -260,23 +260,35 @@ pub struct CloudSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioSettings {
     pub tts_provider: String,
-    /// The microphone Juno listens on, by name. `None` follows the system,
-    /// which is what every install did before this existed.
+    /// The name of the microphone Juno listens on, for display. `None`
+    /// follows the system, which is what every install did before this
+    /// existed.
     ///
-    /// A name, not a stable identifier, because that is how cpal addresses a
-    /// device. A chosen microphone that is not connected falls back to the
-    /// system default rather than refusing to listen; see
-    /// `tauri_plugin_voice_transcription::devices::choose_input`.
+    /// Not an identity: the choice is `input_device_uid`. This is what the
+    /// pane says when that device is not connected. Builds before the UID was
+    /// stored kept only this, so a value here with no UID is a legacy choice
+    /// that still resolves by name until `convert_legacy_device_names` finds
+    /// the device and stores its UID. A chosen microphone that is not
+    /// connected falls back to the system default rather than refusing to
+    /// listen; see `tauri_plugin_voice_transcription::devices::choose_input`.
     #[serde(default)]
     pub input_device: Option<String>,
-    /// The speaker Juno's own voice plays through, by name. `None` follows the
-    /// system.
+    /// The CoreAudio UID of the chosen microphone, which survives reboots and
+    /// reconnects and tells apart two microphones with one name.
+    #[serde(default)]
+    pub input_device_uid: Option<String>,
+    /// The name of the speaker Juno's own voice plays through, for display.
+    /// `None` follows the system. See `input_device` for how the name and the
+    /// UID relate.
     ///
     /// Honoured by the macOS voice (`say -a`), which is the voice the Audio
     /// pane offers. Audio that arrives from a cloud engine as a file is played
     /// by `afplay`, which can only use the system output device.
     #[serde(default)]
     pub output_device: Option<String>,
+    /// The CoreAudio UID of the chosen speaker.
+    #[serde(default)]
+    pub output_device_uid: Option<String>,
     /// The Mac row's id (`system_default`) once resolved. Juno never names a
     /// Mac voice, so any other value (a name an older build stored) resolves
     /// to it; see `tts::voices::resolve_voice`.
@@ -664,7 +676,9 @@ impl Default for AudioSettings {
         Self {
             tts_provider: defaults::TTS_PROVIDER.to_string(),
             input_device: None,
+            input_device_uid: None,
             output_device: None,
+            output_device_uid: None,
             system_voice: None,
             system_voice_chosen: false,
             kokoro_voice: Self::default_kokoro_voice(),

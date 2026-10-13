@@ -10,6 +10,7 @@ pub mod commands;
 pub mod config;
 pub mod constants;
 pub mod controller;
+pub mod device_identity;
 pub mod devices;
 pub mod engine;
 pub mod engine_manager;
@@ -30,6 +31,10 @@ pub use always_listening::AlwaysListeningController;
 pub use capture_failure::CaptureStartFailure;
 pub use config::VoiceTranscriptionConfig;
 pub use controller::VoiceController;
+pub use device_identity::{
+    device_audio_id, device_ref, device_uid, find_device, uid_for_legacy_name, DeviceChoice,
+    DeviceRef,
+};
 pub use devices::{
     effective_input_device_name, list_input_devices, preferred_input_device,
     set_preferred_input_device, AudioDeviceInfo,
