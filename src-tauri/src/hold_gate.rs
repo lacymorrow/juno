@@ -1,7 +1,7 @@
 //! # A release that arrives before its start has landed
 //!
 //! A held key opens a voice session in two steps that do not share a task: the
-//! input monitor emits a start event on its tick, and a listener spawned for
+//! input monitor emits a start event on the press, and a listener spawned for
 //! that event registers the session and opens the microphone. Opening the
 //! microphone is async and slow (permission check, pausing the wake-phrase
 //! engine, the audio engine itself), so a short hold can let go of the key

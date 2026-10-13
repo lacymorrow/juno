@@ -188,17 +188,8 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
     // the first answer may move them.
     crate::platform::fn_key_detection::start(&app_handle);
 
-    // Initialize dictation input monitoring system
-    if let Err(e) =
-        crate::dictation_monitor::init_dictation_input_monitoring(app_handle.clone()).await
-    {
-        error!("Failed to initialize dictation input monitoring: {}", e);
-        return Err(format!("Dictation monitoring initialization failed: {}", e));
-    }
-
-    // Start agent monitor task for hold behavior
-    let _agent_monitor_handle = crate::agent_monitor::start_agent_monitor_task(app_handle.clone());
-    info!("Agent monitor task started successfully");
+    // The dictation and agent hold monitors need no startup: each press
+    // schedules its own deadlines.
 
     Ok(())
 }

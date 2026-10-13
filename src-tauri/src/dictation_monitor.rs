@@ -1,18 +1,17 @@
 use crate::constants::{events, monitor_sessions};
 use crate::hold_gate::{self, HoldEnd, HoldId};
-use crate::state::{SessionClaim, VoiceStartMethod, VoiceTarget};
+use crate::state::{VoiceStartMethod, VoiceTarget};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
-// Configuration constants
-// const HOLD_DURATION_MS: u64 = 500; // Hold dictation input key for 500ms to commit dictation
-// const IMMEDIATE_START_MS: u64 = 0; // Start transcription immediately (0ms delay)
-// const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds max transcription time
-// const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000; // 5 seconds to force cleanup if stuck
-// const COOLDOWN_AFTER_CANCEL_MS: u64 = 150; // Reduced from 300ms to 150ms for better responsiveness
+// Nothing here runs on a timer. The press opens the session and schedules the
+// hold's deadlines (see `schedule_hold_deadlines`); the release ends it. A
+// start that waited for a delay would need something to come back and fire
+// it, so the press is the only start there is and `IMMEDIATE_START_MS` must
+// stay 0 (a test holds it there).
 
 // State for dictation input monitoring
 #[derive(Debug)]
@@ -21,9 +20,10 @@ pub struct DictationInputMonitorState {
     pub transcription_started: bool,
     pub hold_threshold_reached: bool,
     pub passthrough_scheduled: bool,
-    pub transcription_start_time: Option<Instant>, // Track when transcription actually started
-    pub force_cleanup_scheduled: bool,
     pub last_cancellation_time: Option<Instant>, // Track when last cancellation occurred
+    /// Which press this state belongs to. Bumped on every accepted press, so a
+    /// deadline scheduled for one hold can never act on a later one.
+    pub hold_generation: u64,
     /// The start this hold emitted, so its release can wait for it to land
     /// (see [`crate::hold_gate`]).
     pub hold: Option<HoldId>,
@@ -49,9 +49,8 @@ impl DictationInputMonitorState {
             transcription_started: false,
             hold_threshold_reached: false,
             passthrough_scheduled: false,
-            transcription_start_time: None,
-            force_cleanup_scheduled: false,
             last_cancellation_time: None,
+            hold_generation: 0,
             hold: None,
         }
     }
@@ -81,8 +80,7 @@ impl DictationInputMonitorState {
         self.transcription_started = false;
         self.hold_threshold_reached = false;
         self.passthrough_scheduled = false;
-        self.transcription_start_time = None;
-        self.force_cleanup_scheduled = false;
+        self.hold_generation = self.hold_generation.wrapping_add(1);
         info!("[DictationMonitor] Started tracking dictation input hold");
         true // Successfully started tracking
     }
@@ -101,8 +99,6 @@ impl DictationInputMonitorState {
         self.transcription_started = false;
         self.hold_threshold_reached = false;
         self.passthrough_scheduled = false;
-        self.transcription_start_time = None;
-        self.force_cleanup_scheduled = false;
 
         let outcome = if threshold_was_reached {
             HoldRelease::Committed
@@ -132,7 +128,6 @@ impl DictationInputMonitorState {
             let duration = start_time.elapsed();
             if duration.as_millis() >= monitor_sessions::IMMEDIATE_START_MS as u128 {
                 self.transcription_started = true;
-                self.transcription_start_time = Some(Instant::now());
                 info!("[DictationMonitor] Dictation input held for {}ms - starting immediate transcription", duration.as_millis());
                 return true;
             }
@@ -140,54 +135,34 @@ impl DictationInputMonitorState {
         false
     }
 
-    pub fn check_and_reach_threshold(&mut self) -> bool {
-        if self.hold_threshold_reached {
+    /// The hold deadline for `generation` fired. Commits that hold if its key
+    /// is still down, and only once. A deadline from an earlier press, or one
+    /// that lands after the release, does nothing: the release already decided
+    /// the hold was a tap.
+    pub fn reach_threshold(&mut self, generation: u64) -> bool {
+        if self.hold_generation != generation
+            || self.hold_start_time.is_none()
+            || self.hold_threshold_reached
+        {
             return false;
         }
-
-        if let Some(start_time) = self.hold_start_time {
-            let duration = start_time.elapsed();
-            if duration.as_millis() >= monitor_sessions::HOLD_DURATION_MS as u128 {
-                self.hold_threshold_reached = true;
-                info!("[DictationMonitor] Dictation input held for {}ms - threshold reached, committing to Dictation Mode", duration.as_millis());
-                return true;
-            }
-        }
-        false
+        self.hold_threshold_reached = true;
+        let held = self
+            .hold_start_time
+            .map(|start| start.elapsed().as_millis())
+            .unwrap_or_default();
+        info!(
+            "[DictationMonitor] Dictation input held for {}ms - threshold reached, committing to Dictation Mode",
+            held
+        );
+        true
     }
 
-    // Check if transcription has been running too long and needs forced cleanup
-    pub fn check_transcription_timeout(&mut self) -> bool {
-        if let Some(start_time) = self.transcription_start_time {
-            let duration = start_time.elapsed();
-            if duration.as_millis() >= monitor_sessions::MAX_TRANSCRIPTION_DURATION_MS as u128 {
-                warn!(
-                    "[DictationMonitor] Transcription has been running for {}ms - forcing cleanup",
-                    duration.as_millis()
-                );
-                return true;
-            }
-        }
-        false
-    }
-
-    // Check if we need to force cleanup due to stuck state
-    pub fn should_force_cleanup(&mut self) -> bool {
-        // If transcription started but dictation input was released and enough time has passed
-        if self.transcription_started
-            && self.hold_start_time.is_none()
-            && !self.force_cleanup_scheduled
-        {
-            if let Some(start_time) = self.transcription_start_time {
-                let duration = start_time.elapsed();
-                if duration.as_millis() >= monitor_sessions::FORCE_CLEANUP_TIMEOUT_MS as u128 {
-                    self.force_cleanup_scheduled = true;
-                    warn!("[DictationMonitor] Scheduling force cleanup - transcription stuck for {}ms", duration.as_millis());
-                    return true;
-                }
-            }
-        }
-        false
+    /// The max-duration deadline for `generation` fired. True when that same
+    /// hold is still open, which means the key has been down for
+    /// `MAX_TRANSCRIPTION_DURATION_MS` or its release never arrived.
+    pub fn session_overran(&self, generation: u64) -> bool {
+        self.hold_generation == generation && self.transcription_started
     }
 
     // Force reset all state - use when stuck
@@ -198,8 +173,6 @@ impl DictationInputMonitorState {
         self.transcription_started = false;
         self.hold_threshold_reached = false;
         self.passthrough_scheduled = false;
-        self.transcription_start_time = None;
-        self.force_cleanup_scheduled = false;
         self.last_cancellation_time = None; // Clear cooldown tracking on reset
     }
 
@@ -245,22 +218,8 @@ impl DictationInputMonitorState {
 static DICTATION_INPUT_STATE: once_cell::sync::Lazy<Arc<Mutex<DictationInputMonitorState>>> =
     once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(DictationInputMonitorState::new())));
 
-// Initialize dictation input monitoring for the application
-pub async fn init_dictation_input_monitoring(app_handle: AppHandle) -> Result<(), String> {
-    info!("[DictationMonitor] Initializing dictation input monitoring system with immediate transcription start");
-
-    // Start the monitoring task that checks for held dictation input
-    let app_handle_clone = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
-        dictation_input_monitoring_task(app_handle_clone).await;
-    });
-
-    info!("[DictationMonitor] Dictation input monitoring system initialized successfully");
-    Ok(())
-}
-
-/// Open the session if the hold is old enough. Idempotent: the press itself
-/// and the monitoring loop both call it, and only the first one opens.
+/// Open the session for the hold that just started. Idempotent: only the
+/// first call for a hold opens.
 fn emit_start_if_due(app_handle: &AppHandle, state: &mut DictationInputMonitorState) {
     if let Some(hold) = state.open_start(|| hold_gate::open(VoiceTarget::Dictation)) {
         // The payload says how this session is being triggered: this monitor
@@ -285,20 +244,21 @@ fn emit_start_if_due(app_handle: &AppHandle, state: &mut DictationInputMonitorSt
     }
 }
 
-// Monitoring task that checks hold duration and triggers events
-async fn dictation_input_monitoring_task(app_handle: AppHandle) {
-    let mut interval = tokio::time::interval(Duration::from_millis(50)); // Check every 50ms for better responsiveness
-
-    loop {
-        interval.tick().await;
-
-        let mut state = DICTATION_INPUT_STATE.lock().await;
-
-        emit_start_if_due(&app_handle, &mut state);
-
-        // Check if we've reached the hold threshold (commit to dictation)
-        if state.check_and_reach_threshold() {
-            // Emit event to confirm dictation commitment
+/// Schedule the two moments a hold can reach on its own, measured from the
+/// press: the hold threshold, where a tap becomes a hold, and the max session
+/// length. Each fires once, for this press only; a release or a later press
+/// turns it into a no-op (see `reach_threshold` and `session_overran`).
+fn schedule_hold_deadlines(app_handle: &AppHandle, generation: u64) {
+    let app_handle = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(monitor_sessions::HOLD_DURATION_MS)).await;
+        {
+            let mut state = DICTATION_INPUT_STATE.lock().await;
+            if !state.reach_threshold(generation) {
+                // Released first (a tap) or replaced by a later press: the
+                // release has already settled this hold.
+                return;
+            }
             if let Err(e) = app_handle.emit(events::dictation::COMMITTED, ()) {
                 error!(
                     "[DictationMonitor] Failed to emit dictation-committed: {}",
@@ -307,87 +267,37 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
             }
         }
 
-        // Check for transcription timeout (safety mechanism)
-        if state.check_transcription_timeout() {
-            warn!("[DictationMonitor] Transcription timeout detected - forcing stop");
-            if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_FORCE_STOP, ()) {
-                error!(
-                    "[DictationMonitor] Failed to emit dictation-transcription-force-stop: {}",
-                    e
-                );
-            }
-
-            // Force cleanup of app state
-            let app_state = app_handle.state::<crate::state::AppState>();
-            if let Err(e) = app_state.set_dictation_active(false) {
-                warn!("Failed to reset dictation active state: {}", e);
-            }
-
-            state.force_reset();
+        // Safety net: a hold that outlives the max session length is stopped.
+        // It covers a key genuinely held that long and a release event that
+        // never arrived, which would otherwise leave the microphone open.
+        tokio::time::sleep(Duration::from_millis(
+            monitor_sessions::MAX_TRANSCRIPTION_DURATION_MS
+                .saturating_sub(monitor_sessions::HOLD_DURATION_MS),
+        ))
+        .await;
+        let mut state = DICTATION_INPUT_STATE.lock().await;
+        if !state.session_overran(generation) {
+            return;
+        }
+        warn!(
+            "[DictationMonitor] Hold still open after {}ms - forcing stop",
+            monitor_sessions::MAX_TRANSCRIPTION_DURATION_MS
+        );
+        if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_FORCE_STOP, ()) {
+            error!(
+                "[DictationMonitor] Failed to emit dictation-transcription-force-stop: {}",
+                e
+            );
         }
 
-        // Check if we need to force cleanup due to stuck state
-        if state.should_force_cleanup() {
-            warn!("[DictationMonitor] Force cleanup triggered");
-            if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_FORCE_CLEANUP, ()) {
-                error!(
-                    "[DictationMonitor] Failed to emit dictation-transcription-force-cleanup: {}",
-                    e
-                );
-            }
-
-            // Force cleanup of app state
-            let app_state = app_handle.state::<crate::state::AppState>();
-            if let Err(e) = app_state.set_dictation_active(false) {
-                warn!("Failed to reset dictation active state: {}", e);
-            }
-
-            // Try to force stop the voice controller
-            force_stop_voice_controller(&app_handle).await;
-
-            state.force_reset();
+        // Force cleanup of app state
+        let app_state = app_handle.state::<crate::state::AppState>();
+        if let Err(e) = app_state.set_dictation_active(false) {
+            warn!("Failed to reset dictation active state: {}", e);
         }
-    }
-}
 
-// Helper function to force stop the voice controller
-async fn force_stop_voice_controller(app_handle: &AppHandle) {
-    warn!("[DictationMonitor] Attempting to force stop voice controller");
-
-    // Ungated, like every force path: it runs when a session is already stuck.
-    // Claiming matters because this finalises the audio, and a transcript with
-    // no session to own it is dropped rather than delivered.
-    let app_state = app_handle.state::<crate::state::AppState>();
-    match app_state.claim_voice_commit(SessionClaim::Current) {
-        Ok(session) => info!(
-            "[DictationMonitor] Force stop is finalising voice session {}",
-            session.describe()
-        ),
-        Err(rejection) => warn!(
-            "[DictationMonitor] Force stop with no session to claim: {}",
-            rejection.reason()
-        ),
-    }
-
-    // Try to stop the voice transcription plugin only if the controller exists
-    match app_handle.try_state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-        Some(controller_state) => {
-            match tauri_plugin_voice_transcription::commands::stop_dictation(
-                app_handle.clone(),
-                controller_state
-            ).await {
-                Ok(_) => {
-                    info!("[DictationMonitor] Successfully force stopped voice controller");
-                }
-                Err(e) => {
-                    error!("[DictationMonitor] Failed to force stop voice controller: {}", e);
-                }
-            }
-        }
-        None => {
-            warn!("[DictationMonitor] Voice controller not available - cannot force stop");
-        }
-    }
+        state.force_reset();
+    });
 }
 
 // Called when dictation input key is pressed down
@@ -407,8 +317,10 @@ pub async fn on_dictation_input_pressed(app_handle: &AppHandle) {
             crate::commands::sound::SoundType::NotificationAmbient,
         );
         info!("[DictationMonitor] Dictation input pressed down - starting immediate tracking");
-        // The microphone opens on the press, not at the loop's next tick.
+        // The microphone opens on the press; the threshold and the max
+        // session length are deadlines from it.
         emit_start_if_due(app_handle, &mut state);
+        schedule_hold_deadlines(app_handle, state.hold_generation);
     } else {
         warn!("[DictationMonitor] Dictation input pressed down - ignored (transcription_started={}, last_cancel={:?})",
               state.transcription_started,
@@ -500,11 +412,8 @@ mod tests {
         assert!(state.start_hold());
         held_for_ms(&mut state, 120);
         assert!(state.check_and_start_transcription());
-        assert!(
-            !state.check_and_reach_threshold(),
-            "120ms is a tap, not a hold"
-        );
 
+        // Released at 120ms, before the threshold deadline fires.
         let (outcome, _) = state.end_hold();
         assert_eq!(outcome, HoldRelease::Cancelled);
         assert!(!state.transcription_started);
@@ -521,7 +430,7 @@ mod tests {
         assert!(state.start_hold());
         held_for_ms(&mut state, monitor_sessions::HOLD_DURATION_MS + 50);
         assert!(state.check_and_start_transcription());
-        assert!(state.check_and_reach_threshold());
+        assert!(state.reach_threshold(state.hold_generation));
 
         let (outcome, _) = state.end_hold();
         assert_eq!(outcome, HoldRelease::Committed);
@@ -569,7 +478,7 @@ mod tests {
         let mut state = DictationInputMonitorState::new();
         let mut gate = hold_gate::StartGate::default();
         assert!(state.start_hold());
-        // Released before the monitor's tick opened a start.
+        // Released before anything opened a start.
         let (outcome, _, deferred) = state.release(|id, end| gate.defer(id, end));
         assert_eq!(outcome, HoldRelease::Nothing);
         assert!(!deferred);
@@ -610,11 +519,77 @@ mod tests {
         held_for_ms(&mut state, monitor_sessions::HOLD_DURATION_MS + 50);
         let next = state.open_start(|| gate.open()).expect("it starts");
         assert_ne!(next, hold);
-        assert!(state.check_and_reach_threshold());
+        assert!(state.reach_threshold(state.hold_generation));
         assert_eq!(gate.settle(next), None, "landed with the key still down");
         let (outcome, _, deferred) = state.release(|id, end| gate.defer(id, end));
         assert_eq!(outcome, HoldRelease::Committed);
         assert!(!deferred, "a landed start is stopped at once");
+    }
+
+    #[test]
+    fn the_session_opens_on_the_press() {
+        // Nothing comes back after the press to open a delayed start.
+        assert_eq!(monitor_sessions::IMMEDIATE_START_MS, 0);
+    }
+
+    #[test]
+    fn a_deadline_from_an_earlier_hold_does_not_commit_a_later_one() {
+        let mut state = DictationInputMonitorState::new();
+        assert!(state.start_hold());
+        let first = state.hold_generation;
+        assert!(state.check_and_start_transcription());
+        assert_eq!(state.end_hold().0, HoldRelease::Cancelled);
+
+        // A second press inside the first one's 400ms window.
+        cooldown_elapsed(&mut state);
+        assert!(state.start_hold());
+        let second = state.hold_generation;
+        assert_ne!(first, second);
+
+        assert!(
+            !state.reach_threshold(first),
+            "the first hold's deadline must not commit the second hold"
+        );
+        assert!(!state.hold_threshold_reached);
+        assert!(!state.session_overran(first));
+        assert!(state.reach_threshold(second), "its own deadline does");
+    }
+
+    #[test]
+    fn a_release_before_the_threshold_is_a_tap_and_the_late_deadline_is_a_no_op() {
+        let mut state = DictationInputMonitorState::new();
+        assert!(state.start_hold());
+        let generation = state.hold_generation;
+        assert!(state.check_and_start_transcription());
+        assert_eq!(state.end_hold().0, HoldRelease::Cancelled);
+
+        // The deadline fires after the release.
+        assert!(!state.reach_threshold(generation));
+        assert!(!state.hold_threshold_reached);
+        assert!(!state.is_tracking_hold());
+        assert!(
+            !state.session_overran(generation),
+            "the max-duration deadline is a no-op once released"
+        );
+    }
+
+    #[test]
+    fn the_threshold_commits_exactly_once() {
+        let mut state = DictationInputMonitorState::new();
+        assert!(state.start_hold());
+        let generation = state.hold_generation;
+        assert!(state.check_and_start_transcription());
+        assert!(state.reach_threshold(generation));
+        assert!(
+            !state.reach_threshold(generation),
+            "a second firing must not commit again"
+        );
+        assert!(
+            state.session_overran(generation),
+            "a hold still open at the max-duration deadline is stopped"
+        );
+        assert_eq!(state.end_hold().0, HoldRelease::Committed);
+        assert!(!state.session_overran(generation));
     }
 
     #[test]

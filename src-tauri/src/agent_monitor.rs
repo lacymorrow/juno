@@ -54,12 +54,8 @@ fn increment_agent_generation() -> u64 {
     new_gen
 }
 
-// Configuration constants
-// const HOLD_DURATION_MS: u64 = 500; // Hold agent key for 500ms to commit to agent mode
-// const IMMEDIATE_START_MS: u64 = 0; // Start agent immediately (0ms delay)
-// const MAX_AGENT_DURATION_MS: u64 = 120_000; // 2 minutes max agent session time
-// const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000; // 5 seconds to force cleanup if stuck
-// const COOLDOWN_AFTER_CANCEL_MS: u64 = 150; // 150ms cooldown for better responsiveness
+// Nothing here runs on a timer. The press opens the session and schedules the
+// hold's deadlines (see `schedule_hold_deadlines`); the release ends it.
 
 // State for agent input monitoring
 #[derive(Debug)]
@@ -67,9 +63,11 @@ pub struct AgentInputMonitorState {
     pub hold_start_time: Option<Instant>,
     pub agent_started: bool,
     pub hold_threshold_reached: bool,
-    pub agent_start_time: Option<Instant>, // Track when agent actually started
-    pub force_cleanup_scheduled: bool,
     pub last_cancellation_time: Option<Instant>, // Track when last cancellation occurred
+    /// Which press this state belongs to. Bumped on every accepted press, so a
+    /// deadline scheduled for one hold can never act on a later one. Separate
+    /// from `AGENT_SESSION_GENERATION`, which tracks sessions, not presses.
+    pub hold_generation: u64,
     /// The start this hold emitted, so its release can wait for it to land
     /// (see [`crate::hold_gate`]).
     pub hold: Option<HoldId>,
@@ -82,9 +80,8 @@ impl AgentInputMonitorState {
             hold_start_time: None,
             agent_started: false,
             hold_threshold_reached: false,
-            agent_start_time: None,
-            force_cleanup_scheduled: false,
             last_cancellation_time: None,
+            hold_generation: 0,
             hold: None,
         }
     }
@@ -108,8 +105,7 @@ impl AgentInputMonitorState {
         self.hold_start_time = Some(Instant::now());
         self.agent_started = false;
         self.hold_threshold_reached = false;
-        self.agent_start_time = None;
-        self.force_cleanup_scheduled = false;
+        self.hold_generation = self.hold_generation.wrapping_add(1);
         debug!("[AgentMonitor] Started tracking agent input hold");
         true // Successfully started tracking
     }
@@ -140,8 +136,6 @@ impl AgentInputMonitorState {
         self.hold = None;
         self.agent_started = false;
         self.hold_threshold_reached = false;
-        self.agent_start_time = None;
-        self.force_cleanup_scheduled = false;
 
         debug!(
             "[AgentMonitor] Ended agent input hold tracking, duration: {:?}ms, agent_started: {}, threshold_reached: {}",
@@ -199,7 +193,6 @@ impl AgentInputMonitorState {
             let duration = start_time.elapsed();
             if duration.as_millis() >= monitor_sessions::IMMEDIATE_START_MS as u128 {
                 self.agent_started = true;
-                self.agent_start_time = Some(Instant::now());
                 let gen = increment_agent_generation();
                 info!(
                     "[AgentMonitor] Agent input held for {}ms - starting immediate agent mode (generation={})",
@@ -211,54 +204,34 @@ impl AgentInputMonitorState {
         false
     }
 
-    pub fn check_and_reach_threshold(&mut self) -> bool {
-        if self.hold_threshold_reached {
+    /// The hold deadline for `generation` fired. Commits that hold if its key
+    /// is still down, and only once. A deadline from an earlier press, or one
+    /// that lands after the release, does nothing: the release already decided
+    /// the hold was a tap.
+    pub fn reach_threshold(&mut self, generation: u64) -> bool {
+        if self.hold_generation != generation
+            || self.hold_start_time.is_none()
+            || self.hold_threshold_reached
+        {
             return false;
         }
-
-        if let Some(start_time) = self.hold_start_time {
-            let duration = start_time.elapsed();
-            if duration.as_millis() >= monitor_sessions::HOLD_DURATION_MS as u128 {
-                self.hold_threshold_reached = true;
-                info!("[AgentMonitor] Agent input held for {}ms - threshold reached, committing to Agent Mode", duration.as_millis());
-                return true;
-            }
-        }
-        false
+        self.hold_threshold_reached = true;
+        let held = self
+            .hold_start_time
+            .map(|start| start.elapsed().as_millis())
+            .unwrap_or_default();
+        info!(
+            "[AgentMonitor] Agent input held for {}ms - threshold reached, committing to Agent Mode",
+            held
+        );
+        true
     }
 
-    // Check if agent has been running too long and needs forced cleanup
-    pub fn check_agent_timeout(&mut self) -> bool {
-        if let Some(start_time) = self.agent_start_time {
-            let duration = start_time.elapsed();
-            if duration.as_millis() >= monitor_sessions::MAX_AGENT_DURATION_MS as u128 {
-                warn!(
-                    "[AgentMonitor] Agent has been running for {}ms - forcing cleanup",
-                    duration.as_millis()
-                );
-                return true;
-            }
-        }
-        false
-    }
-
-    // Check if we need to force cleanup due to stuck state
-    pub fn should_force_cleanup(&mut self) -> bool {
-        // If agent started but agent input was released and enough time has passed
-        if self.agent_started && self.hold_start_time.is_none() && !self.force_cleanup_scheduled {
-            if let Some(start_time) = self.agent_start_time {
-                let duration = start_time.elapsed();
-                if duration.as_millis() >= monitor_sessions::FORCE_CLEANUP_TIMEOUT_MS as u128 {
-                    self.force_cleanup_scheduled = true;
-                    warn!(
-                        "[AgentMonitor] Scheduling force cleanup - agent stuck for {}ms",
-                        duration.as_millis()
-                    );
-                    return true;
-                }
-            }
-        }
-        false
+    /// The max-duration deadline for `generation` fired. True when that same
+    /// hold is still open, which means the key has been down for
+    /// `MAX_AGENT_DURATION_MS` or its release never arrived.
+    pub fn session_overran(&self, generation: u64) -> bool {
+        self.hold_generation == generation && self.agent_started
     }
 
     // Force reset all state - use when stuck
@@ -267,8 +240,6 @@ impl AgentInputMonitorState {
         self.hold = None;
         self.agent_started = false;
         self.hold_threshold_reached = false;
-        self.agent_start_time = None;
-        self.force_cleanup_scheduled = false;
         warn!("[AgentMonitor] Force reset agent input state");
     }
 }
@@ -279,14 +250,13 @@ static AGENT_INPUT_STATE: tokio::sync::Mutex<AgentInputMonitorState> =
         hold_start_time: None,
         agent_started: false,
         hold_threshold_reached: false,
-        agent_start_time: None,
-        force_cleanup_scheduled: false,
         last_cancellation_time: None,
+        hold_generation: 0,
         hold: None,
     });
 
-/// Open the agent session if the hold is old enough. Idempotent: the press
-/// itself and the monitoring loop both call it, and only the first one opens.
+/// Open the agent session for the hold that just started. Idempotent: only
+/// the first call for a hold opens.
 fn emit_agent_start_if_due(app_handle: &AppHandle, state: &mut AgentInputMonitorState) {
     if let Some(hold) = state.open_start(|| hold_gate::open(VoiceTarget::Agent)) {
         // This is the held-key path, so the session records push_to_talk
@@ -306,6 +276,49 @@ fn emit_agent_start_if_due(app_handle: &AppHandle, state: &mut AgentInputMonitor
     }
 }
 
+/// Schedule the two moments a hold can reach on its own, measured from the
+/// press: the hold threshold, where a tap becomes a hold, and the max session
+/// length. Each fires once, for this press only; a release or a later press
+/// turns it into a no-op (see `reach_threshold` and `session_overran`).
+fn schedule_hold_deadlines(app_handle: &AppHandle, generation: u64) {
+    let app_handle = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(monitor_sessions::HOLD_DURATION_MS)).await;
+        {
+            let mut state = AGENT_INPUT_STATE.lock().await;
+            if !state.reach_threshold(generation) {
+                // Released first (a tap) or replaced by a later press: the
+                // release has already settled this hold.
+                return;
+            }
+            if let Err(e) = app_handle.emit(events::agent::COMMITTED, ()) {
+                error!("[AgentMonitor] Failed to emit agent-committed: {}", e);
+            }
+        }
+
+        // Safety net: a hold that outlives the max session length is stopped.
+        // It covers a key genuinely held that long and a release event that
+        // never arrived, which would otherwise leave the microphone open. The
+        // force-stop handler resets this monitor's state.
+        tokio::time::sleep(Duration::from_millis(
+            monitor_sessions::MAX_AGENT_DURATION_MS
+                .saturating_sub(monitor_sessions::HOLD_DURATION_MS),
+        ))
+        .await;
+        let overran = AGENT_INPUT_STATE.lock().await.session_overran(generation);
+        if !overran {
+            return;
+        }
+        warn!(
+            "[AgentMonitor] Hold still open after {}ms - forcing stop",
+            monitor_sessions::MAX_AGENT_DURATION_MS
+        );
+        if let Err(e) = app_handle.emit(events::agent::FORCE_STOP, ()) {
+            error!("[AgentMonitor] Failed to emit agent-force-stop: {}", e);
+        }
+    });
+}
+
 // Called when agent input key is pressed
 pub async fn on_agent_input_pressed(app_handle: &AppHandle) {
     info!("[AgentMonitor] on_agent_input_pressed() called");
@@ -313,8 +326,10 @@ pub async fn on_agent_input_pressed(app_handle: &AppHandle) {
     let started = state.start_hold();
     if started {
         info!("[AgentMonitor] Agent input pressed down - starting immediate tracking");
-        // The microphone opens on the press, not at the loop's next tick.
+        // The microphone opens on the press; the threshold and the max
+        // session length are deadlines from it.
         emit_agent_start_if_due(app_handle, &mut state);
+        schedule_hold_deadlines(app_handle, state.hold_generation);
     } else {
         info!(
             "[AgentMonitor] Agent input pressed down - ignored (agent active or cooldown period)"
@@ -447,44 +462,6 @@ pub async fn force_reset_agent_input_state() {
     state.force_reset();
 }
 
-// Background task to monitor agent state and handle timeouts
-pub fn start_agent_monitor_task(app_handle: AppHandle) -> tauri::async_runtime::JoinHandle<()> {
-    info!("[AgentMonitor] Starting background monitoring task");
-    tauri::async_runtime::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
-
-        loop {
-            interval.tick().await;
-
-            let mut state = AGENT_INPUT_STATE.lock().await;
-
-            emit_agent_start_if_due(&app_handle, &mut state);
-
-            // Check if we should reach threshold
-            if state.check_and_reach_threshold() {
-                // Emit event for threshold reached
-                if let Err(e) = app_handle.emit(events::agent::COMMITTED, ()) {
-                    error!("[AgentMonitor] Failed to emit agent-committed: {}", e);
-                }
-            }
-
-            // Check for timeouts
-            if state.check_agent_timeout() {
-                if let Err(e) = app_handle.emit(events::agent::FORCE_STOP, ()) {
-                    error!("[AgentMonitor] Failed to emit agent-force-stop: {}", e);
-                }
-            }
-
-            // Check for stuck state cleanup
-            if state.should_force_cleanup() {
-                if let Err(e) = app_handle.emit(events::agent::FORCE_CLEANUP, ()) {
-                    error!("[AgentMonitor] Failed to emit agent-force-cleanup: {}", e);
-                }
-            }
-        }
-    })
-}
-
 // Check if agent should handle key press based on trigger mode
 pub async fn should_handle_agent_key(app_handle: &AppHandle, key_state: &str) -> bool {
     let app_state = app_handle.state::<AppState>();
@@ -519,11 +496,8 @@ mod tests {
         assert!(state.start_hold());
         held_for_ms(&mut state, 120);
         assert!(state.check_and_start_agent());
-        assert!(
-            !state.check_and_reach_threshold(),
-            "120ms is a tap, not a hold"
-        );
 
+        // Released at 120ms, before the threshold deadline fires.
         let start_gen = current_agent_generation();
         let (agent_started, threshold_reached, _) = state.end_hold();
         assert!(agent_started);
@@ -544,7 +518,7 @@ mod tests {
         assert!(state.start_hold());
         held_for_ms(&mut state, monitor_sessions::HOLD_DURATION_MS + 50);
         assert!(state.check_and_start_agent());
-        assert!(state.check_and_reach_threshold());
+        assert!(state.reach_threshold(state.hold_generation));
 
         let (_agent_started, threshold_reached, _) = state.end_hold();
         assert!(threshold_reached);
@@ -588,13 +562,11 @@ mod tests {
         );
 
         // The next hold after the cooldown starts and ends normally.
-        state.last_cancellation_time = Instant::now().checked_sub(Duration::from_millis(
-            monitor_sessions::COOLDOWN_AFTER_CANCEL_MS + 10,
-        ));
+        cooldown_elapsed(&mut state);
         assert!(state.start_hold(), "the next hold is not refused");
         held_for_ms(&mut state, monitor_sessions::HOLD_DURATION_MS + 50);
         let next = state.open_start(|| gate.open()).expect("it starts");
-        assert!(state.check_and_reach_threshold());
+        assert!(state.reach_threshold(state.hold_generation));
         assert_eq!(gate.settle(next), None);
         let (_, committed, _, deferred) = state.release(|id, end| gate.defer(id, end));
         assert!(committed);
@@ -607,6 +579,75 @@ mod tests {
         let mut gate = hold_gate::StartGate::default();
         let (started, committed, _, deferred) = state.release(|id, end| gate.defer(id, end));
         assert!(!started && !committed && !deferred);
+    }
+
+    fn cooldown_elapsed(state: &mut AgentInputMonitorState) {
+        state.last_cancellation_time = Instant::now().checked_sub(Duration::from_millis(
+            monitor_sessions::COOLDOWN_AFTER_CANCEL_MS + 10,
+        ));
+    }
+
+    #[test]
+    fn a_deadline_from_an_earlier_hold_does_not_commit_a_later_one() {
+        let mut state = AgentInputMonitorState::new();
+        assert!(state.start_hold());
+        let first = state.hold_generation;
+        assert!(state.check_and_start_agent());
+        let (_, committed, _) = state.end_hold();
+        assert!(!committed);
+
+        // A second press inside the first one's 400ms window.
+        cooldown_elapsed(&mut state);
+        assert!(state.start_hold());
+        let second = state.hold_generation;
+        assert_ne!(first, second);
+
+        assert!(
+            !state.reach_threshold(first),
+            "the first hold's deadline must not commit the second hold"
+        );
+        assert!(!state.hold_threshold_reached);
+        assert!(!state.session_overran(first));
+        assert!(state.reach_threshold(second), "its own deadline does");
+    }
+
+    #[test]
+    fn a_release_before_the_threshold_is_a_tap_and_the_late_deadline_is_a_no_op() {
+        let mut state = AgentInputMonitorState::new();
+        assert!(state.start_hold());
+        let generation = state.hold_generation;
+        assert!(state.check_and_start_agent());
+        let (started, committed, _) = state.end_hold();
+        assert!(started && !committed, "a tap");
+
+        // The deadline fires after the release.
+        assert!(!state.reach_threshold(generation));
+        assert!(!state.hold_threshold_reached);
+        assert!(!state.is_tracking_hold());
+        assert!(
+            !state.session_overran(generation),
+            "the max-duration deadline is a no-op once released"
+        );
+    }
+
+    #[test]
+    fn the_threshold_commits_exactly_once() {
+        let mut state = AgentInputMonitorState::new();
+        assert!(state.start_hold());
+        let generation = state.hold_generation;
+        assert!(state.check_and_start_agent());
+        assert!(state.reach_threshold(generation));
+        assert!(
+            !state.reach_threshold(generation),
+            "a second firing must not commit again"
+        );
+        assert!(
+            state.session_overran(generation),
+            "a hold still open at the max-duration deadline is stopped"
+        );
+        let (_, committed, _) = state.end_hold();
+        assert!(committed);
+        assert!(!state.session_overran(generation));
     }
 
     #[test]

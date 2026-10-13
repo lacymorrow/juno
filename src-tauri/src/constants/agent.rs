@@ -309,17 +309,12 @@ pub mod monitor_sessions {
     /// the press itself; a tap is sorted out on release by `HOLD_DURATION_MS`.
     pub const IMMEDIATE_START_MS: u64 = 0;
 
-    // Max durations
+    // Max durations: a deadline scheduled on the press force-stops a hold
+    // still open this long after it (a release that never arrived).
     pub const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds
-    pub const MAX_AGENT_DURATION_MS: u64 = 180_000; // 2 minutes
+    pub const MAX_AGENT_DURATION_MS: u64 = 180_000; // 3 minutes
 
-    // Cleanup timeouts
-    pub const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000; // 5 seconds
     pub const COOLDOWN_AFTER_CANCEL_MS: u64 = 150; // 150ms
-
-    // Monitor intervals
-    pub const AGENT_MONITOR_INTERVAL_MS: u64 = 100;
-    pub const DICTATION_MONITOR_INTERVAL_MS: u64 = 50;
 }
 
 // Computer action constants (for documentation and consistency)
