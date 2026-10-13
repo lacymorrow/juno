@@ -22,7 +22,7 @@
 use crate::settings::manager::SettingsManager;
 use serde::Serialize;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tracing::{info, warn};
 
 /// How long generation may take before the raw transcript is typed instead.
@@ -169,14 +169,11 @@ pub fn availability() -> Availability {
     }
 }
 
-/// The saved toggle, honoured only while debug mode is on: cleanup is a beta
+/// The saved toggle, honoured only while Beta features is on: cleanup is a beta
 /// feature and its row is hidden otherwise. Unreadable settings count as the
 /// default (on): the pass is harmless where the model is missing.
 pub async fn is_enabled(app_handle: &AppHandle) -> bool {
-    let debug = app_handle
-        .try_state::<crate::state::AppState>()
-        .is_some_and(|state| crate::commands::core::debug_mode_active(&state));
-    if !debug {
+    if !crate::settings::beta_features_active(app_handle) {
         return false;
     }
     let settings = match SettingsManager::new(app_handle.clone()) {

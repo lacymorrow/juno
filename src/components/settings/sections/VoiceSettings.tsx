@@ -319,7 +319,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
         </SettingsRow>
       </SettingsGroup>
 
-      {debugMode && (
+      {betaFeatures && (
         <SettingsGroup title="Dictation">
           <DictationCleanupRow />
         </SettingsGroup>
