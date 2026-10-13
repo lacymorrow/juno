@@ -19,6 +19,19 @@ fn remember_model_path(model_path: &str) {
     }
 }
 
+/// Models at or below this size decode faster on the CPU than on Metal.
+///
+/// A small model is cheap per operation, so the cost of handing each one to
+/// the GPU dominates, and the GPU is shared with every window on screen.
+/// Measured on an M1 Air, tiny.en (74 MB), 4 s clip, beam 2, under load:
+/// Metal 1.6-2.2 s per decode, CPU (8 threads) 0.40-0.47 s. Larger models
+/// have not been measured on the CPU and stay on Metal.
+const CPU_MODEL_MAX_BYTES: u64 = 100 * 1024 * 1024;
+
+fn prefers_gpu(model_bytes: u64) -> bool {
+    model_bytes > CPU_MODEL_MAX_BYTES
+}
+
 /// Manager for shared Whisper model loading and access
 pub struct SharedWhisperManager;
 
@@ -31,12 +44,18 @@ impl SharedWhisperManager {
             return Err(Error::ModelNotFound(model_path.to_string()));
         }
 
-        if let Ok(metadata) = std::fs::metadata(model_path) {
-            let size_mb = metadata.len() as f64 / (1024.0 * 1024.0);
-            info!("[SharedWhisper] Loading Whisper model: {:.1}MB", size_mb);
+        let model_bytes = std::fs::metadata(model_path).map(|m| m.len()).ok();
+        let use_gpu = model_bytes.is_none_or(prefers_gpu);
+        if let Some(bytes) = model_bytes {
+            info!(
+                "[SharedWhisper] Loading Whisper model: {:.1}MB on {}",
+                bytes as f64 / (1024.0 * 1024.0),
+                if use_gpu { "Metal" } else { "CPU" }
+            );
         }
 
-        let context_params = WhisperContextParameters::default();
+        let mut context_params = WhisperContextParameters::default();
+        context_params.use_gpu(use_gpu && context_params.use_gpu);
         let whisper_context =
             WhisperContext::new_with_params(model_path, context_params).map_err(|e| {
                 error!("[SharedWhisper] Failed to create WhisperContext: {:?}", e);
@@ -179,6 +198,13 @@ impl SharedWhisperManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tiny_runs_on_the_cpu_and_larger_models_on_metal() {
+        assert!(!prefers_gpu(77_704_715)); // ggml-tiny.en.bin
+        assert!(prefers_gpu(487_601_967)); // ggml-small.en.bin
+        assert!(prefers_gpu(574_041_195)); // ggml-large-v3-turbo-q5_0.bin
+    }
 
     #[test]
     fn test_shared_whisper_manager_status() {
