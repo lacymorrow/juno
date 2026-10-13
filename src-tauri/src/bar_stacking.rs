@@ -557,7 +557,7 @@ mod tests {
         assert_eq!(BarStacking::Normal.bar_level(true), 0);
         assert_eq!(BarStacking::BelowFront.bar_level(true), 0);
         // Above the menu bar (24), below pop-up menus (101).
-        assert!(OVER_MENU_BAR_LEVEL > 24 && OVER_MENU_BAR_LEVEL < 101);
+        const { assert!(OVER_MENU_BAR_LEVEL > 24 && OVER_MENU_BAR_LEVEL < 101) };
     }
 
     #[test]
