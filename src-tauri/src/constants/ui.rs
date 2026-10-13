@@ -149,9 +149,31 @@ pub mod bar_appearances {
     /// one back is deleting it from this list. Bar and Studio are not finished.
     pub const HIDDEN: &[&str] = &[APP, VOICE_AI];
 
+    /// Looks offered only while Settings → Advanced → Beta features is on.
+    /// The Pill and the Island are finished; everything else is still being
+    /// finished. With beta off, a saved beta look is shown as `DEFAULT` but
+    /// kept, so turning beta back on brings it back (`effective`).
+    pub const BETA: &[&str] = &[PERSONA, SHADER_ORB, ORB, REACT_ORB];
+
     /// True when this look is not offered to a person.
     pub fn is_hidden(id: &str) -> bool {
         HIDDEN.contains(&id)
+    }
+
+    /// True when this look is offered only with beta features on.
+    pub fn is_beta(id: &str) -> bool {
+        BETA.contains(&id)
+    }
+
+    /// The look the bar actually draws for a saved value: a hidden look, or
+    /// a beta look while beta features are off, draws `DEFAULT`. The saved
+    /// value itself is never rewritten here.
+    pub fn effective(id: &str, beta_on: bool) -> &str {
+        if is_hidden(id) || (is_beta(id) && !beta_on) {
+            DEFAULT
+        } else {
+            id
+        }
     }
 
     /// The look to show for a saved value: a hidden one becomes `DEFAULT`,
@@ -180,6 +202,18 @@ pub mod bar_appearances {
                 assert_eq!(resolve(id), id);
             }
             assert!(!is_hidden(DEFAULT));
+        }
+
+        #[test]
+        fn only_the_pill_and_the_island_are_out_of_beta() {
+            assert!(!is_beta(FLOATING) && !is_beta(DYNAMIC));
+            for id in [PERSONA, SHADER_ORB, ORB, REACT_ORB] {
+                assert!(is_beta(id), "{id} should be beta");
+                assert_eq!(effective(id, false), DEFAULT);
+                assert_eq!(effective(id, true), id);
+            }
+            assert_eq!(effective(DYNAMIC, false), DYNAMIC);
+            assert_eq!(effective(APP, true), DEFAULT);
         }
     }
 }

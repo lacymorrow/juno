@@ -1,7 +1,17 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { APPEARANCE_CATALOG } from "@/components/bar/appearanceCatalog";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { APPEARANCE_CATALOG, isBetaAppearance } from "@/components/bar/appearanceCatalog";
+import { UI } from "@/lib/constants.generated";
 import { AppearancePicker } from "../AppearancePicker";
+
+// Beta features on unless a test turns it off: most of these walk every look.
+const beta = vi.hoisted(() => ({ enabled: true }));
+vi.mock("@/hooks/useBetaFeatures", () => ({
+  useBetaFeatures: () => ({ enabled: beta.enabled, setEnabled: async () => {} }),
+}));
+beforeEach(() => {
+  beta.enabled = true;
+});
 
 function frames() {
   return Array.from(document.querySelectorAll("iframe")).map((f) => ({
@@ -94,5 +104,26 @@ describe("AppearancePicker loading state", () => {
     expect(stage().textContent).toBe("");
     expect(stage().textContent).not.toContain("Preview unavailable");
     vi.useRealTimers();
+  });
+});
+
+describe("AppearancePicker with Beta features off", () => {
+  it("offers only the Pill and the Island", () => {
+    beta.enabled = false;
+    render(<AppearancePicker value={UI.BAR_APPEARANCES_FLOATING} onChange={() => {}} />);
+    const dots = screen.getAllByRole("tab").map((t) => t.getAttribute("aria-label"));
+    expect(dots).toEqual(["Pill", "Island"]);
+  });
+
+  it("shows a saved beta look as the default it is drawn as", () => {
+    beta.enabled = false;
+    render(<AppearancePicker value={UI.BAR_APPEARANCES_PERSONA} onChange={() => {}} />);
+    expect(screen.getByRole("tab", { selected: true }).getAttribute("aria-label")).toBe("Pill");
+  });
+
+  it("marks beta looks with the Beta badge when beta is on", () => {
+    render(<AppearancePicker value={UI.BAR_APPEARANCES_PERSONA} onChange={() => {}} />);
+    expect(screen.getByText("Beta")).toBeTruthy();
+    expect(isBetaAppearance(UI.BAR_APPEARANCES_DYNAMIC)).toBe(false);
   });
 });

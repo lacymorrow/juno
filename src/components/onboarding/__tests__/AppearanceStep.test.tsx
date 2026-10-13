@@ -11,7 +11,7 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 import OnboardingFlow from "../Onboarding";
 import { AppearanceStep } from "../AppearanceStep";
-import { APPEARANCE_CATALOG } from "@/components/bar/appearanceCatalog";
+import { offeredAppearances } from "@/components/bar/appearanceCatalog";
 import { COMMANDS, UI } from "@/lib/constants.generated";
 
 const savedConfig = { bar_appearance: UI.BAR_APPEARANCES_DEFAULT, other: 1 };
@@ -37,7 +37,8 @@ describe("onboarding appearance step", () => {
 
   it("saves through the command Settings uses and keeps the rest of the config", async () => {
     render(<AppearanceStep />);
-    const other = APPEARANCE_CATALOG.find((e) => e.value !== UI.BAR_APPEARANCES_DEFAULT)!;
+    // A first run has Beta features off: the finished looks only.
+    const other = offeredAppearances(false).find((e) => e.value !== UI.BAR_APPEARANCES_DEFAULT)!;
     fireEvent.click(screen.getByRole("tab", { name: other.name }));
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith(COMMANDS.BAR_UI_SET_BAR_CONFIG, {
