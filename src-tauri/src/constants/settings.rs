@@ -177,10 +177,9 @@ pub mod defaults {
     pub const CLI_PERSISTENT_SESSION_ENABLED: bool = true;
     pub const DICTATION_CLIPBOARD_ENABLED: bool = true;
     /// Dictation gets a grammar and punctuation pass from Apple's on-device
-    /// model before it is typed. On by default: where the model is missing
-    /// (Intel, macOS before 26, Apple Intelligence off) it does nothing, so
-    /// the default costs nobody anything.
-    pub const DICTATION_CLEANUP: bool = true;
+    /// model before it is typed. Off by default: it rewrites what the person
+    /// said, so they opt in (and only once Beta features is on).
+    pub const DICTATION_CLEANUP: bool = false;
 
     pub fn dictation_cleanup() -> bool {
         DICTATION_CLEANUP

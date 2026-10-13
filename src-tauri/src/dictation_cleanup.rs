@@ -171,7 +171,7 @@ pub fn availability() -> Availability {
 
 /// The saved toggle, honoured only while Beta features is on: cleanup is a beta
 /// feature and its row is hidden otherwise. Unreadable settings count as the
-/// default (on): the pass is harmless where the model is missing.
+/// default (off).
 pub async fn is_enabled(app_handle: &AppHandle) -> bool {
     if !crate::settings::beta_features_active(app_handle) {
         return false;
