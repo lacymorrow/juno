@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -101,6 +101,9 @@ describe("Audio: how fast Juno speaks", () => {
     renderSection(list({ speed: { value: 1.5, min: 0.75, max: 2 } }));
     expect(await screen.findByText("Speaking speed")).toBeInTheDocument();
     expect(screen.getByText("How fast Juno talks.")).toBeInTheDocument();
+    // Unlocked by the Beta features switch, so it says so.
+    const row = document.getElementById("settings-row-voice-speed") as HTMLElement;
+    expect(within(row).getByText("Beta")).toBeInTheDocument();
     expect(screen.getByText("1.5x")).toBeInTheDocument();
     expect(screen.getByRole("slider")).toHaveAttribute("aria-valuemin", "0.75");
     expect(screen.getByRole("slider")).toHaveAttribute("aria-valuemax", "2");

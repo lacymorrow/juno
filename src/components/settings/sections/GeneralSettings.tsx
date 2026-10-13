@@ -10,10 +10,8 @@ import { useBarAppearance } from "../useBarAppearance";
 import { UpdatesGroup } from "../UpdatesGroup";
 import { NotificationsGroup } from "../NotificationsGroup";
 import { CursorColorPicker } from "../CursorColorPicker";
-import { useBetaFeatures } from "@/hooks/useBetaFeatures";
 
 export default function GeneralSettings(_props: SettingsSectionProps) {
-  const { enabled: betaFeatures, setEnabled: setBetaFeatures } = useBetaFeatures();
   const [autoLaunchEnabled, setAutoLaunchEnabled] = useState(false);
   const [autoLaunchLoading, setAutoLaunchLoading] = useState(false);
   const {
@@ -182,20 +180,6 @@ export default function GeneralSettings(_props: SettingsSectionProps) {
             checked={autoLaunchEnabled}
             onCheckedChange={handleAutoLaunchChange}
             disabled={autoLaunchLoading}
-          />
-        </SettingsRow>
-      </SettingsGroup>
-
-      <SettingsGroup title="Beta">
-        <SettingsRow
-          htmlFor="beta-features"
-          label="Beta features"
-          description="Try features that are still being finished."
-        >
-          <Switch
-            id="beta-features"
-            checked={betaFeatures}
-            onCheckedChange={(checked) => void setBetaFeatures(checked)}
           />
         </SettingsRow>
       </SettingsGroup>

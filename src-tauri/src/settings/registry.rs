@@ -505,7 +505,7 @@ impl SettingKey {
                 self,
                 "general.beta_features",
                 "Beta features",
-                Pane::General,
+                Pane::Advanced,
                 "beta-features",
                 V::Bool,
                 "beta_features_enabled",

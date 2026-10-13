@@ -40,6 +40,7 @@ describe("DictationCleanupRow", () => {
     expect(
       screen.getByText("Fixes grammar and punctuation on your Mac."),
     ).toBeInTheDocument();
+    expect(screen.getByText("Beta")).toBeInTheDocument();
   });
 
   it("saves a change through the backend", async () => {
