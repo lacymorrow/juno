@@ -82,7 +82,7 @@ describe("settings order and labels", () => {
     ).toEqual(["Appearance", "Startup", "Notifications", "Updates"]);
   });
 
-  it("Audio: Don't speak, then Sound, Microphone, Speaker; Juno's voice only with Advanced", async () => {
+  it("Audio: Don't speak, then Sound, then Microphone and speaker; Juno's voice only with Advanced", async () => {
     backend(false);
     const { container } = render(
       <AdvancedSettingsProvider>
@@ -92,12 +92,15 @@ describe("settings order and labels", () => {
     await screen.findByText("Play sounds");
     const text = container.textContent ?? "";
     expect(text).not.toContain("Juno's voice");
-    expect(order(text, ["Don't speak", "Sound", "Microphone", "Speaker"])).toEqual([
+    expect(order(text, ["Don't speak", "Play sounds", "Microphone and speaker"])).toEqual([
       "Don't speak",
-      "Sound",
-      "Microphone",
-      "Speaker",
+      "Play sounds",
+      "Microphone and speaker",
     ]);
+    // Device pickers fold away until something is wrong with them.
+    expect(
+      screen.getByRole("button", { name: /Microphone and speaker/ }),
+    ).toHaveAttribute("aria-expanded", "false");
     expect(text).not.toContain("Whatever my Mac");
   });
 
