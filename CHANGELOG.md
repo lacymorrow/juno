@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.189] - 2026-10-13
+
+### Fixed
+
+- **triggers:** drive hold keys by press, release and deadlines, not polling loops (#805) (2ada53d2)
+
 ## [0.8.188] - 2026-10-13
 
 ### Changed
@@ -1379,7 +1385,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.188...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.189...HEAD
+[0.8.189]: https://github.com/lacymorrow/juno/compare/cua-v0.8.188...v0.8.189
 [0.8.188]: https://github.com/lacymorrow/juno/compare/cua-v0.8.187...v0.8.188
 [0.8.187]: https://github.com/lacymorrow/juno/compare/cua-v0.8.186...v0.8.187
 [0.8.185]: https://github.com/lacymorrow/juno/compare/cua-v0.8.184...v0.8.185
