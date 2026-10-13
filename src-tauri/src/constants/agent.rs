@@ -304,7 +304,10 @@ pub mod monitor_sessions {
     /// deliberate hold and a quick tap separate cleanly on hardware; 300 ms
     /// cancelled short holds that people meant.
     pub const HOLD_DURATION_MS: u64 = 400;
-    pub const IMMEDIATE_START_MS: u64 = 15;
+    /// How long a press must last before the microphone opens: none. The
+    /// first word is usually said as the key goes down, so recording starts on
+    /// the press itself; a tap is sorted out on release by `HOLD_DURATION_MS`.
+    pub const IMMEDIATE_START_MS: u64 = 0;
 
     // Max durations
     pub const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds

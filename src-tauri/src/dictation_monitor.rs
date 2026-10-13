@@ -259,8 +259,8 @@ pub async fn init_dictation_input_monitoring(app_handle: AppHandle) -> Result<()
     Ok(())
 }
 
-/// Open the session if the hold is old enough. Idempotent: the press's own
-/// timer and the monitoring loop both call it, and only the first one opens.
+/// Open the session if the hold is old enough. Idempotent: the press itself
+/// and the monitoring loop both call it, and only the first one opens.
 fn emit_start_if_due(app_handle: &AppHandle, state: &mut DictationInputMonitorState) {
     if let Some(hold) = state.open_start(|| hold_gate::open(VoiceTarget::Dictation)) {
         // The payload says how this session is being triggered: this monitor
@@ -283,18 +283,6 @@ fn emit_start_if_due(app_handle: &AppHandle, state: &mut DictationInputMonitorSt
             let _ = hold_gate::settle(VoiceTarget::Dictation, hold);
         }
     }
-}
-
-/// Open the session the moment the hold is old enough to count, rather than
-/// at the monitoring loop's next tick, which added up to 50 ms before the
-/// microphone was even asked for.
-fn start_when_due(app_handle: &AppHandle) {
-    let app_handle = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(monitor_sessions::IMMEDIATE_START_MS)).await;
-        let mut state = DICTATION_INPUT_STATE.lock().await;
-        emit_start_if_due(&app_handle, &mut state);
-    });
 }
 
 // Monitoring task that checks hold duration and triggers events
@@ -419,7 +407,8 @@ pub async fn on_dictation_input_pressed(app_handle: &AppHandle) {
             crate::commands::sound::SoundType::NotificationAmbient,
         );
         info!("[DictationMonitor] Dictation input pressed down - starting immediate tracking");
-        start_when_due(app_handle);
+        // The microphone opens on the press, not at the loop's next tick.
+        emit_start_if_due(app_handle, &mut state);
     } else {
         warn!("[DictationMonitor] Dictation input pressed down - ignored (transcription_started={}, last_cancel={:?})",
               state.transcription_started,
