@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.183] - 2026-10-13
+
+### Added
+
+- **escape:** one rung per press, newest work first, and the icons climb back up (#797) (4c40c043)
+
 ## [0.8.182] - 2026-10-13
 
 ### Added
@@ -1349,7 +1355,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.182...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.183...HEAD
+[0.8.183]: https://github.com/lacymorrow/juno/compare/cua-v0.8.182...v0.8.183
 [0.8.182]: https://github.com/lacymorrow/juno/compare/cua-v0.8.181...v0.8.182
 [0.8.180]: https://github.com/lacymorrow/juno/compare/cua-v0.8.179...v0.8.180
 [0.8.179]: https://github.com/lacymorrow/juno/compare/cua-v0.8.178...v0.8.179
