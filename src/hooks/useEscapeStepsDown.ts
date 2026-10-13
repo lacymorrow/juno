@@ -6,6 +6,29 @@ import { useEffect, useRef } from "react";
  */
 const OWNS_ESCAPE =
   '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-radix-popper-content-wrapper]';
+/**
+ * A tooltip or hover card is a popper too, but it only shows because the
+ * pointer is resting on something (Settings' info icons open on hover with no
+ * delay). It is not a layer the person opened, so it never holds Escape.
+ */
+const HOVER_ONLY =
+  '[role="tooltip"], [data-slot="tooltip-content"], [data-slot="hover-card-content"]';
+/**
+ * A layer that was just dismissed stays mounted while it fades out, marked
+ * closed. It already used its Escape; the next one is the window's.
+ */
+const CLOSING = '[data-state="closed"]';
+
+function holdsEscape(layer: Element): boolean {
+  if (layer.closest(CLOSING) || layer.querySelector(`:scope > ${CLOSING}`)) {
+    return false;
+  }
+  return !layer.querySelector(HOVER_ONLY);
+}
+
+function somethingOwnsEscape(): boolean {
+  return Array.from(document.querySelectorAll(OWNS_ESCAPE)).some(holdsEscape);
+}
 
 /**
  * # Escape steps this window down
@@ -27,7 +50,7 @@ export function useEscapeStepsDown(onEscape: () => void): void {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented || e.repeat) return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-      if (document.querySelector(OWNS_ESCAPE)) return;
+      if (somethingOwnsEscape()) return;
       latest.current();
     };
     window.addEventListener("keydown", onKey);
