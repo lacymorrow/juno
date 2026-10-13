@@ -5,7 +5,22 @@ import { useEffect, useRef } from "react";
  * a menu, a listbox, or a popover. Its own dismissal comes first.
  */
 const OWNS_ESCAPE =
-  '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-radix-popper-content-wrapper]';
+  '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
+const POPPER = "[data-radix-popper-content-wrapper]";
+/**
+ * A tooltip or hover card is a popper too, but it only shows because the
+ * pointer is resting on something (Settings' info icons open on hover with no
+ * delay). It is not a layer the person opened, so it never holds Escape.
+ */
+const HOVER_ONLY =
+  '[role="tooltip"], [data-slot="tooltip-content"], [data-slot="hover-card-content"]';
+
+function somethingOwnsEscape(): boolean {
+  if (document.querySelector(OWNS_ESCAPE)) return true;
+  return Array.from(document.querySelectorAll(POPPER)).some(
+    (popper) => !popper.querySelector(HOVER_ONLY),
+  );
+}
 
 /**
  * # Escape steps this window down
@@ -27,7 +42,7 @@ export function useEscapeStepsDown(onEscape: () => void): void {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented || e.repeat) return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-      if (document.querySelector(OWNS_ESCAPE)) return;
+      if (somethingOwnsEscape()) return;
       latest.current();
     };
     window.addEventListener("keydown", onKey);
