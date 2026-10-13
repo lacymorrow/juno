@@ -13,7 +13,7 @@ import {
   notchWells,
 } from "../notchWells";
 import type { MonitorRect } from "../snapWells";
-import { steadyLayout } from "../steadyFrame";
+import { contentRect, dockedEdges, steadyLayout } from "../steadyFrame";
 import { glideTarget } from "@/hooks/useBarSnapWells";
 import { NOTCH_STEADY_SPEC, notchShape, curlUnderClip, FOLD, SHOULDER } from "@/components/bar/notch/notchModel";
 import { ISLAND_SIZES } from "@/components/bar/island/islandModel";
@@ -139,6 +139,37 @@ describe("the Notch's steady frame", () => {
     });
     const br = wells.find((w) => w.fx === 1 && w.fy === 1)!;
     expect(glideTarget(br, { width: 44, height: 44 })).toEqual({ x: br.x, y: br.y });
+  });
+
+  it("grows a side notch straight out of its edge, centred on its tab", () => {
+    for (const fx of [0, 1]) {
+      const well = wells.find((w) => w.fx === fx && w.fy === 0.5)!;
+      const layout = steadyLayout(well, LAPTOP, NOTCH_STEADY_SPEC);
+      expect(layout).toMatchObject({ centerY: true, growUp: false });
+      const edge = fx === 0 ? "left" : "right";
+      const mid = well.y + well.height / 2;
+      const sizes = {
+        capsule: ISLAND_SIZES.capsule,
+        line: ISLAND_SIZES.line,
+        status: ISLAND_SIZES.status,
+        card: { width: 360, height: 320, radius: 20 },
+      };
+      for (const [posture, size] of Object.entries(sizes)) {
+        const shape = notchShape("notch", posture as keyof typeof sizes, size, 38, "top-left", edge);
+        const r = contentRect(layout, shape);
+        // The middle never moves, and the shape stays on the screen's edge.
+        expect(dockedEdges(layout, shape).y).toBe(mid);
+        expect(layout.origin.x + r.x).toBe(fx === 0 ? 0 : 1512 - shape.width);
+        expect(layout.origin.y + r.y).toBeGreaterThanOrEqual(0);
+        expect(layout.origin.y + r.y + r.height).toBeLessThanOrEqual(982);
+      }
+      // A dragged shape glides in centred on the tab, not above or below it.
+      expect(glideTarget(well, { width: 236, height: 38 }).y).toBe(Math.round(mid - 19));
+    }
+    // Every other well keeps its row.
+    for (const w of wells.filter((w) => w.fy !== 0.5)) {
+      expect(steadyLayout(w, LAPTOP, NOTCH_STEADY_SPEC).centerY).toBe(false);
+    }
   });
 });
 

@@ -924,11 +924,28 @@ function NotchStage({
   const { layout, placement, form, corner, edge, strip, report } = frame;
   const shape = notchShape(form, posture, size, strip, corner, edge);
   const gap = suggestions ? 8 : 0;
-  const block = {
-    width: Math.max(shape.width, suggestions ? ISLAND_SIZES.line.width - 24 : 0),
-    height: shape.height + (suggestions ? gap + suggestionsHeight : 0),
-  };
-  const drawn = contentRect(layout, block);
+  const suggestionsWidth = ISLAND_SIZES.line.width - 24;
+  // On a side the shape grows out of the edge centred on its tab, so the
+  // suggestions hang below it without moving it; elsewhere they join the
+  // column the shape is pinned in.
+  const centred = layout.centerY;
+  const block = centred
+    ? { width: shape.width, height: shape.height }
+    : {
+        width: Math.max(shape.width, suggestions ? suggestionsWidth : 0),
+        height: shape.height + (suggestions ? gap + suggestionsHeight : 0),
+      };
+  const placed = contentRect(layout, block);
+  const hangWidth = Math.max(placed.width, suggestionsWidth);
+  const drawn =
+    centred && suggestions
+      ? {
+          x: layout.anchorX === "end" ? placed.x + placed.width - hangWidth : placed.x,
+          y: placed.y,
+          width: hangWidth,
+          height: placed.height + gap + suggestionsHeight,
+        }
+      : placed;
   useLayoutEffect(() => {
     report(drawn);
   }, [report, drawn.x, drawn.y, drawn.width, drawn.height]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -948,7 +965,10 @@ function NotchStage({
           right: placement.right,
           top: placement.top,
           bottom: placement.bottom,
-          transform: placement.translateX ? "translateX(-50%)" : undefined,
+          transform:
+            [placement.translateX && "translateX(-50%)", placement.translateY && "translateY(-50%)"]
+              .filter(Boolean)
+              .join(" ") || undefined,
           // A drop into a well that draws differently swaps behind this.
           opacity: frame.hidden ? 0 : 1,
           gap,
@@ -964,7 +984,15 @@ function NotchStage({
           {children}
         </NotchShell>
         {suggestions && (
-          <div className="z-20" style={{ width: ISLAND_SIZES.line.width - 24 }}>
+          <div
+            className={cn("z-20", centred && "absolute")}
+            style={{
+              width: suggestionsWidth,
+              ...(centred
+                ? { top: `calc(100% + ${gap}px)`, [layout.anchorX === "end" ? "right" : "left"]: 0 }
+                : null),
+            }}
+          >
             {suggestions}
           </div>
         )}

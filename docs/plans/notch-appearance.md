@@ -31,7 +31,7 @@ Every state, word, control and timer is the Island's (`island/islandModel.ts`, `
 | Hover, line, ear, status | the Island's size, hung below the menu bar strip | the Island's size, growing straight out of the edge | the Island's size on the black, fold strip on the inner side |
 | Card | the Island's card, below the strip | the card, out of the edge | the card, anchored to the corner, inner corner folded 22pt |
 
-Every notch has the hardware's concave shoulders where it meets its edge and round far corners. A side notch at mid-height grows upward from its resting tab, as every look docked in the lower half does.
+Every notch has the hardware's concave shoulders where it meets its edge and round far corners. A side notch grows straight out of its edge, centred on its resting tab: the tab's middle never moves, so it opens the way a panel pulled from that edge would, and it has room both ways for a bigger panel (a floating chat) later. Its skill suggestions hang below it without moving it. Every other well keeps its row (`SteadyLayout.centerY` is the Notch's side wells only).
 
 Top corners cover the menu bar strip first, as the notch does, so words never sit under the clock or the Apple menu. Bottom corners start at the screen edge.
 

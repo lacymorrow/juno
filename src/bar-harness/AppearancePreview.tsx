@@ -888,7 +888,7 @@ export default function AppearancePreview() {
       if (anchorX === "start") left = -stage.x * fit;
       if (anchorX === "end") left = viewport.w - (stage.x + stage.width) * fit;
       // A side's middle stays centred in the tile, as it is on the screen.
-      if (steady.layout.slot.fy !== 0.5) {
+      if (!steady.layout.centerY) {
         top = growUp ? viewport.h - (stage.y + stage.height) * fit : -stage.y * fit;
       }
     }

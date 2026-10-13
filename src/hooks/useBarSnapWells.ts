@@ -624,7 +624,7 @@ async function settleSteady(win: AppWindow, spec: SteadySpec, layout: SteadyLayo
 /**
  * Where the dragged footprint's top-left glides to so it meets the well on
  * the well's docked edges: flush right in a right-hand well, flush bottom in a
- * bottom one, centred in a centre column. For a grid look the footprint is the
+ * bottom one, centred in a centre column or on a side's middle. For a grid look the footprint is the
  * well's size and this is the well's own top-left; the Notch's footprint
  * changes size between its notch and its corners, and this lands the shape it
  * is carrying in the corner it is about to become.
@@ -639,7 +639,14 @@ export function glideTarget(
       : well.fx === 0.5
         ? Math.round(well.x + well.width / 2 - footprint.width / 2)
         : well.x;
-  const y = well.fy === 1 ? well.y + well.height - footprint.height : well.y;
+  // A side's middle (only the Notch's footprint differs from its well there)
+  // meets the well centred on it.
+  const y =
+    well.fy === 1
+      ? well.y + well.height - footprint.height
+      : well.fy > 0
+        ? Math.round(well.y + well.height / 2 - footprint.height / 2)
+        : well.y;
   return { x, y };
 }
 

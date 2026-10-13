@@ -83,6 +83,12 @@ export interface SteadyLayout {
   anchorX: WindowAnchorX;
   /** Content grows up from the anchor's bottom edge instead of down from its top. */
   growUp: boolean;
+  /**
+   * Content is centred on the anchor's middle row and grows both ways. Only
+   * the Notch on a side edge: it grows straight out of the edge, centred on
+   * its tab, the way a panel opened from that edge would. `growUp` is false.
+   */
+  centerY: boolean;
 }
 
 /**
@@ -110,7 +116,10 @@ export function steadyLayout(
 ): SteadyLayout {
   const slot = { fx: well.fx, fy: well.fy };
   const anchorX = dockAnchorX(slot);
-  const growUp = dockGrowsUp(slot);
+  // A flush well on a side edge (not a corner, not the top or bottom) grows
+  // out of the edge centred on itself; everything else keeps its row.
+  const centerY = spec.wells === "notch" && well.fy > 0 && well.fy < 1;
+  const growUp = !centerY && dockGrowsUp(slot);
   // The well is sized for the resting footprint. Every grid well is
   // `spec.rest`; the Notch's differ per well (a wide notch, small corners).
   const rw = well.width || spec.rest.width;
@@ -119,11 +128,11 @@ export function steadyLayout(
   // otherwise be uneven: a centre column then sits on a whole pixel, and so
   // does every edge that grows symmetrically around it.
   const W = spec.max.width + ((spec.max.width - rw) % 2);
-  const H = spec.max.height;
+  const H = spec.max.height + (centerY ? (spec.max.height - rh) % 2 : 0);
 
   // Ideal offset of the resting footprint inside the window.
   const idealX = anchorX === "start" ? 0 : anchorX === "end" ? W - rw : Math.floor((W - rw) / 2);
-  const idealY = growUp ? H - rh : 0;
+  const idealY = centerY ? Math.floor((H - rh) / 2) : growUp ? H - rh : 0;
 
   // The window's ideal top-left, then clamped inside the inset area: the
   // display's real work area, so the top edge sits under this display's own
@@ -152,6 +161,7 @@ export function steadyLayout(
     anchor: { x: ax, y: ay, width: rw, height: rh },
     anchorX,
     growUp,
+    centerY,
   };
 }
 
@@ -215,14 +225,19 @@ export function contentRect(layout: SteadyLayout, size: Size): Rect {
       : layout.anchorX === "end"
         ? anchor.x + anchor.width - size.width
         : anchor.x + anchor.width / 2 - size.width / 2;
-  const y = layout.growUp ? anchor.y + anchor.height - size.height : anchor.y;
+  const y = layout.centerY
+    ? anchor.y + anchor.height / 2 - size.height / 2
+    : layout.growUp
+      ? anchor.y + anchor.height - size.height
+      : anchor.y;
   return { x, y, width: size.width, height: size.height };
 }
 
 /**
  * CSS placement for the content block: the docked edges as absolute offsets,
  * so the browser holds those edges still while width and height animate.
- * A centred column is pinned at its centre line with a -50% translate.
+ * A centred column is pinned at its centre line with a -50% translate, and a
+ * centred row (`centerY`) the same way vertically.
  */
 export function contentPlacement(layout: SteadyLayout): {
   left?: number;
@@ -230,6 +245,7 @@ export function contentPlacement(layout: SteadyLayout): {
   top?: number;
   bottom?: number;
   translateX: boolean;
+  translateY: boolean;
 } {
   const { anchor, size } = layout;
   const horizontal =
@@ -238,9 +254,11 @@ export function contentPlacement(layout: SteadyLayout): {
       : layout.anchorX === "end"
         ? { right: size.width - (anchor.x + anchor.width), translateX: false }
         : { left: anchor.x + anchor.width / 2, translateX: true };
-  const vertical = layout.growUp
-    ? { bottom: size.height - (anchor.y + anchor.height) }
-    : { top: anchor.y };
+  const vertical = layout.centerY
+    ? { top: anchor.y + anchor.height / 2, translateY: true }
+    : layout.growUp
+      ? { bottom: size.height - (anchor.y + anchor.height), translateY: false }
+      : { top: anchor.y, translateY: false };
   return { ...horizontal, ...vertical };
 }
 
@@ -250,6 +268,10 @@ export function contentPlacement(layout: SteadyLayout): {
  * pane) to this, so a window clamped by a small display never clips.
  */
 export function roomForContent(layout: SteadyLayout): number {
+  if (layout.centerY) {
+    const mid = layout.anchor.y + layout.anchor.height / 2;
+    return 2 * Math.min(mid, layout.size.height - mid);
+  }
   return layout.growUp
     ? layout.anchor.y + layout.anchor.height
     : layout.size.height - layout.anchor.y;
@@ -274,7 +296,7 @@ export function dockedEdges(layout: SteadyLayout, size: Size): { x: number; y: n
   const r = toScreen(layout, contentRect(layout, size));
   const x =
     layout.anchorX === "start" ? r.x : layout.anchorX === "end" ? r.x + r.width : r.x + r.width / 2;
-  const y = layout.growUp ? r.y + r.height : r.y;
+  const y = layout.centerY ? r.y + r.height / 2 : layout.growUp ? r.y + r.height : r.y;
   return { x, y };
 }
 
@@ -297,7 +319,8 @@ export function sameLayout(a: SteadyLayout | null, b: SteadyLayout | null): bool
     a.anchor.x === b.anchor.x &&
     a.anchor.y === b.anchor.y &&
     a.anchorX === b.anchorX &&
-    a.growUp === b.growUp
+    a.growUp === b.growUp &&
+    a.centerY === b.centerY
   );
 }
 
@@ -309,7 +332,8 @@ export function sameDrawing(a: SteadyLayout, b: SteadyLayout): boolean {
     a.anchor.x === b.anchor.x &&
     a.anchor.y === b.anchor.y &&
     a.anchorX === b.anchorX &&
-    a.growUp === b.growUp
+    a.growUp === b.growUp &&
+    a.centerY === b.centerY
   );
 }
 
