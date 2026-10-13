@@ -16,7 +16,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -64,7 +64,7 @@ pub fn set_preferred_input_device(choice: Option<DeviceChoice>) {
         Err(e) => tracing::error!("[VoiceDevices] Could not store the microphone choice: {e}"),
     }
     // Get the new one ready before the next press, not during it.
-    request_warm();
+    microphones_changed();
 }
 
 /// The microphone the person picked, if any.
@@ -552,8 +552,9 @@ pub struct WarmInput {
     /// stream is never started.
     broken: Arc<AtomicBool>,
     /// Hears another app changing this device's rate, so the stream is
-    /// rebuilt before the next press rather than during it.
-    _rate_watch: Option<watch::RateWatch>,
+    /// rebuilt before the next press rather than during it. Without it a
+    /// rate change would go unheard, so the press checks the rate itself.
+    rate_watch: Option<watch::RateWatch>,
 }
 
 static WARM_INPUT: Mutex<Option<WarmInput>> = Mutex::new(None);
@@ -680,9 +681,14 @@ fn put_back(warm: WarmInput) {
 /// The stream waiting for this press, if it is still the microphone this
 /// press should open, still there, and still at its rate.
 ///
-/// Cheap on purpose: a few property reads on one device, never the device
-/// list. Anything that does not match is dropped, this press opens the device
-/// itself, and a fresh one is built for the next.
+/// Free when nothing changed since the warmer last checked it: every change
+/// that could make it the wrong stream is an event that marks it stale (see
+/// [`Freshness`]), so a fresh one is taken without asking CoreAudio anything.
+/// Those questions are IPC to the audio server and took half a second on a
+/// press on some Macs. Only a stale stream is checked here, with a few
+/// property reads on one device, never the device list. Anything that does
+/// not match is dropped, this press opens the device itself, and a fresh one
+/// is built for the next.
 pub fn claim_warm_input(preferred: Option<&DeviceChoice>) -> Option<WarmInput> {
     let warm = WARM_INPUT.lock().ok()?.take();
     let Some(warm) = warm else {
@@ -695,15 +701,24 @@ pub fn claim_warm_input(preferred: Option<&DeviceChoice>) -> Option<WarmInput> {
         return None;
     }
 
+    // Trusted only while every change that could stale it is heard: a
+    // listener CoreAudio refused would leave a change unannounced.
+    let fresh = FRESHNESS.is_current()
+        && SYSTEM_WATCHED.load(Ordering::SeqCst)
+        && warm.rate_watch.is_some();
     // Following the system means the device macOS has as its default right
-    // now, compared by CoreAudio id: two microphones can share a name.
+    // now, compared by CoreAudio id: two microphones can share a name. A
+    // fresh stream was built for that default after the last change to it.
     let wanted = match named(preferred) {
         Some(wanted) => wanted.matches(&warm.device_ref()),
+        None if fresh => true,
         None => cpal::default_host()
             .default_input_device()
             .is_some_and(|current| watch::same_device(&current, &warm.device)),
     };
-    if !wanted || !warm.rate_is_current() {
+    // A stream built for another rate would record garbage.
+    let at_rate = fresh || warm.rate_is_current();
+    if !wanted || !at_rate {
         tracing::info!(
             "[VoiceDevices] {} is not the microphone this press needs; opening it directly",
             warm.name
@@ -712,6 +727,68 @@ pub fn claim_warm_input(preferred: Option<&DeviceChoice>) -> Option<WarmInput> {
         return None;
     }
     Some(warm)
+}
+
+/// Whether the stream waiting for the press was checked against the Mac's
+/// microphones as they are now.
+///
+/// A generation count rather than a flag. Every change that could make the
+/// waiting stream the wrong one (a new default, a microphone plugged in or
+/// out, a new rate on the held device, the device going away, a new
+/// preference) bumps `changes` before it asks the warmer to run. The warmer
+/// reads `changes` before it looks at anything and records that value once
+/// the stream in the slot is verified or rebuilt. A change that lands while
+/// it works is newer than what it records, so the stream stays stale until
+/// the pass that change asked for catches up; a flag cleared at the end of a
+/// pass would lose it.
+struct Freshness {
+    changes: AtomicU64,
+    verified: AtomicU64,
+}
+
+impl Freshness {
+    /// Stale until the first pass verifies something.
+    const fn new() -> Self {
+        Self {
+            changes: AtomicU64::new(1),
+            verified: AtomicU64::new(0),
+        }
+    }
+
+    /// Something changed; whatever is waiting has to be checked again.
+    fn changed(&self) {
+        self.changes.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// The generation a pass starts from. Read before anything it checks.
+    fn generation(&self) -> u64 {
+        self.changes.load(Ordering::SeqCst)
+    }
+
+    /// The waiting stream matches the Mac as it was at `generation`. Never
+    /// moves backwards, so a slow pass cannot undo a newer one's record.
+    fn verified_at(&self, generation: u64) {
+        self.verified.fetch_max(generation, Ordering::SeqCst);
+    }
+
+    /// Nothing has changed since the waiting stream was last verified.
+    fn is_current(&self) -> bool {
+        self.verified.load(Ordering::SeqCst) == self.changes.load(Ordering::SeqCst)
+    }
+}
+
+static FRESHNESS: Freshness = Freshness::new();
+
+/// CoreAudio accepted the listeners for a new default microphone and for one
+/// plugged in or out, so those changes reach [`FRESHNESS`].
+static SYSTEM_WATCHED: AtomicBool = AtomicBool::new(false);
+
+/// Something about the Mac's microphones changed: mark the waiting stream
+/// stale, then ask for it to be made ready again. In that order, so a press
+/// in between checks it rather than trusting it.
+fn microphones_changed() {
+    FRESHNESS.changed();
+    request_warm();
 }
 
 /// Build a stopped stream on `device`, ready to be lent to a recording.
@@ -744,13 +821,13 @@ fn build_warm(
             tracing::error!("[VoiceDevices] Input stream error: {err}");
             if matches!(err, cpal::StreamError::DeviceNotAvailable) {
                 broken_by.store(true, Ordering::SeqCst);
-                request_warm();
+                microphones_changed();
             }
         },
     )?;
 
     Ok(WarmInput {
-        _rate_watch: watch::RateWatch::new(&device),
+        rate_watch: watch::RateWatch::new(&device),
         id: device_uid(&device),
         device,
         name: device_name,
@@ -810,7 +887,7 @@ pub fn request_warm() {
 pub fn keep_microphone_warm() {
     static WATCHING: OnceLock<()> = OnceLock::new();
     WATCHING.get_or_init(|| {
-        watch::system_changes();
+        SYSTEM_WATCHED.store(watch::system_changes(), Ordering::SeqCst);
         request_warm();
     });
 }
@@ -826,6 +903,9 @@ fn ensure_warm() {
         return;
     }
 
+    // Before anything is read, so a change that lands during this pass is
+    // newer than what it records.
+    let generation = FRESHNESS.generation();
     let began = std::time::Instant::now();
     let resolved = match resolve_input_device(preferred_input_device().as_ref()) {
         Ok(resolved) => resolved,
@@ -845,6 +925,7 @@ fn ensure_warm() {
                 && !waiting.broken.load(Ordering::SeqCst)
                 && waiting.rate_is_current()
             {
+                FRESHNESS.verified_at(generation);
                 return;
             }
         }
@@ -862,7 +943,10 @@ fn ensure_warm() {
                 began.elapsed().as_millis()
             );
             match WARM_INPUT.lock() {
-                Ok(mut slot) => *slot = Some(warm),
+                Ok(mut slot) => {
+                    *slot = Some(warm);
+                    FRESHNESS.verified_at(generation);
+                }
                 Err(e) => {
                     tracing::error!("[VoiceDevices] Could not keep the microphone ready: {e}")
                 }
@@ -896,7 +980,7 @@ mod watch {
         _addresses: *const AudioObjectPropertyAddress,
         _data: *mut c_void,
     ) -> OSStatus {
-        super::request_warm();
+        super::microphones_changed();
         0
     }
 
@@ -920,13 +1004,15 @@ mod watch {
         status == 0
     }
 
-    /// A microphone plugged in or out, or a new default.
-    pub fn system_changes() {
-        listen(
+    /// A microphone plugged in or out, or a new default. True when both
+    /// are being heard.
+    pub fn system_changes() -> bool {
+        let default = listen(
             kAudioObjectSystemObject,
             kAudioHardwarePropertyDefaultInputDevice,
         );
-        listen(kAudioObjectSystemObject, kAudioHardwarePropertyDevices);
+        let devices = listen(kAudioObjectSystemObject, kAudioHardwarePropertyDevices);
+        default && devices
     }
 
     fn device_id(device: &cpal::Device) -> AudioObjectID {
@@ -964,7 +1050,10 @@ mod watch {
 mod watch {
     use cpal::traits::DeviceTrait;
 
-    pub fn system_changes() {}
+    /// Nothing is heard here, so every press checks.
+    pub fn system_changes() -> bool {
+        false
+    }
 
     pub fn same_device(a: &cpal::Device, b: &cpal::Device) -> bool {
         a.name().ok() == b.name().ok()
@@ -1232,5 +1321,58 @@ mod tests {
         // It is dropped into sentences such as "Juno could not open ...".
         assert!(!UNNAMED_DEVICE.is_empty());
         assert_eq!(UNNAMED_DEVICE, UNNAMED_DEVICE.to_lowercase());
+    }
+}
+
+#[cfg(test)]
+mod freshness_tests {
+    use super::Freshness;
+
+    #[test]
+    fn nothing_is_trusted_before_the_first_pass() {
+        assert!(!Freshness::new().is_current());
+    }
+
+    #[test]
+    fn a_pass_with_no_change_since_makes_the_stream_current() {
+        let f = Freshness::new();
+        let g = f.generation();
+        f.verified_at(g);
+        assert!(f.is_current());
+    }
+
+    #[test]
+    fn a_change_makes_a_verified_stream_stale() {
+        let f = Freshness::new();
+        f.verified_at(f.generation());
+        f.changed();
+        assert!(!f.is_current(), "a press after a change must check");
+    }
+
+    /// The ordering the generation exists for: a change that lands while the
+    /// warmer is checking is newer than what that pass records.
+    #[test]
+    fn a_change_during_a_pass_keeps_the_stream_stale() {
+        let f = Freshness::new();
+        let g = f.generation();
+        f.changed();
+        f.verified_at(g);
+        assert!(!f.is_current());
+        // The pass that change asked for catches up.
+        f.verified_at(f.generation());
+        assert!(f.is_current());
+    }
+
+    #[test]
+    fn a_slow_pass_finishing_late_does_not_undo_a_newer_one() {
+        let f = Freshness::new();
+        let slow = f.generation();
+        f.changed();
+        let fast = f.generation();
+        f.verified_at(fast);
+        f.verified_at(slow);
+        assert!(f.is_current());
+        f.changed();
+        assert!(!f.is_current());
     }
 }

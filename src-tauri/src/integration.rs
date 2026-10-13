@@ -78,6 +78,91 @@ pub fn setup_application_integration(app: &tauri::App) -> Result<(), Box<dyn std
     Ok(())
 }
 
+/// The microphone is running: now, and only now, the person is shown and told.
+///
+/// The plugin sends its started event from the audio thread once the device
+/// is open, so this is the first moment Juno is really listening. Everything
+/// a start shows follows it, for dictation and for Talk to Juno alike: the
+/// start cue, the bar (dictation mode, then listening), the tray and the
+/// `dictation-active` / capture announcements. Before, the bar expanded and
+/// the cue played on the press, and the microphone came up most of a second
+/// later, so the first words were spoken into a pill that looked ready and
+/// was not.
+///
+/// Only for a session still open and recording. A start whose session was
+/// ended while the microphone opened (a quick tap, the stop key) gets nothing:
+/// its start handler closes the microphone, and a cue or a pill for it would
+/// be announcing a recording that is already over.
+async fn show_live_microphone(app_handle: &AppHandle) {
+    let app_state = app_handle.state::<state::AppState>();
+    let Some(session) = app_state.current_voice_session().filter(|s| s.is_live()) else {
+        info!("[Voice] The microphone is live but no session is waiting for it; showing nothing");
+        return;
+    };
+    info!(
+        "[Voice] Microphone live for voice session {}",
+        session.describe()
+    );
+
+    crate::commands::sound::play_cue(
+        app_handle,
+        crate::commands::sound::SoundType::NotificationAmbient,
+    );
+
+    // If it's dictation mode, set the flag in floating bar manager first
+    if app_state.is_dictation_active() {
+        commands::ui_commands::handle_dictation_mode_change(app_handle, true).await;
+    }
+
+    // Then handle the dictation started event
+    commands::ui_commands::handle_dictation_started(app_handle).await;
+
+    match session.target {
+        VoiceTarget::Dictation => {
+            if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, true) {
+                error!(
+                    "[Dictation Mode] Failed to emit dictation-active event: {}",
+                    e
+                );
+            }
+        }
+        VoiceTarget::Agent => {
+            if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
+                app_handle,
+                true,
+                CaptureBar::Follows,
+            )
+            .await
+            {
+                error!(
+                    "[Agent Mode] Failed to announce the agent capture phase: {}",
+                    e
+                );
+            }
+            // A stop or cancel that claimed the session while the line above
+            // ran has already closed the capture phase, and this would have
+            // reopened it behind them. Close it again; the bar is theirs.
+            let still_live = app_state
+                .current_voice_session()
+                .is_some_and(|open| open.id == session.id && open.is_live());
+            if !still_live {
+                if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
+                    app_handle,
+                    false,
+                    CaptureBar::Untouched,
+                )
+                .await
+                {
+                    error!(
+                        "[Agent Mode] Failed to close a capture phase that ended while it opened: {}",
+                        e
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Setup voice transcription event listeners for specialized behavior
 fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
     // Listen for voice transcription start events
@@ -88,18 +173,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
             info!("[Event] Received voice-transcription:started event");
             let app_handle_clone = app_handle_for_listener.clone();
             safe_spawn_async_task(move || async move {
-                // Check if Dictation Mode is active
-                let app_state = app_handle_clone.state::<state::AppState>();
-                let is_dictation_mode = app_state.is_dictation_active();
-
-                // If it's dictation mode, set the flag in floating bar manager first
-                if is_dictation_mode {
-                    commands::ui_commands::handle_dictation_mode_change(&app_handle_clone, true)
-                        .await;
-                }
-
-                // Then handle the dictation started event
-                commands::ui_commands::handle_dictation_started(&app_handle_clone).await;
+                show_live_microphone(&app_handle_clone).await;
             });
         },
     );
@@ -1107,18 +1181,10 @@ async fn handle_agent_transcription_start(
                     warn!("[Agent Mode] Failed to register escape key for agent transcription: {} - continuing anyway", e);
                 }
 
-                if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
-                    app_handle,
-                    true,
-                    CaptureBar::Follows,
-                )
-                .await
-                {
-                    error!(
-                        "[Agent Mode] Failed to announce the agent capture phase: {}",
-                        e
-                    );
-                }
+                // The capture phase (bar, tray, `agent-capture-active`) and
+                // the start cue are announced once the microphone is actually
+                // running, by `show_live_microphone`, not here: this returns
+                // while the device is still opening.
                 return;
             }
             Err(e) => {

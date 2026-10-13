@@ -308,14 +308,10 @@ pub async fn on_dictation_input_pressed(app_handle: &AppHandle) {
     info!("[DictationMonitor] Acquired lock, calling start_hold");
     let started = state.start_hold();
     if started {
-        // Fire the start cue right here, on the key-down edge — not from the
-        // downstream transcription-start handler, which only runs after audio
-        // capture has initialized. The user must hear feedback the instant they
-        // press, with no delay. `play_cue` is fire-and-forget (returns in µs).
-        crate::commands::sound::play_cue(
-            app_handle,
-            crate::commands::sound::SoundType::NotificationAmbient,
-        );
+        // No start cue here. The press starts the microphone; the cue, like
+        // the pill, follows the event that says it is running
+        // (`show_live_microphone` in integration.rs), so nothing is heard
+        // before the recording is.
         info!("[DictationMonitor] Dictation input pressed down - starting immediate tracking");
         // The microphone opens on the press; the threshold and the max
         // session length are deadlines from it.
