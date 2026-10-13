@@ -3,10 +3,13 @@ import { UI } from "@/lib/constants.generated";
 import {
   RESTING_STATES,
   barIsExpanded,
+  climbTarget,
   escapeHandled,
+  escapeHidesBar,
   escapeOutcome,
   isRestingState,
   type BarEscapeState,
+  type LadderStep,
 } from "@/lib/barEscape";
 
 /**
@@ -122,5 +125,43 @@ describe("barEscape: the state table", () => {
         }
       }
     }
+  });
+});
+
+describe("barEscape: the visibility ladder", () => {
+  const rest: BarEscapeState = {
+    barState: UI.BAR_STATES_DEFAULT,
+    working: false,
+    overlayOpen: false,
+    composerOpen: false,
+    popupOpen: false,
+  };
+
+  it("hides the idle bar only for a press aimed at Juno", () => {
+    expect(escapeHidesBar(rest, { focused: true, chained: false })).toBe(true);
+    expect(escapeHidesBar(rest, { focused: false, chained: true })).toBe(true);
+    // Escape in Vim, with the bar idle in a corner.
+    expect(escapeHidesBar(rest, { focused: false, chained: false })).toBe(false);
+  });
+
+  it("never hides a bar that still has a rung above idle", () => {
+    const aimed = { focused: true, chained: true };
+    expect(escapeHidesBar({ ...rest, overlayOpen: true }, aimed)).toBe(false);
+    expect(escapeHidesBar({ ...rest, composerOpen: true }, aimed)).toBe(false);
+    expect(escapeHidesBar({ ...rest, working: true }, aimed)).toBe(false);
+    expect(escapeHidesBar({ ...rest, barState: UI.BAR_STATES_SPEAKING }, aimed)).toBe(false);
+    expect(escapeHidesBar({ ...rest, popupOpen: true }, aimed)).toBe(false);
+  });
+
+  it("climbs one rung at a time", () => {
+    expect(climbTarget(UI.LADDER_STEPS_COMPOSER as LadderStep, rest)).toBe("composer");
+    expect(climbTarget(UI.LADDER_STEPS_NEXT as LadderStep, rest)).toBe("floating");
+    expect(
+      climbTarget(UI.LADDER_STEPS_NEXT as LadderStep, { ...rest, composerOpen: true }),
+    ).toBe("floating");
+    expect(climbTarget(UI.LADDER_STEPS_NEXT as LadderStep, { ...rest, overlayOpen: true })).toBe(
+      "main",
+    );
+    expect(climbTarget(UI.LADDER_STEPS_FLOATING as LadderStep, rest)).toBe("floating");
   });
 });

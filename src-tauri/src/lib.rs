@@ -748,6 +748,8 @@ pub fn run() {
             window_management::close_settings_window,
             window_management::open_main_window,
             window_management::close_main_window,
+            window_management::escape_main_window,
+            window_management::hide_floating_bar,
             platform::file_panels::save_chat_export,
             platform::file_panels::load_chat_import,
             window_management::open_onboarding_window,
@@ -1228,21 +1230,15 @@ pub fn run() {
             // Run with callback to handle macOS dock icon click and window lifecycle events
             app.run(|app_handle, event| {
                 match event {
-                    tauri::RunEvent::Reopen {
-                        has_visible_windows,
-                        ..
-                    } => {
-                        // macOS: User clicked the dock icon — show the main window
-                        if !has_visible_windows
-                            && !window_management::onboarding_is_open(app_handle)
-                        {
-                            if let Some(window) = app_handle.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.unminimize();
-                                let _ = window.set_focus();
-                                window_management::announce_main_window(app_handle, true);
-                            }
-                        }
+                    tauri::RunEvent::Reopen { .. } => {
+                        // macOS: the Dock icon climbs the same ladder as the
+                        // tray icon, one rung per click. From hidden, Juno
+                        // comes back as the bar's text input.
+                        let app = app_handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let surface = window_management::active_chat_surface(&app);
+                            window_management::climb_chat_ladder(&app, surface).await;
+                        });
                         // In menu-bar-only mode this click is usually someone
                         // hunting for an app they cannot see. Count it, and
                         // say where Juno went.

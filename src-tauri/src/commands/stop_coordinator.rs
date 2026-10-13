@@ -44,6 +44,15 @@ impl Drop for CleanupLatch {
     }
 }
 
+/// What a coordinated stop ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopScope {
+    /// Everything Escape can stop.
+    Everything,
+    /// Juno's work only; an open dictation carries on.
+    KeepDictation,
+}
+
 /// Centralized stop coordinator to prevent race conditions and cascading cleanup operations
 pub struct StopCoordinator {
     /// Track active operations to prevent redundant stops
@@ -154,10 +163,31 @@ impl StopCoordinator {
         app_handle: &AppHandle,
         reason: &str,
     ) -> Result<String, String> {
-        info!(
-            "[StopCoordinator] Stop all operations requested: {}",
-            reason
-        );
+        self.stop(app_handle, reason, StopScope::Everything).await
+    }
+
+    /// Stop Juno's work and leave an open dictation running.
+    ///
+    /// Escape takes the newest layer off first. When Juno started a turn while
+    /// the person was already dictating, the turn is that layer: her run, her
+    /// voice and her timers stop, and the microphone, the dictation's claim on
+    /// the stop key and its place on the bar all stay.
+    pub async fn stop_work_keeping_dictation(
+        &self,
+        app_handle: &AppHandle,
+        reason: &str,
+    ) -> Result<String, String> {
+        self.stop(app_handle, reason, StopScope::KeepDictation)
+            .await
+    }
+
+    async fn stop(
+        &self,
+        app_handle: &AppHandle,
+        reason: &str,
+        scope: StopScope,
+    ) -> Result<String, String> {
+        info!("[StopCoordinator] Stop requested ({:?}): {}", scope, reason);
 
         // Atomically try to start cleanup
         if !self.try_start_cleanup().await {
@@ -171,7 +201,9 @@ impl StopCoordinator {
         // Register this cleanup operation
         let cleanup_id = self.register_operation("cleanup").await;
 
-        let result = self.perform_coordinated_cleanup(app_handle, reason).await;
+        let result = self
+            .perform_coordinated_cleanup(app_handle, reason, scope)
+            .await;
 
         self.unregister_operation(&cleanup_id).await;
 
@@ -183,7 +215,9 @@ impl StopCoordinator {
         &self,
         app_handle: &AppHandle,
         reason: &str,
+        scope: StopScope,
     ) -> Result<String, String> {
+        let keep_dictation = scope == StopScope::KeepDictation;
         info!(
             "[StopCoordinator] Performing coordinated cleanup: {}",
             reason
@@ -214,8 +248,12 @@ impl StopCoordinator {
             info!("[StopCoordinator] Stopping TTS");
             crate::tts::stop_speech();
             // Every voice session ends below, and with it any hold on Juno's
-            // voice. Released here too so a stop never leaves her held.
-            crate::tts::release_after_capture();
+            // voice. Released here too so a stop never leaves her held. A
+            // dictation that stays open keeps its hold: her voice would
+            // otherwise be recorded into it.
+            if !keep_dictation {
+                crate::tts::release_after_capture();
+            }
 
             // Emit TTS stop event once
             self.emit_tts_stop_event(app_handle);
@@ -263,7 +301,13 @@ impl StopCoordinator {
         }
 
         // 3. Stop dictation through state manager
-        if let Some(dictation_op_id) = self.try_register_operation("dictation_stop").await {
+        // Skipped when the dictation is the layer this press leaves in place.
+        let dictation_op = if keep_dictation {
+            None
+        } else {
+            self.try_register_operation("dictation_stop").await
+        };
+        if let Some(dictation_op_id) = dictation_op {
             info!("[StopCoordinator] Stopping dictation");
 
             if let Err(e) =
@@ -276,8 +320,15 @@ impl StopCoordinator {
             self.unregister_operation(&dictation_op_id).await;
         }
 
-        // 4. Stop always listening mode
-        if let Some(al_op_id) = self.try_register_operation("always_listening_stop").await {
+        // 4. Stop always listening mode. Not while a dictation stays open: the
+        // dictation holds the microphone, and step 9 would re-arm the wake
+        // phrase on top of it.
+        let al_op = if keep_dictation {
+            None
+        } else {
+            self.try_register_operation("always_listening_stop").await
+        };
+        if let Some(al_op_id) = al_op {
             info!("[StopCoordinator] Stopping always listening mode");
 
             if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(
@@ -298,14 +349,16 @@ impl StopCoordinator {
             info!("[StopCoordinator] Resetting monitoring states");
 
             crate::agent_monitor::force_reset_agent_input_state().await;
-            crate::dictation_monitor::force_reset_dictation_input_state().await;
+            if !keep_dictation {
+                crate::dictation_monitor::force_reset_dictation_input_state().await;
+            }
             cleanup_results.push("Monitoring states reset".to_string());
 
             self.unregister_operation(&monitor_op_id).await;
         }
 
         // 6. Emit state update events (once only)
-        self.emit_state_events(app_handle).await;
+        self.emit_state_events(app_handle, keep_dictation).await;
         cleanup_results.push("State events emitted".to_string());
 
         // 7. Update floating bar
@@ -316,6 +369,11 @@ impl StopCoordinator {
         )
         .await;
         cleanup_results.push("Floating bar updated".to_string());
+        // The run's end put the bar to rest; the dictation is still going, so
+        // the bar goes back to showing it.
+        if keep_dictation {
+            crate::commands::ui_commands::handle_dictation_mode_change(app_handle, true).await;
+        }
 
         // 7b. Cancel every armed timer: screen monitors, file monitors and
         // pending delays alike.
@@ -353,7 +411,14 @@ impl StopCoordinator {
 
             let escape_coordinator =
                 crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-            if let Err(e) = escape_coordinator.unregister_all_users(app_handle).await {
+            let released = if keep_dictation {
+                escape_coordinator
+                    .unregister_all_but_dictation(app_handle)
+                    .await
+            } else {
+                escape_coordinator.unregister_all_users(app_handle).await
+            };
+            if let Err(e) = released {
                 warn!(
                     "[StopCoordinator] Failed to unregister all escape key users: {}",
                     e
@@ -376,8 +441,10 @@ impl StopCoordinator {
         // as startup would, and re-emits the listening outcome so the bar's
         // dot follows. If no voice trigger is enabled this stops at the first
         // check and costs nothing.
-        crate::commands::triggers::apply_stored_voice_triggers(app_handle).await;
-        cleanup_results.push("Voice triggers re-armed".to_string());
+        if !keep_dictation {
+            crate::commands::triggers::apply_stored_voice_triggers(app_handle).await;
+            cleanup_results.push("Voice triggers re-armed".to_string());
+        }
 
         let result_summary = format!(
             "Coordinated cleanup completed: [{}]",
@@ -388,7 +455,7 @@ impl StopCoordinator {
     }
 
     /// Emit state update events once only
-    async fn emit_state_events(&self, app_handle: &AppHandle) {
+    async fn emit_state_events(&self, app_handle: &AppHandle, keep_dictation: bool) {
         // A stop closes the microphone as well as the run, and the capture
         // phase keeps a flag now. Clear it here, next to the announcement, so
         // the two cannot part company: a capture flag left standing after a
@@ -406,6 +473,9 @@ impl StopCoordinator {
         ];
 
         for (event_name, active) in events.iter() {
+            if keep_dictation && *event_name == crate::constants::events::dictation::ACTIVE {
+                continue;
+            }
             self.emit_event(app_handle, event_name, *active);
         }
     }

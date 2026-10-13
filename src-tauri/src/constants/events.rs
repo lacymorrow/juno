@@ -454,6 +454,10 @@ pub mod bar {
     /// Close the chat pane. Emitted by the global Escape monitor when nothing is
     /// running, so Escape dismisses the pane even when the bar is not focused.
     pub const DISMISS_PANE: &str = "bar-dismiss-pane";
+    /// Climb the visibility ladder. Payload: `{ to }`, one of
+    /// `ui::ladder_steps`. Sent by the Dock and tray icons, and by Escape in
+    /// the big chat, which steps down to the floating chat.
+    pub const LADDER: &str = "bar-ladder";
     /// The cursor moved to a different display; payload carries the cursor's
     /// `x`/`y` in global points so the bar re-homes to the same drag-well slot there.
     pub const CURSOR_DISPLAY_CHANGED: &str = "bar-cursor-display-changed";

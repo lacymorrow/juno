@@ -1,7 +1,7 @@
 import { act, fireEvent, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UI } from "@/lib/constants.generated";
-import { ESCAPE_REARM_MS } from "@/lib/barEscape";
+import { ESCAPE_REARM_MS, LADDER_CHAIN_MS } from "@/lib/barEscape";
 import { useEscapeToIdle, type EscapeToIdleOptions } from "@/hooks/useEscapeToIdle";
 
 const invoke = vi.hoisted(() =>
@@ -18,11 +18,15 @@ vi.mock("@/hooks/useEventListener", () => ({
 }));
 
 const DISMISS = "bar-dismiss-pane";
+const LADDER = "bar-ladder";
 const PANE_OPEN = "set_bar_pane_open";
+const HIDE_BAR = "hide_floating_bar";
+const OPEN_MAIN = "open_main_window";
 
 function render(over: Partial<EscapeToIdleOptions> = {}) {
   const collapse = vi.fn();
   const report = vi.fn();
+  const climb = vi.fn();
   const initial: EscapeToIdleOptions = {
     barState: UI.BAR_STATES_DEFAULT,
     working: false,
@@ -31,16 +35,19 @@ function render(over: Partial<EscapeToIdleOptions> = {}) {
     popupOpen: false,
     collapse,
     report,
+    climb,
     ...over,
   };
   const view = renderHook((props: EscapeToIdleOptions) => useEscapeToIdle(props), {
     initialProps: initial,
   });
-  return { ...view, collapse, report, initial };
+  return { ...view, collapse, report, climb, initial };
 }
 
 const pressEscape = () => fireEvent.keyDown(document, { key: "Escape" });
 const backendDismiss = () => act(() => void handlers.get(DISMISS)?.(null));
+const ladder = (to: string) => act(() => void handlers.get(LADDER)?.({ to }));
+const called = (command: string) => invoke.mock.calls.filter(([c]) => c === command).length;
 const paneCalls = (): boolean[] =>
   invoke.mock.calls
     .filter(([command]) => command === PANE_OPEN)
@@ -119,11 +126,12 @@ describe("useEscapeToIdle: one press", () => {
     expect(report).toHaveBeenCalledTimes(1);
   });
 
-  it("does nothing at rest with nothing open", () => {
+  it("takes the bar off the screen from rest when the press was typed into the bar", () => {
     const { collapse, report } = render();
     pressEscape();
     expect(collapse).not.toHaveBeenCalled();
     expect(report).not.toHaveBeenCalled();
+    expect(called(HIDE_BAR)).toBe(1);
   });
 
   it("leaves the key to a popup that owns it", () => {
@@ -166,5 +174,95 @@ describe("useEscapeToIdle: the two routes", () => {
     pressEscape();
     expect(collapse).toHaveBeenCalledTimes(1);
     expect(report).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("useEscapeToIdle: the ladder down", () => {
+  it("walks floating chat, idle bar, hidden: one rung per press", () => {
+    const { rerender, initial, collapse } = render({ overlayOpen: true });
+    backendDismiss();
+    expect(collapse).toHaveBeenCalledTimes(1);
+    expect(called(HIDE_BAR)).toBe(0);
+
+    rerender({ ...initial, overlayOpen: false });
+    backendDismiss();
+    expect(called(HIDE_BAR)).toBe(1);
+  });
+
+  it("never hides the bar for an Escape typed in another app", () => {
+    // At rest, nothing just happened: a press the monitor saw belongs to
+    // whatever app the person is in.
+    render();
+    backendDismiss();
+    expect(called(HIDE_BAR)).toBe(0);
+  });
+
+  it("lets the walk lapse", () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender, initial } = render({ overlayOpen: true });
+      backendDismiss();
+      rerender({ ...initial, overlayOpen: false });
+      act(() => {
+        vi.advanceTimersByTime(LADDER_CHAIN_MS + 1);
+      });
+      backendDismiss();
+      expect(called(HIDE_BAR)).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the stop key claimed for the next rung, then lets go", () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender, initial } = render({ overlayOpen: true });
+      backendDismiss();
+      rerender({ ...initial, overlayOpen: false });
+      expect(paneCalls().at(-1)).toBe(true);
+      act(() => {
+        vi.advanceTimersByTime(LADDER_CHAIN_MS + 1);
+      });
+      expect(paneCalls().at(-1)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not hide the bar because the big chat took over", () => {
+    const { rerender, initial, collapse } = render({ overlayOpen: true });
+    backendDismiss();
+    rerender({ ...initial, overlayOpen: false });
+    act(() => void handlers.get(DISMISS)?.({ reason: "main_window" }));
+    expect(collapse).toHaveBeenCalledTimes(1);
+    expect(called(HIDE_BAR)).toBe(0);
+  });
+});
+
+describe("useEscapeToIdle: the ladder up", () => {
+  it("opens the text input when Juno comes back from hidden", () => {
+    const { climb } = render();
+    ladder("composer");
+    expect(climb).toHaveBeenCalledWith("composer");
+  });
+
+  it("opens the floating chat from the idle bar or the text input", () => {
+    const { climb } = render({ composerOpen: true });
+    ladder("next");
+    expect(climb).toHaveBeenCalledWith("floating");
+    expect(called(OPEN_MAIN)).toBe(0);
+  });
+
+  it("opens the big chat from the floating chat", () => {
+    const { climb } = render({ overlayOpen: true });
+    ladder("next");
+    expect(climb).not.toHaveBeenCalled();
+    expect(called(OPEN_MAIN)).toBe(1);
+  });
+
+  it("opens the floating chat when Escape steps down from the big chat", () => {
+    const { climb } = render();
+    ladder("floating");
+    expect(climb).toHaveBeenCalledWith("floating");
   });
 });

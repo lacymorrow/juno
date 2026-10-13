@@ -18,7 +18,7 @@ import { EVENTS, UI, COMMANDS, WINDOW_LABELS } from "@/lib/constants.generated";
 import { useWindowSize } from "@/hooks/useWindowSize";
 import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
-import { useEscapeToIdle } from "@/hooks/useEscapeToIdle";
+import { openComposerThroughRust, useEscapeToIdle, type ClimbTarget } from "@/hooks/useEscapeToIdle";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
 import { SkillGhostText, SkillSuggestionList } from "@/components/SkillAutocomplete";
@@ -393,6 +393,16 @@ export function IslandBar() {
     popupOpen: skill.open,
     collapse: closeCard,
     report: reportEscape,
+    // The Dock or tray icon. Floating is this look's last answer; with none
+    // yet, the text input. Called after render, so it may name what is
+    // declared below.
+    climb: (to: ClimbTarget) => {
+      if (to === "floating" && hasTurn) {
+        openCard();
+        return;
+      }
+      openComposerThroughRust(() => void sendInteraction(UI.INTERACTION_TYPES_CLICK));
+    },
   });
 
   useEffect(() => {

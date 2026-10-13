@@ -463,6 +463,19 @@ async fn toggle_chat_from_tray(app: &AppHandle) {
     refresh_chat_toggle_label(app).await;
 }
 
+/// The tray icon's click: one rung up, from what was on screen as the pointer
+/// arrived (see `toggle_chat_from_tray`).
+async fn climb_from_tray(app: &AppHandle) {
+    let surface = {
+        let manager = get_tray_icon_manager().await;
+        let mut guard = manager.lock().await;
+        guard.pending_chat_surface.take()
+    };
+    let surface = surface.unwrap_or_else(|| active_chat_surface(app));
+    crate::window_management::climb_chat_ladder(app, surface).await;
+    refresh_chat_toggle_label(app).await;
+}
+
 /// Get keyboard shortcuts from app state
 fn get_keyboard_shortcuts(
     app: &AppHandle,
@@ -1176,12 +1189,13 @@ pub fn handle_tray_icon_event(app_handle: &AppHandle, event: tauri::tray::TrayIc
             ..
         } => {
             info!("[TrayIcon] Left click detected on tray icon");
-            // The same thing the menu row does. This used to reach past the
-            // pane straight to the full-size window, so the icon and the row
-            // under it did two different things to two different surfaces.
+            // One rung up the ladder per click, the same as the Dock icon:
+            // hidden to the text input, the idle bar or the text input to the
+            // floating chat, the floating chat to the big chat. Putting Juno
+            // away is Escape's job; the menu's Show/Hide Chat row still toggles.
             let app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                toggle_chat_from_tray(&app_handle).await;
+                climb_from_tray(&app_handle).await;
             });
         }
         tauri::tray::TrayIconEvent::Click {

@@ -45,6 +45,7 @@ const REQUIRED_FIELDS = [
   "popupOpen",
   "collapse",
   "report",
+  "climb",
 ] as const;
 
 /**

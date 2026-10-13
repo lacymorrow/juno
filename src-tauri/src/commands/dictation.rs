@@ -101,11 +101,15 @@ pub async fn end_dictation_session(app_handle: &AppHandle, reason: &str) {
 /// What one press of the stop key ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EscapeScope {
-    /// A dictation is open: end it and leave everything else running.
+    /// A dictation is open and is the newest thing going: end it and leave
+    /// everything else running.
     Dictation,
+    /// A dictation is open, but Juno started a turn after it: stop her work
+    /// and leave the dictation open.
+    WorkAboveDictation,
     /// The same press, seen a second time (the bar's own keydown and the
     /// passive stop-key monitor both report one press while the bar is
-    /// focused). It was spent on the dictation.
+    /// focused). It was already spent on one layer.
     SamePress,
     /// Nothing is dictating: the coordinated stop of everything.
     Everything,
@@ -114,21 +118,46 @@ pub enum EscapeScope {
 /// Two reports of one Escape press arrive within this window.
 const SAME_PRESS_WINDOW: std::time::Duration = std::time::Duration::from_millis(400);
 
+/// What is going on when the stop key is pressed.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EscapeLayers {
+    /// A dictation is open.
+    pub dictation_open: bool,
+    /// When that dictation claimed the stop key.
+    pub dictation_since: Option<std::time::Instant>,
+    /// When Juno last started a turn that still holds the stop key.
+    pub turn_since: Option<std::time::Instant>,
+    /// Time since a press last ended only a dictation.
+    pub since_dictation_escape: Option<std::time::Duration>,
+    /// Time since a press last ended only Juno's work.
+    pub since_work_escape: Option<std::time::Duration>,
+}
+
 /// Decide what an Escape press ends.
 ///
-/// Escape peels one layer. A dictation held while the agent works is the thing
-/// the person is doing right now, so Escape cancels it and only it: the run,
-/// Juno's voice, armed timers and the wake phrase all carry on, and a second
-/// press stops those. It used to run the coordinated stop, which threw away a
-/// long agent run because the person changed their mind about a sentence they
-/// were dictating into another app.
-pub fn escape_scope(
-    dictation_open: bool,
-    since_dictation_escape: Option<std::time::Duration>,
-) -> EscapeScope {
-    if dictation_open {
-        EscapeScope::Dictation
-    } else if since_dictation_escape.is_some_and(|elapsed| elapsed < SAME_PRESS_WINDOW) {
+/// Escape peels one layer, newest first, the way a Mac app hands Escape to
+/// whatever opened most recently. A dictation opened while Juno works is the
+/// thing the person is doing right now, so Escape cancels it and only it: the
+/// run, Juno's voice, armed timers and the wake phrase all carry on, and a
+/// second press stops those. A turn Juno started while the person was already
+/// dictating is the newer layer, so it goes first and the dictation stays open.
+///
+/// A dictation with no claim on record is treated as the newest layer, which
+/// is what this did before turns were ordered at all.
+pub fn escape_scope(layers: EscapeLayers) -> EscapeScope {
+    let within = |since: Option<std::time::Duration>| since.is_some_and(|e| e < SAME_PRESS_WINDOW);
+    // Checked first: the press that stopped the work leaves the dictation
+    // open, and its second report must not go on to end that too.
+    if within(layers.since_work_escape) {
+        return EscapeScope::SamePress;
+    }
+    if layers.dictation_open {
+        return match (layers.dictation_since, layers.turn_since) {
+            (Some(dictation), Some(turn)) if turn > dictation => EscapeScope::WorkAboveDictation,
+            _ => EscapeScope::Dictation,
+        };
+    }
+    if within(layers.since_dictation_escape) {
         EscapeScope::SamePress
     } else {
         EscapeScope::Everything
@@ -136,32 +165,63 @@ pub fn escape_scope(
 }
 
 static LAST_DICTATION_ESCAPE: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+static LAST_WORK_ESCAPE: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+fn elapsed_since(stamp: &Mutex<Option<std::time::Instant>>) -> Option<std::time::Duration> {
+    stamp
+        .lock()
+        .ok()
+        .and_then(|last| last.map(|at| at.elapsed()))
+}
+
+fn stamp_now(stamp: &Mutex<Option<std::time::Instant>>) {
+    if let Ok(mut last) = stamp.lock() {
+        *last = Some(std::time::Instant::now());
+    }
+}
 
 /// The Escape step that comes before the coordinated stop. Returns `true` when
-/// the press was spent here (a dictation was cancelled, or this is a second
-/// report of the press that cancelled it) and the caller must not stop
-/// anything else.
+/// the press was spent here (one layer was ended, or this is a second report
+/// of the press that ended it) and the caller must not stop anything else.
 pub async fn escape_spent_on_dictation(app_handle: &AppHandle) -> bool {
     let app_state = app_handle.state::<AppState>();
     let dictation_open = app_state.is_dictation_active()
         || app_state
             .current_voice_session()
             .is_some_and(|session| session.target == crate::state::VoiceTarget::Dictation);
-    let since = LAST_DICTATION_ESCAPE
-        .lock()
-        .ok()
-        .and_then(|last| last.map(|at| at.elapsed()));
+    let (dictation_since, turn_since) =
+        crate::commands::escape_key_coordinator::get_escape_key_coordinator().claims_since();
 
-    match escape_scope(dictation_open, since) {
+    let layers = EscapeLayers {
+        dictation_open,
+        dictation_since,
+        turn_since,
+        since_dictation_escape: elapsed_since(&LAST_DICTATION_ESCAPE),
+        since_work_escape: elapsed_since(&LAST_WORK_ESCAPE),
+    };
+    match escape_scope(layers) {
         EscapeScope::Everything => false,
         EscapeScope::SamePress => true,
         EscapeScope::Dictation => {
             info!("[Dictation] Escape cancels the open dictation only");
-            if let Ok(mut last) = LAST_DICTATION_ESCAPE.lock() {
-                *last = Some(std::time::Instant::now());
-            }
+            stamp_now(&LAST_DICTATION_ESCAPE);
             end_dictation_session(app_handle, "Escape").await;
             crate::commands::triggers::resume_voice_after_dictation(app_handle).await;
+            true
+        }
+        EscapeScope::WorkAboveDictation => {
+            info!("[Dictation] Escape stops Juno's newer turn; the dictation stays open");
+            stamp_now(&LAST_WORK_ESCAPE);
+            let coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
+            if let Err(e) = coordinator
+                .stop_work_keeping_dictation(app_handle, "Escape key pressed")
+                .await
+            {
+                error!(
+                    "[Dictation] Stopping the turn above the dictation failed: {}",
+                    e
+                );
+            }
             true
         }
     }
@@ -591,13 +651,70 @@ mod tests {
     use super::*;
     use crate::constants::settings::dictation_insertion_modes::{CLIPBOARD_FREE, PASTE};
 
+    fn ms(n: u64) -> Option<std::time::Duration> {
+        Some(std::time::Duration::from_millis(n))
+    }
+
+    fn dictating() -> EscapeLayers {
+        EscapeLayers {
+            dictation_open: true,
+            ..EscapeLayers::default()
+        }
+    }
+
     #[test]
     fn escape_during_a_dictation_ends_only_the_dictation() {
         // A dictation is open (the agent may well be working underneath):
         // Escape is spent on the dictation, not the coordinated stop.
-        assert_eq!(escape_scope(true, None), EscapeScope::Dictation);
+        assert_eq!(escape_scope(dictating()), EscapeScope::Dictation);
         assert_eq!(
-            escape_scope(true, Some(std::time::Duration::from_millis(10))),
+            escape_scope(EscapeLayers {
+                since_dictation_escape: ms(10),
+                ..dictating()
+            }),
+            EscapeScope::Dictation
+        );
+    }
+
+    #[test]
+    fn the_newest_layer_goes_first() {
+        let earlier = std::time::Instant::now();
+        let later = earlier + std::time::Duration::from_secs(5);
+        // Juno was working, then the person started dictating: dictation first.
+        assert_eq!(
+            escape_scope(EscapeLayers {
+                dictation_since: Some(later),
+                turn_since: Some(earlier),
+                ..dictating()
+            }),
+            EscapeScope::Dictation
+        );
+        // The person was dictating, then Juno started a turn: the turn first.
+        assert_eq!(
+            escape_scope(EscapeLayers {
+                dictation_since: Some(earlier),
+                turn_since: Some(later),
+                ..dictating()
+            }),
+            EscapeScope::WorkAboveDictation
+        );
+    }
+
+    #[test]
+    fn the_press_that_stopped_the_turn_does_not_also_end_the_dictation() {
+        assert_eq!(
+            escape_scope(EscapeLayers {
+                since_work_escape: ms(50),
+                ..dictating()
+            }),
+            EscapeScope::SamePress
+        );
+        // A deliberate second press ends the dictation.
+        assert_eq!(
+            escape_scope(EscapeLayers {
+                since_work_escape: Some(SAME_PRESS_WINDOW),
+                ..dictating()
+            }),
             EscapeScope::Dictation
         );
     }
@@ -607,16 +724,25 @@ mod tests {
         // The bar's keydown and the passive monitor report one press twice.
         // The second report must not go on to stop the agent.
         assert_eq!(
-            escape_scope(false, Some(std::time::Duration::from_millis(50))),
+            escape_scope(EscapeLayers {
+                since_dictation_escape: ms(50),
+                ..EscapeLayers::default()
+            }),
             EscapeScope::SamePress
         );
     }
 
     #[test]
     fn a_later_escape_with_no_dictation_stops_everything() {
-        assert_eq!(escape_scope(false, None), EscapeScope::Everything);
         assert_eq!(
-            escape_scope(false, Some(SAME_PRESS_WINDOW)),
+            escape_scope(EscapeLayers::default()),
+            EscapeScope::Everything
+        );
+        assert_eq!(
+            escape_scope(EscapeLayers {
+                since_dictation_escape: Some(SAME_PRESS_WINDOW),
+                ..EscapeLayers::default()
+            }),
             EscapeScope::Everything,
             "a deliberate second press stops the run"
         );

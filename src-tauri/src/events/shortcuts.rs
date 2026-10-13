@@ -156,6 +156,18 @@ pub fn handle_stop_key_event(app: &AppHandle, pressed: bool) {
 
     let app_handle_clone = app.clone();
     tauri::async_runtime::spawn(async move {
+        // Settings in front of the person is the top of the stack: the window
+        // closes on this press itself, and the work underneath waits for the
+        // next. Read here, off the monitor's callback, like every window query.
+        let settings_focused = app_handle_clone
+            .get_webview_window(crate::constants::window_labels::SETTINGS)
+            .and_then(|window| window.is_focused().ok())
+            .unwrap_or(false);
+        if settings_focused {
+            info!("[Escape Key] Settings is in front - it takes this press");
+            return;
+        }
+
         // A dictation open on top of a running agent is the layer Escape
         // takes off first; the run keeps going (see `escape_scope`).
         if crate::commands::dictation::escape_spent_on_dictation(&app_handle_clone).await {

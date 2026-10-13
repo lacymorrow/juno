@@ -22,6 +22,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { COMMANDS, SETTINGS } from "@/lib/constants.generated";
 import { useEventListener } from "@/hooks/useEventListener";
+import { useEscapeStepsDown } from "@/hooks/useEscapeStepsDown";
 import { revealRow } from "./revealRow";
 import {
   GeneralSettings,
@@ -282,6 +283,14 @@ function SettingsWindowContent() {
   // every value back from Rust, as if it had just been opened.
   const [paneVersion, setPaneVersion] = useState(0);
   const settings = useSettingsContext();
+  // Open and in front of the person, Settings is the top of the Escape stack:
+  // the first press closes it, and nothing else (the stop key stands aside
+  // while this window is focused; see `handle_stop_key_event`).
+  useEscapeStepsDown(() => {
+    void getCurrentWindow()
+      .close()
+      .catch((error) => console.error("Settings: could not close:", error));
+  });
   const theme = useSystemTheme();
   const contentRef = useRef<HTMLDivElement>(null);
   const { advanced, loading: advancedLoading, setAdvanced } =

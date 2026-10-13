@@ -34,6 +34,7 @@ import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { useShortcutEvents } from "@/hooks/useShortcutEvents";
 import { useDictationStateEvents } from "@/hooks/useDictationStateEvents";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
+import { useEscapeStepsDown } from "@/hooks/useEscapeStepsDown";
 import { useUpdater } from "@/hooks/useUpdater";
 
 /**
@@ -55,6 +56,15 @@ function App() {
   const agentSessions = useAgentSessions();
 
   const { status: updateStatus, checkNow, restart } = useUpdater();
+
+  // Escape here is one rung down the ladder: the big chat gives the
+  // conversation to the floating chat. Rust declines while anything is
+  // running, because the stop key takes that press first.
+  useEscapeStepsDown(() => {
+    void invoke(COMMANDS.WINDOWS_ESCAPE_MAIN_WINDOW).catch((error) =>
+      console.error("App: could not step down to the floating chat:", error),
+    );
+  });
 
   // Timer tracking for cleanup
   const pendingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
