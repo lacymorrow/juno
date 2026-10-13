@@ -51,6 +51,10 @@ objc-foundation = "0.1"
 cocoa = "0.25"
 cocoa-foundation = "0.1"
 block = "0.1"
+# CoreAudio change notifications (a microphone plugged in, a new default, a
+# new rate), so the dictation input is rebuilt before the press. The same
+# crate and features cpal already uses, so nothing new is compiled.
+coreaudio-rs = { version = "0.11", default-features = false, features = ["audio_unit", "core_audio"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
