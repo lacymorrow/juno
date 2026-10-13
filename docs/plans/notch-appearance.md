@@ -28,7 +28,8 @@ Every state, word, control and timer is the Island's (`island/islandModel.ts`, `
 | Posture | Top notch | Bottom / side notch | In a corner |
 |---|---|---|---|
 | Resting (capsule) | the menu bar strip, 236 wide; dot in the right ear | a 24pt tab (236 long on the bottom, 72 on a side); dot centred | a 44pt peeled corner; dot in the black triangle |
-| Hover, line, ear, status | the Island's size, hung below the menu bar strip | the Island's size, growing straight out of the edge | the Island's size on the black, fold strip on the inner side |
+| Hover | the Island's size, hung below the menu bar strip | bottom: out of the edge; a side: the notch on its side, running along the edge, controls stacked | the Island's size on the black, fold strip on the inner side |
+| Line, ear, status | the Island's size, hung below the menu bar strip | the Island's size, growing straight out of the edge (words cannot stand on their side) | the Island's size on the black, fold strip on the inner side |
 | Card | the Island's card, below the strip | the card, out of the edge | the card, anchored to the corner, inner corner folded 22pt |
 
 Every notch has the hardware's concave shoulders where it meets its edge and round far corners. A side notch grows straight out of its edge, centred on its resting tab: the tab's middle never moves, so it opens the way a panel pulled from that edge would, and it has room both ways for a bigger panel (a floating chat) later. Its skill suggestions hang below it without moving it. Every other well keeps its row (`SteadyLayout.centerY` is the Notch's side wells only).
@@ -41,7 +42,7 @@ Top corners cover the menu bar strip first, as the notch does, so words never si
 
 ## Above the menu bar
 
-AppKit keeps any window below `NSMainMenuWindowLevel` out of the menu bar on every frame change (`appearance-steady-frame.md`, "Never"). The Notch therefore asks Rust (`set_bar_over_menu_bar`) to rest at `NSMainMenuWindowLevel + 3`, the level NotchNook, Boring Notch and Sentient use. `bar_stacking::BarStacking::bar_level` lifts only the resting intent: when a system prompt is expected or a Juno window is in front, the bar goes to the normal level exactly as every other look does. The look reports `false` when it unmounts. The window's class is never touched.
+AppKit keeps any window below `NSMainMenuWindowLevel` out of the menu bar on every frame change (`appearance-steady-frame.md`, "Never"). The Notch therefore asks Rust (`set_bar_over_menu_bar`) to rest at `NSMainMenuWindowLevel + 3`, the level NotchNook, Boring Notch and Sentient use. `bar_stacking::BarStacking::bar_level` lifts only the resting intent: when a system prompt is expected or a Juno window is in front, the bar goes to the normal level exactly as every other look does. The look reports `false` when it unmounts. Stepping down can let AppKit push the window under the menu bar; when the bar is lifted again, `apply_bar_stacking` puts the frame back if it was moved straight down by no more than a menu bar. The window's class is never touched.
 
 ## Removed, and considered and cut
 
