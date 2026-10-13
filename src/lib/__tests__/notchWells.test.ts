@@ -3,9 +3,12 @@ import {
   CURL_REST,
   FALLBACK_MENU_BAR,
   NOTCH_REST_WIDTH,
+  EDGE_REST_DEPTH,
+  SIDE_REST_LENGTH,
   curlCornerFor,
   menuBarHeight,
   nearestNotchWell,
+  notchEdgeFor,
   notchFormFor,
   notchWells,
 } from "../notchWells";
@@ -32,26 +35,39 @@ const EXTERNAL: MonitorRect = {
 describe("the Notch's wells", () => {
   const wells = notchWells([LAPTOP, EXTERNAL]);
 
-  it("are the notch and the four corners on every display, and nothing else", () => {
-    expect(wells).toHaveLength(10);
-    for (const index of [0, 1]) {
-      const slots = wells
-        .filter((w) => w.monitorIndex === index)
-        .map((w) => `${w.fx},${w.fy}`)
-        .sort();
-      expect(slots).toEqual(["0,0", "0,1", "0.5,0", "1,0", "1,1"]);
+  it("are every stop on the display's edges: the corners and the edge middles", () => {
+    const laptop = wells
+      .filter((w) => w.monitorIndex === 0)
+      .map((w) => `${w.fx},${w.fy}`)
+      .sort();
+    expect(laptop).toEqual(["0,0", "0,0.5", "0,1", "0.5,0", "0.5,1", "1,0", "1,0.5", "1,1"]);
+    // A wide display has five stops along its long edges, still none inside.
+    const wide = wells.filter((w) => w.monitorIndex === 1);
+    expect(wide).toHaveLength(12);
+    expect(wide.some((w) => w.fx === 0.25 && w.fy === 0)).toBe(true);
+    expect(wide.some((w) => w.fx === 0.25 && w.fy === 0.5)).toBe(false);
+  });
+
+  it("never offers the centre of the screen", () => {
+    for (const w of wells) {
+      const inside = w.fx > 0 && w.fx < 1 && w.fy > 0 && w.fy < 1;
+      expect(inside, `${w.fx},${w.fy}`).toBe(false);
     }
   });
 
-  it("never offers the centre or an edge midpoint", () => {
-    for (const w of wells) {
-      expect(w.fx === 0.5 && w.fy !== 0, `${w.fx},${w.fy}`).toBe(false);
-      expect(w.fy === 0.5).toBe(false);
-    }
+  it("puts a notch on each edge middle, sized for that edge", () => {
+    const at = (fx: number, fy: number) =>
+      wells.find((w) => w.monitorIndex === 0 && w.fx === fx && w.fy === fy)!;
+    expect(at(0.5, 1)).toMatchObject({ y: 982 - EDGE_REST_DEPTH, width: NOTCH_REST_WIDTH, height: EDGE_REST_DEPTH });
+    expect(at(0, 0.5)).toMatchObject({ x: 0, width: EDGE_REST_DEPTH, height: SIDE_REST_LENGTH });
+    expect(at(1, 0.5)).toMatchObject({ x: 1512 - EDGE_REST_DEPTH });
+    expect(at(0, 0.5).y + SIDE_REST_LENGTH / 2).toBe(491);
   });
 
   it("are flush with each display's edges, menu bar included", () => {
-    const [notch, tl, tr, bl, br] = wells.filter((w) => w.monitorIndex === 0);
+    const at = (fx: number, fy: number) =>
+      wells.find((w) => w.monitorIndex === 0 && w.fx === fx && w.fy === fy)!;
+    const [notch, tl, tr, bl, br] = [at(0.5, 0), at(0, 0), at(1, 0), at(0, 1), at(1, 1)];
     expect(notch).toMatchObject({ y: 0, width: NOTCH_REST_WIDTH, height: 38 });
     expect(notch.x + notch.width / 2).toBe(756);
     expect(tl).toMatchObject({ x: 0, y: 0, width: CURL_REST, height: CURL_REST });
@@ -78,11 +94,20 @@ describe("the Notch's wells", () => {
     // the centre is not a well.
     const middle = nearestNotchWell({ x: 700, y: 400 }, { width: 44, height: 44 }, wells);
     expect([middle?.fx, middle?.fy]).not.toEqual([0.5, 0.5]);
+    // Near the left edge's middle, it becomes a notch on that edge.
+    const left = nearestNotchWell({ x: 10, y: 470 }, { width: 44, height: 44 }, wells);
+    expect(left).toMatchObject({ fx: 0, fy: 0.5 });
   });
 
   it("names its form and corner", () => {
     expect(notchFormFor({ fx: 0.5, fy: 0 })).toBe("notch");
     expect(notchFormFor({ fx: 1, fy: 1 })).toBe("curl");
+    expect(notchFormFor({ fx: 0.5, fy: 1 })).toBe("notch");
+    expect(notchFormFor({ fx: 1, fy: 0.5 })).toBe("notch");
+    expect(notchEdgeFor({ fx: 0.5, fy: 1 })).toBe("bottom");
+    expect(notchEdgeFor({ fx: 0, fy: 0.5 })).toBe("left");
+    expect(notchEdgeFor({ fx: 1, fy: 0.5 })).toBe("right");
+    expect(notchEdgeFor({ fx: 0.25, fy: 0 })).toBe("top");
     expect(notchFormFor(null)).toBe("notch");
     expect(curlCornerFor({ fx: 0, fy: 1 })).toBe("bottom-left");
     expect(curlCornerFor({ fx: 1, fy: 0 })).toBe("top-right");
@@ -125,6 +150,16 @@ describe("the Notch's shapes", () => {
     expect(card.height).toBe(238);
     expect(card.width).toBe(360 + 2 * SHOULDER);
     expect(card.content).toMatchObject({ top: 38, height: 200 });
+  });
+
+  it("grows straight out of the bottom and the sides", () => {
+    const bottom = notchShape("notch", "status", ISLAND_SIZES.status, 38, "top-left", "bottom");
+    expect(bottom).toMatchObject({ edge: "bottom", height: ISLAND_SIZES.status.height });
+    expect(bottom.content.top).toBe(0);
+    const side = notchShape("notch", "card", { width: 360, height: 200, radius: 20 }, 38, "top-left", "left");
+    expect(side).toMatchObject({ edge: "left", width: 360, height: 200 + 2 * SHOULDER });
+    const restSide = notchShape("notch", "capsule", ISLAND_SIZES.capsule, 38, "top-left", "right");
+    expect(restSide).toMatchObject({ width: EDGE_REST_DEPTH, height: SIDE_REST_LENGTH });
   });
 
   it("rests as a peeled corner, and opens into a card with its corner folded", () => {

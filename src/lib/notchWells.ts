@@ -1,12 +1,16 @@
 /**
  * Wells and shapes for the Notch look.
  *
- * The Notch lives in the hardware: flush with the top of the display, centred
- * on the camera housing, the same black, so at rest it simply is the notch.
- * Dropped in a corner it becomes the corner of the screen peeled back like a
- * page, with Juno underneath. Those are its only homes: the notch and the four
- * corners. There is no centre well and no edge-midpoint; a notch in the middle
- * of the screen, or halfway down its side, is not a notch.
+ * The Notch lives on the screen's edges. At top centre it is the hardware
+ * notch: flush with the top of the display, centred on the camera housing, the
+ * same black, so at rest it simply is the notch. On any other edge stop (the
+ * bottom, the left and right sides, and the quarter points of a wide display)
+ * it is the same kind of tab growing out of that edge. In a corner it becomes
+ * the corner of the screen peeled back like a page, with Juno underneath.
+ *
+ * The one place it never goes is the middle of the screen: a notch has to
+ * grow out of an edge. So the wells are the grid's perimeter and nothing
+ * inside it.
  *
  * Every well is FLUSH: no margin, no gap under the menu bar. The bar is lifted
  * over the menu bar while this look rests (`bar_stacking::OVER_MENU_BAR_LEVEL`
@@ -15,21 +19,30 @@
  * Pure, and in global desktop points like `snapWells.ts`.
  */
 
-import type { MonitorRect, Well, WellSlot } from "./snapWells";
+import { axisStops, type MonitorRect, type Well, type WellSlot } from "./snapWells";
 
 /** Which of its two forms the Notch takes in a well. */
 export type NotchForm = "notch" | "curl";
+
+/** Which screen edge a notch grows out of. */
+export type NotchEdge = "top" | "bottom" | "left" | "right";
 
 /** Which screen corner a curl is peeled back from. */
 export type CurlCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
 /**
- * The resting notch's width, in points. Wider than the camera housing on
- * every notched MacBook (about 185 to 200 points) so the shape covers it whole
- * and leaves a small ear either side, where the status dot shows. On a display
- * without a notch it reads as a small black tab at the top.
+ * The resting notch's length along its edge, in points. Wider than the camera
+ * housing on every notched MacBook (about 185 to 200 points) so the shape
+ * covers it whole and leaves a small ear either side, where the status dot
+ * shows. On a display without a notch it reads as a small black tab.
  */
 export const NOTCH_REST_WIDTH = 236;
+
+/** A resting notch on the left or right edge: shorter, since a side has no camera to cover. */
+export const SIDE_REST_LENGTH = 72;
+
+/** How far a resting notch on the bottom or a side stands out from its edge, in points. */
+export const EDGE_REST_DEPTH = 24;
 
 /**
  * The strip the shape draws over the menu bar when the display reports none
@@ -41,19 +54,24 @@ export const FALLBACK_MENU_BAR = 32;
 /** The resting curl: the corner peeled back this far along each edge, in points. */
 export const CURL_REST = 44;
 
-/** The slot each well is: top centre, and the four corners. */
-export const NOTCH_SLOTS: readonly WellSlot[] = [
-  { fx: 0.5, fy: 0 },
-  { fx: 0, fy: 0 },
-  { fx: 1, fy: 0 },
-  { fx: 0, fy: 1 },
-  { fx: 1, fy: 1 },
-];
+function isCorner(slot: WellSlot): boolean {
+  return (slot.fx === 0 || slot.fx === 1) && (slot.fy === 0 || slot.fy === 1);
+}
 
-/** The notch form sits at top centre; every other well is a corner. */
+/** A corner is a curl; every other edge stop is a notch on that edge. */
 export function notchFormFor(slot: WellSlot | null): NotchForm {
   if (!slot) return "notch";
-  return slot.fx === 0.5 && slot.fy === 0 ? "notch" : "curl";
+  return isCorner(slot) ? "curl" : "notch";
+}
+
+/** The edge a notch well grows out of. Top for anything that is not on another edge. */
+export function notchEdgeFor(slot: WellSlot | null): NotchEdge {
+  if (!slot) return "top";
+  if (slot.fy === 0) return "top";
+  if (slot.fy === 1) return "bottom";
+  if (slot.fx === 0) return "left";
+  if (slot.fx === 1) return "right";
+  return "top";
 }
 
 /** The corner a curl well peels from. */
@@ -77,28 +95,44 @@ export function menuBarHeight(m: MonitorRect): number {
 
 /** The resting footprint for a slot on a display. */
 export function notchRestSize(slot: WellSlot, m: MonitorRect): { width: number; height: number } {
-  return notchFormFor(slot) === "notch"
-    ? { width: NOTCH_REST_WIDTH, height: menuBarHeight(m) }
-    : { width: CURL_REST, height: CURL_REST };
+  if (notchFormFor(slot) === "curl") return { width: CURL_REST, height: CURL_REST };
+  switch (notchEdgeFor(slot)) {
+    case "top":
+      return { width: NOTCH_REST_WIDTH, height: menuBarHeight(m) };
+    case "bottom":
+      return { width: NOTCH_REST_WIDTH, height: EDGE_REST_DEPTH };
+    default:
+      return { width: EDGE_REST_DEPTH, height: SIDE_REST_LENGTH };
+  }
 }
 
 /**
- * The Notch's wells on every display: top centre and the four corners, each
- * flush with the display's own edges, sized for the resting shape it lands
- * as. Nothing else, and never the centre.
+ * The slots on a display's perimeter: the grid's edge stops (three along a
+ * laptop's sides, five along a wide display's long one) and its corners.
+ * Never the centre, and never an inner stop of a five-stop grid.
+ */
+export function perimeterSlots(m: MonitorRect): WellSlot[] {
+  const slots: WellSlot[] = [];
+  for (const fy of axisStops(m.size.height)) {
+    for (const fx of axisStops(m.size.width)) {
+      const onEdge = fx === 0 || fx === 1 || fy === 0 || fy === 1;
+      if (onEdge) slots.push({ fx, fy });
+    }
+  }
+  return slots;
+}
+
+/**
+ * The Notch's wells on every display: every perimeter stop, each flush with
+ * the display's own edges and sized for the resting shape it lands as.
  */
 export function notchWells(monitors: MonitorRect[]): Well[] {
   const wells: Well[] = [];
   monitors.forEach((m, monitorIndex) => {
-    for (const slot of NOTCH_SLOTS) {
+    for (const slot of perimeterSlots(m)) {
       const { width, height } = notchRestSize(slot, m);
-      const x =
-        slot.fx === 0
-          ? m.position.x
-          : slot.fx === 1
-            ? m.position.x + m.size.width - width
-            : Math.round(m.position.x + (m.size.width - width) / 2);
-      const y = slot.fy === 0 ? m.position.y : m.position.y + m.size.height - height;
+      const x = Math.round(m.position.x + slot.fx * (m.size.width - width));
+      const y = Math.round(m.position.y + slot.fy * (m.size.height - height));
       wells.push({ x, y, width, height, fx: slot.fx, fy: slot.fy, monitorIndex });
     }
   });

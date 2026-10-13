@@ -204,7 +204,7 @@ function ApprovalRow({
 /**
  * `frame="notch"` is the Notch look: the same island, every posture and every
  * control, in the hardware notch or peeled back from a corner of the screen
- * (`../notch/`). It lives on the steady frame, so it never resizes its window.
+ * (`../notch/`), or growing out of any other edge. It lives on the steady frame, so it never resizes its window.
  */
 export function IslandBar({ frame = "island" }: { frame?: "island" | "notch" } = {}) {
   const notch = frame === "notch";
@@ -579,7 +579,7 @@ export function IslandBar({ frame = "island" }: { frame?: "island" | "notch" } =
   if (posture === "capsule") {
     // The Notch's resting dot sits in the notch's ear, or in the corner of a
     // peeled-back page; the Island's in its middle.
-    const rest = notch ? restingDotPlacement(notchFrame.form, notchFrame.corner) : null;
+    const rest = notch ? restingDotPlacement(notchFrame.form, notchFrame.corner, notchFrame.edge) : null;
     layer = (
       <div
         className="flex h-full w-full items-center justify-center"
@@ -921,8 +921,8 @@ function NotchStage({
   rootProps: React.HTMLAttributes<HTMLDivElement>;
   children: ReactNode;
 }) {
-  const { layout, placement, form, corner, strip, report } = frame;
-  const shape = notchShape(form, posture, size, strip, corner);
+  const { layout, placement, form, corner, edge, strip, report } = frame;
+  const shape = notchShape(form, posture, size, strip, corner, edge);
   const gap = suggestions ? 8 : 0;
   const block = {
     width: Math.max(shape.width, suggestions ? ISLAND_SIZES.line.width - 24 : 0),

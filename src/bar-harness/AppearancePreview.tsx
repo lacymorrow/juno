@@ -30,7 +30,8 @@
  * being re-centred on every resize), and `dock=low` to park the fake window
  * in the bottom half of the display before the bar mounts (looks that grow
  * upward when docked low can then be seen doing so). The Notch takes
- * `dock=corner` (bottom-right) or `dock=top-left` to show its page curl.
+ * `dock=corner` (bottom-right) or `dock=top-left` to show its page curl, and
+ * `dock=bottom`, `dock=left` or `dock=right` for a notch on that edge.
  *
  * A look on the steady frame (the Pill, see `lib/steadyFrame.ts`) never
  * resizes its window, so the preview frames the strip the look grows within
@@ -156,7 +157,7 @@ function readQuery(): {
   theme: "light" | "dark" | null;
   pinFrame: boolean;
   dockLow: boolean;
-  /** The Notch's corner, or null for the notch itself. */
+  /** Where the Notch was left, as fractions of the display, or null for the notch itself. */
   dockCorner: { x: number; y: number } | null;
 } {
   const params = new URLSearchParams(window.location.search);
@@ -174,12 +175,7 @@ function readQuery(): {
     theme: params.get("theme") === "dark" ? "dark" : params.get("theme") === "light" ? "light" : null,
     pinFrame: params.get("pin") === "frame",
     dockLow: params.get("dock") === "low",
-    dockCorner:
-      params.get("dock") === "corner"
-        ? { x: 1, y: 1 }
-        : params.get("dock") === "top-left"
-          ? { x: 0, y: 0 }
-          : null,
+    dockCorner: NOTCH_DOCKS[params.get("dock") ?? ""] ?? null,
   };
 }
 
@@ -189,6 +185,15 @@ declare global {
     __junoBenchStart?: () => void;
   }
 }
+
+/** The Notch's `dock=` values: the slot it was left in. */
+const NOTCH_DOCKS: Record<string, { x: number; y: number }> = {
+  corner: { x: 1, y: 1 },
+  "top-left": { x: 0, y: 0 },
+  bottom: { x: 0.5, y: 1 },
+  left: { x: 0, y: 0.5 },
+  right: { x: 1, y: 0.5 },
+};
 
 /** One frame for a held state, with words where the state would show them. */
 function heldFrame(state: string): Frame & FrameExtra {
@@ -882,7 +887,10 @@ export default function AppearancePreview() {
       const { anchorX, growUp } = steady.layout;
       if (anchorX === "start") left = -stage.x * fit;
       if (anchorX === "end") left = viewport.w - (stage.x + stage.width) * fit;
-      top = growUp ? viewport.h - (stage.y + stage.height) * fit : -stage.y * fit;
+      // A side's middle stays centred in the tile, as it is on the screen.
+      if (steady.layout.slot.fy !== 0.5) {
+        top = growUp ? viewport.h - (stage.y + stage.height) * fit : -stage.y * fit;
+      }
     }
   } else if (pinFrame && driven) {
     if (!originRef.current) {

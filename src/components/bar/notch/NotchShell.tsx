@@ -6,10 +6,11 @@ import { SHOULDER, curlUnderClip, type NotchShape } from "./notchModel";
 /**
  * The Notch's body. Two forms, one spring.
  *
- * In the notch: a black shape flush with the top of the display, with the
+ * In the notch: a black shape flush with an edge of the display, with the
  * small concave shoulders the hardware notch has where it meets the screen's
- * edge, and round bottom corners. At rest it is only the menu bar strip, so on
- * a notched MacBook it is the notch.
+ * edge, and round far corners. At the top centre it rests as only the menu bar
+ * strip, so on a notched MacBook it is the notch; on the bottom and the sides
+ * it is the same tab growing out of that edge.
  *
  * In a corner: the corner of the screen peeled back like a page. The black is
  * what is underneath; the light triangle is the page's underside, folded over.
@@ -51,6 +52,7 @@ export function NotchShell({ shape, corner, layerKey, reducedMotion, children, o
     <motion.div
       data-testid="notch-shell"
       data-form={shape.form}
+      data-edge={shape.form === "notch" ? shape.edge : undefined}
       data-corner={shape.form === "curl" ? corner : undefined}
       data-posture={layerKey}
       onClick={onClick}
@@ -94,29 +96,68 @@ export function NotchShell({ shape, corner, layerKey, reducedMotion, children, o
 
 type Transition = typeof SPRING | typeof EASE;
 
+/** Where the shoulders and the body sit for each edge, and which corners are round. */
+const EDGE_LAYOUT = {
+  top: {
+    shoulders: [
+      { at: { top: 0, left: 0 }, circle: "0% 100%" },
+      { at: { top: 0, right: 0 }, circle: "100% 100%" },
+    ],
+    body: { top: 0, bottom: 0, left: SHOULDER, right: SHOULDER },
+    round: ["borderBottomLeftRadius", "borderBottomRightRadius"],
+  },
+  bottom: {
+    shoulders: [
+      { at: { bottom: 0, left: 0 }, circle: "0% 0%" },
+      { at: { bottom: 0, right: 0 }, circle: "100% 0%" },
+    ],
+    body: { top: 0, bottom: 0, left: SHOULDER, right: SHOULDER },
+    round: ["borderTopLeftRadius", "borderTopRightRadius"],
+  },
+  left: {
+    shoulders: [
+      { at: { top: 0, left: 0 }, circle: "100% 0%" },
+      { at: { bottom: 0, left: 0 }, circle: "100% 100%" },
+    ],
+    body: { top: SHOULDER, bottom: SHOULDER, left: 0, right: 0 },
+    round: ["borderTopRightRadius", "borderBottomRightRadius"],
+  },
+  right: {
+    shoulders: [
+      { at: { top: 0, right: 0 }, circle: "0% 0%" },
+      { at: { bottom: 0, right: 0 }, circle: "0% 100%" },
+    ],
+    body: { top: SHOULDER, bottom: SHOULDER, left: 0, right: 0 },
+    round: ["borderTopLeftRadius", "borderBottomLeftRadius"],
+  },
+} as const;
+
 function NotchBody({ shape, transition }: { shape: NotchShape; transition: Transition }) {
-  // The shoulders: a square of black with a quarter circle cut from its lower
-  // outer corner, so the shape flares into the screen's top edge.
-  const shoulder = (side: "left" | "right") => ({
-    [side]: 0,
-    width: SHOULDER,
-    height: SHOULDER,
-    background: `radial-gradient(circle at ${side === "left" ? "0%" : "100%"} 100%, transparent ${SHOULDER - 0.5}px, #000 ${SHOULDER}px)`,
-  });
+  // The shoulders: a square of black with a quarter circle cut from the
+  // corner away from the screen's edge, so the shape flares into that edge.
+  const layout = EDGE_LAYOUT[shape.edge];
+  const radii = Object.fromEntries(layout.round.map((corner) => [corner, shape.radius]));
   return (
     <>
-      <span aria-hidden className="absolute top-0 block" style={shoulder("left")} />
-      <span aria-hidden className="absolute top-0 block" style={shoulder("right")} />
+      {layout.shoulders.map(({ at, circle }) => (
+        <span
+          key={circle}
+          aria-hidden
+          className="absolute block"
+          style={{
+            ...at,
+            width: SHOULDER,
+            height: SHOULDER,
+            background: `radial-gradient(circle at ${circle}, transparent ${SHOULDER - 0.5}px, #000 ${SHOULDER}px)`,
+          }}
+        />
+      ))}
       <motion.div
         aria-hidden
-        className="absolute top-0 bg-black"
-        style={{ left: SHOULDER, right: SHOULDER }}
+        className="absolute bg-black"
+        style={layout.body}
         initial={false}
-        animate={{
-          height: shape.height,
-          borderBottomLeftRadius: shape.radius,
-          borderBottomRightRadius: shape.radius,
-        }}
+        animate={radii}
         transition={transition}
       />
     </>

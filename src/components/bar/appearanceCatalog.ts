@@ -33,7 +33,7 @@ const ALL_APPEARANCES: readonly AppearanceEntry[] = [
   {
     value: UI.BAR_APPEARANCES_NOTCH,
     name: "Notch",
-    descriptor: "Lives in the notch and opens downward. Drag it to a corner and it peels back like a page.",
+    descriptor: "Lives in the notch, or on any edge of the screen. In a corner it peels back like a page.",
   },
   {
     value: UI.BAR_APPEARANCES_APP,

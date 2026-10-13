@@ -137,9 +137,9 @@ pub mod bar_appearances {
     /// because "react_orb" above still belongs to the ring.
     pub const SHADER_ORB: &str = "shader_orb";
     pub const PERSONA: &str = "persona";
-    /// Lives in the MacBook notch, flush with the top of the display, and
-    /// becomes a page peeled back from the corner when dropped in a corner.
-    /// Its wells are the notch and the four corners only.
+    /// Lives in the MacBook notch, flush with the top of the display, or as
+    /// the same tab on any other edge; dropped in a corner it becomes a page
+    /// peeled back from the corner. It has no well in the middle of the screen.
     pub const NOTCH: &str = "notch";
 
     /// The look a new install (and a settings reset) starts on: the Pill, a

@@ -1,5 +1,13 @@
 import type { SteadySpec } from "@/lib/steadyFrame";
-import { CURL_REST, NOTCH_REST_WIDTH, type CurlCorner, type NotchForm } from "@/lib/notchWells";
+import {
+  CURL_REST,
+  EDGE_REST_DEPTH,
+  NOTCH_REST_WIDTH,
+  SIDE_REST_LENGTH,
+  type CurlCorner,
+  type NotchEdge,
+  type NotchForm,
+} from "@/lib/notchWells";
 import { ISLAND_SIZES, type IslandSize, type Posture } from "../island/islandModel";
 
 /**
@@ -7,9 +15,10 @@ import { ISLAND_SIZES, type IslandSize, type Posture } from "../island/islandMod
  *
  * The Notch says everything the Island says, with the Island's own posture
  * table (`islandModel.ts`): the same dot, the same words, the same card. What
- * changes is the body. In the notch the island's content hangs below the menu
- * bar strip, out from under the camera; in a corner it sits on the black of a
- * page peeled back from the corner, with the folded flap at its inner corner.
+ * changes is the body. In the top notch the island's content hangs below the
+ * menu bar strip, out from under the camera; on another edge it grows straight
+ * out of that edge; in a corner it sits on the black of a page peeled back
+ * from the corner, with the folded flap at its inner corner.
  *
  * Every size here is the shape the person sees; the steady frame places it
  * against the well's docked edges.
@@ -45,6 +54,8 @@ export const NOTCH_STEADY_SPEC: SteadySpec = {
 /** One frame of the body. */
 export interface NotchShape {
   form: NotchForm;
+  /** The edge a notch grows out of. Top for a curl (unused there). */
+  edge: NotchEdge;
   /** The whole footprint, shoulders and fold included. */
   width: number;
   height: number;
@@ -70,27 +81,15 @@ export function notchShape(
   size: IslandSize,
   strip: number,
   corner: CurlCorner = "top-left",
+  edge: NotchEdge = "top",
 ): NotchShape {
   const resting = posture === "capsule";
-  if (form === "notch") {
-    const body = resting ? NOTCH_REST_WIDTH - 2 * SHOULDER : Math.max(size.width, NOTCH_REST_WIDTH - 2 * SHOULDER);
-    const height = resting ? strip : strip + size.height;
-    return {
-      form,
-      width: body + 2 * SHOULDER,
-      height,
-      radius: resting ? NOTCH_REST_RADIUS : size.radius,
-      fold: 0,
-      // At rest the content is the strip itself: the dot sits in its ear.
-      content: resting
-        ? { top: 0, left: SHOULDER, width: body, height: strip }
-        : { top: strip, left: SHOULDER, width: body, height: size.height },
-    };
-  }
+  if (form === "notch") return edgeNotch(edge, resting, size, strip);
 
   if (resting) {
     return {
       form,
+      edge: "top",
       width: CURL_REST,
       height: CURL_REST,
       radius: 0,
@@ -107,6 +106,7 @@ export function notchShape(
   const height = pad + size.height + FOLD;
   return {
     form,
+    edge: "top",
     width: size.width,
     height,
     radius: size.radius,
@@ -116,16 +116,66 @@ export function notchShape(
 }
 
 /**
+ * A notch on one edge. The shoulders sit on the screen's edge, at either end
+ * of the shape; the far corners are round.
+ *
+ * Top: the menu bar strip comes first and the island hangs below it. Bottom:
+ * the island stands on the screen's bottom edge. Left and right: the island
+ * grows sideways out of the edge, with shoulders above and below it.
+ */
+function edgeNotch(edge: NotchEdge, resting: boolean, size: IslandSize, strip: number): NotchShape {
+  const radius = resting ? NOTCH_REST_RADIUS : size.radius;
+  if (edge === "top" || edge === "bottom") {
+    const minBody = NOTCH_REST_WIDTH - 2 * SHOULDER;
+    const body = resting ? minBody : Math.max(size.width, minBody);
+    const lead = edge === "top" ? strip : 0;
+    const depth = resting ? (edge === "top" ? strip : EDGE_REST_DEPTH) : lead + size.height;
+    return {
+      form: "notch",
+      edge,
+      width: body + 2 * SHOULDER,
+      height: depth,
+      radius,
+      fold: 0,
+      // At rest the content is the whole tab: the dot sits in it.
+      content: resting
+        ? { top: 0, left: SHOULDER, width: body, height: depth }
+        : { top: lead, left: SHOULDER, width: body, height: size.height },
+    };
+  }
+  // Open, the body is exactly the island's height: a side has no camera to
+  // clear, so nothing makes it longer than what it holds.
+  const body = resting ? SIDE_REST_LENGTH - 2 * SHOULDER : size.height;
+  const depth = resting ? EDGE_REST_DEPTH : size.width;
+  return {
+    form: "notch",
+    edge,
+    width: depth,
+    height: body + 2 * SHOULDER,
+    radius,
+    fold: 0,
+    content: { top: SHOULDER, left: 0, width: depth, height: body },
+  };
+}
+
+/**
  * Where the resting dot sits inside the resting shape.
  *
- * In the notch it is in the right-hand ear, clear of the camera; in a curl it
- * is in the black triangle, close to the screen's corner.
+ * In the top notch it is in the right-hand ear, clear of the camera; on any
+ * other edge in the middle of the tab; in a curl it is in the black triangle,
+ * close to the screen's corner.
  */
 export function restingDotPlacement(
   form: NotchForm,
   corner: CurlCorner,
+  edge: NotchEdge = "top",
 ): { justify: "start" | "end" | "center"; align: "start" | "end" | "center"; inset: number } {
-  if (form === "notch") return { justify: "end", align: "center", inset: 8 };
+  // Under the camera the dot moves to the ear; any other edge has no camera.
+  if (form === "notch") {
+    return edge === "top"
+      ? { justify: "end", align: "center", inset: 8 }
+      : { justify: "center", align: "center", inset: 0 };
+  }
   return {
     justify: corner.endsWith("left") ? "start" : "end",
     align: corner.startsWith("top") ? "start" : "end",

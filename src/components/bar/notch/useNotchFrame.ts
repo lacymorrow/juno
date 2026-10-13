@@ -8,8 +8,10 @@ import {
   FALLBACK_MENU_BAR,
   curlCornerFor,
   menuBarHeight,
+  notchEdgeFor,
   notchFormFor,
   type CurlCorner,
+  type NotchEdge,
   type NotchForm,
 } from "@/lib/notchWells";
 import { nearestWell, wellForSlot, type Well } from "@/lib/snapWells";
@@ -45,6 +47,8 @@ export interface NotchFrame {
   hidden: boolean;
   form: NotchForm;
   corner: CurlCorner;
+  /** The edge a notch grows out of. */
+  edge: NotchEdge;
   /** The menu bar strip on the well's display, in points. */
   strip: number;
   /** CSS for the block pinned to the well's docked edges. */
@@ -56,7 +60,7 @@ export interface NotchFrame {
 }
 
 /**
- * The Notch's window: the steady frame, in the Notch's five flush wells.
+ * The Notch's window: the steady frame, in the Notch's flush edge wells.
  *
  * Same contract as the Pill (`lib/steadyFrame.ts`): the window is sized once
  * for the largest shape and placed once per well; every state is a CSS change
@@ -199,6 +203,7 @@ export function useNotchFrame(enabled: boolean): NotchFrame {
     hidden: steady?.hidden ?? false,
     form: notchFormFor(layout.slot),
     corner: curlCornerFor(layout.slot),
+    edge: notchEdgeFor(layout.slot),
     strip,
     placement: contentPlacement(layout),
     region,
