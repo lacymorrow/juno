@@ -542,7 +542,7 @@ impl VoiceController {
         // The microphone, built before the press and waiting. Starting it
         // takes milliseconds; resolving and building one took up to three
         // seconds while the person was already talking.
-        if let Some(warm) = devices::claim_warm_input(preferred.as_deref()) {
+        if let Some(warm) = devices::claim_warm_input(preferred.as_ref()) {
             let actual_rate = warm.sample_rate();
             let channels = warm.channels();
             self.set_recording_rate(actual_rate);
@@ -559,7 +559,7 @@ impl VoiceController {
         // standing in for one that was unplugged. A failure here is a sentence
         // the UI can show, which is why it comes from `CaptureStartFailure`
         // rather than being written out again.
-        let resolved = devices::resolve_input_device(preferred.as_deref())
+        let resolved = devices::resolve_input_device(preferred.as_ref())
             .map_err(|failure| Error::AudioDevice(failure.message()))?;
         if let Some(requested) = &resolved.substituted_for {
             tracing::warn!(

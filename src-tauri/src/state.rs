@@ -263,9 +263,9 @@ impl ToolApprovalRequest {
 #[derive(Clone, Debug)]
 pub struct AudioSettings {
     pub tts_provider: String,
-    /// The speaker Juno's own voice plays through, by name. `None` follows the
-    /// system. See `settings::AudioSettings::output_device`.
-    pub output_device: Option<String>,
+    /// The speaker Juno's own voice plays through. `None` follows the system.
+    /// See `settings::AudioSettings::output_device`.
+    pub output_device: Option<tauri_plugin_voice_transcription::DeviceChoice>,
     /// Which macOS voice speaks as Juno, by `say -v` name. `None` means the
     /// voice the Mac is already set to use.
     pub system_voice: Option<String>,
@@ -644,14 +644,19 @@ impl AppState {
     }
 
     /// The speaker Juno's voice plays through, or `None` for the system's.
-    pub fn get_output_device(&self) -> Result<Option<String>, String> {
+    pub fn get_output_device(
+        &self,
+    ) -> Result<Option<tauri_plugin_voice_transcription::DeviceChoice>, String> {
         self.audio_settings
             .lock()
             .map(|settings| settings.output_device.clone())
             .map_err(|e| format_error(templates::FAILED_TO_RETRIEVE, "output device", e))
     }
 
-    pub fn set_output_device(&self, device: Option<String>) -> Result<(), String> {
+    pub fn set_output_device(
+        &self,
+        device: Option<tauri_plugin_voice_transcription::DeviceChoice>,
+    ) -> Result<(), String> {
         self.audio_settings
             .lock()
             .map(|mut settings| settings.output_device = device)

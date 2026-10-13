@@ -8188,6 +8188,7 @@ dependencies = [
  "chrono",
  "cocoa 0.25.0",
  "cocoa-foundation 0.1.2",
+ "core-foundation 0.10.1",
  "coreaudio-rs",
  "cpal",
  "crossbeam-channel",

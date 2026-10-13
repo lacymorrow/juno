@@ -1092,7 +1092,7 @@ pub async fn speak_prerendered(
     let result = match audio {
         prerender::Prerendered::Pcm { samples, rate } => {
             let device = state.get_output_device().ok().flatten();
-            match pcm_player::play_pcm(&samples, rate, device.as_deref()).await {
+            match pcm_player::play_pcm(&samples, rate, device.as_ref()).await {
                 pcm_player::Spoken::Status(status) => Ok(status.to_string()),
                 pcm_player::Spoken::Unplayable(reason) => Err(reason),
             }
@@ -1849,10 +1849,11 @@ pub async fn invoke_tts_for_provider(
             if !mac_voice_allowed_logged().await {
                 return Err("the System Voice is not a Siri voice".to_string());
             }
-            let device = _state
+            let chosen = _state
                 .as_ref()
                 .and_then(|s| s.get_output_device().ok())
                 .flatten();
+            let device = crate::commands::audio_devices::say_device_argument(chosen.as_ref());
             let words_per_minute = rate::effective("system", stored_rate(_state.as_ref()))
                 .and_then(rate::say_words_per_minute);
             system::speak_with_say(text, device, words_per_minute).await

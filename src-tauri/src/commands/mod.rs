@@ -200,7 +200,7 @@ pub async fn load_audio_settings_from_centralized_settings(
     let settings_manager = SettingsManager::new(app_handle.clone())
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    let audio_settings = settings_manager
+    let mut audio_settings = settings_manager
         .get_audio_settings()
         .await
         .map_err(|e| format!("Failed to get audio settings: {}", e))?;
@@ -258,10 +258,17 @@ pub async fn load_audio_settings_from_centralized_settings(
     // so the microphone choice is handed to it here. This is the only place it
     // is told, which is why a device picked in Audio settings also calls
     // `set_preferred_input_device` directly.
+    crate::commands::audio_devices::convert_legacy_device_names_at_startup(
+        app_handle,
+        &mut audio_settings,
+    )
+    .await;
     tauri_plugin_voice_transcription::set_preferred_input_device(
-        audio_settings.input_device.clone(),
+        crate::commands::audio_devices::input_choice(&audio_settings),
     );
-    let _ = state.set_output_device(audio_settings.output_device.clone());
+    let _ = state.set_output_device(crate::commands::audio_devices::output_choice(
+        &audio_settings,
+    ));
 
     // Juno's voice, resolved and in force before anything can speak in it,
     // and the local model warming in the background if Kokoro is the engine.
@@ -305,8 +312,9 @@ pub async fn save_audio_settings_to_centralized_settings(
         audio_settings.always_listening_active = always_listening_active;
     }
 
-    if let Ok(output_device) = state.get_output_device() {
-        audio_settings.output_device = output_device;
+    if let Ok(output_choice) = state.get_output_device() {
+        audio_settings.output_device = output_choice.as_ref().map(|c| c.name.clone());
+        audio_settings.output_device_uid = output_choice.and_then(|c| c.uid);
     }
 
     if let Ok(always_listening_sensitivity) = state.get_always_listening_sensitivity() {

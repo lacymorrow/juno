@@ -1,13 +1,16 @@
 //! Which microphone Juno listens on.
 //!
-//! cpal identifies a device by its name, so the name is also the stored
-//! choice. The person's choice lives here rather than in the controllers
-//! because both capture paths (dictation and always-listening) need it, and
-//! both read it on the worker thread at the moment they open the stream. That
-//! is the only moment it matters: a device unplugged between sessions is
-//! noticed on the next one, not remembered as broken.
+//! A microphone is identified by its CoreAudio UID (see [`crate::device_identity`]),
+//! never by its display name: two microphones can share a name, and a name can
+//! change. The name travels along only to be shown. The person's choice lives
+//! here rather than in the controllers because both capture paths (dictation
+//! and always-listening) need it, and both read it on the worker thread at the
+//! moment they open the stream. That is the only moment it matters: a device
+//! unplugged between sessions is noticed on the next one, not remembered as
+//! broken.
 
 use crate::capture_failure::CaptureStartFailure;
+use crate::device_identity::{device_ref, device_uid, DeviceChoice, DeviceRef};
 use crate::utils::{downmix_f32_to_mono, downmix_i16_to_mono};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
@@ -20,26 +23,41 @@ use std::sync::{Arc, Mutex, OnceLock};
 /// One microphone, as the settings window lists it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AudioDeviceInfo {
-    /// The device name, which is also its id.
+    /// The CoreAudio UID: what a choice is stored and matched by.
+    pub id: String,
+    /// What the person sees. Display only.
     pub name: String,
     /// True for the one macOS would choose on its own.
     pub is_default: bool,
+}
+
+impl AudioDeviceInfo {
+    /// The device, without the flag.
+    pub fn device_ref(&self) -> DeviceRef {
+        DeviceRef {
+            id: self.id.clone(),
+            name: self.name.clone(),
+        }
+    }
 }
 
 /// The microphone the person picked, or `None` for "whatever macOS is using".
 ///
 /// A plain `None` default matters: an install that has never opened Audio
 /// settings follows the system, which is what it did before this existed.
-static PREFERRED_INPUT: Mutex<Option<String>> = Mutex::new(None);
+static PREFERRED_INPUT: Mutex<Option<DeviceChoice>> = Mutex::new(None);
 
 /// Remember the microphone the person picked. `None` means follow the system.
-pub fn set_preferred_input_device(name: Option<String>) {
-    let cleaned = name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+pub fn set_preferred_input_device(choice: Option<DeviceChoice>) {
+    let cleaned = choice.and_then(DeviceChoice::cleaned);
     match PREFERRED_INPUT.lock() {
         Ok(mut preferred) => {
             tracing::info!(
                 "[VoiceDevices] Microphone preference set to {}",
-                cleaned.as_deref().unwrap_or("the system default")
+                cleaned
+                    .as_ref()
+                    .map(DeviceChoice::label)
+                    .unwrap_or_else(|| "the system default".to_string())
             );
             *preferred = cleaned;
         }
@@ -50,7 +68,7 @@ pub fn set_preferred_input_device(name: Option<String>) {
 }
 
 /// The microphone the person picked, if any.
-pub fn preferred_input_device() -> Option<String> {
+pub fn preferred_input_device() -> Option<DeviceChoice> {
     match PREFERRED_INPUT.lock() {
         Ok(preferred) => preferred.clone(),
         Err(e) => {
@@ -66,7 +84,7 @@ pub fn preferred_input_device() -> Option<String> {
 /// microphone access and makes no sound.
 pub fn list_input_devices() -> Vec<AudioDeviceInfo> {
     let host = cpal::default_host();
-    let default_name = host.default_input_device().and_then(|d| d.name().ok());
+    let default_id = host.default_input_device().map(|d| device_uid(&d));
     let Ok(devices) = host.input_devices() else {
         tracing::warn!("[VoiceDevices] The system would not list input devices");
         return Vec::new();
@@ -75,12 +93,19 @@ pub fn list_input_devices() -> Vec<AudioDeviceInfo> {
     let mut listed = Vec::new();
     let mut seen = HashSet::new();
     for device in devices {
-        let Ok(name) = device.name() else { continue };
-        if !seen.insert(name.clone()) {
+        let Some(found) = device_ref(&device) else {
+            continue;
+        };
+        // By identity, so two microphones that share a name are both offered.
+        if !seen.insert(found.id.clone()) {
             continue;
         }
-        let is_default = default_name.as_deref() == Some(name.as_str());
-        listed.push(AudioDeviceInfo { name, is_default });
+        let is_default = default_id.as_deref() == Some(found.id.as_str());
+        listed.push(AudioDeviceInfo {
+            id: found.id,
+            name: found.name,
+            is_default,
+        });
     }
     listed
 }
@@ -88,10 +113,13 @@ pub fn list_input_devices() -> Vec<AudioDeviceInfo> {
 /// What listening settled on, which is not always what was asked for.
 pub struct ResolvedInput {
     pub device: cpal::Device,
-    /// The device actually opened.
+    /// The UID of the device actually opened.
+    pub id: String,
+    /// The name of the device actually opened.
     pub name: String,
     /// Set when the chosen device was not there and the system default stood
-    /// in for it. Unplugged headphones must not brick dictation.
+    /// in for it, as the name the person chose it by. Unplugged headphones
+    /// must not brick dictation.
     pub substituted_for: Option<String>,
 }
 
@@ -99,13 +127,18 @@ pub struct ResolvedInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum InputChoice {
     /// The device the person picked, and it is here.
-    Chosen(String),
+    Chosen(DeviceRef),
     /// The chosen device is gone; this is the system default standing in.
-    Substituted { requested: String, used: String },
+    Substituted { requested: String, used: DeviceRef },
     /// No preference, so whatever macOS is using.
-    SystemDefault(String),
+    SystemDefault(DeviceRef),
     /// Nothing to listen on.
     Nothing { requested: Option<String> },
+}
+
+/// A choice that names something. A stored blank is the same as no choice.
+fn named(choice: Option<&DeviceChoice>) -> Option<&DeviceChoice> {
+    choice.filter(|w| w.uid.is_some() || !w.name.trim().is_empty())
 }
 
 /// Which microphone to open, given the preference, what is plugged in, and
@@ -114,31 +147,29 @@ pub(crate) enum InputChoice {
 /// Pure, because the fallback is the part that matters and it must be provable
 /// without a microphone.
 pub(crate) fn choose_input(
-    preferred: Option<&str>,
-    available: &[String],
-    system_default: Option<&str>,
+    preferred: Option<&DeviceChoice>,
+    available: &[DeviceRef],
+    system_default: Option<&DeviceRef>,
 ) -> InputChoice {
-    let wanted = preferred.map(str::trim).filter(|w| !w.is_empty());
-
-    if let Some(wanted) = wanted {
-        if available.iter().any(|name| name == wanted) {
-            return InputChoice::Chosen(wanted.to_string());
+    if let Some(wanted) = named(preferred) {
+        if let Some(found) = available.iter().find(|device| wanted.matches(device)) {
+            return InputChoice::Chosen(found.clone());
         }
         // The chosen device went away. Fall back rather than refusing to
         // listen, and remember what was asked for so the person is told.
-        return match system_default.filter(|d| !d.is_empty()) {
+        return match system_default {
             Some(default) => InputChoice::Substituted {
-                requested: wanted.to_string(),
-                used: default.to_string(),
+                requested: wanted.label(),
+                used: default.clone(),
             },
             None => InputChoice::Nothing {
-                requested: Some(wanted.to_string()),
+                requested: Some(wanted.label()),
             },
         };
     }
 
-    match system_default.filter(|d| !d.is_empty()) {
-        Some(default) => InputChoice::SystemDefault(default.to_string()),
+    match system_default {
+        Some(default) => InputChoice::SystemDefault(default.clone()),
         None => InputChoice::Nothing { requested: None },
     }
 }
@@ -147,16 +178,19 @@ pub(crate) fn choose_input(
 /// still openable, so refusing to listen over a missing string would be worse.
 const UNNAMED_DEVICE: &str = "your microphone";
 
-/// Pull a device out of the enumerated list by name.
-fn take_device(present: &mut Vec<(String, cpal::Device)>, wanted: &str) -> Option<cpal::Device> {
+/// A device paired with the handle that opens it.
+type Handle = (DeviceRef, cpal::Device);
+
+/// Pull a device out of the enumerated list by identity.
+fn take_device(present: &mut Vec<Handle>, wanted_id: &str) -> Option<Handle> {
     present
         .iter()
-        .position(|(name, _)| name == wanted)
-        .map(|index| present.remove(index).1)
+        .position(|(found, _)| found.id == wanted_id)
+        .map(|index| present.remove(index))
 }
 
-/// The handle to open for `wanted`: cpal's own default-device handle when
-/// `wanted` is the system default, the enumerated one otherwise.
+/// The handle to open for `wanted_id`: cpal's own default-device handle when
+/// it is the system default, the enumerated one otherwise.
 ///
 /// Which handle matters. cpal 0.15 on macOS gives a stream opened from an
 /// enumerated device (`is_default: false`) a disconnect listener that holds a
@@ -165,92 +199,95 @@ fn take_device(present: &mut Vec<(String, cpal::Device)>, wanted: &str) -> Optio
 /// freed when dropped. [`LiveInput`] stops the device either way; this keeps
 /// the common case from also leaking the stopped audio unit.
 fn take_for_opening(
-    present: &mut Vec<(String, cpal::Device)>,
-    default: &mut Option<(String, cpal::Device)>,
-    wanted: &str,
-) -> Option<cpal::Device> {
-    if default.as_ref().is_some_and(|(name, _)| name == wanted) {
-        return default.take().map(|(_, device)| device);
+    present: &mut Vec<Handle>,
+    default: &mut Option<Handle>,
+    wanted_id: &str,
+) -> Option<Handle> {
+    if default
+        .as_ref()
+        .is_some_and(|(found, _)| found.id == wanted_id)
+    {
+        return default.take();
     }
-    take_device(present, wanted)
+    take_device(present, wanted_id)
+}
+
+fn resolved(handle: Handle, substituted_for: Option<String>) -> ResolvedInput {
+    let (found, device) = handle;
+    ResolvedInput {
+        device,
+        id: found.id,
+        name: found.name,
+        substituted_for,
+    }
 }
 
 /// Open the microphone Juno should listen on.
 pub fn resolve_input_device(
-    preferred: Option<&str>,
+    preferred: Option<&DeviceChoice>,
 ) -> std::result::Result<ResolvedInput, CaptureStartFailure> {
     let host = cpal::default_host();
 
     // A device whose name the system will not give us is still openable, so
     // it gets a label rather than being treated as absent.
-    let mut default = host.default_input_device().map(|d| {
+    let mut default: Option<Handle> = host.default_input_device().map(|d| {
         let name = d.name().unwrap_or_else(|_| UNNAMED_DEVICE.to_string());
-        (name, d)
+        (
+            DeviceRef {
+                id: device_uid(&d),
+                name,
+            },
+            d,
+        )
     });
 
     // Following the system, or the choice is the system's own microphone: no
     // list needed. Listing asks every device on the Mac, virtual drivers
     // included, for its formats, and that took up to three seconds a press
     // while the person was already talking.
-    let wanted = preferred.map(str::trim).filter(|w| !w.is_empty());
-    if let Some((name, device)) =
-        default.take_if(|(name, _)| wanted.is_none_or(|w| w == name.as_str()))
-    {
-        return Ok(ResolvedInput {
-            device,
-            name,
-            substituted_for: None,
-        });
+    let wanted = named(preferred);
+    if let Some(handle) = default.take_if(|(found, _)| wanted.is_none_or(|w| w.matches(found))) {
+        return Ok(resolved(handle, None));
     }
 
-    let mut present: Vec<(String, cpal::Device)> = Vec::new();
+    let mut present: Vec<Handle> = Vec::new();
     if let Ok(devices) = host.input_devices() {
         for device in devices {
-            if let Ok(name) = device.name() {
-                present.push((name, device));
+            if let Some(found) = device_ref(&device) {
+                present.push((found, device));
             }
         }
     }
-    let default_name = default.as_ref().map(|(name, _)| name.clone());
-    let names: Vec<String> = present.iter().map(|(name, _)| name.clone()).collect();
+    let default_ref = default.as_ref().map(|(found, _)| found.clone());
+    let refs: Vec<DeviceRef> = present.iter().map(|(found, _)| found.clone()).collect();
 
-    match choose_input(preferred, &names, default_name.as_deref()) {
-        InputChoice::Chosen(name) => {
-            let device = take_for_opening(&mut present, &mut default, &name).ok_or_else(|| {
-                CaptureStartFailure::ChosenDeviceGone {
-                    requested: name.clone(),
-                }
-            })?;
-            Ok(ResolvedInput {
-                device,
-                name,
-                substituted_for: None,
-            })
+    match choose_input(preferred, &refs, default_ref.as_ref()) {
+        InputChoice::Chosen(chosen) => {
+            let handle =
+                take_for_opening(&mut present, &mut default, &chosen.id).ok_or_else(|| {
+                    CaptureStartFailure::ChosenDeviceGone {
+                        requested: chosen.name.clone(),
+                    }
+                })?;
+            Ok(resolved(handle, None))
         }
         InputChoice::Substituted { requested, used } => {
-            let device = take_for_opening(&mut present, &mut default, &used)
-                .or_else(|| default.take().map(|(_, device)| device))
+            let handle = take_for_opening(&mut present, &mut default, &used.id)
+                .or_else(|| default.take())
                 .ok_or_else(|| CaptureStartFailure::ChosenDeviceGone {
                     requested: requested.clone(),
                 })?;
             tracing::warn!(
-                "[VoiceDevices] {requested} is not connected; listening on {used} instead"
+                "[VoiceDevices] {requested} is not connected; listening on {} instead",
+                used.name
             );
-            Ok(ResolvedInput {
-                device,
-                name: used,
-                substituted_for: Some(requested),
-            })
+            Ok(resolved(handle, Some(requested)))
         }
-        InputChoice::SystemDefault(name) => {
-            let device = take_for_opening(&mut present, &mut default, &name)
-                .or_else(|| default.take().map(|(_, device)| device))
+        InputChoice::SystemDefault(system) => {
+            let handle = take_for_opening(&mut present, &mut default, &system.id)
+                .or_else(|| default.take())
                 .ok_or(CaptureStartFailure::NoInputDevice)?;
-            Ok(ResolvedInput {
-                device,
-                name,
-                substituted_for: None,
-            })
+            Ok(resolved(handle, None))
         }
         InputChoice::Nothing { requested } => Err(match requested {
             Some(requested) => CaptureStartFailure::ChosenDeviceGone { requested },
@@ -503,6 +540,9 @@ unsafe impl Send for SendStream {}
 /// is stopped and waits again.
 pub struct WarmInput {
     device: cpal::Device,
+    /// The device's UID, which is what "is this the microphone wanted" is
+    /// decided on.
+    id: String,
     name: String,
     config: cpal::StreamConfig,
     sample_format: SampleFormat,
@@ -521,6 +561,13 @@ static WARM_INPUT: Mutex<Option<WarmInput>> = Mutex::new(None);
 impl WarmInput {
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    fn device_ref(&self) -> DeviceRef {
+        DeviceRef {
+            id: self.id.clone(),
+            name: self.name.clone(),
+        }
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -636,7 +683,7 @@ fn put_back(warm: WarmInput) {
 /// Cheap on purpose: a few property reads on one device, never the device
 /// list. Anything that does not match is dropped, this press opens the device
 /// itself, and a fresh one is built for the next.
-pub fn claim_warm_input(preferred: Option<&str>) -> Option<WarmInput> {
+pub fn claim_warm_input(preferred: Option<&DeviceChoice>) -> Option<WarmInput> {
     let warm = WARM_INPUT.lock().ok()?.take();
     let Some(warm) = warm else {
         tracing::info!("[VoiceDevices] No microphone was ready for this press");
@@ -650,8 +697,8 @@ pub fn claim_warm_input(preferred: Option<&str>) -> Option<WarmInput> {
 
     // Following the system means the device macOS has as its default right
     // now, compared by CoreAudio id: two microphones can share a name.
-    let wanted = match preferred.map(str::trim).filter(|w| !w.is_empty()) {
-        Some(wanted) => warm.name == wanted,
+    let wanted = match named(preferred) {
+        Some(wanted) => wanted.matches(&warm.device_ref()),
         None => cpal::default_host()
             .default_input_device()
             .is_some_and(|current| watch::same_device(&current, &warm.device)),
@@ -704,6 +751,7 @@ fn build_warm(
 
     Ok(WarmInput {
         _rate_watch: watch::RateWatch::new(&device),
+        id: device_uid(&device),
         device,
         name: device_name,
         config,
@@ -779,7 +827,7 @@ fn ensure_warm() {
     }
 
     let began = std::time::Instant::now();
-    let resolved = match resolve_input_device(preferred_input_device().as_deref()) {
+    let resolved = match resolve_input_device(preferred_input_device().as_ref()) {
         Ok(resolved) => resolved,
         Err(failure) => {
             tracing::info!("[VoiceDevices] Nothing to get ready: {}", failure.message());
@@ -792,7 +840,7 @@ fn ensure_warm() {
 
     if let Ok(slot) = WARM_INPUT.lock() {
         if let Some(waiting) = slot.as_ref() {
-            if waiting.name == resolved.name
+            if waiting.id == resolved.id
                 && watch::same_device(&waiting.device, &resolved.device)
                 && !waiting.broken.load(Ordering::SeqCst)
                 && waiting.rate_is_current()
@@ -882,8 +930,7 @@ mod watch {
     }
 
     fn device_id(device: &cpal::Device) -> AudioObjectID {
-        let cpal::platform::DeviceInner::CoreAudio(device) = device.as_inner();
-        device.audio_device_id()
+        crate::device_identity::object_id(device)
     }
 
     /// The same physical device. Names are not enough: two microphones can
@@ -937,15 +984,15 @@ mod watch {
 pub fn effective_input_device_name() -> Option<String> {
     let preferred = preferred_input_device();
     let listed = list_input_devices();
-    let names: Vec<String> = listed.iter().map(|d| d.name.clone()).collect();
-    let default_name = listed
+    let available: Vec<DeviceRef> = listed.iter().map(AudioDeviceInfo::device_ref).collect();
+    let default = listed
         .iter()
         .find(|d| d.is_default)
-        .map(|d| d.name.as_str());
-    match choose_input(preferred.as_deref(), &names, default_name) {
-        InputChoice::Chosen(name) => Some(name),
-        InputChoice::Substituted { used, .. } => Some(used),
-        InputChoice::SystemDefault(name) => Some(name),
+        .map(AudioDeviceInfo::device_ref);
+    match choose_input(preferred.as_ref(), &available, default.as_ref()) {
+        InputChoice::Chosen(device) => Some(device.name),
+        InputChoice::Substituted { used, .. } => Some(used.name),
+        InputChoice::SystemDefault(device) => Some(device.name),
         InputChoice::Nothing { .. } => None,
     }
 }
@@ -1033,46 +1080,113 @@ mod live_input_tests {
 #[cfg(test)]
 mod tests {
     use super::{choose_input, InputChoice, UNNAMED_DEVICE};
+    use crate::device_identity::{DeviceChoice, DeviceRef};
 
-    fn devices() -> Vec<String> {
+    fn dev(id: &str, name: &str) -> DeviceRef {
+        DeviceRef {
+            id: id.to_string(),
+            name: name.to_string(),
+        }
+    }
+
+    fn devices() -> Vec<DeviceRef> {
         vec![
-            "MacBook Air Microphone".to_string(),
-            "Shure MV7".to_string(),
+            dev("uid-builtin", "MacBook Air Microphone"),
+            dev("uid-shure", "Shure MV7"),
         ]
+    }
+
+    fn picked(uid: &str, name: &str) -> DeviceChoice {
+        DeviceChoice {
+            uid: Some(uid.to_string()),
+            name: name.to_string(),
+        }
     }
 
     #[test]
     fn no_preference_follows_the_system() {
+        let all = devices();
         assert_eq!(
-            choose_input(None, &devices(), Some("MacBook Air Microphone")),
-            InputChoice::SystemDefault("MacBook Air Microphone".to_string())
+            choose_input(None, &all, Some(&all[0])),
+            InputChoice::SystemDefault(all[0].clone())
         );
     }
 
     #[test]
     fn a_connected_choice_is_honoured() {
+        let all = devices();
         assert_eq!(
-            choose_input(
-                Some("Shure MV7"),
-                &devices(),
-                Some("MacBook Air Microphone")
-            ),
-            InputChoice::Chosen("Shure MV7".to_string())
+            choose_input(Some(&picked("uid-shure", "Shure MV7")), &all, Some(&all[0])),
+            InputChoice::Chosen(all[1].clone())
+        );
+    }
+
+    /// The choice follows the UID, so a renamed device is still the one picked.
+    #[test]
+    fn a_renamed_device_is_still_the_choice() {
+        let all = devices();
+        assert_eq!(
+            choose_input(Some(&picked("uid-shure", "Old Name")), &all, Some(&all[0])),
+            InputChoice::Chosen(all[1].clone())
+        );
+    }
+
+    /// Two microphones with one name: the UID says which.
+    #[test]
+    fn two_devices_sharing_a_name_resolve_by_uid() {
+        let twins = vec![
+            dev("uid-usb-1", "USB Microphone"),
+            dev("uid-usb-2", "USB Microphone"),
+        ];
+        for index in 0..2 {
+            let choice = picked(&twins[index].id, "USB Microphone");
+            assert_eq!(
+                choose_input(Some(&choice), &twins, Some(&twins[0])),
+                InputChoice::Chosen(twins[index].clone())
+            );
+        }
+    }
+
+    /// A device with the right name but another UID is not the choice.
+    #[test]
+    fn a_matching_name_is_not_enough_once_a_uid_is_stored() {
+        let all = devices();
+        assert_eq!(
+            choose_input(Some(&picked("uid-gone", "Shure MV7")), &all, Some(&all[0])),
+            InputChoice::Substituted {
+                requested: "Shure MV7".to_string(),
+                used: all[0].clone(),
+            }
+        );
+    }
+
+    /// A choice saved by an older build has a name and no UID.
+    #[test]
+    fn a_legacy_name_choice_still_resolves() {
+        let all = devices();
+        let legacy = DeviceChoice {
+            uid: None,
+            name: "Shure MV7".to_string(),
+        };
+        assert_eq!(
+            choose_input(Some(&legacy), &all, Some(&all[0])),
+            InputChoice::Chosen(all[1].clone())
         );
     }
 
     /// Unplugging the headphones must not brick dictation.
     #[test]
     fn a_vanished_choice_falls_back_to_the_system_default() {
+        let all = devices();
         assert_eq!(
             choose_input(
-                Some("AirPods Pro"),
-                &devices(),
-                Some("MacBook Air Microphone")
+                Some(&picked("uid-airpods", "AirPods Pro")),
+                &all,
+                Some(&all[0])
             ),
             InputChoice::Substituted {
                 requested: "AirPods Pro".to_string(),
-                used: "MacBook Air Microphone".to_string(),
+                used: all[0].clone(),
             }
         );
     }
@@ -1080,7 +1194,7 @@ mod tests {
     #[test]
     fn a_vanished_choice_with_nothing_left_is_a_failure() {
         assert_eq!(
-            choose_input(Some("AirPods Pro"), &[], None),
+            choose_input(Some(&picked("uid-airpods", "AirPods Pro")), &[], None),
             InputChoice::Nothing {
                 requested: Some("AirPods Pro".to_string())
             }
@@ -1095,14 +1209,19 @@ mod tests {
         );
     }
 
-    /// A stored empty string is the same as no preference, not a device named
-    /// "". Settings files written by hand have both.
+    /// A stored blank is the same as no preference, not a device named "".
+    /// Settings files written by hand have both.
     #[test]
     fn a_blank_preference_is_no_preference() {
+        let all = devices();
         for blank in ["", "   "] {
+            let choice = DeviceChoice {
+                uid: None,
+                name: blank.to_string(),
+            };
             assert_eq!(
-                choose_input(Some(blank), &devices(), Some("Shure MV7")),
-                InputChoice::SystemDefault("Shure MV7".to_string()),
+                choose_input(Some(&choice), &all, Some(&all[1])),
+                InputChoice::SystemDefault(all[1].clone()),
                 "{blank:?} should mean no preference"
             );
         }

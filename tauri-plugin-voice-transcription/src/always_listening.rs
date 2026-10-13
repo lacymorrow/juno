@@ -194,7 +194,7 @@ impl Drop for CaptureGuard {
 fn open_capture_stream(
     audio_data_tx: Sender<Vec<f32>>,
 ) -> std::result::Result<OpenCapture, CaptureStartFailure> {
-    let resolved = devices::resolve_input_device(devices::preferred_input_device().as_deref())?;
+    let resolved = devices::resolve_input_device(devices::preferred_input_device().as_ref())?;
 
     let supported = resolved.device.default_input_config().map_err(|e| {
         CaptureStartFailure::DeviceConfigUnavailable {
