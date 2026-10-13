@@ -311,13 +311,14 @@ export default function ModelsSettings() {
                 {changed && (
                   <p className="flex items-center justify-between gap-2">
                     <span>{changed.tier_name ?? changed.name} is now active.</span>
-                    <button
-                      type="button"
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={stt.dismissChange}
-                      className="text-[11px] hover:text-foreground"
+                      className="h-6 px-2 text-[11px]"
                     >
                       OK
-                    </button>
+                    </Button>
                   </p>
                 )}
                 {!stt.online && <p>No internet connection. Downloaded models still work.</p>}

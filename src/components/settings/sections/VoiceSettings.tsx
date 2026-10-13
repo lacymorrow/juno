@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -316,13 +317,9 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
             label="Juno is not listening"
             description={captureFailure.message}
           >
-            <button
-              type="button"
-              onClick={dismissCaptureFailure}
-              className="text-[12px] text-muted-foreground hover:text-foreground"
-            >
+            <Button variant="ghost" size="sm" onClick={dismissCaptureFailure}>
               Dismiss
-            </button>
+            </Button>
           </SettingsRow>
         )}
 

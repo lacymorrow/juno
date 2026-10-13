@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Toggle } from "@/components/ui/toggle";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -822,26 +824,18 @@ function TriggerRow({
       {isVoice && (
         <div className={cn("mt-3 space-y-2", !trigger.enabled && "opacity-55")}>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                onPatch(
-                  key,
-                  { require_hey_prefix: !trigger.require_hey_prefix },
-                  { immediate: true },
-                )
+            <Toggle
+              variant="outline"
+              size="sm"
+              pressed={trigger.require_hey_prefix}
+              onPressedChange={(pressed) =>
+                onPatch(key, { require_hey_prefix: pressed }, { immediate: true })
               }
-              aria-pressed={trigger.require_hey_prefix}
               aria-label="Require the “hey” prefix"
-              className={cn(
-                "shrink-0 rounded-md border px-2 py-1.5 font-mono text-[13px] transition-colors",
-                trigger.require_hey_prefix
-                  ? "border-[#00C7BE]/50 bg-[#00C7BE]/10 text-foreground"
-                  : "border-transparent text-muted-foreground/50 hover:text-muted-foreground",
-              )}
+              className="font-mono text-[13px] data-[state=off]:text-muted-foreground/60"
             >
               hey
-            </button>
+            </Toggle>
             <Input
               value={trigger.phrase ?? ""}
               onChange={(e) => onPatch(key, { phrase: e.target.value })}
@@ -892,23 +886,23 @@ function TriggerRow({
       {/* Binding editor (key methods, when open) */}
       {!isVoice && editing && (
         <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-2.5">
-          <div className="inline-flex rounded-md border p-0.5 text-[12px]">
-            {(["keyboard", "mouse"] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => onTabChange(tab)}
-                className={cn(
-                  "rounded px-2.5 py-1 font-medium transition-colors",
-                  bindingTab === tab
-                    ? "bg-background shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {tab === "keyboard" ? "Keyboard" : "Mouse"}
-              </button>
-            ))}
-          </div>
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            aria-label="Bind to"
+            value={bindingTab}
+            onValueChange={(tab) => {
+              if (tab) onTabChange(tab as "keyboard" | "mouse");
+            }}
+          >
+            <ToggleGroupItem value="keyboard" className="h-7 flex-none px-2.5 text-[12px]">
+              Keyboard
+            </ToggleGroupItem>
+            <ToggleGroupItem value="mouse" className="h-7 flex-none px-2.5 text-[12px]">
+              Mouse
+            </ToggleGroupItem>
+          </ToggleGroup>
 
           {bindingTab === "keyboard" ? (
             <div className="space-y-2">
@@ -959,13 +953,14 @@ function TriggerRow({
               stops being wrong. Both tabs, because a mouse button is a
               binding too. */}
           {trigger.binding && (
-            <button
-              type="button"
+            <Button
+              variant="link"
+              size="sm"
               onClick={() => void setBindingNow(null).catch(ignoreHandled)}
-              className="text-[12px] text-muted-foreground hover:text-foreground"
+              className="h-auto p-0 text-[12px] text-muted-foreground hover:text-foreground"
             >
               Remove binding
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -1027,8 +1022,8 @@ function GlobeKeyNote() {
       <Globe className="mt-[2px] size-3 shrink-0" aria-hidden />
       <span>
         macOS gives the globe key its own job by default. Set{" "}
-        <button
-          type="button"
+        <Button
+          variant="link"
           onClick={async () => {
             try {
               await invoke(COMMANDS.TRIGGERS_OPEN_KEYBOARD_SETTINGS);
@@ -1038,10 +1033,10 @@ function GlobeKeyNote() {
               setFailed(true);
             }
           }}
-          className="text-[#007AFF] underline-offset-2 hover:underline"
+          className="inline h-auto p-0 text-[12px] font-normal text-[#007AFF] dark:text-[#0A84FF]"
         >
           System Settings, Keyboard
-        </button>
+        </Button>
         , "Press globe key to" to "Do Nothing", or it will open the emoji picker
         every time you talk to Juno.
         {failed && (

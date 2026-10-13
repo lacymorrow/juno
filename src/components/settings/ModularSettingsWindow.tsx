@@ -1,7 +1,12 @@
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
 import { cn } from "@/lib/utils";
 import { useSystemTheme } from "@/hooks/useSystemTheme";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -12,6 +17,7 @@ import {
   Mic,
   Network,
   Search,
+  X,
   Settings,
   Shield,
   Terminal,
@@ -442,17 +448,38 @@ function SettingsWindowContent() {
 
           {/* Search */}
           <div className="px-3 pb-2">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
+            <InputGroup className="h-7 rounded-[7px] border-transparent bg-black/[0.04] shadow-none dark:bg-white/[0.06]">
+              <InputGroupAddon className="pl-2.5">
+                <Search className="size-3.5" />
+              </InputGroupAddon>
+              <InputGroupInput
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  // Escape clears first, like a macOS search field.
+                  if (e.key === "Escape" && query) {
+                    e.stopPropagation();
+                    setQuery("");
+                  }
+                }}
                 placeholder="Search"
                 aria-label="Search settings"
-                className="h-7 rounded-[7px] bg-black/[0.04] pl-8 text-[13px] shadow-none dark:bg-white/[0.06]"
+                className="h-7 text-[13px]"
               />
-            </div>
+              {query && (
+                <InputGroupAddon align="inline-end" className="pr-1.5">
+                  <InputGroupButton
+                    size="icon-xs"
+                    aria-label="Clear search"
+                    className="size-4 rounded-full bg-muted-foreground/40 text-background hover:bg-muted-foreground/60 hover:text-background"
+                    onClick={() => setQuery("")}
+                  >
+                    <X className="size-2.5" strokeWidth={3} />
+                  </InputGroupButton>
+                </InputGroupAddon>
+              )}
+            </InputGroup>
           </div>
 
           {/* Category list */}

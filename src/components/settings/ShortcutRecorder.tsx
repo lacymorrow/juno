@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Check } from "lucide-react";
@@ -232,18 +233,19 @@ export function ShortcutRecorder({
       </p>
 
       <div className="flex items-center gap-3 text-[12px]">
-        <button type="button" onClick={onCancel} className="text-muted-foreground hover:text-foreground">
+        <Button variant="link" size="sm" onClick={onCancel} className="h-auto p-0 text-[12px] text-muted-foreground hover:text-foreground">
           Cancel
-        </button>
+        </Button>
         {defaultShortcut && defaultShortcut !== value && (
-          <button
-            type="button"
+          <Button
+            variant="link"
+            size="sm"
             onClick={() => void commit(defaultShortcut)}
-            className="text-muted-foreground hover:text-foreground"
+            className="h-auto p-0 text-[12px] text-muted-foreground hover:text-foreground"
             title="No undo"
           >
             Reset to default
-          </button>
+          </Button>
         )}
       </div>
     </div>

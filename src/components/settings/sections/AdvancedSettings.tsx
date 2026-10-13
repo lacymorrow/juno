@@ -17,9 +17,9 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { COMMANDS } from "@/lib/constants.generated";
 import { useBetaFeatures } from "@/hooks/useBetaFeatures";
-import { cn } from "@/lib/utils";
 import type { MouseControlMode } from "@/lib/inputControl";
 import { AgentModeGroup } from "../AgentModeGroup";
 import { BuildGroup } from "../BuildGroup";
@@ -46,35 +46,29 @@ function SegmentedChoice<T extends string>({
   onChange: (next: T) => void;
 }) {
   return (
-    <div
+    <ToggleGroup
       id={id}
-      role="radiogroup"
+      type="single"
+      variant="outline"
+      size="sm"
       aria-label={label}
-      className="inline-flex items-center gap-0.5 rounded-[7px] border border-border bg-muted/40 p-0.5"
+      value={value}
+      disabled={disabled}
+      // A segmented control always has one choice; ignore the deselect.
+      onValueChange={(next) => {
+        if (next) onChange(next as T);
+      }}
     >
-      {options.map((option) => {
-        const selected = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            disabled={disabled}
-            onClick={() => onChange(option.value)}
-            className={cn(
-              "rounded-[5px] px-3 py-1 text-[12px] leading-tight transition-opacity duration-150",
-              "disabled:opacity-50",
-              selected
-                ? "bg-background font-medium text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
+      {options.map((option) => (
+        <ToggleGroupItem
+          key={option.value}
+          value={option.value}
+          className="h-7 flex-none px-3 text-[12px]"
+        >
+          {option.label}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
   );
 }
 
