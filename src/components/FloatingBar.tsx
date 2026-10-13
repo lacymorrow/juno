@@ -39,7 +39,7 @@ import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useEventListener } from "@/hooks/useEventListener";
-import { useEscapeToIdle } from "@/hooks/useEscapeToIdle";
+import { useEscapeToIdle, type ClimbTarget } from "@/hooks/useEscapeToIdle";
 import { BarFlameBorder } from "@/components/bar/BarFlameBorder";
 import { BAR_DEPTH_GLOW } from "@/components/bar/barAppearance";
 import { cn } from "@/lib/utils";
@@ -1690,6 +1690,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const reportEscape = useCallback(() => {
     void sendInteraction(createInteraction(UI.INTERACTION_TYPES_ESCAPE));
   }, [sendInteraction, createInteraction]);
+  // The Dock or tray icon: the text input, or the floating chat with the
+  // caret in it (an open pane keeps the composer up).
+  const climbLadder = useCallback(
+    (to: ClimbTarget) => {
+      if (to === "floating") reopenPane();
+      openInput();
+    },
+    [reopenPane, openInput],
+  );
   useEscapeToIdle({
     barState: currentUiState,
     working: isWorking,
@@ -1698,6 +1707,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     popupOpen: false,
     collapse: collapseToIdle,
     report: reportEscape,
+    climb: climbLadder,
   });
 
   // On launch the bar always lands in a well, never at an arbitrary spot.

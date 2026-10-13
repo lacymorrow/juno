@@ -39,24 +39,62 @@ pub enum LedgerTransition {
     Unchanged,
 }
 
+/// One user's claim on the stop key.
+#[derive(Debug, Clone, Copy)]
+struct Claim {
+    /// When the claim was first made. A re-assertion does not move it: this
+    /// is what orders "which started last" for Escape (see `newest_layer`).
+    since: Instant,
+    /// When it was last asserted. The stale sweep reads this, so a holder
+    /// that re-asserts (the bar pane) is never swept as stale.
+    refreshed: Instant,
+}
+
 /// Set of named users that currently want the stop key, with the time each
 /// registered. The set *is* the ref count — no separate counter to drift.
 #[derive(Debug, Default)]
 pub struct StopKeyLedger {
-    users: HashMap<String, Instant>,
+    users: HashMap<String, Claim>,
 }
 
 impl StopKeyLedger {
     pub fn register(&mut self, user: &str, now: Instant) -> LedgerTransition {
         let was_empty = self.users.is_empty();
-        let already = self.users.insert(user.to_string(), now).is_some();
-        if already {
-            LedgerTransition::Unchanged
-        } else if was_empty {
+        if let Some(claim) = self.users.get_mut(user) {
+            claim.refreshed = now;
+            return LedgerTransition::Unchanged;
+        }
+        self.users.insert(
+            user.to_string(),
+            Claim {
+                since: now,
+                refreshed: now,
+            },
+        );
+        if was_empty {
             LedgerTransition::Activate
         } else {
             LedgerTransition::Unchanged
         }
+    }
+
+    /// The earliest standing claim among the users `include` picks, if any:
+    /// when that kind of work began holding the stop key.
+    pub fn earliest_since(&self, include: impl Fn(&str) -> bool) -> Option<Instant> {
+        self.claims(include).into_iter().min()
+    }
+
+    /// The most recent standing claim among the users `include` picks.
+    pub fn latest_since(&self, include: impl Fn(&str) -> bool) -> Option<Instant> {
+        self.claims(include).into_iter().max()
+    }
+
+    fn claims(&self, include: impl Fn(&str) -> bool) -> Vec<Instant> {
+        self.users
+            .iter()
+            .filter(|(user, _)| include(user.as_str()))
+            .map(|(_, claim)| claim.since)
+            .collect()
     }
 
     pub fn unregister(&mut self, user: &str) -> LedgerTransition {
@@ -64,6 +102,18 @@ impl StopKeyLedger {
             return LedgerTransition::Unchanged;
         }
         if self.users.is_empty() {
+            LedgerTransition::Deactivate
+        } else {
+            LedgerTransition::Unchanged
+        }
+    }
+
+    /// Drop every user `keep` does not pick. Used by a stop that ends the
+    /// agent's work but leaves a newer dictation holding the key.
+    pub fn retain(&mut self, keep: impl Fn(&str) -> bool) -> LedgerTransition {
+        let was_empty = self.users.is_empty();
+        self.users.retain(|user, _| keep(user.as_str()));
+        if !was_empty && self.users.is_empty() {
             LedgerTransition::Deactivate
         } else {
             LedgerTransition::Unchanged
@@ -113,7 +163,7 @@ impl StopKeyLedger {
         let mut out: Vec<String> = self
             .users
             .iter()
-            .filter(|(_, registered_at)| now.saturating_duration_since(**registered_at) > max_age)
+            .filter(|(_, claim)| now.saturating_duration_since(claim.refreshed) > max_age)
             .map(|(user, _)| user.clone())
             .collect();
         out.sort();
@@ -313,6 +363,27 @@ impl EscapeKeyCoordinator {
         Ok(())
     }
 
+    /// Remove every user except a dictation's, so the key stays armed for the
+    /// dictation the person is still in. See `StopScope::KeepDictation`.
+    pub async fn unregister_all_but_dictation(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let transition = self.ledger().retain(is_dictation_user);
+        if transition == LedgerTransition::Deactivate {
+            info!("[EscapeKeyCoordinator] No dictation holds the stop key — releasing it");
+            self.deactivate(app_handle)?;
+        }
+        Ok(())
+    }
+
+    /// When the open dictation first claimed the stop key, and when Juno last
+    /// started a turn, in that order. `None` for one that holds no claim.
+    pub fn claims_since(&self) -> (Option<Instant>, Option<Instant>) {
+        let ledger = self.ledger();
+        (
+            ledger.earliest_since(is_dictation_user),
+            ledger.latest_since(is_run_start_user),
+        )
+    }
+
     /// Force reset the escape key state (emergency cleanup).
     pub async fn force_reset(&self, app_handle: &AppHandle) -> Result<(), String> {
         warn!("[EscapeKeyCoordinator] Force reset requested");
@@ -483,6 +554,35 @@ pub fn get_escape_key_coordinator() -> &'static EscapeKeyCoordinator {
     &ESCAPE_KEY_COORDINATOR
 }
 
+/// Ledger users that are a dictation in progress.
+const DICTATION_STOP_KEY_USERS: &[&str] = &[
+    "dictation_state",
+    "mode_dictation",
+    crate::commands::dictation::DICTATION_ESCAPE_USER,
+];
+
+/// Ledger users whose claim marks Juno starting a turn of her own. Only these
+/// order against a dictation: her voice (`tts_playback`) can claim the key in
+/// the middle of a run that began long before the dictation, and an armed
+/// monitor is not a turn until it fires one (which claims `agent_execution`).
+const RUN_START_STOP_KEY_USERS: &[&str] = &[
+    "agent_execution",
+    "claude_own_turn",
+    "mode_agent",
+    "agent_voice_input",
+    "agent_transcription",
+];
+
+/// Whether a ledger user is a dictation.
+pub fn is_dictation_user(user: &str) -> bool {
+    DICTATION_STOP_KEY_USERS.contains(&user)
+}
+
+/// Whether a ledger user is the start of one of Juno's turns.
+pub fn is_run_start_user(user: &str) -> bool {
+    RUN_START_STOP_KEY_USERS.contains(&user)
+}
+
 /// Ledger user that keeps the passive Escape monitor armed while the floating
 /// bar's chat pane is open, so a global Escape can dismiss it while nothing is
 /// running (see `handle_stop_key_event`).
@@ -617,6 +717,51 @@ mod tests {
             .is_empty());
         // One unregister releases it — the duplicate did not add a second hold.
         assert_eq!(ledger.unregister("agent"), LedgerTransition::Deactivate);
+    }
+
+    #[test]
+    fn a_reassertion_keeps_when_the_claim_began() {
+        // Escape orders work by when it began, so refreshing a claim must not
+        // make an old run look newer than a dictation opened after it.
+        let mut ledger = StopKeyLedger::default();
+        let began = ago(60);
+        ledger.register("tts_playback", began);
+        ledger.register("tts_playback", now());
+        assert_eq!(ledger.earliest_since(|u| u == "tts_playback"), Some(began));
+    }
+
+    #[test]
+    fn turns_and_dictation_are_told_apart() {
+        assert!(is_dictation_user("dictation_state"));
+        assert!(is_dictation_user(
+            crate::commands::dictation::DICTATION_ESCAPE_USER
+        ));
+        assert!(!is_run_start_user("dictation_state"));
+        assert!(is_run_start_user("agent_execution"));
+        assert!(is_run_start_user("claude_own_turn"));
+        // Her voice can claim the key mid-run; it is not a new turn.
+        assert!(!is_run_start_user("tts_playback"));
+        assert!(!is_run_start_user(BAR_PANE_ESCAPE_USER));
+        assert!(!is_run_start_user("onboarding"));
+    }
+
+    #[test]
+    fn retain_keeps_the_dictation_and_reports_the_last_one_out() {
+        let mut ledger = StopKeyLedger::default();
+        ledger.register("agent_execution", now());
+        ledger.register("dictation_state", now());
+        assert_eq!(
+            ledger.retain(is_dictation_user),
+            LedgerTransition::Unchanged
+        );
+        assert_eq!(ledger.users(), vec!["dictation_state".to_string()]);
+
+        let mut only_work = StopKeyLedger::default();
+        only_work.register("agent_execution", now());
+        assert_eq!(
+            only_work.retain(is_dictation_user),
+            LedgerTransition::Deactivate
+        );
     }
 
     #[test]

@@ -208,6 +208,10 @@ pub mod windows {
     /// Put the full-size chat window away and give the bar the conversation back
     pub const CLOSE_MAIN_WINDOW: &str = "close_main_window";
     pub const OPEN_MAIN_WINDOW: &str = "open_main_window";
+    /// Escape in the big chat: one rung down, to the floating chat
+    pub const ESCAPE_MAIN_WINDOW: &str = "escape_main_window";
+    /// Escape on the idle bar: the last rung, off the screen
+    pub const HIDE_FLOATING_BAR: &str = "hide_floating_bar";
     pub const OPEN_SETTINGS_WINDOW: &str = "open_settings_window";
     /// Tap a suggested-reply chip under a locally served reply
     pub const RUN_REPLY_CHIP: &str = "run_reply_chip";
