@@ -827,8 +827,10 @@ mod tests {
 
     #[test]
     fn beta_features_round_trip() {
-        let mut settings = AppSettings::default();
-        settings.beta_features_enabled = true;
+        let settings = AppSettings {
+            beta_features_enabled: true,
+            ..AppSettings::default()
+        };
         let json = serde_json::to_string(&settings).expect("serialize");
         let back: AppSettings = serde_json::from_str(&json).expect("deserialize");
         assert!(back.beta_features_enabled);
