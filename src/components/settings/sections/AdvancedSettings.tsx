@@ -347,7 +347,7 @@ export default function AdvancedSettings({
         <SettingsRow
           htmlFor="debug-mode"
           label="Debug Mode"
-          description="Enable verbose logging and debug features"
+          description="Extra logging and a window outline, for troubleshooting."
         >
           <Switch
             id="debug-mode"

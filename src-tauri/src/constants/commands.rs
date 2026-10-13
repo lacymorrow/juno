@@ -32,6 +32,8 @@ pub mod settings {
     pub const SET_AUTOSTART_ENABLED: &str = "set_autostart_enabled";
     pub const GET_ADVANCED_SETTINGS_ENABLED: &str = "get_advanced_settings_enabled";
     pub const SET_ADVANCED_SETTINGS_ENABLED: &str = "set_advanced_settings_enabled";
+    pub const GET_BETA_FEATURES: &str = "get_beta_features";
+    pub const SET_BETA_FEATURES: &str = "set_beta_features";
     /// The pane and row the agent asked for before the window existed.
     pub const TAKE_PENDING_SETTINGS_NAVIGATION: &str = "take_pending_settings_navigation";
     /// A `juno://` link clicked in a reply; Rust parses and follows it.
