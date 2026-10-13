@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.193] - 2026-10-13
+
+### Changed
+
+- **dictation:** the microphone is running before the pill, the tray or the cue move (#810) (cfb2b62d)
+
 ## [0.8.192] - 2026-10-13
 
 ### Added
@@ -1404,7 +1410,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.192...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.193...HEAD
+[0.8.193]: https://github.com/lacymorrow/juno/compare/cua-v0.8.192...v0.8.193
 [0.8.192]: https://github.com/lacymorrow/juno/compare/cua-v0.8.191...v0.8.192
 [0.8.191]: https://github.com/lacymorrow/juno/compare/cua-v0.8.190...v0.8.191
 [0.8.190]: https://github.com/lacymorrow/juno/compare/cua-v0.8.189...v0.8.190
