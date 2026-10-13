@@ -285,13 +285,36 @@ static AGENT_INPUT_STATE: tokio::sync::Mutex<AgentInputMonitorState> =
         hold: None,
     });
 
+/// Open the agent session if the hold is old enough. Idempotent: the press
+/// itself and the monitoring loop both call it, and only the first one opens.
+fn emit_agent_start_if_due(app_handle: &AppHandle, state: &mut AgentInputMonitorState) {
+    if let Some(hold) = state.open_start(|| hold_gate::open(VoiceTarget::Agent)) {
+        // This is the held-key path, so the session records push_to_talk
+        // rather than leaving the method unstated for a stop path to guess at.
+        if let Err(e) = app_handle.emit(
+            events::agent::TRANSCRIPTION_START,
+            serde_json::json!({ "method": "push_to_talk", "hold": hold }),
+        ) {
+            error!(
+                "[AgentMonitor] Failed to emit agent-transcription-start: {}",
+                e
+            );
+            // No start is coming to settle it, so a release must not wait for
+            // one.
+            let _ = hold_gate::settle(VoiceTarget::Agent, hold);
+        }
+    }
+}
+
 // Called when agent input key is pressed
-pub async fn on_agent_input_pressed() {
+pub async fn on_agent_input_pressed(app_handle: &AppHandle) {
     info!("[AgentMonitor] on_agent_input_pressed() called");
     let mut state = AGENT_INPUT_STATE.lock().await;
     let started = state.start_hold();
     if started {
         info!("[AgentMonitor] Agent input pressed down - starting immediate tracking");
+        // The microphone opens on the press, not at the loop's next tick.
+        emit_agent_start_if_due(app_handle, &mut state);
     } else {
         info!(
             "[AgentMonitor] Agent input pressed down - ignored (agent active or cooldown period)"
@@ -435,27 +458,7 @@ pub fn start_agent_monitor_task(app_handle: AppHandle) -> tauri::async_runtime::
 
             let mut state = AGENT_INPUT_STATE.lock().await;
 
-            // Check if we should start agent mode
-            if let Some(hold) = state.open_start(|| hold_gate::open(VoiceTarget::Agent)) {
-                info!("[AgentMonitor] Background task detected agent should start - emitting agent-transcription-start");
-                // Emit event to start agent. This is the held-key path, so the
-                // session records push_to_talk rather than leaving the method
-                // unstated for a stop path to guess at.
-                if let Err(e) = app_handle.emit(
-                    events::agent::TRANSCRIPTION_START,
-                    serde_json::json!({ "method": "push_to_talk", "hold": hold }),
-                ) {
-                    error!(
-                        "[AgentMonitor] Failed to emit agent-transcription-start: {}",
-                        e
-                    );
-                    // No start is coming to settle it, so a release must not
-                    // wait for one.
-                    let _ = hold_gate::settle(VoiceTarget::Agent, hold);
-                } else {
-                    info!("[AgentMonitor] Successfully emitted agent-transcription-start event");
-                }
-            }
+            emit_agent_start_if_due(&app_handle, &mut state);
 
             // Check if we should reach threshold
             if state.check_and_reach_threshold() {

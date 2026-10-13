@@ -13,7 +13,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -179,6 +179,28 @@ pub fn resolve_input_device(
 ) -> std::result::Result<ResolvedInput, CaptureStartFailure> {
     let host = cpal::default_host();
 
+    // A device whose name the system will not give us is still openable, so
+    // it gets a label rather than being treated as absent.
+    let mut default = host.default_input_device().map(|d| {
+        let name = d.name().unwrap_or_else(|_| UNNAMED_DEVICE.to_string());
+        (name, d)
+    });
+
+    // Following the system, or the choice is the system's own microphone: no
+    // list needed. Listing asks every device on the Mac, virtual drivers
+    // included, for its formats, and that took up to three seconds a press
+    // while the person was already talking.
+    let wanted = preferred.map(str::trim).filter(|w| !w.is_empty());
+    if let Some((name, device)) =
+        default.take_if(|(name, _)| wanted.is_none_or(|w| w == name.as_str()))
+    {
+        return Ok(ResolvedInput {
+            device,
+            name,
+            substituted_for: None,
+        });
+    }
+
     let mut present: Vec<(String, cpal::Device)> = Vec::new();
     if let Ok(devices) = host.input_devices() {
         for device in devices {
@@ -187,13 +209,6 @@ pub fn resolve_input_device(
             }
         }
     }
-
-    // A device whose name the system will not give us is still openable, so
-    // it gets a label rather than being treated as absent.
-    let mut default = host.default_input_device().map(|d| {
-        let name = d.name().unwrap_or_else(|_| UNNAMED_DEVICE.to_string());
-        (name, d)
-    });
     let default_name = default.as_ref().map(|(name, _)| name.clone());
     let names: Vec<String> = present.iter().map(|(name, _)| name.clone()).collect();
 
@@ -340,6 +355,31 @@ pub fn start_mono_stream(
     sample_format: SampleFormat,
     audio_data_tx: Sender<Vec<f32>>,
 ) -> std::result::Result<LiveInput, CaptureStartFailure> {
+    let stream = build_started_stream(
+        device,
+        device_name,
+        config,
+        sample_format,
+        move |mono| {
+            if let Err(e) = audio_data_tx.send(mono) {
+                tracing::error!("[VoiceDevices] Could not pass on audio: {e}");
+            }
+        },
+        |err| tracing::error!("[VoiceDevices] Input stream error: {err}"),
+    )?;
+    Ok(LiveInput::new(Box::new(stream)))
+}
+
+/// Build an input stream that hands each buffer, downmixed to mono, to
+/// `deliver`, and start it.
+fn build_started_stream(
+    device: &cpal::Device,
+    device_name: &str,
+    config: &cpal::StreamConfig,
+    sample_format: SampleFormat,
+    deliver: impl Fn(Vec<f32>) + Send + 'static,
+    on_error: impl FnMut(cpal::StreamError) + Send + 'static,
+) -> std::result::Result<cpal::Stream, CaptureStartFailure> {
     let channels = config.channels as usize;
     if channels > 1 {
         tracing::info!(
@@ -348,32 +388,22 @@ pub fn start_mono_stream(
     }
 
     let built = match sample_format {
-        SampleFormat::F32 => {
-            let tx = audio_data_tx;
-            device.build_input_stream(
-                config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if let Err(e) = tx.send(downmix_f32_to_mono(data, channels)) {
-                        tracing::error!("[VoiceDevices] Could not pass on audio: {e}");
-                    }
-                },
-                |err| tracing::error!("[VoiceDevices] Input stream error: {err}"),
-                None,
-            )
-        }
-        SampleFormat::I16 => {
-            let tx = audio_data_tx;
-            device.build_input_stream(
-                config,
-                move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    if let Err(e) = tx.send(downmix_i16_to_mono(data, channels)) {
-                        tracing::error!("[VoiceDevices] Could not pass on audio: {e}");
-                    }
-                },
-                |err| tracing::error!("[VoiceDevices] Input stream error: {err}"),
-                None,
-            )
-        }
+        SampleFormat::F32 => device.build_input_stream(
+            config,
+            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                deliver(downmix_f32_to_mono(data, channels))
+            },
+            on_error,
+            None,
+        ),
+        SampleFormat::I16 => device.build_input_stream(
+            config,
+            move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                deliver(downmix_i16_to_mono(data, channels))
+            },
+            on_error,
+            None,
+        ),
         other => {
             return Err(CaptureStartFailure::UnsupportedSampleFormat {
                 device: device_name.to_string(),
@@ -397,7 +427,218 @@ pub fn start_mono_stream(
         });
     }
 
-    Ok(LiveInput::new(Box::new(stream)))
+    Ok(stream)
+}
+
+/// Where a warm stream's audio goes: the recording that holds it, or nowhere
+/// while it is parked.
+type AudioSink = Arc<Mutex<Option<Sender<Vec<f32>>>>>;
+
+/// cpal marks every `Stream` `!Send` because some backends are bound to the
+/// thread that made them. CoreAudio's is not: it is an `Arc<Mutex<..>>` around
+/// an audio unit that may be started, stopped and disposed from any thread.
+/// Juno's capture only runs on macOS, which is what makes handing one from a
+/// finished recording's thread to the next one's sound.
+struct SendStream(cpal::Stream);
+
+// SAFETY: see the type's doc comment. The stream is only ever used by one
+// thread at a time, under `WARM_INPUT` or by the recording that took it.
+unsafe impl Send for SendStream {}
+
+/// The dictation microphone, paused between recordings.
+///
+/// Building a CoreAudio input took 0.1s on a quiet Mac and over a second on a
+/// busy one, and every word said before it ran was lost. So a dictation's
+/// stream is paused when it ends, not closed, and the next press only starts
+/// it again. A paused input is not a hot microphone: the device is stopped,
+/// macOS draws no orange indicator, and [`open_input_streams`] does not count
+/// it.
+pub struct WarmInput {
+    device: cpal::Device,
+    name: String,
+    config: cpal::StreamConfig,
+    sample_format: SampleFormat,
+    stream: SendStream,
+    sink: AudioSink,
+    /// Set by the stream's error callback (the device went away). A broken
+    /// stream is never resumed.
+    broken: Arc<AtomicBool>,
+}
+
+static WARM_INPUT: Mutex<Option<WarmInput>> = Mutex::new(None);
+
+impl WarmInput {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn sample_rate(&self) -> u32 {
+        self.config.sample_rate.0
+    }
+
+    pub fn channels(&self) -> u16 {
+        self.config.channels
+    }
+
+    /// Start it again, delivering to `audio_data_tx`. A stream that will not
+    /// start (CoreAudio restarted under it) is replaced by a fresh one on the
+    /// same device at the same rate, so the recording that claimed it never
+    /// pays for it.
+    pub fn resume(
+        self,
+        audio_data_tx: Sender<Vec<f32>>,
+    ) -> std::result::Result<LiveInput, CaptureStartFailure> {
+        set_sink(&self.sink, Some(audio_data_tx.clone()));
+        match self.stream.0.play() {
+            Ok(()) => Ok(LiveInput::new(Box::new(WarmLease(Some(self))))),
+            Err(e) => {
+                tracing::warn!(
+                    "[VoiceDevices] {} would not start again ({e:?}); opening it fresh",
+                    self.name
+                );
+                let WarmInput {
+                    device,
+                    name,
+                    config,
+                    sample_format,
+                    stream,
+                    sink,
+                    ..
+                } = self;
+                stream.0.halt();
+                set_sink(&sink, None);
+                drop(stream);
+                start_warm_stream(device, name, config, sample_format, audio_data_tx)
+            }
+        }
+    }
+}
+
+fn set_sink(sink: &AudioSink, tx: Option<Sender<Vec<f32>>>) {
+    match sink.lock() {
+        Ok(mut slot) => *slot = tx,
+        Err(e) => tracing::error!("[VoiceDevices] Could not route microphone audio: {e}"),
+    }
+}
+
+/// A warm stream lent to one recording. Halting it pauses the device; dropping
+/// it parks the paused stream for the next press.
+struct WarmLease(Option<WarmInput>);
+
+impl InputHalt for WarmLease {
+    fn halt(&self) {
+        if let Some(warm) = &self.0 {
+            warm.stream.0.halt();
+            set_sink(&warm.sink, None);
+        }
+    }
+}
+
+impl Drop for WarmLease {
+    fn drop(&mut self) {
+        if let Some(warm) = self.0.take() {
+            park(warm);
+        }
+    }
+}
+
+fn park(warm: WarmInput) {
+    if warm.broken.load(Ordering::SeqCst) {
+        tracing::info!(
+            "[VoiceDevices] {} went away; not keeping it warm",
+            warm.name
+        );
+        return;
+    }
+    match WARM_INPUT.lock() {
+        Ok(mut slot) => *slot = Some(warm),
+        Err(e) => tracing::error!("[VoiceDevices] Could not keep the microphone warm: {e}"),
+    }
+}
+
+/// The paused stream from the last dictation, if it is still the microphone
+/// this one should open and still runs at the rate it was built for.
+///
+/// Cheap on purpose: two property reads on one device, never the device list.
+/// Anything that does not match is dropped, and the press takes the full path.
+pub fn claim_warm_input(preferred: Option<&str>) -> Option<WarmInput> {
+    let warm = WARM_INPUT.lock().ok()?.take()?;
+    if warm.broken.load(Ordering::SeqCst) {
+        return None;
+    }
+
+    let wanted = match preferred.map(str::trim).filter(|w| !w.is_empty()) {
+        Some(wanted) => wanted.to_string(),
+        None => cpal::default_host().default_input_device()?.name().ok()?,
+    };
+    if warm.name != wanted {
+        tracing::info!(
+            "[VoiceDevices] Listening moves from {} to {wanted}; opening it fresh",
+            warm.name
+        );
+        return None;
+    }
+
+    // Still plugged in, and nothing has changed its rate underneath it.
+    match warm.device.default_input_config() {
+        Ok(current) if current.sample_rate() == warm.config.sample_rate => Some(warm),
+        _ => {
+            tracing::info!(
+                "[VoiceDevices] {} changed since the last dictation; opening it fresh",
+                warm.name
+            );
+            None
+        }
+    }
+}
+
+/// Open the dictation microphone so that it is kept warm when the recording
+/// ends. The first press after launch, or after a device change, comes here;
+/// every press after that resumes it through [`claim_warm_input`].
+pub fn start_warm_stream(
+    device: cpal::Device,
+    device_name: String,
+    config: cpal::StreamConfig,
+    sample_format: SampleFormat,
+    audio_data_tx: Sender<Vec<f32>>,
+) -> std::result::Result<LiveInput, CaptureStartFailure> {
+    let sink: AudioSink = Arc::new(Mutex::new(Some(audio_data_tx)));
+    let broken = Arc::new(AtomicBool::new(false));
+
+    let deliver_to = Arc::clone(&sink);
+    let broken_by = Arc::clone(&broken);
+    let stream = build_started_stream(
+        &device,
+        &device_name,
+        &config,
+        sample_format,
+        move |mono| {
+            // Parked: nobody is recording, and the device is stopped anyway.
+            if let Ok(slot) = deliver_to.lock() {
+                if let Some(tx) = slot.as_ref() {
+                    if let Err(e) = tx.send(mono) {
+                        tracing::error!("[VoiceDevices] Could not pass on audio: {e}");
+                    }
+                }
+            }
+        },
+        move |err| {
+            tracing::error!("[VoiceDevices] Input stream error: {err}");
+            if matches!(err, cpal::StreamError::DeviceNotAvailable) {
+                broken_by.store(true, Ordering::SeqCst);
+            }
+        },
+    )?;
+
+    Ok(LiveInput::new(Box::new(WarmLease(Some(WarmInput {
+        device,
+        name: device_name,
+        config,
+        sample_format,
+        stream: SendStream(stream),
+        sink,
+        broken,
+    })))))
 }
 
 /// The device the next capture will open, for the settings window to show
