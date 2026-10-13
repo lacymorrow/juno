@@ -442,9 +442,8 @@ pub fn start_warm_spare(app: tauri::AppHandle) {
 /// there should not be one.
 ///
 /// A spare is only started when the CLI is the active provider, persistent
-/// sessions are on, the CLI is signed in, and a previous turn has left behind the
-/// system prompt Juno runs it with. Without that prompt the spare could not match
-/// the first turn, so none is started and the first conversation starts cold.
+/// sessions are on and the CLI is signed in. Its system prompt is built here, so
+/// it does not wait for a turn: the first conversation after launch adopts it.
 pub async fn prewarm_persistent_session(app: tauri::AppHandle) {
     use crate::agent::providers::factory::BrainFactory;
     use crate::agent::providers::types::Provider;
@@ -461,30 +460,15 @@ pub async fn prewarm_persistent_session(app: tauri::AppHandle) {
         claude_cli_session::stop_spare();
         return;
     }
-    let Some(system_prompt) = claude_cli_session::remembered_system_prompt(&app) else {
-        debug!("[CliSession] No turn has run yet; no warm spare until one has");
-        return;
-    };
-    // The remembered prompt asks for speech, or deliberately does not, to match
-    // Juno's voice at the time. If the voice has been switched since, a spare
-    // started from it could never be adopted, so none is kept. The next turn
-    // starts cold, remembers the prompt it ran with and primes from that.
-    if claude_cli_session::remembered_voice(&app)
-        != Some(crate::agent::voice_policy::voice_enabled_now(&app))
-    {
-        debug!("[CliSession] Juno's voice changed since the last turn; no warm spare until a turn has run");
-        claude_cli_session::stop_spare();
-        return;
-    }
-
     let config = crate::agent::providers::config::load_provider_config(Some(&app));
     let Some(mut provider_config) = config.resolve_provider(Provider::ClaudeCli) else {
         return;
     };
-    // The prompt the last turn ran with, which is what the next turn will run
-    // with unless something changed. If it did, adoption sees the mismatch and
-    // the turn starts cold, as it would have anyway.
-    provider_config.system_prompt = Some(system_prompt);
+    // Built now, the way the next turn builds it, so the first conversation
+    // after launch has a spare too. If the turn's prompt still differs,
+    // adoption sees the mismatch and the turn starts cold, as it would have
+    // anyway.
+    provider_config.system_prompt = Some(crate::anthropic::next_turn_system_prompt(&app).await);
     let brain = match ClaudeCliBrain::from_config(&provider_config) {
         Ok(brain) => brain,
         Err(e) => {

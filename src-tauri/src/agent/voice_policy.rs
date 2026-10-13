@@ -11,8 +11,8 @@
 //! The prompt is also part of the Claude CLI session's launch fingerprint
 //! (`claude_cli_session::signature_parts`), so a live session started with the
 //! speech rules is not reused after the voice goes off, and the other way
-//! round. The warm spare remembers which kind of prompt it was primed with and
-//! is not kept when that no longer matches (`claude_cli::prewarm_persistent_session`).
+//! round. The warm spare is re-primed with a freshly built prompt when the voice
+//! changes (`claude_cli::start_warm_spare`).
 
 use super::prompts::PromptFragments;
 use crate::state::AppState;

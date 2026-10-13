@@ -74,8 +74,8 @@
 //! started in the background.
 //!
 //! - It is spawned with exactly the [`LaunchConfig`] a turn would use, learned from
-//!   the last turn (and, across launches, from the system prompt remembered in
-//!   `cli_session.json`). Adoption compares fingerprints; a spare that does not
+//!   the last turn, or at launch from the prompt the next turn will build
+//!   (`anthropic::next_turn_system_prompt`). Adoption compares fingerprints; a spare that does not
 //!   match is killed and the turn starts cold, exactly as it did before the spare.
 //! - It receives nothing on stdin until adopted, so it can never run a turn.
 //! - It lives outside the conversation registry: the idle reaper never reaps it and
@@ -161,17 +161,6 @@ const SPARE_REFILL_DELAY: Duration = Duration::from_secs(3);
 /// Spare spawn failures (a spawn error, or a spare that exited on its own) in a
 /// row before Juno stops trying until the configuration changes.
 pub const MAX_SPARE_FAILURES: u32 = 3;
-
-/// Store file holding the system prompt the last turn ran with, so a spare can
-/// be started at launch with the prompt the first turn will use. Separate from
-/// the settings store: it is a cache, not a setting.
-const SPARE_STORE_FILE: &str = "cli_session.json";
-const SPARE_PROMPT_KEY: &str = "spare_system_prompt";
-/// Whether the remembered prompt was written for a spoken reply. The prompt
-/// carries the speech instructions only when Juno's voice is on
-/// (`agent::voice_policy`), so a spare primed from it at launch is only
-/// worth starting when the voice is still the same.
-const SPARE_VOICE_KEY: &str = "spare_voice";
 
 /// What a turn produced, or that there was no persistent session to run it in.
 pub enum TurnOutcome {
@@ -631,15 +620,13 @@ fn fill_spare(app: &tauri::AppHandle, config: LaunchConfig) {
     let signature = signature_of(&config);
     let now = Instant::now();
 
-    // `Some(persist_prompt)` when a spawn should start, with the lock released.
+    // Whether a spawn should start, decided under the lock and acted on without it.
     let spawn = {
         let mut state = spare_state();
         state.app = Some(app.clone());
 
-        let previous = state.config.as_ref();
-        let config_changed = previous.map(signature_of).as_deref() != Some(signature.as_str());
-        let prompt_changed =
-            previous.map(|c| c.system_prompt.as_deref()) != Some(config.system_prompt.as_deref());
+        let config_changed =
+            state.config.as_ref().map(signature_of).as_deref() != Some(signature.as_str());
         if config_changed {
             // New settings get a fresh set of attempts.
             state.failures = 0;
@@ -664,19 +651,14 @@ fn fill_spare(app: &tauri::AppHandle, config: LaunchConfig) {
         }
 
         if state.slot.is_some() || !state.may_spawn(now) {
-            None
+            false
         } else {
             state.spawning = true;
-            Some(prompt_changed)
+            true
         }
     };
-
-    let Some(persist_prompt) = spawn else {
+    if !spawn {
         return;
-    };
-    let voice_now = crate::agent::voice_policy::voice_enabled_now(app);
-    if persist_prompt || remembered_voice(app) != Some(voice_now) {
-        remember_system_prompt(app, config.system_prompt.as_deref(), voice_now);
     }
 
     // Lock released: spawning forks a process.
@@ -709,51 +691,6 @@ fn fill_spare(app: &tauri::AppHandle, config: LaunchConfig) {
             warn!("[CliSession] Could not start a warm spare: {e}");
             state.record_failure(now);
         }
-    }
-}
-
-/// The system prompt the last turn ran with, saved so a spare can be started at
-/// launch before any turn has run. `None` before the first turn ever.
-pub fn remembered_system_prompt(app: &tauri::AppHandle) -> Option<String> {
-    use tauri_plugin_store::StoreExt;
-    app.store(SPARE_STORE_FILE)
-        .ok()?
-        .get(SPARE_PROMPT_KEY)?
-        .as_str()
-        .map(str::to_string)
-}
-
-/// Whether Juno's voice was on when the remembered prompt was saved. `None`
-/// before the first turn, and for a store written before this was recorded.
-pub fn remembered_voice(app: &tauri::AppHandle) -> Option<bool> {
-    use tauri_plugin_store::StoreExt;
-    app.store(SPARE_STORE_FILE)
-        .ok()?
-        .get(SPARE_VOICE_KEY)?
-        .as_bool()
-}
-
-fn remember_system_prompt(app: &tauri::AppHandle, prompt: Option<&str>, voice: bool) {
-    use tauri_plugin_store::StoreExt;
-    let store = match app.store(SPARE_STORE_FILE) {
-        Ok(store) => store,
-        Err(e) => {
-            debug!("[CliSession] Could not open {SPARE_STORE_FILE}: {e}");
-            return;
-        }
-    };
-    match prompt {
-        Some(prompt) => {
-            store.set(SPARE_PROMPT_KEY, Value::String(prompt.to_string()));
-            store.set(SPARE_VOICE_KEY, Value::Bool(voice));
-        }
-        None => {
-            store.delete(SPARE_PROMPT_KEY);
-            store.delete(SPARE_VOICE_KEY);
-        }
-    }
-    if let Err(e) = store.save() {
-        debug!("[CliSession] Could not save {SPARE_STORE_FILE}: {e}");
     }
 }
 
