@@ -496,6 +496,10 @@ impl VoiceController {
         &mut self,
         app_handle: &AppHandle<R>,
     ) -> Result<()> {
+        // The press, as near as the plugin sees it: the log line that says
+        // when the microphone went live measures from here.
+        let requested = Instant::now();
+
         // Check if controller is initialized before starting dictation
         self.ensure_initialized()?;
 
@@ -527,10 +531,9 @@ impl VoiceController {
 
         info!("[VoiceController] Starting dictation...");
 
-        // Emit dictation started event
-        app_handle
-            .emit(constants::voice_transcription::DICTATION_STARTED, ())
-            .map_err(|e| Error::Tauri(e.to_string()))?;
+        // No "started" event here. It means the microphone is running, so the
+        // audio thread sends it once the device is open; the pill, the tray
+        // and the start cue all wait for it.
 
         // Clear the last processed audio buffer
         if let Ok(mut buffer_guard) = self.last_processed_audio_buffer.lock() {
@@ -552,7 +555,7 @@ impl VoiceController {
                 info!("[AudioThread] Audio stream resumed on {name}.");
                 Ok(Box::new(stream) as Box<dyn std::any::Any>)
             });
-            return self.spawn_audio_worker(app_handle, open, actual_rate, channels);
+            return self.spawn_audio_worker(app_handle, open, actual_rate, channels, requested);
         }
 
         // The microphone the person picked, or the system's, or the system's
@@ -594,7 +597,7 @@ impl VoiceController {
             Ok(Box::new(stream) as Box<dyn std::any::Any>)
         });
 
-        self.spawn_audio_worker(app_handle, open, actual_rate, channels)
+        self.spawn_audio_worker(app_handle, open, actual_rate, channels, requested)
     }
 
     /// The rate the microphone records at, for the final decode to resample
@@ -610,13 +613,16 @@ impl VoiceController {
     }
 
     /// Start the thread that owns the microphone. Everything after device
-    /// resolution, so a test can run it with a fake microphone.
+    /// resolution, so a test can run it with a fake microphone. `requested`
+    /// is when the start was asked for, for the log line that says how long
+    /// the microphone took.
     fn spawn_audio_worker<R: Runtime + 'static>(
         &mut self,
         app_handle: &AppHandle<R>,
         open: CaptureOpen,
         actual_rate: u32,
         channels: u16,
+        requested: Instant,
     ) -> Result<()> {
         let (control_tx, control_rx) = channel::<AudioThreadMessage>();
         let (audio_data_tx, audio_data_rx) = channel::<Vec<f32>>();
@@ -643,6 +649,7 @@ impl VoiceController {
                 audio_data_tx,
                 audio_data_rx,
                 open,
+                requested,
                 live_partial_for_thread,
                 live_captures_for_thread,
             );
@@ -675,6 +682,35 @@ impl VoiceController {
         }
     }
 
+    /// The microphone is running. Sent once per recording, from the audio
+    /// thread, the moment the device opened and never before: everything the
+    /// person sees or hears for a start (the pill, the tray, the start cue)
+    /// follows this, so none of it can come ahead of the recording. A capture
+    /// that fails to open sends `DICTATION_STOPPED` instead and never this.
+    fn announce_live<R: Runtime>(app_handle: &AppHandle<R>) {
+        for event in [
+            constants::voice_transcription::DICTATION_STARTED,
+            constants::plugin::VOICE_TRANSCRIPTION_DICTATION_STARTED,
+        ] {
+            if let Err(e) = app_handle.emit(event, ()) {
+                tracing::error!(
+                    "[AudioThread] Could not announce the live microphone ({event}): {e}"
+                );
+            }
+        }
+    }
+
+    /// Close out a session that has no audio: the empty transcript it is
+    /// still owed, then the stop. See [`Self::process_final_audio`] for why
+    /// the empty result is not optional.
+    fn emit_empty_result<R: Runtime>(app_handle: &AppHandle<R>) {
+        let _ = app_handle.emit(
+            constants::voice_transcription::FINAL_RESULT,
+            serde_json::json!({ "text": "" }),
+        );
+        let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn audio_thread_worker<R: Runtime + 'static>(
         engine: Arc<dyn TranscriptionEngine>,
@@ -686,27 +722,16 @@ impl VoiceController {
         audio_data_tx: std::sync::mpsc::Sender<Vec<f32>>,
         audio_data_rx: std::sync::mpsc::Receiver<Vec<f32>>,
         open: CaptureOpen,
+        requested: Instant,
         live_partial: PartialGate,
         live_captures: Arc<AtomicUsize>,
     ) {
+        let engine_name = engine.name();
         info!(
             "[AudioThread] Thread started. Engine: '{}', live_partial: {}",
-            engine.name(),
+            engine_name,
             live_partial.is_open()
         );
-
-        let mut session = match engine.create_session() {
-            Ok(s) => s,
-            Err(e) => {
-                Self::give_up_on_capture(
-                    &app_handle,
-                    CaptureStartFailure::EngineUnavailable {
-                        detail: e.to_string(),
-                    },
-                );
-                return;
-            }
-        };
 
         // A stop or cancel that is already waiting (a quick press whose release
         // beat this thread here) is honoured before any input is opened.
@@ -715,15 +740,10 @@ impl VoiceController {
         match control_rx.try_recv() {
             Ok(AudioThreadMessage::Stop) => {
                 info!("[AudioThread] Stopped before the microphone opened.");
-                Self::process_final_audio(
-                    session.as_mut(),
-                    &[],
-                    actual_rate,
-                    &app_handle,
-                    &last_buffer_arc,
-                    None,
-                    0,
-                );
+                if let Ok(mut buffer_guard) = last_buffer_arc.lock() {
+                    *buffer_guard = Some(Vec::new());
+                }
+                Self::emit_empty_result(&app_handle);
                 return;
             }
             Ok(AudioThreadMessage::Discard) => {
@@ -738,13 +758,11 @@ impl VoiceController {
             Err(TryRecvError::Empty) => {}
         }
 
-        // Decodes pause-delimited segments at final quality while the person is
-        // still talking, so the release only waits for the tail. Declared before
-        // the capture guard so that on a cancel the microphone is released
-        // first and the worker (at most one segment in flight) is joined after.
-        let mut planner = CommitPlanner::new(actual_rate);
-        let committer = SegmentCommitter::spawn(engine.clone(), actual_rate, resample_for_final);
-
+        // The microphone first, before the transcription session and the
+        // segment worker, so the person is recorded from the earliest moment
+        // this thread can manage. Audio that arrives while those are set up
+        // waits in `audio_data_rx`; none of it is lost.
+        //
         // The one exit between here and a running microphone, and it tells the
         // person why. Before this, each of these failures logged an error and
         // returned, leaving the bar drawn as if it were recording.
@@ -758,11 +776,40 @@ impl VoiceController {
                 return;
             }
         };
-        // Held for as long as the loop runs, and dropped on every way out of
-        // this function. Dropping it stops the microphone, and the end path
-        // joins this thread, so by the time a stop or cancel returns the
-        // stream is gone.
-        let _capture = CaptureGuard::new(keepalive, live_captures);
+        // Held for as long as the loop runs. Dropping it stops the microphone,
+        // and the end path joins this thread, so by the time a stop or cancel
+        // returns the stream is gone. It is dropped explicitly after the loop,
+        // ahead of the segment worker declared below it, so on a cancel the
+        // microphone is released first and the worker (at most one segment in
+        // flight) is joined after. Every exit from the loop is a `break` for
+        // that reason; an early return would drop the worker first.
+        let capture = CaptureGuard::new(keepalive, live_captures);
+        info!(
+            "[AudioThread] Microphone live {} ms after start_dictation",
+            requested.elapsed().as_millis()
+        );
+        Self::announce_live(&app_handle);
+
+        let mut session = match engine.create_session() {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!(
+                    "[AudioThread] The {engine_name} engine could not open a session: {e}"
+                );
+                Self::give_up_on_capture(
+                    &app_handle,
+                    CaptureStartFailure::EngineUnavailable {
+                        detail: e.to_string(),
+                    },
+                );
+                return;
+            }
+        };
+
+        // Decodes pause-delimited segments at final quality while the person is
+        // still talking, so the release only waits for the tail.
+        let mut planner = CommitPlanner::new(actual_rate);
+        let committer = SegmentCommitter::spawn(engine.clone(), actual_rate, resample_for_final);
 
         info!("[AudioThread] Recording at {} Hz with {} channel(s), will resample to {} Hz for Whisper.",
               actual_rate, channels, WHISPER_SAMPLE_RATE);
@@ -879,6 +926,10 @@ impl VoiceController {
                 }
             }
         }
+
+        // The microphone before the segment worker; see where `capture` is
+        // declared.
+        drop(capture);
     }
 
     fn process_partial_transcription<R: Runtime>(
@@ -949,11 +1000,7 @@ impl VoiceController {
             // So the rule is: a session that was asked to finalise always gets
             // exactly one result, even when there was nothing to decode.
             info!("[AudioThread] No audio to transcribe (empty buffer); emitting an empty result so the session is closed out");
-            let _ = app_handle.emit(
-                constants::voice_transcription::FINAL_RESULT,
-                serde_json::json!({ "text": "" }),
-            );
-            let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
+            Self::emit_empty_result(app_handle);
             return;
         }
 
@@ -1421,8 +1468,14 @@ mod tests {
     }
 
     fn start_fake<R: Runtime + 'static>(c: &mut VoiceController, app: &AppHandle<R>) {
-        c.spawn_audio_worker(app, fake_microphone(), WHISPER_SAMPLE_RATE, 1)
-            .expect("start");
+        c.spawn_audio_worker(
+            app,
+            fake_microphone(),
+            WHISPER_SAMPLE_RATE,
+            1,
+            Instant::now(),
+        )
+        .expect("start");
         let deadline = Instant::now() + Duration::from_secs(5);
         while c.active_capture_handles() != 1 && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(5));
@@ -1474,6 +1527,7 @@ mod tests {
             }),
             WHISPER_SAMPLE_RATE,
             1,
+            Instant::now(),
         )
         .expect("start");
         assert!(c.cancel_dictation().is_ok());
@@ -1530,14 +1584,19 @@ mod tests {
 
     use crate::devices::fake_input;
 
-    /// Blocks `create_session` until released, so an end can be queued
-    /// before the audio thread reaches the microphone.
+    /// Blocks the audio thread's first call into the engine (its name, read
+    /// as the thread starts) until released, so an end can be queued before
+    /// the thread reaches the microphone. The microphone now opens before the
+    /// session is created, so `create_session` is too late to hold it.
     struct GatedEngine {
         go: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
     }
 
     impl TranscriptionEngine for GatedEngine {
         fn name(&self) -> &'static str {
+            if let Some(go) = self.go.lock().unwrap().take() {
+                let _ = go.recv_timeout(Duration::from_secs(5));
+            }
             "gated"
         }
         fn supports_streaming(&self) -> bool {
@@ -1547,9 +1606,6 @@ mod tests {
             true
         }
         fn create_session(&self) -> std::result::Result<Box<dyn TranscriptionSession>, String> {
-            if let Some(go) = self.go.lock().unwrap().take() {
-                let _ = go.recv_timeout(Duration::from_secs(5));
-            }
             Ok(Box::new(SilentSession))
         }
     }
@@ -1623,8 +1679,14 @@ mod tests {
             let app = tauri::test::mock_app();
             let device = FakeDevice::new();
             let mut c = controller();
-            c.spawn_audio_worker(app.handle(), device.microphone(None, None), 16000, 1)
-                .expect("start");
+            c.spawn_audio_worker(
+                app.handle(),
+                device.microphone(None, None),
+                16000,
+                1,
+                Instant::now(),
+            )
+            .expect("start");
             let deadline = Instant::now() + Duration::from_secs(5);
             while device.open.load(Ordering::SeqCst) != 1 && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(5));
@@ -1649,6 +1711,7 @@ mod tests {
                 device.microphone(Some(entered_tx), Some(go_rx)),
                 16000,
                 1,
+                Instant::now(),
             )
             .expect("start");
             entered_rx
@@ -1672,15 +1735,22 @@ mod tests {
             let app = tauri::test::mock_app();
             let device = FakeDevice::new();
             let (go_tx, go_rx) = channel::<()>();
-            let mut c = VoiceController::new_with_engine(
-                "test",
-                Arc::new(GatedEngine {
-                    go: Mutex::new(Some(go_rx)),
-                }),
+            let engine = Arc::new(GatedEngine {
+                go: Mutex::new(None),
+            });
+            let mut c =
+                VoiceController::new_with_engine("test", engine.clone()).expect("controller");
+            // Armed only now, so nothing the constructor asks the engine can
+            // spend the gate meant for the audio thread.
+            *engine.go.lock().unwrap() = Some(go_rx);
+            c.spawn_audio_worker(
+                app.handle(),
+                device.microphone(None, None),
+                16000,
+                1,
+                Instant::now(),
             )
-            .expect("controller");
-            c.spawn_audio_worker(app.handle(), device.microphone(None, None), 16000, 1)
-                .expect("start");
+            .expect("start");
             let releaser = thread::spawn(move || {
                 thread::sleep(Duration::from_millis(50));
                 let _ = go_tx.send(());
@@ -1695,6 +1765,100 @@ mod tests {
         }
     }
 
+    // ── "Started" means the microphone is running ──
+    //
+    // The pill, the tray and the start cue all follow the started events, so
+    // they must come from the audio thread after the device opened, once, and
+    // never for a capture that failed to open.
+
+    fn wait_until(done: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !done() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn started_is_announced_once_the_microphone_is_running() {
+        use tauri::Listener;
+        let app = tauri::test::mock_app();
+        let device = FakeDevice::new();
+        let announced: Arc<Mutex<Vec<(&'static str, bool)>>> = Arc::new(Mutex::new(Vec::new()));
+        for event in [
+            constants::voice_transcription::DICTATION_STARTED,
+            constants::plugin::VOICE_TRANSCRIPTION_DICTATION_STARTED,
+        ] {
+            let seen = Arc::clone(&announced);
+            let running = Arc::clone(&device.running);
+            app.handle().listen(event, move |_| {
+                seen.lock()
+                    .unwrap()
+                    .push((event, running.load(Ordering::SeqCst)));
+            });
+        }
+
+        let mut c = controller();
+        c.spawn_audio_worker(
+            app.handle(),
+            device.microphone(None, None),
+            16000,
+            1,
+            Instant::now(),
+        )
+        .expect("start");
+        wait_until(|| announced.lock().unwrap().len() == 2);
+        assert!(c.stop_dictation().expect("stop"));
+
+        let announced = announced.lock().unwrap();
+        assert_eq!(announced.len(), 2, "each started event once: {announced:?}");
+        assert!(
+            announced.iter().all(|(_, running)| *running),
+            "announced before the microphone was running: {announced:?}"
+        );
+    }
+
+    #[test]
+    fn a_microphone_that_fails_to_open_is_never_announced() {
+        use tauri::Listener;
+        let app = tauri::test::mock_app();
+        let started = Arc::new(AtomicUsize::new(0));
+        let stopped = Arc::new(AtomicUsize::new(0));
+        for event in [
+            constants::voice_transcription::DICTATION_STARTED,
+            constants::plugin::VOICE_TRANSCRIPTION_DICTATION_STARTED,
+        ] {
+            let started = Arc::clone(&started);
+            app.handle().listen(event, move |_| {
+                started.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+        {
+            let stopped = Arc::clone(&stopped);
+            app.handle().listen(
+                constants::voice_transcription::DICTATION_STOPPED,
+                move |_| {
+                    stopped.fetch_add(1, Ordering::SeqCst);
+                },
+            );
+        }
+
+        let mut c = controller();
+        c.spawn_audio_worker(
+            app.handle(),
+            Box::new(|_tx: Sender<Vec<f32>>| -> OpenResult {
+                Err(CaptureStartFailure::NoInputDevice)
+            }),
+            WHISPER_SAMPLE_RATE,
+            1,
+            Instant::now(),
+        )
+        .expect("start");
+        wait_until(|| stopped.load(Ordering::SeqCst) > 0);
+        assert!(c.cancel_dictation().is_ok());
+        assert!(stopped.load(Ordering::SeqCst) > 0, "the failure unwound");
+        assert_eq!(started.load(Ordering::SeqCst), 0, "a failed open announced");
+    }
+
     /// The end waited on a busy controller (#687, #694), with the real
     /// device check this time.
     #[test]
@@ -1703,8 +1867,14 @@ mod tests {
             let app = tauri::test::mock_app();
             let device = FakeDevice::new();
             let mut c = controller();
-            c.spawn_audio_worker(app.handle(), device.microphone(None, None), 16000, 1)
-                .expect("start");
+            c.spawn_audio_worker(
+                app.handle(),
+                device.microphone(None, None),
+                16000,
+                1,
+                Instant::now(),
+            )
+            .expect("start");
             let deadline = Instant::now() + Duration::from_secs(5);
             while device.open.load(Ordering::SeqCst) != 1 && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(5));

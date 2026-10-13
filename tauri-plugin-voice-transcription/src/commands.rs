@@ -181,11 +181,9 @@ pub async fn start_dictation<R: tauri::Runtime + 'static>(
 
     voice_controller.start_dictation(&app)?;
 
-    // Emit started event through the plugin system - sound will be handled automatically by backend
-    app.emit(constants::plugin::VOICE_TRANSCRIPTION_DICTATION_STARTED, ())
-        .map_err(|e| Error::EventError(format!("Failed to emit dictation-started event: {}", e)))?;
-
-    info!("[Plugin] Dictation started successfully");
+    // The started events come from the audio thread once the microphone is
+    // actually running, not from here: this returns while it is still opening.
+    info!("[Plugin] Dictation started successfully; the microphone opens on its own thread");
     Ok(())
 }
 
@@ -373,16 +371,9 @@ pub async fn toggle_dictation<R: tauri::Runtime + 'static>(
             }
         };
 
-        match voice_controller.start_dictation(&app) {
-            Ok(()) => {
-                app.emit(constants::plugin::VOICE_TRANSCRIPTION_DICTATION_STARTED, ())
-                    .map_err(|e| {
-                        Error::EventError(format!("Failed to emit dictation-started event: {}", e))
-                    })?;
-                Ok(true)
-            }
-            Err(e) => Err(e),
-        }
+        // Announced by the audio thread once the microphone is running.
+        voice_controller.start_dictation(&app)?;
+        Ok(true)
     }
 }
 

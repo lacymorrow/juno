@@ -487,46 +487,21 @@ async fn handle_dictation_transcription_start(
         session.describe()
     );
 
-    // Warm Apple's on-device model now, while the person is still talking, so
-    // the release only pays for generation. No-op where it cannot run.
-    crate::dictation_cleanup::prewarm(&app_handle);
-
     // Mark this as Dictation Mode in AppState BEFORE starting transcription.
     // This is a liveness flag for the UI only; the session above is what says
-    // who the transcript belongs to.
+    // who the transcript belongs to. The live-microphone listener in
+    // integration.rs reads it to put the bar in dictation mode.
     if let Err(e) = app_state.set_dictation_active(true) {
         warn!("Failed to set dictation active state: {}", e);
     }
 
-    // Pause always listening mode if it's active
-    let was_always_listening_active = app_state.get_always_listening_active().unwrap_or(false);
-
-    // Store the state so we can restore it later
-    if let Ok(mut audio_settings) = app_state.audio_settings.lock() {
-        audio_settings.was_always_listening_active_before_dictation = was_always_listening_active;
-    }
-
-    if was_always_listening_active {
-        info!("[Dictation Mode] Pausing always listening mode");
-        if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(
-            app_handle.clone(),
-            app_state.clone(),
-        )
-        .await
-        {
-            warn!(
-                "[Dictation Mode] Failed to pause always listening mode: {}",
-                e
-            );
-        }
-    }
-
-    // Update floating bar manager to set dictation mode
-    let app_handle_for_bar = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
-        crate::commands::ui_commands::handle_dictation_mode_change(&app_handle_for_bar, true).await;
-    });
-
+    // The microphone comes first. Nothing the person can see or hear happens
+    // before it is running: the bar, the tray, `dictation-active` and the
+    // start cue all follow the plugin's started event, which the audio thread
+    // sends once the device is open (`show_live_microphone` in
+    // integration.rs). Everything else this start does waits until after the
+    // call below.
+    //
     // Use the plugin command to start dictation only if controller exists
     if let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
         match tauri_plugin_voice_transcription::commands::start_dictation(
@@ -562,13 +537,6 @@ async fn handle_dictation_transcription_start(
 
                 info!("[Dictation Mode] Started immediate transcription successfully");
 
-                if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, true) {
-                    error!(
-                        "[Dictation Mode] Failed to emit dictation-active event: {}",
-                        e
-                    );
-                }
-
                 // Register escape key to cancel dictation
                 {
                     let coordinator =
@@ -587,10 +555,42 @@ async fn handle_dictation_transcription_start(
                     }
                 }
 
-                // NOTE: the start cue is played on the key-down edge
-                // (dictation_monitor::on_dictation_input_pressed / the tap
-                // handler), not here — this handler only runs after audio
-                // capture has initialized, which is too late to feel instant.
+                // Pause always listening mode if it's active. After the
+                // dictation microphone is asked for, not before: stopping the
+                // wake-phrase engine joins its thread, and the person is
+                // already talking.
+                let was_always_listening_active =
+                    app_state.get_always_listening_active().unwrap_or(false);
+
+                // Store the state so we can restore it later
+                if let Ok(mut audio_settings) = app_state.audio_settings.lock() {
+                    audio_settings.was_always_listening_active_before_dictation =
+                        was_always_listening_active;
+                }
+
+                if was_always_listening_active {
+                    info!("[Dictation Mode] Pausing always listening mode");
+                    if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(
+                        app_handle.clone(),
+                        app_state.clone(),
+                    )
+                    .await
+                    {
+                        warn!(
+                            "[Dictation Mode] Failed to pause always listening mode: {}",
+                            e
+                        );
+                    }
+                }
+
+                // Warm Apple's on-device model now, while the person is still
+                // talking, so the release only pays for generation. No-op
+                // where it cannot run.
+                crate::dictation_cleanup::prewarm(&app_handle);
+
+                // The start cue is not played here, nor on the key-down edge:
+                // it follows the live microphone, with the bar (see the
+                // started listener in integration.rs).
             }
             Err(e) => {
                 error!("[Dictation Mode] Failed to start dictation: {}", e);
