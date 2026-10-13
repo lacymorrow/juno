@@ -259,6 +259,44 @@ pub async fn init_dictation_input_monitoring(app_handle: AppHandle) -> Result<()
     Ok(())
 }
 
+/// Open the session if the hold is old enough. Idempotent: the press's own
+/// timer and the monitoring loop both call it, and only the first one opens.
+fn emit_start_if_due(app_handle: &AppHandle, state: &mut DictationInputMonitorState) {
+    if let Some(hold) = state.open_start(|| hold_gate::open(VoiceTarget::Dictation)) {
+        // The payload says how this session is being triggered: this monitor
+        // only ever watches a held key or button, so the session it opens is
+        // a push-to-talk one and says so rather than leaving the start
+        // handler to work it out.
+        if let Err(e) = app_handle.emit(
+            events::dictation::TRANSCRIPTION_START,
+            serde_json::json!({
+                "method": VoiceStartMethod::PushToTalk.as_wire(),
+                "hold": hold,
+            }),
+        ) {
+            error!(
+                "[DictationMonitor] Failed to emit dictation-transcription-start: {}",
+                e
+            );
+            // No start is coming to settle it, so a release must not wait
+            // for one.
+            let _ = hold_gate::settle(VoiceTarget::Dictation, hold);
+        }
+    }
+}
+
+/// Open the session the moment the hold is old enough to count, rather than
+/// at the monitoring loop's next tick, which added up to 50 ms before the
+/// microphone was even asked for.
+fn start_when_due(app_handle: &AppHandle) {
+    let app_handle = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(monitor_sessions::IMMEDIATE_START_MS)).await;
+        let mut state = DICTATION_INPUT_STATE.lock().await;
+        emit_start_if_due(&app_handle, &mut state);
+    });
+}
+
 // Monitoring task that checks hold duration and triggers events
 async fn dictation_input_monitoring_task(app_handle: AppHandle) {
     let mut interval = tokio::time::interval(Duration::from_millis(50)); // Check every 50ms for better responsiveness
@@ -268,29 +306,7 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
 
         let mut state = DICTATION_INPUT_STATE.lock().await;
 
-        // Check if we should start transcription immediately
-        if let Some(hold) = state.open_start(|| hold_gate::open(VoiceTarget::Dictation)) {
-            // Emit event to start transcription immediately. The payload says
-            // how this session is being triggered: this monitor only ever
-            // watches a held key or button, so the session it opens is a
-            // push-to-talk one and says so rather than leaving the start
-            // handler to work it out.
-            if let Err(e) = app_handle.emit(
-                events::dictation::TRANSCRIPTION_START,
-                serde_json::json!({
-                    "method": VoiceStartMethod::PushToTalk.as_wire(),
-                    "hold": hold,
-                }),
-            ) {
-                error!(
-                    "[DictationMonitor] Failed to emit dictation-transcription-start: {}",
-                    e
-                );
-                // No start is coming to settle it, so a release must not wait
-                // for one.
-                let _ = hold_gate::settle(VoiceTarget::Dictation, hold);
-            }
-        }
+        emit_start_if_due(&app_handle, &mut state);
 
         // Check if we've reached the hold threshold (commit to dictation)
         if state.check_and_reach_threshold() {
@@ -403,6 +419,7 @@ pub async fn on_dictation_input_pressed(app_handle: &AppHandle) {
             crate::commands::sound::SoundType::NotificationAmbient,
         );
         info!("[DictationMonitor] Dictation input pressed down - starting immediate tracking");
+        start_when_due(app_handle);
     } else {
         warn!("[DictationMonitor] Dictation input pressed down - ignored (transcription_started={}, last_cancel={:?})",
               state.transcription_started,
