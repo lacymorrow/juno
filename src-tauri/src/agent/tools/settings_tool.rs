@@ -163,22 +163,21 @@ async fn advanced_on(app: &AppHandle) -> bool {
     }
 }
 
-/// Debug mode, as the Settings window sees it.
-fn debug_on(app: &AppHandle) -> bool {
-    app.try_state::<AppState>()
-        .is_some_and(|state| crate::commands::core::debug_mode_active(&state))
+/// Beta features, as the Settings window sees them.
+fn beta_on(app: &AppHandle) -> bool {
+    crate::settings::beta_features_active(app)
 }
 
-/// Whether the agent is offered a setting right now: a debug-only one (speaking
-/// speed) exists only while debug mode is on, so it is not listed, read or set
-/// otherwise, matching the window, which hides the row.
-fn offered(spec: &SettingSpec, debug: bool) -> bool {
-    !spec.debug_only || debug
+/// Whether the agent is offered a setting right now: a beta-only one (speaking
+/// speed) exists only while beta features are on, so it is not listed, read or
+/// set otherwise, matching the window, which hides the row.
+fn offered(spec: &SettingSpec, beta: bool) -> bool {
+    !spec.beta_only || beta
 }
 
 fn ensure_offered(app: &AppHandle, key: SettingKey) -> Result<(), String> {
     let spec = key.spec();
-    if offered(&spec, debug_on(app)) {
+    if offered(&spec, beta_on(app)) {
         Ok(())
     } else {
         Err(format!(
@@ -189,9 +188,9 @@ fn ensure_offered(app: &AppHandle, key: SettingKey) -> Result<(), String> {
 }
 
 async fn list(app: &AppHandle) -> Result<Value, String> {
-    let debug = debug_on(app);
+    let beta = beta_on(app);
     let settings: Vec<Value> = all_specs()
-        .filter(|spec| offered(spec, debug))
+        .filter(|spec| offered(spec, beta))
         .map(|spec| spec.describe())
         .collect();
     Ok(json!({
@@ -246,7 +245,11 @@ async fn set(app: &AppHandle, key: SettingKey, raw: &Value) -> Result<Value, Str
     }
 
     let (current, _) = read(app, key).await?;
-    Ok(json!({ "key": spec.id, "changed": true, "current": current }))
+    let mut result = json!({ "key": spec.id, "changed": true, "current": current });
+    if key == SettingKey::BetaFeatures && current == json!(true) {
+        result["notice"] = json!(registry::beta_notice());
+    }
+    Ok(result)
 }
 
 async fn open(app: &AppHandle, pane: Option<&str>) -> Result<Value, String> {
@@ -310,8 +313,8 @@ pub async fn follow_name(app: &AppHandle, name: &str) -> Result<Value, String> {
 /// path for the tool's `highlight` and for `juno://settings?highlight=` links.
 pub async fn highlight(app: &AppHandle, key: SettingKey) -> Result<Value, String> {
     let spec = key.spec();
-    // A debug-only row is not on screen without debug mode: open its pane.
-    if !offered(&spec, debug_on(app)) {
+    // A beta-only row is not on screen without beta features: open its pane.
+    if !offered(&spec, beta_on(app)) {
         return open_pane(app, Some(spec.pane)).await;
     }
     // A row behind the advanced toggle does not exist on screen until the
@@ -442,6 +445,7 @@ async fn read(app: &AppHandle, key: SettingKey) -> Result<(Value, Option<Value>)
         K::OpenAtLogin => {
             json!(crate::commands::autostart::is_autostart_enabled(app.clone()).await?)
         }
+        K::BetaFeatures => json!(crate::settings::beta_features_active(app)),
         K::CursorColor => json!(
             manager(app)?
                 .get_floating_bar_settings()
@@ -643,6 +647,10 @@ async fn apply(app: &AppHandle, change: &AuthorizedChange) -> Result<(), String>
             )
             .await?;
         }
+        K::BetaFeatures => {
+            // Saves, and announces `beta-features-changed` so an open window follows.
+            crate::commands::settings::set_beta_features(app.clone(), want_bool(change)?).await?;
+        }
         K::OpenAtLogin => {
             if want_bool(change)? {
                 crate::commands::autostart::enable_autostart(app.clone()).await?;
@@ -812,6 +820,63 @@ mod tests {
             );
         }
         assert!(def.description.contains("protected"));
+    }
+
+    #[test]
+    fn beta_features_is_settable_visible_and_in_general() {
+        let spec = SettingKey::BetaFeatures.spec();
+        assert!(!spec.protected);
+        assert!(!spec.needs_advanced());
+        assert_eq!(spec.pane, registry::Pane::General);
+        assert!(!spec.beta_only);
+        assert!(offered(&spec, false));
+        for raw in [json!(true), json!(false)] {
+            assert!(registry::authorize_set(SettingKey::BetaFeatures, &raw).is_ok());
+        }
+    }
+
+    #[test]
+    fn enabling_beta_notice_carries_the_caveat_and_what_it_unlocks() {
+        let notice = registry::beta_notice();
+        assert!(notice.contains("still being finished"));
+        assert!(notice.contains("not fully tested"));
+        assert!(notice.contains("Speaking speed"));
+        let note = SettingKey::BetaFeatures.spec().describe()["note"]
+            .as_str()
+            .expect("note")
+            .to_string();
+        assert!(note.contains("not fully tested") && note.contains("Speaking speed"));
+    }
+
+    #[test]
+    fn beta_only_settings_appear_in_list_once_beta_is_on() {
+        let listed = |beta: bool| -> Vec<&'static str> {
+            all_specs()
+                .filter(|spec| offered(spec, beta))
+                .map(|spec| spec.id)
+                .collect()
+        };
+        assert!(!listed(false).contains(&"audio.speaking_speed"));
+        assert!(listed(true).contains(&"audio.speaking_speed"));
+        assert!(listed(false).contains(&"general.beta_features"));
+        assert_eq!(registry::beta_unlocks(), vec!["Speaking speed"]);
+    }
+
+    #[test]
+    fn beta_only_settings_are_offered_only_with_beta_features() {
+        for key in SettingKey::ALL {
+            let spec = key.spec();
+            assert!(offered(&spec, true), "{} offered with beta on", spec.id);
+            assert_eq!(
+                offered(&spec, false),
+                !spec.beta_only,
+                "{} with beta off",
+                spec.id
+            );
+        }
+        assert!(!offered(&SettingKey::SpeakingSpeed.spec(), false));
+        assert!(offered(&SettingKey::SpeakingSpeed.spec(), true));
+        assert!(offered(&SettingKey::JunoVoice.spec(), false));
     }
 
     #[test]

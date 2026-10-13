@@ -802,6 +802,8 @@ pub fn run() {
             commands::settings::set_autostart_enabled,
             commands::settings::get_advanced_settings_enabled,
             commands::settings::set_advanced_settings_enabled,
+            commands::settings::get_beta_features,
+            commands::settings::set_beta_features,
             commands::settings::take_pending_settings_navigation,
             commands::settings::open_juno_link,
             // Experimental: one long-lived `claude` process per conversation.

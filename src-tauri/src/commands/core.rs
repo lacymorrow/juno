@@ -611,8 +611,10 @@ pub async fn set_debug_mode(
 }
 
 /// Whether debug mode is on: the Advanced switch, a debug build, or
-/// `RUST_LOG=debug`. The one answer for the window and for the `settings`
-/// tool, which both hide debug-only settings (speaking speed) without it.
+/// `RUST_LOG=debug`. Debug mode now means extra logging and the bar window
+/// outline only. Features still being finished belong to
+/// [`crate::settings::beta_features_active`].
+#[allow(dead_code)] // kept for callers still gated on it; settings now use beta_features_active
 pub fn debug_mode_active(state: &AppState) -> bool {
     state.is_debug_mode()
         || cfg!(debug_assertions)

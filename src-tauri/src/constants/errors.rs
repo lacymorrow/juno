@@ -213,6 +213,7 @@ pub mod actions {
     pub const ONBOARDING_SETTINGS: &str = "onboarding settings";
     pub const AUTOSTART_SETTING: &str = "autostart setting";
     pub const ADVANCED_SETTINGS_TOGGLE: &str = "advanced settings toggle";
+    pub const BETA_FEATURES_TOGGLE: &str = "beta features toggle";
     pub const WINDOW_LIST_JSON: &str = "window list JSON";
     pub const WINDOW_INFO_JSON: &str = "window info JSON";
     pub const EXECUTE_COMMAND_INPUT: &str = "execute_command input";

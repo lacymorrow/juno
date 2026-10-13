@@ -446,6 +446,38 @@ pub async fn set_advanced_settings_enabled(
     Ok(())
 }
 
+/// Whether beta features are on.
+#[command]
+pub async fn get_beta_features(app_handle: AppHandle) -> Result<bool, String> {
+    Ok(crate::settings::beta_features_active(&app_handle))
+}
+
+/// Turn beta features on or off. Persisted; an open Settings window follows
+/// through the event.
+#[command]
+pub async fn set_beta_features(app_handle: AppHandle, enabled: bool) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app_handle.clone()).map_err(|e| {
+        format_error(
+            templates::FAILED_TO_INITIALIZE,
+            components::SETTINGS_MANAGER,
+            e,
+        )
+    })?;
+
+    settings_manager
+        .set_beta_features(enabled)
+        .await
+        .map_err(|e| format_error(templates::FAILED_TO_SET, actions::BETA_FEATURES_TOGGLE, e))?;
+
+    if let Err(e) = app_handle.emit(
+        crate::constants::settings::events::BETA_FEATURES_CHANGED,
+        enabled,
+    ) {
+        tracing::warn!("Could not announce the beta features change: {}", e);
+    }
+    Ok(())
+}
+
 /// The pane and row the agent pointed the Settings window at before the
 /// window existed. Taken once, by the window, when it mounts.
 #[command]
@@ -553,6 +585,7 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "onboarding",
     "autostart_enabled",
     "advanced_settings_enabled",
+    "beta_features_enabled",
     "cli",
     "voice_transcription",
     "triggers",

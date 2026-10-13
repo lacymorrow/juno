@@ -14,6 +14,13 @@ pub mod persist;
 pub mod registry;
 pub mod reset;
 
+/// Whether beta features are on. The one answer for the Settings window, the
+/// agent's `settings` tool and any feature gated as beta. Off when the store
+/// cannot be read.
+pub fn beta_features_active(app: &tauri::AppHandle) -> bool {
+    manager::SettingsManager::read_beta_features(app)
+}
+
 /// Main application settings structure
 /// This replaces all individual JSON config files with a single, centralized structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +49,11 @@ pub struct AppSettings {
     /// trimmed basic set (false). Older stores lack the key, so it defaults off.
     #[serde(default = "defaults::advanced_settings_enabled")]
     pub advanced_settings_enabled: bool,
+    /// Whether features still being finished (speaking speed today) are shown.
+    /// Older stores lack the key, so it defaults off. Ask [`beta_features_active`],
+    /// not this field, so the answer stays in one place.
+    #[serde(default = "defaults::beta_features_enabled")]
+    pub beta_features_enabled: bool,
     /// CLI configuration settings
     pub cli: CLISettings,
     /// Voice transcription configuration
@@ -561,6 +573,7 @@ impl Default for AppSettings {
             onboarding: OnboardingSettings::default(),
             autostart_enabled: defaults::AUTOSTART_ENABLED,
             advanced_settings_enabled: defaults::ADVANCED_SETTINGS_ENABLED,
+            beta_features_enabled: defaults::BETA_FEATURES_ENABLED,
             cli: CLISettings::default(),
             voice_transcription: VoiceTranscriptionSettings::default(),
             triggers: crate::triggers::default_triggers(),
@@ -797,6 +810,30 @@ mod tests {
         settings.set_dictation_copy_to_clipboard(true);
         assert!(settings.dictation_copy_to_clipboard());
         assert!(settings.dictation_clipboard_enabled);
+    }
+
+    #[test]
+    fn beta_features_default_off_and_old_stores_still_parse() {
+        let settings = AppSettings::default();
+        assert!(!settings.beta_features_enabled);
+        let mut value = serde_json::to_value(&settings).expect("settings serialize");
+        value
+            .as_object_mut()
+            .expect("settings are an object")
+            .remove("beta_features_enabled");
+        let old: AppSettings = serde_json::from_value(value).expect("old store parses");
+        assert!(!old.beta_features_enabled);
+    }
+
+    #[test]
+    fn beta_features_round_trip() {
+        let settings = AppSettings {
+            beta_features_enabled: true,
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&settings).expect("serialize");
+        let back: AppSettings = serde_json::from_str(&json).expect("deserialize");
+        assert!(back.beta_features_enabled);
     }
 
     /// New installs and Reset run one agent. Saved values are not rewritten:
