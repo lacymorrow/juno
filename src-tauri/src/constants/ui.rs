@@ -237,6 +237,19 @@ pub mod agent_status {
     pub const RESPONSE: &str = "response";
 }
 
+/// Where `bar-ladder` asks the bar to climb to. Escape walks Juno down one
+/// rung at a time (big chat, floating chat, idle bar, hidden) and the Dock and
+/// tray icons walk her back up; see `window_management::climb_step`.
+pub mod ladder_steps {
+    /// Shown from hidden: open the small text input, ready to type.
+    pub const COMPOSER: &str = "composer";
+    /// Open the floating chat.
+    pub const FLOATING: &str = "floating";
+    /// One rung up from wherever the bar is: the idle bar or the text input
+    /// opens the floating chat, the floating chat opens the big chat.
+    pub const NEXT: &str = "next";
+}
+
 /// UI interaction types
 /// These values are used by the frontend UI interaction handlers
 pub mod interaction_types {

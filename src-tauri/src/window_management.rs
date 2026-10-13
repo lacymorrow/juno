@@ -159,6 +159,106 @@ pub async fn toggle_chat_surface(app: &AppHandle, surface: ChatSurface) {
     }
 }
 
+/// One click on the Dock or tray icon: what it does to Juno's chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Climb {
+    /// The big chat is already in front of the person. It is the top rung.
+    Stay,
+    /// The big chat is on screen but behind something: bring it forward.
+    BringMainForward,
+    /// Juno is off the screen: put the bar back with its text input open.
+    ShowBarWithComposer,
+    /// The bar is up: one rung higher, which only the bar can work out (idle
+    /// bar or text input to floating chat, floating chat to big chat).
+    BarNext,
+}
+
+/// The visibility ladder, going up.
+///
+/// Escape takes Juno down one rung per press: big chat, floating chat, idle
+/// bar, hidden. The Dock and tray icons walk her back up the same ladder, one
+/// rung per click, except that from hidden she comes back ready to type,
+/// because someone reaching for a Juno they cannot see wants to ask something.
+pub fn climb_step(surface: ChatSurface, bar_visible: bool) -> Climb {
+    match surface {
+        ChatSurface::MainWindow { frontmost: true } => Climb::Stay,
+        ChatSurface::MainWindow { frontmost: false } => Climb::BringMainForward,
+        ChatSurface::BarPane if !bar_visible => Climb::ShowBarWithComposer,
+        ChatSurface::BarPane => Climb::BarNext,
+    }
+}
+
+/// Ask the bar to climb to `to`, one of `ui::ladder_steps`.
+fn emit_ladder(app: &AppHandle, to: &str) {
+    if let Err(e) = app.emit(
+        constants::events::bar::LADDER,
+        serde_json::json!({ "to": to }),
+    ) {
+        warn!("Could not ask the bar to climb to {}: {}", to, e);
+    }
+}
+
+/// Put the floating bar on screen without focusing it. It is a panel, and
+/// focusing it would pull the person out of the app they are in.
+fn show_bar(app: &AppHandle) {
+    if let Some(bar) = app.get_webview_window(window_labels::FLOATING_BAR) {
+        if !bar.is_visible().unwrap_or(false) {
+            if let Err(e) = bar.show() {
+                warn!("Could not put the floating bar on screen: {}", e);
+            }
+        }
+    }
+}
+
+/// One rung up the ladder: a click on the Dock icon or the tray icon.
+///
+/// The surface is passed in for the same reason as `toggle_chat_surface`: the
+/// tray reads it as the pointer arrives, before AppKit starts tracking a click.
+pub async fn climb_chat_ladder(app: &AppHandle, surface: ChatSurface) {
+    // During setup the only Juno to get back to is the setup window.
+    if onboarding_is_open(app) {
+        bring_onboarding_forward(app);
+        return;
+    }
+    let bar_visible = WindowManager::is_window_visible(app, window_labels::FLOATING_BAR);
+    match climb_step(surface, bar_visible) {
+        Climb::Stay => {}
+        Climb::BringMainForward => {
+            if let Err(e) = open_main_window(app.clone()).await {
+                warn!("Could not bring the chat window forward: {}", e);
+            }
+        }
+        Climb::ShowBarWithComposer => {
+            show_bar(app);
+            emit_ladder(app, constants::ui::ladder_steps::COMPOSER);
+        }
+        Climb::BarNext => emit_ladder(app, constants::ui::ladder_steps::NEXT),
+    }
+}
+
+/// Escape in the big chat: one rung down, to the floating chat.
+///
+/// Returns whether it stepped. Running work comes off the stack first, and the
+/// stop key's monitor is already handling that press, so with anything to stop
+/// this does nothing and the next press steps down.
+#[tauri::command]
+pub async fn escape_main_window(app: AppHandle) -> Result<bool, String> {
+    if crate::commands::escape_key_coordinator::something_to_stop(&app).await {
+        return Ok(false);
+    }
+    close_main_window(app.clone()).await?;
+    show_bar(&app);
+    emit_ladder(&app, constants::ui::ladder_steps::FLOATING);
+    Ok(true)
+}
+
+/// Escape on the idle bar: the last rung. Juno leaves the screen; the Dock or
+/// tray icon brings her back.
+#[tauri::command]
+pub async fn hide_floating_bar(app: AppHandle) -> Result<(), String> {
+    WindowManager::hide_window(&app, window_labels::FLOATING_BAR).await
+}
+
 /// Window management operations
 pub struct WindowManager;
 
@@ -647,8 +747,12 @@ pub fn announce_main_window(app: &AppHandle, open: bool) {
     // and the bar show the same conversation, so an idle bar belongs behind it.
     if open {
         crate::bar_stacking::note_front(app, window_labels::MAIN);
-        // The bar already knows how to put its pane away.
-        if let Err(e) = app.emit(constants::events::bar::DISMISS_PANE, ()) {
+        // The bar already knows how to put its pane away. The reason tells it
+        // this was not a typed Escape, so it never walks on to hiding the bar.
+        if let Err(e) = app.emit(
+            constants::events::bar::DISMISS_PANE,
+            serde_json::json!({ "reason": "main_window" }),
+        ) {
             warn!("Could not tell the bar to dismiss its pane: {}", e);
         }
     } else {
@@ -693,6 +797,24 @@ mod tests {
             serde_json::from_str(raw).expect("tauri.conf.json is not valid JSON");
         serde_json::from_value(value["app"]["windows"].clone())
             .expect("app.windows in tauri.conf.json does not parse as Tauri window configs")
+    }
+
+    #[test]
+    fn the_icons_climb_one_rung_at_a_time() {
+        assert_eq!(
+            climb_step(ChatSurface::BarPane, false),
+            Climb::ShowBarWithComposer
+        );
+        assert_eq!(climb_step(ChatSurface::BarPane, true), Climb::BarNext);
+        assert_eq!(
+            climb_step(ChatSurface::MainWindow { frontmost: false }, true),
+            Climb::BringMainForward
+        );
+        // The top rung: a click never puts the big chat away.
+        assert_eq!(
+            climb_step(ChatSurface::MainWindow { frontmost: true }, false),
+            Climb::Stay
+        );
     }
 
     #[test]

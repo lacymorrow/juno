@@ -1,14 +1,20 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 import { useEventListener } from "@/hooks/useEventListener";
 import {
   ESCAPE_COALESCE_MS,
   ESCAPE_REARM_MS,
+  LADDER_CHAIN_MS,
   barIsExpanded,
+  climbTarget,
   escapeHandled,
+  escapeHidesBar,
   escapeOutcome,
   type BarEscapeState,
+  type ClimbTarget,
+  type LadderStep,
 } from "@/lib/barEscape";
 
 /**
@@ -31,6 +37,14 @@ export interface EscapeToIdleOptions extends BarEscapeState {
    * Rust's decision; this only reports the press.
    */
   report: () => void;
+  /**
+   * One rung up the ladder, asked for by the Dock or tray icon (or by Escape
+   * in the big chat, which steps down to the floating chat). `composer`: open
+   * this look's text input, focused and ready to type. `floating`: open this
+   * look's chat (the Pill's pane, a card, an answer), or the text input when
+   * there is nothing to show yet.
+   */
+  climb: (to: ClimbTarget) => void;
 }
 
 /**
@@ -52,6 +66,11 @@ export interface EscapeToIdleOptions extends BarEscapeState {
  *
  * Both routes land on one decision (`escapeOutcome`) and are coalesced, so one
  * keystroke collapses the bar exactly once.
+ *
+ * It is also the bar's half of the visibility ladder. A press the bar has
+ * nothing else for, on the idle bar, takes the bar off the screen, but only
+ * when it was aimed at Juno (see `escapeHidesBar`). And `bar-ladder` from Rust
+ * climbs the other way through the look's `climb`.
  */
 export function useEscapeToIdle(options: EscapeToIdleOptions): void {
   const { barState, working, overlayOpen, composerOpen, popupOpen } = options;
@@ -64,33 +83,66 @@ export function useEscapeToIdle(options: EscapeToIdleOptions): void {
 
   const expanded = barIsExpanded({ barState, working, overlayOpen, composerOpen, popupOpen });
 
+  // Just after a press did something, the next one is the same walk down the
+  // ladder, and the stop key stays claimed so it can be seen from any app.
+  const [chainOpen, setChainOpen] = useState(false);
+  const chainTimer = useRef<number | undefined>(undefined);
+  const openChain = useCallback(() => {
+    setChainOpen(true);
+    window.clearTimeout(chainTimer.current);
+    chainTimer.current = window.setTimeout(() => setChainOpen(false), LADDER_CHAIN_MS);
+  }, []);
+  useEffect(() => () => window.clearTimeout(chainTimer.current), []);
+  const claimed = expanded || chainOpen;
+
   /**
    * Act on one press. `route` is which of the two paths it arrived on: a press
    * echoed back by the other route moments later is the same keystroke, not a
    * second one, and must not collapse another layer. Two presses on the same
    * route are two presses, however fast they come.
    */
-  const press = useCallback((route: EscapeRoute) => {
-    const now = Date.now();
-    const last = lastHandledRef.current;
-    if (route !== last.route && now - last.at < ESCAPE_COALESCE_MS) return;
-    const { barState, working, overlayOpen, composerOpen, popupOpen, collapse, report } =
-      latest.current;
-    const outcome = escapeOutcome({ barState, working, overlayOpen, composerOpen, popupOpen });
-    if (!escapeHandled(outcome)) return;
-    lastHandledRef.current = { at: now, route };
-    if (outcome.closeLocally) collapse();
-    if (outcome.report) report();
-  }, []);
+  const press = useCallback(
+    (route: EscapeRoute, aimedAtJuno = true) => {
+      const now = Date.now();
+      const last = lastHandledRef.current;
+      if (route !== last.route && now - last.at < ESCAPE_COALESCE_MS) return;
+      const { barState, working, overlayOpen, composerOpen, popupOpen, collapse, report } =
+        latest.current;
+      const state = { barState, working, overlayOpen, composerOpen, popupOpen };
+      const outcome = escapeOutcome(state);
+      if (escapeHandled(outcome)) {
+        lastHandledRef.current = { at: now, route };
+        openChain();
+        if (outcome.closeLocally) collapse();
+        if (outcome.report) report();
+        return;
+      }
+      const hides = escapeHidesBar(state, {
+        focused: route === "dom",
+        chained: aimedAtJuno && now - last.at < LADDER_CHAIN_MS,
+      });
+      if (!hides) return;
+      lastHandledRef.current = { at: now, route };
+      void invoke(COMMANDS.WINDOWS_HIDE_FLOATING_BAR).catch(() => {});
+    },
+    [openChain],
+  );
 
-  const pressFromBackend = useCallback(() => press("backend"), [press]);
+  // The same event also says "the big chat took over" (`reason: main_window`).
+  // That collapses the bar like a press, but it was not typed, so it never
+  // continues a walk down the ladder into hiding the bar.
+  const pressFromBackend = useCallback(
+    (payload: { reason?: string } | null | undefined) =>
+      press("backend", payload?.reason !== "main_window"),
+    [press],
+  );
 
   // Claim the stop key while the bar is showing more than the idle bar, and
   // let go of it when it settles. The Rust ledger is idempotent and keyed by
   // name, so re-asserting is free.
   useEffect(() => {
-    void invoke(COMMANDS.BAR_SET_BAR_PANE_OPEN, { open: expanded }).catch(() => {});
-  }, [expanded]);
+    void invoke(COMMANDS.BAR_SET_BAR_PANE_OPEN, { open: claimed }).catch(() => {});
+  }, [claimed]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -111,6 +163,23 @@ export function useEscapeToIdle(options: EscapeToIdleOptions): void {
 
   useEventListener(EVENTS.BAR_DISMISS_PANE, pressFromBackend);
 
+  // One rung up: the Dock or tray icon, or Escape in the big chat.
+  useEventListener<{ to: LadderStep }>(EVENTS.BAR_LADDER, (payload) => {
+    const { barState, working, overlayOpen, composerOpen, popupOpen, climb } = latest.current;
+    const target = climbTarget(payload.to, {
+      barState,
+      working,
+      overlayOpen,
+      composerOpen,
+      popupOpen,
+    });
+    if (target === "main") {
+      void invoke(COMMANDS.WINDOWS_OPEN_MAIN_WINDOW).catch(() => {});
+    } else {
+      climb(target);
+    }
+  });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") press("dom");
@@ -118,4 +187,17 @@ export function useEscapeToIdle(options: EscapeToIdleOptions): void {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [press]);
+}
+export type { ClimbTarget } from "@/lib/barEscape";
+
+/**
+ * Open a look's text input the way its own type button does: make the bar the
+ * key window so typing lands in it, then click the idle bar, which Rust takes
+ * to its input state. For the looks whose composer is Rust's input state.
+ */
+export function openComposerThroughRust(sendClick: () => void): void {
+  getCurrentWindow()
+    .setFocus()
+    .catch((error) => console.debug("Bar: window activation failed:", error));
+  sendClick();
 }

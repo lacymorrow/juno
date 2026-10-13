@@ -4,7 +4,10 @@ import { UI } from "@/lib/constants.generated";
  * # Escape, decided once
  *
  * Escape is the universal cancel key (`settings.rs`: fixed, not configurable).
- * Whatever the bar is showing, one press puts it back to the tiny idle bar.
+ * It walks Juno down a ladder one rung per press: big chat, floating chat,
+ * idle bar, hidden. Running work comes off first, newest first (Rust decides
+ * that). Whatever the bar is showing, one press puts it back to the tiny idle
+ * bar, and one more takes the bar off the screen.
  *
  * Every appearance used to hand-roll that for itself: a three-rung ladder of
  * `working` / `some overlay` / `composer`, with each look naming a different
@@ -120,6 +123,44 @@ export function escapeOutcome(state: BarEscapeState): EscapeOutcome {
     // typed value even when the state has settled.
     report: state.working || !isRestingState(state.barState) || state.composerOpen,
   };
+}
+
+/**
+ * How long after a press that did something the next one still counts as the
+ * same walk down the ladder. Only inside it does a press on the idle bar take
+ * the bar off the screen: the stop-key monitor sees every Escape typed in any
+ * app, and an Escape meant for Vim must never make Juno vanish.
+ */
+export const LADDER_CHAIN_MS = 1500;
+
+/**
+ * Whether a press the bar had nothing else to do with takes the bar off the
+ * screen: the last rung. Only on the idle bar, only when no popup owns the
+ * key, and only when the press was aimed at Juno: typed into the bar itself
+ * (`focused`) or continuing a walk down the ladder (`chained`).
+ */
+export function escapeHidesBar(
+  state: BarEscapeState,
+  { focused, chained }: { focused: boolean; chained: boolean },
+): boolean {
+  if (state.popupOpen || barIsExpanded(state)) return false;
+  return focused || chained;
+}
+
+/** Where the bar is asked to climb to (`ui::ladder_steps` in Rust). */
+export type LadderStep = "composer" | "floating" | "next";
+
+/** What a look does when asked to climb: open its text input or its chat. */
+export type ClimbTarget = "composer" | "floating";
+
+/**
+ * One rung up, for a look in `state`. `next` from an open floating chat is
+ * the big chat, which only Rust can open; everything else is the look's own.
+ */
+export function climbTarget(step: LadderStep, state: BarEscapeState): ClimbTarget | "main" {
+  if (step === UI.LADDER_STEPS_COMPOSER) return "composer";
+  if (step === UI.LADDER_STEPS_NEXT && state.overlayOpen) return "main";
+  return "floating";
 }
 
 /** Whether a press did anything at all. */
