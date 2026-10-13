@@ -1655,10 +1655,31 @@ pub async fn bar_escape_to_idle(app_handle: &AppHandle, reason: &str) {
 /// needed the manager could fail and draw the default look over a saved one.
 /// Unreadable settings give the defaults, as the manager's own load does.
 pub fn bar_config_now(app_handle: &AppHandle) -> FloatingBarConfig {
-    crate::settings::manager::SettingsManager::new(app_handle.clone())
+    let config = crate::settings::manager::SettingsManager::new(app_handle.clone())
         .and_then(|manager| manager.floating_bar_settings_now())
         .map(|settings| UIManager::convert_settings_to_config(&settings))
-        .unwrap_or_default()
+        .unwrap_or_default();
+    as_drawn(app_handle, config)
+}
+
+/// The config as the bar should draw it: a beta look while beta features are
+/// off (or a hidden one) becomes the default look. Applied wherever the config
+/// leaves Rust, never to what is saved, so turning beta back on restores the
+/// look the person picked.
+pub fn as_drawn(app_handle: &AppHandle, mut config: FloatingBarConfig) -> FloatingBarConfig {
+    let beta_on = crate::settings::beta_features_active(app_handle);
+    config.bar_appearance =
+        ui::bar_appearances::effective(&config.bar_appearance, beta_on).to_string();
+    config
+}
+
+/// Tell the bar (and Settings) the config to draw now. Beta features changed,
+/// so a beta look may have to give way to the default, or come back.
+pub fn announce_bar_config(app_handle: &AppHandle) {
+    let config = bar_config_now(app_handle);
+    if let Err(e) = app_handle.emit(events::bar::CONFIG_CHANGED, &config) {
+        warn!("Failed to emit config change event: {}", e);
+    }
 }
 
 #[tauri::command]
@@ -1667,7 +1688,7 @@ pub async fn ui_get_bar_config(app_handle: AppHandle) -> Result<FloatingBarConfi
 
     if let Some(manager) = get_ui_manager().await {
         let manager = manager.lock().await;
-        Ok(manager.bar_config.clone())
+        Ok(as_drawn(&app_handle, manager.bar_config.clone()))
     } else {
         // Not up yet at launch: the settings are the same source it loads from.
         Ok(bar_config_now(&app_handle))
@@ -1675,7 +1696,10 @@ pub async fn ui_get_bar_config(app_handle: AppHandle) -> Result<FloatingBarConfi
 }
 
 #[tauri::command]
-pub async fn ui_set_bar_config(config: FloatingBarConfig) -> Result<(), String> {
+pub async fn ui_set_bar_config(
+    app_handle: AppHandle,
+    config: FloatingBarConfig,
+) -> Result<(), String> {
     debug!("Setting floating bar configuration: {:?}", config);
 
     if let Some(manager) = get_ui_manager().await {
@@ -1690,7 +1714,7 @@ pub async fn ui_set_bar_config(config: FloatingBarConfig) -> Result<(), String> 
         // failure toast surfaced in the settings window).
         if let Err(e) = manager
             .app_handle
-            .emit(events::bar::CONFIG_CHANGED, &config)
+            .emit(events::bar::CONFIG_CHANGED, as_drawn(&app_handle, config))
         {
             warn!("Failed to emit config change event: {}", e);
         }

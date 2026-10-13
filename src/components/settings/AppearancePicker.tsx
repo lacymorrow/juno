@@ -3,11 +3,14 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { BarAppearance } from "@/components/bar/barAppearance";
 import {
-  APPEARANCE_CATALOG,
   appearanceEntry,
   appearancePreviewUrl,
+  isBetaAppearance,
+  offeredAppearances,
 } from "@/components/bar/appearanceCatalog";
 import { preloadLooks } from "@/components/bar/lookChunks";
+import { useBetaFeatures } from "@/hooks/useBetaFeatures";
+import { BetaBadge } from "@/components/settings/ui";
 
 interface AppearancePickerProps {
   value: string;
@@ -52,16 +55,22 @@ export function AppearancePicker({ value, onChange, disabled = false }: Appearan
   useEffect(() => {
     preloadLooks();
   }, []);
-  const entry = appearanceEntry(value);
-  const index = APPEARANCE_CATALOG.findIndex((e) => e.value === entry.value);
+  // Only the finished looks unless Beta features is on.
+  const { enabled: betaOn } = useBetaFeatures();
+  const catalog = useMemo(() => offeredAppearances(betaOn), [betaOn]);
+  const saved = appearanceEntry(value);
+  // A beta look while beta is off is drawn as the default; show that one.
+  const found = catalog.findIndex((e) => e.value === saved.value);
+  const index = found >= 0 ? found : Math.max(0, catalog.findIndex((e) => e.value === appearanceEntry(null).value));
+  const entry = catalog[index] ?? saved;
 
   const step = useCallback(
     (delta: number) => {
       if (disabled) return;
-      const next = (index + delta + APPEARANCE_CATALOG.length) % APPEARANCE_CATALOG.length;
-      onChange(APPEARANCE_CATALOG[next].value);
+      const next = (index + delta + catalog.length) % catalog.length;
+      onChange(catalog[next].value);
     },
-    [disabled, index, onChange],
+    [disabled, index, onChange, catalog],
   );
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -80,10 +89,10 @@ export function AppearancePicker({ value, onChange, disabled = false }: Appearan
   // "ready" once its bar has painted and "failed" if it threw; a current frame
   // silent past the timeout counts as failed too.
   const mounted = useMemo(() => {
-    const n = APPEARANCE_CATALOG.length;
+    const n = catalog.length;
     const around = [(index - 1 + n) % n, index, (index + 1) % n];
-    return Array.from(new Set(around)).map((i) => APPEARANCE_CATALOG[i]);
-  }, [index]) as readonly (typeof APPEARANCE_CATALOG)[number][];
+    return Array.from(new Set(around)).map((i) => catalog[i]);
+  }, [index, catalog]);
   const [statusByValue, setStatusByValue] = useState<Record<string, PreviewStatus>>({});
   const status: PreviewStatus = statusByValue[entry.value] ?? "loading";
   const timeoutRef = useRef<number | null>(null);
@@ -196,11 +205,14 @@ export function AppearancePicker({ value, onChange, disabled = false }: Appearan
 
       <div className="flex items-start justify-between gap-4 px-0.5">
         <div className="min-w-0 space-y-0.5">
-          <p className="text-[13px] font-medium leading-tight">{entry.name}</p>
+          <p className="flex items-center gap-1.5 text-[13px] font-medium leading-tight">
+            {entry.name}
+            {isBetaAppearance(entry.value) && <BetaBadge />}
+          </p>
           <p className="text-[12px] leading-snug text-muted-foreground">{entry.descriptor}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5 pt-1.5" role="tablist" aria-label="Appearances">
-          {APPEARANCE_CATALOG.map((item, i) => (
+          {catalog.map((item, i) => (
             <button
               key={item.value}
               type="button"

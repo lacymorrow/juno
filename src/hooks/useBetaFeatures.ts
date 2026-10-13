@@ -17,7 +17,8 @@ export interface BetaFeatures {
  * `beta-features-changed` event, so every open window agrees. Off until the
  * backend says otherwise.
  *
- * Gates the speaking speed row. The agent's `settings` tool hides the same
+ * Gates the speaking speed row and the beta bar looks (Rust draws the
+ * default look in place of a beta one while this is off). The agent's `settings` tool hides the same
  * settings on the same answer (`SettingSpec::beta_only`).
  */
 export function useBetaFeatures(): BetaFeatures {
