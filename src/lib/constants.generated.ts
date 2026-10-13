@@ -446,6 +446,7 @@ export const UI = {
   BAR_APPEARANCES_PERSONA: 'persona',
   BAR_APPEARANCES_DEFAULT: 'floating',
   BAR_APPEARANCES_HIDDEN: ['app', 'voice_ai'],
+  BAR_APPEARANCES_BETA: ['persona', 'shader_orb', 'orb', 'react_orb'],
   BAR_STATES_DEFAULT: 'default',
   BAR_STATES_EXPANDING: 'expanding',
   BAR_STATES_INPUT: 'input',

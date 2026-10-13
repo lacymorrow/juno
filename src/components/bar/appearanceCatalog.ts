@@ -86,5 +86,19 @@ export function appearancePreviewUrl(
   return `${APPEARANCE_PREVIEW_PATH}?${params.toString()}`;
 }
 
+/**
+ * True for a look offered only while Beta features is on (the Rust list
+ * `bar_appearances::BETA`). Rust also draws the default look in its place
+ * while beta is off, so a saved beta look comes back when beta does.
+ */
+export function isBetaAppearance(value: string): boolean {
+  return (UI.BAR_APPEARANCES_BETA as readonly string[]).includes(value);
+}
+
+/** What the picker offers: the finished looks, plus the beta ones when beta is on. */
+export function offeredAppearances(betaOn: boolean): readonly AppearanceEntry[] {
+  return betaOn ? APPEARANCE_CATALOG : APPEARANCE_CATALOG.filter((e) => !isBetaAppearance(e.value));
+}
+
 /** Every look, hidden ones included, for the dev harness and tests. */
 export const ALL_APPEARANCE_ENTRIES = ALL_APPEARANCES;

@@ -475,6 +475,8 @@ pub async fn set_beta_features(app_handle: AppHandle, enabled: bool) -> Result<(
     ) {
         tracing::warn!("Could not announce the beta features change: {}", e);
     }
+    // A beta look gives way to the default, or comes back, at once.
+    crate::commands::ui_commands::announce_bar_config(&app_handle);
     Ok(())
 }
 
