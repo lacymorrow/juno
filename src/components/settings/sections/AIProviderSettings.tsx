@@ -206,6 +206,40 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
             }
           />
 
+          {/* Applies on the next query: one-shot spawns pick it up directly,
+              and a persistent CLI session is replaced via its spawn signature. */}
+          {settings.activeProvider === "claude_cli" && (
+            <SettingsRow
+              advanced
+              htmlFor="load-account-mcp"
+              label="Load account MCP connectors"
+              description="Use your Claude account connectors in chats."
+            info="Use the connectors on your Claude account, like Slack, Gmail, and Drive, in Juno chats. Off limits Juno to its own tools."
+            >
+              <Switch
+                id="load-account-mcp"
+                checked={settings.providerSettings?.load_account_mcp ?? true}
+                onCheckedChange={settings.handleLoadAccountMcpChange}
+              />
+            </SettingsRow>
+          )}
+
+        </SettingsGroup>
+      )}
+
+      {/* Rarely changed, so folded away even with advanced settings on. */}
+      {settings.activeProvider && settings.providerSettings && (
+        <SettingsGroup
+          title="Model parameters"
+          advanced
+          collapsible
+          summary={
+            settings.formData.systemPrompt.trim()
+              ? "Custom system prompt"
+              : undefined
+          }
+          footer="Changes save when you leave a field."
+        >
           {/* Max tokens / temperature — not applicable to Claude CLI (managed by the CLI) */}
           {settings.activeProvider !== "claude_cli" &&
             settings.activeProvider !== "codex_cli" && (
@@ -249,24 +283,6 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
             </>
           )}
 
-          {/* Applies on the next query: one-shot spawns pick it up directly,
-              and a persistent CLI session is replaced via its spawn signature. */}
-          {settings.activeProvider === "claude_cli" && (
-            <SettingsRow
-              advanced
-              htmlFor="load-account-mcp"
-              label="Load account MCP connectors"
-              description="Use your Claude account connectors in chats."
-            info="Use the connectors on your Claude account, like Slack, Gmail, and Drive, in Juno chats. Off limits Juno to its own tools."
-            >
-              <Switch
-                id="load-account-mcp"
-                checked={settings.providerSettings?.load_account_mcp ?? true}
-                onCheckedChange={settings.handleLoadAccountMcpChange}
-              />
-            </SettingsRow>
-          )}
-
           <SettingsRow
             advanced
             htmlFor="system-prompt"
@@ -287,7 +303,6 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
               />
             }
           />
-
         </SettingsGroup>
       )}
     </div>

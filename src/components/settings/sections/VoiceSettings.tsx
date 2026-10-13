@@ -152,6 +152,17 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     ? `${audioDevices.missing_output.name} is not connected. Juno is using your Mac's output instead.`
     : undefined;
 
+  const audioDevicesNeedAttention = Boolean(
+    captureFailure ||
+      audioDevices?.missing_input ||
+      audioDevices?.missing_output ||
+      (audioDevices && !audioDevices.effective_input),
+  );
+  const audioDevicesFooter = [microphoneNote, speakerNote]
+    .filter(Boolean)
+    .join(" ");
+  const audioDevicesSummary = audioDevices?.effective_input ?? undefined;
+
   return (
     <div className="space-y-6">
       {/* The only voice control outside Advanced. Independent of the voice:
@@ -230,96 +241,6 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
         </SettingsRow>
       </SettingsGroup>
 
-      <SettingsGroup title="Microphone" footer={microphoneNote}>
-        {captureFailure && (
-          <SettingsRow
-            id="capture-failure"
-            label="Juno is not listening"
-            description={captureFailure.message}
-          >
-            <button
-              type="button"
-              onClick={dismissCaptureFailure}
-              className="text-[12px] text-muted-foreground hover:text-foreground"
-            >
-              Dismiss
-            </button>
-          </SettingsRow>
-        )}
-
-        <SettingsRow htmlFor="audio-input-device" label="Listen through">
-          <Select
-            value={audioDevices?.chosen_input ?? FOLLOW_SYSTEM}
-            onValueChange={(value) =>
-              void handleAudioInputDeviceChange(
-                value === FOLLOW_SYSTEM ? null : value,
-              )
-            }
-          >
-            <SelectTrigger id="audio-input-device" className="w-[250px]">
-              <SelectValue placeholder="Select a microphone" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={FOLLOW_SYSTEM}>
-                Default microphone
-              </SelectItem>
-              {inputs.map((device) => (
-                <SelectItem key={device.id} value={device.id}>
-                  {device.name}
-                </SelectItem>
-              ))}
-              {/* A choice that has been unplugged stays selectable, so the
-                  Select shows what was chosen rather than snapping to
-                  something the person never picked. That it is not connected
-                  is said once, underneath, not twice. */}
-              {audioDevices?.missing_input && (
-                <SelectItem value={audioDevices.missing_input.id}>
-                  {audioDevices.missing_input.name}
-                </SelectItem>
-              )}
-            </SelectContent>
-          </Select>
-        </SettingsRow>
-      </SettingsGroup>
-
-      <SettingsGroup
-        title="Speaker"
-        footer={
-          speakerNote ??
-          "Juno's own voice plays here. Cloud voices play through your Mac's output."
-        }
-      >
-        <SettingsRow htmlFor="audio-output-device" label="Speak through">
-          <Select
-            value={audioDevices?.chosen_output ?? FOLLOW_SYSTEM}
-            onValueChange={(value) =>
-              void handleAudioOutputDeviceChange(
-                value === FOLLOW_SYSTEM ? null : value,
-              )
-            }
-          >
-            <SelectTrigger id="audio-output-device" className="w-[250px]">
-              <SelectValue placeholder="Select a speaker" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={FOLLOW_SYSTEM}>
-                Default speaker
-              </SelectItem>
-              {outputs.map((device) => (
-                <SelectItem key={device.id} value={device.id}>
-                  {device.name}
-                </SelectItem>
-              ))}
-              {audioDevices?.missing_output && (
-                <SelectItem value={audioDevices.missing_output.id}>
-                  {audioDevices.missing_output.name}
-                </SelectItem>
-              )}
-            </SelectContent>
-          </Select>
-        </SettingsRow>
-      </SettingsGroup>
-
       {betaFeatures && (
         <SettingsGroup title="Dictation">
           <DictationCleanupRow />
@@ -376,6 +297,101 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
             checked={settings.livePartialTranscription}
             onCheckedChange={settings.handleLivePartialTranscriptionChange}
           />
+        </SettingsRow>
+      </SettingsGroup>
+
+      {/* Most people never leave the system defaults, so the two pickers fold
+          away. Anything wrong (capture failed, a chosen device unplugged, no
+          microphone at all) opens the group so it is never hidden. */}
+      <SettingsGroup
+        title="Microphone and speaker"
+        collapsible
+        defaultOpen={audioDevicesNeedAttention}
+        summary={audioDevicesSummary}
+        footer={audioDevicesFooter}
+      >
+        {captureFailure && (
+          <SettingsRow
+            id="capture-failure"
+            label="Juno is not listening"
+            description={captureFailure.message}
+          >
+            <button
+              type="button"
+              onClick={dismissCaptureFailure}
+              className="text-[12px] text-muted-foreground hover:text-foreground"
+            >
+              Dismiss
+            </button>
+          </SettingsRow>
+        )}
+
+        <SettingsRow htmlFor="audio-input-device" label="Listen through">
+          <Select
+            value={audioDevices?.chosen_input ?? FOLLOW_SYSTEM}
+            onValueChange={(value) =>
+              void handleAudioInputDeviceChange(
+                value === FOLLOW_SYSTEM ? null : value,
+              )
+            }
+          >
+            <SelectTrigger id="audio-input-device" className="w-[250px]">
+              <SelectValue placeholder="Select a microphone" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={FOLLOW_SYSTEM}>
+                Default microphone
+              </SelectItem>
+              {inputs.map((device) => (
+                <SelectItem key={device.id} value={device.id}>
+                  {device.name}
+                </SelectItem>
+              ))}
+              {/* A choice that has been unplugged stays selectable, so the
+                  Select shows what was chosen rather than snapping to
+                  something the person never picked. That it is not connected
+                  is said once, underneath, not twice. */}
+              {audioDevices?.missing_input && (
+                <SelectItem value={audioDevices.missing_input.id}>
+                  {audioDevices.missing_input.name}
+                </SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+
+        <SettingsRow
+          htmlFor="audio-output-device"
+          label="Speak through"
+          description="Cloud voices use your Mac's output."
+        >
+          <Select
+            value={audioDevices?.chosen_output ?? FOLLOW_SYSTEM}
+            onValueChange={(value) =>
+              void handleAudioOutputDeviceChange(
+                value === FOLLOW_SYSTEM ? null : value,
+              )
+            }
+          >
+            <SelectTrigger id="audio-output-device" className="w-[250px]">
+              <SelectValue placeholder="Select a speaker" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={FOLLOW_SYSTEM}>
+                Default speaker
+              </SelectItem>
+              {outputs.map((device) => (
+                <SelectItem key={device.id} value={device.id}>
+                  {device.name}
+                </SelectItem>
+              ))}
+              {audioDevices?.missing_output && (
+                <SelectItem value={audioDevices.missing_output.id}>
+                  {audioDevices.missing_output.name}
+                </SelectItem>
+              )}
+            </SelectContent>
+          </Select>
         </SettingsRow>
       </SettingsGroup>
     </div>

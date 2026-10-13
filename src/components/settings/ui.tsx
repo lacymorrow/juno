@@ -2,7 +2,7 @@ import React from "react";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { HelpCircle } from "lucide-react";
+import { ChevronRight, HelpCircle } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -60,7 +60,23 @@ interface SettingsGroupProps {
   className?: string;
   /** Only render while the advanced-settings toggle is on. */
   advanced?: boolean;
+  /**
+   * Fold the card away under its title, closed until clicked. For groups
+   * most people never touch. The rows stay mounted (just hidden), so search
+   * and the agent can still find one and open the group to show it.
+   */
+  collapsible?: boolean;
+  /** Start a collapsible group open, e.g. when something in it needs attention. */
+  defaultOpen?: boolean;
+  /** One short line beside a closed group's title saying what's inside. */
+  summary?: React.ReactNode;
 }
+
+/**
+ * Fired on a settings row (bubbling) to ask the folded group around it to
+ * open. `revealRow` sends it before scrolling to the row.
+ */
+export const SETTINGS_REVEAL_EVENT = "settings:reveal";
 
 export function SettingsGroup({
   title,
@@ -68,25 +84,91 @@ export function SettingsGroup({
   children,
   className,
   advanced = false,
+  collapsible = false,
+  defaultOpen = false,
+  summary,
 }: SettingsGroupProps) {
   const { advanced: showAdvanced } = useAdvancedSettings();
+  const [open, setOpen] = React.useState(defaultOpen);
+  const sectionRef = React.useRef<HTMLElement>(null);
+  const contentId = React.useId();
+
+  // Follow `defaultOpen` as it changes (data loads, a microphone is unplugged)
+  // until the person has used the group; after that it only ever opens, so it
+  // never folds away under their hands.
+  const touched = React.useRef(false);
+  React.useEffect(() => {
+    if (defaultOpen) setOpen(true);
+    else if (!touched.current) setOpen(false);
+  }, [defaultOpen]);
+
+  React.useEffect(() => {
+    const el = sectionRef.current;
+    if (!collapsible || !el) return;
+    const reveal = () => {
+      touched.current = true;
+      setOpen(true);
+    };
+    el.addEventListener(SETTINGS_REVEAL_EVENT, reveal);
+    return () => el.removeEventListener(SETTINGS_REVEAL_EVENT, reveal);
+  }, [collapsible]);
+
   if (advanced && !showAdvanced) return null;
 
+  const shown = !collapsible || open;
+
   return (
-    <section className={cn("space-y-1.5", className)}>
-      {title && (
-        <h3 className="px-1 text-[13px] font-semibold text-muted-foreground">
-          {title}
-        </h3>
-      )}
-      <div className="overflow-hidden rounded-[10px] border border-border bg-card shadow-sm">
-        <div className="divide-y divide-border">{children}</div>
+    <section ref={sectionRef} className={cn("space-y-1.5", className)}>
+      {title &&
+        (collapsible ? (
+          <h3 className="text-[13px] font-semibold text-muted-foreground">
+            <button
+              type="button"
+              aria-expanded={open}
+              aria-controls={contentId}
+              onClick={() => {
+                touched.current = true;
+                setOpen((o) => !o);
+              }}
+              className="flex w-full items-center gap-1 rounded-[4px] px-1 text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <ChevronRight
+                aria-hidden="true"
+                className={cn(
+                  "h-3.5 w-3.5 shrink-0 transition-transform duration-150 motion-reduce:transition-none",
+                  open && "rotate-90",
+                )}
+              />
+              <span>{title}</span>
+              {!open && summary && (
+                <span className="ml-auto min-w-0 truncate pl-3 text-[12px] font-normal">
+                  {summary}
+                </span>
+              )}
+            </button>
+          </h3>
+        ) : (
+          <h3 className="px-1 text-[13px] font-semibold text-muted-foreground">
+            {title}
+          </h3>
+        ))}
+      <div
+        id={contentId}
+        hidden={!shown}
+        className="space-y-1.5"
+        onFocusCapture={() => {
+          touched.current = true;
+        }}
+      >
+        <div className="overflow-hidden rounded-[10px] border border-border bg-card shadow-sm">
+          <div className="divide-y divide-border">{children}</div>
+        </div>
+        {footer && (
+          <p className="px-1 text-[12px] leading-snug text-muted-foreground">
+            {footer}
+          </p>
+        )}
       </div>
-      {footer && (
-        <p className="px-1 text-[12px] leading-snug text-muted-foreground">
-          {footer}
-        </p>
-      )}
     </section>
   );
 }
