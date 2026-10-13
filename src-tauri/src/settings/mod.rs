@@ -775,22 +775,22 @@ mod tests {
     }
 
     #[test]
-    fn legacy_store_defaults_dictation_cleanup_on() {
+    fn legacy_store_defaults_dictation_cleanup_off() {
         let settings: AudioSettings =
             serde_json::from_value(legacy_store_json(true)).expect("legacy store parses");
-        assert!(settings.dictation_cleanup);
-        assert!(AudioSettings::default().dictation_cleanup);
+        assert!(!settings.dictation_cleanup);
+        assert!(!AudioSettings::default().dictation_cleanup);
     }
 
     #[test]
-    fn an_explicit_cleanup_off_survives_a_round_trip() {
+    fn an_explicit_cleanup_on_survives_a_round_trip() {
         let settings = AudioSettings {
-            dictation_cleanup: false,
+            dictation_cleanup: true,
             ..AudioSettings::default()
         };
         let json = serde_json::to_value(&settings).expect("serializes");
         let back: AudioSettings = serde_json::from_value(json).expect("parses");
-        assert!(!back.dictation_cleanup);
+        assert!(back.dictation_cleanup);
     }
 
     #[test]
