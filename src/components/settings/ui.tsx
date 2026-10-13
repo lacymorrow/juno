@@ -1,5 +1,10 @@
 import React from "react";
 import { Badge } from "@/components/ui/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ChevronRight, HelpCircle } from "lucide-react";
@@ -91,7 +96,6 @@ export function SettingsGroup({
   const { advanced: showAdvanced } = useAdvancedSettings();
   const [open, setOpen] = React.useState(defaultOpen);
   const sectionRef = React.useRef<HTMLElement>(null);
-  const contentId = React.useId();
 
   // Follow `defaultOpen` as it changes (data loads, a microphone is unplugged)
   // until the person has used the group; after that it only ever opens, so it
@@ -115,61 +119,72 @@ export function SettingsGroup({
 
   if (advanced && !showAdvanced) return null;
 
-  const shown = !collapsible || open;
+  const header = title && (
+    <h3 className="px-1 text-[13px] font-semibold text-muted-foreground">
+      {title}
+    </h3>
+  );
+  const card = (
+    <>
+      <div className="overflow-hidden rounded-[10px] border border-border bg-card shadow-sm">
+        <div className="divide-y divide-border">{children}</div>
+      </div>
+      {footer && (
+        <p className="px-1 text-[12px] leading-snug text-muted-foreground">
+          {footer}
+        </p>
+      )}
+    </>
+  );
+
+  if (!collapsible) {
+    return (
+      <section className={cn("space-y-1.5", className)}>
+        {header}
+        {card}
+      </section>
+    );
+  }
 
   return (
-    <section ref={sectionRef} className={cn("space-y-1.5", className)}>
-      {title &&
-        (collapsible ? (
-          <h3 className="text-[13px] font-semibold text-muted-foreground">
-            <button
-              type="button"
-              aria-expanded={open}
-              aria-controls={contentId}
-              onClick={() => {
-                touched.current = true;
-                setOpen((o) => !o);
-              }}
-              className="flex w-full items-center gap-1 rounded-[4px] px-1 text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <ChevronRight
-                aria-hidden="true"
-                className={cn(
-                  "h-3.5 w-3.5 shrink-0 transition-transform duration-150 motion-reduce:transition-none",
-                  open && "rotate-90",
-                )}
-              />
-              <span>{title}</span>
-              {!open && summary && (
-                <span className="ml-auto min-w-0 truncate pl-3 text-[12px] font-normal">
-                  {summary}
-                </span>
-              )}
-            </button>
-          </h3>
-        ) : (
-          <h3 className="px-1 text-[13px] font-semibold text-muted-foreground">
-            {title}
-          </h3>
-        ))}
-      <div
-        id={contentId}
-        hidden={!shown}
-        className="space-y-1.5"
-        onFocusCapture={() => {
-          touched.current = true;
-        }}
-      >
-        <div className="overflow-hidden rounded-[10px] border border-border bg-card shadow-sm">
-          <div className="divide-y divide-border">{children}</div>
-        </div>
-        {footer && (
-          <p className="px-1 text-[12px] leading-snug text-muted-foreground">
-            {footer}
-          </p>
-        )}
-      </div>
-    </section>
+    <Collapsible
+      asChild
+      open={open}
+      onOpenChange={(next) => {
+        touched.current = true;
+        setOpen(next);
+      }}
+    >
+      <section ref={sectionRef} className={cn("space-y-1.5", className)}>
+        <h3 className="text-[13px] font-semibold text-muted-foreground">
+          <CollapsibleTrigger className="group/disclosure flex w-full items-center gap-1 rounded-[4px] px-1 text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <ChevronRight
+              aria-hidden="true"
+              className="h-3.5 w-3.5 shrink-0 transition-transform duration-150 group-data-[state=open]/disclosure:rotate-90 motion-reduce:transition-none"
+            />
+            <span>{title}</span>
+            {!open && summary && (
+              <span className="ml-auto min-w-0 truncate pl-3 text-[12px] font-normal">
+                {summary}
+              </span>
+            )}
+          </CollapsibleTrigger>
+        </h3>
+        {/* Kept mounted while closed, so search and the agent can find a row
+            inside and open the group to show it. `forceMount` alone leaves it
+            visible; Radix expects the hiding to come from us. */}
+        <CollapsibleContent
+          forceMount
+          hidden={!open}
+          className="space-y-1.5"
+          onFocusCapture={() => {
+            touched.current = true;
+          }}
+        >
+          {card}
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
   );
 }
 
@@ -210,8 +225,8 @@ interface SettingsRowProps {
 export function BetaBadge() {
   return (
     <Badge
-      variant="outline"
-      className="rounded-[4px] px-1 py-0 text-[10px] font-medium leading-[14px] text-muted-foreground"
+      variant="secondary"
+      className="rounded-[4px] bg-[#007AFF]/12 px-1.5 py-0 text-[10px] font-semibold leading-[16px] text-[#007AFF] dark:bg-[#0A84FF]/20 dark:text-[#0A84FF]"
     >
       Beta
     </Badge>
@@ -252,7 +267,7 @@ export function SettingsRow({
       {hasTopLine && (
         <div className="flex min-h-[28px] flex-wrap items-center justify-between gap-x-4 gap-y-2">
           {(label || description) && (
-            <div className="min-w-[14rem] flex-1 space-y-0.5">
+            <div className="min-w-[10rem] flex-1 space-y-0.5">
               {label && (
                 <div className="flex items-center gap-1.5">
                   <Label
