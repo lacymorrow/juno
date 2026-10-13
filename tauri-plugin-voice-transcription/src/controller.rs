@@ -1,7 +1,5 @@
 use crate::constants;
 use crate::engine::{TranscriptionEngine, TranscriptionSession};
-use cpal::traits::DeviceTrait;
-use cpal::SampleFormat;
 use hound;
 use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
@@ -541,9 +539,9 @@ impl VoiceController {
 
         let preferred = devices::preferred_input_device();
 
-        // The last dictation's microphone, paused. Resuming it takes
-        // milliseconds; resolving and building one took up to three seconds
-        // while the person was already talking.
+        // The microphone, built before the press and waiting. Starting it
+        // takes milliseconds; resolving and building one took up to three
+        // seconds while the person was already talking.
         if let Some(warm) = devices::claim_warm_input(preferred.as_deref()) {
             let actual_rate = warm.sample_rate();
             let channels = warm.channels();
@@ -576,50 +574,8 @@ impl VoiceController {
         let device_name = resolved.name;
         let device = resolved.device;
 
-        let mut supported_configs_iter = device.supported_input_configs().map_err(|e| {
-            Error::AudioDevice(format!(
-                "Failed to get input device configs (microphone permission may be denied): {:?}",
-                e
-            ))
-        })?;
-
-        let selected_config_range = supported_configs_iter
-            // No channel filter. Any count downmixes to mono below, and
-            // filtering for 1 or 2 used to leave a device that only offers
-            // three with "No suitable input config found", which reads as a
-            // broken microphone rather than as a limit we imposed.
-            .find(|c| {
-                (c.min_sample_rate().0..=c.max_sample_rate().0).contains(&16000)
-                    && (c.sample_format() == SampleFormat::F32
-                        || c.sample_format() == SampleFormat::I16)
-            });
-
-        let supported_config = if let Some(conf_range) = selected_config_range {
-            conf_range.with_sample_rate(cpal::SampleRate(16000))
-        } else {
-            device
-                .supported_input_configs()
-                .map_err(|e| {
-                    Error::AudioDevice(format!(
-                        "Failed to get device configs for fallback: {:?}",
-                        e
-                    ))
-                })?
-                .find(|c| {
-                    c.sample_format() == SampleFormat::F32 || c.sample_format() == SampleFormat::I16
-                })
-                .map(|c| {
-                    if (c.min_sample_rate().0..=c.max_sample_rate().0).contains(&16000) {
-                        c.with_sample_rate(cpal::SampleRate(16000))
-                    } else {
-                        c.with_sample_rate(c.min_sample_rate())
-                    }
-                })
-                .ok_or_else(|| Error::AudioDevice("No suitable input config found.".to_string()))?
-        };
-
-        let config = supported_config.config();
-        let sample_format = supported_config.sample_format();
+        let (config, sample_format) = devices::input_config(&device, &device_name)
+            .map_err(|failure| Error::AudioDevice(failure.message()))?;
         let actual_rate = config.sample_rate.0;
         let channels = config.channels;
 

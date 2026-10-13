@@ -7,7 +7,7 @@ members = [
 	"crates/juno-cua",                  # Headless CUA CLI — no Tauri/GUI required
 ]
 # Vendored upstream code is patched in, not linted as ours.
-exclude = ["vendor/tauri-plugin-store"]
+exclude = ["vendor/tauri-plugin-store", "vendor/cpal"]
 
 # Shared workspace dependencies to reduce duplication
 [workspace.dependencies]
@@ -67,3 +67,8 @@ block = { path = "vendor/block" }
 # settings file and the next launch silently starts from nothing. The vendored
 # copy writes a temp file and renames it over the original. See its Cargo.toml.
 tauri-plugin-store = { path = "vendor/tauri-plugin-store" }
+# cpal 0.15.3 starts an input stream the moment it is built, which lights the
+# microphone indicator. Juno builds the dictation input before the key is
+# pressed, so the vendored copy builds it stopped (`play()` starts it) and
+# exposes the CoreAudio device id. Both changes are marked JUNO PATCH.
+cpal = { path = "vendor/cpal" }
