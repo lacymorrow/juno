@@ -427,6 +427,13 @@ pub async fn insert_dictation_text(app_handle: &AppHandle, text: &str) -> Result
 
     let plan = plan_insertion(&insertion_mode, copy_to_clipboard);
 
+    // Pause ellipses out, then the optional on-device grammar pass. Dictation
+    // only: this function is never reached by a voice turn for the agent. The
+    // bar keeps its processing state while this runs; it falls back to the
+    // transcript as heard, so the worst case is a slower, uncleaned insert.
+    let prepared = crate::dictation_cleanup::prepare(app_handle, text).await;
+    let text = prepared.as_str();
+
     let started = std::time::Instant::now();
     let attempt = if plan.clipboard_free {
         let owned = text.to_string();
@@ -533,6 +540,50 @@ pub async fn insert_dictation_text(app_handle: &AppHandle, text: &str) -> Result
     }
 
     Ok(())
+}
+
+/// What the Dictation settings need to draw the cleanup toggle: whether it is
+/// on, whether Apple's on-device model can run it, and why not when it cannot.
+#[tauri::command]
+pub async fn get_dictation_cleanup_status(
+    app_handle: AppHandle,
+) -> Result<crate::dictation_cleanup::CleanupStatus, String> {
+    let enabled = crate::dictation_cleanup::is_enabled(&app_handle).await;
+    let availability = tokio::task::spawn_blocking(crate::dictation_cleanup::availability)
+        .await
+        .map_err(|e| format!("Availability check failed: {}", e))?;
+    Ok(crate::dictation_cleanup::CleanupStatus::new(
+        enabled,
+        availability,
+    ))
+}
+
+/// Turn the dictation cleanup pass on or off.
+#[tauri::command]
+pub async fn set_dictation_cleanup_enabled(
+    app_handle: AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
+    let mut audio_settings = settings_manager
+        .get_audio_settings()
+        .await
+        .map_err(|e| format!("Failed to load audio settings: {}", e))?;
+    audio_settings.dictation_cleanup = enabled;
+    settings_manager
+        .set_audio_settings(&audio_settings)
+        .await
+        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+    info!("Dictation cleanup set to: {}", enabled);
+    Ok(())
+}
+
+/// Open System Settings on Apple Intelligence & Siri, where the on-device
+/// model is switched on.
+#[tauri::command]
+pub async fn open_apple_intelligence_settings() -> Result<(), String> {
+    crate::dictation_cleanup::open_settings_pane()
 }
 
 #[cfg(test)]

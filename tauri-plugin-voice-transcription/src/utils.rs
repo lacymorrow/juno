@@ -49,6 +49,97 @@ fn correct_name_mishearings(text: &str) -> String {
     }
 }
 
+/// Is `c` part of an ellipsis (`.` or `…`)?
+fn is_dot(c: char) -> bool {
+    c == '.' || c == '\u{2026}'
+}
+
+/// Turn the ellipses a speech model leaves at pauses into plain text.
+///
+/// Whisper writes "..." or "…" wherever the speaker stopped to think, which
+/// reads as hesitation once typed. A run of three or more dots, or any
+/// `…`, with whatever whitespace surrounds it, becomes:
+///
+/// - nothing at the very end ("so we shipped it..." -> "so we shipped it")
+///   or the very start;
+/// - one space before a lowercase word ("well... maybe" -> "well maybe");
+/// - ". " before an uppercase word ("I think so... We should go" ->
+///   "I think so. We should go"), or just a space when the text before it
+///   already ends in punctuation;
+/// - one space before anything else (a digit, a quote).
+///
+/// A pair of dots ("..") is not an ellipsis and is left alone, so is a
+/// version like "1.2.3". Case is never changed.
+pub fn strip_pause_ellipses(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if !is_dot(chars[i]) {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        // A run of dots and ellipsis characters, allowing spaces between
+        // dots (". . .").
+        let mut j = i;
+        let mut dots = 0usize;
+        let mut end = i;
+        while j < chars.len() {
+            if chars[j] == '\u{2026}' {
+                dots += 3;
+                j += 1;
+                end = j;
+            } else if chars[j] == '.' {
+                dots += 1;
+                j += 1;
+                end = j;
+            } else if chars[j] == ' ' && j + 1 < chars.len() && is_dot(chars[j + 1]) && dots > 0 {
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        if dots < 3 {
+            // Not an ellipsis: copy the dots as they were.
+            for c in &chars[i..end] {
+                out.push(*c);
+            }
+            i = end;
+            continue;
+        }
+        // Drop whitespace before the run (already in `out`) and after it.
+        let mut k = end;
+        while k < chars.len() && chars[k].is_whitespace() {
+            k += 1;
+        }
+        let before_trimmed = out.trim_end().len();
+        out.truncate(before_trimmed);
+        match chars.get(k) {
+            // Trailing ellipsis: gone.
+            None => {}
+            Some(&next) => {
+                if out.is_empty() {
+                    // Leading ellipsis: gone.
+                } else if next.is_uppercase() {
+                    let ends_sentence = out
+                        .chars()
+                        .last()
+                        .is_some_and(|c| matches!(c, '.' | '!' | '?' | ',' | ';' | ':'));
+                    if !ends_sentence {
+                        out.push('.');
+                    }
+                    out.push(' ');
+                } else {
+                    out.push(' ');
+                }
+            }
+        }
+        i = k;
+    }
+    out
+}
+
 /// Remove Whisper audio marker artifacts from transcription text.
 ///
 /// Strips tokens like `[BLANK_AUDIO]`, `[BLANK AUDIO]`, `[SILENCE]`, `[INAUDIBLE]`, `[MUSIC]`,
@@ -73,7 +164,7 @@ pub fn filter_transcription_text(text: &str) -> String {
         }
         None => text.to_string(),
     };
-    correct_name_mishearings(&cleaned)
+    correct_name_mishearings(&strip_pause_ellipses(&cleaned))
 }
 
 /// Where downloaded (not bundled) models live: `<app data>/models`. The
@@ -496,5 +587,77 @@ mod downmix_tests {
     fn integer_mono_input_is_only_scaled() {
         let mono = downmix_i16_to_mono(&[0, i16::MIN], 1);
         assert_eq!(mono, vec![0.0, -1.0]);
+    }
+}
+
+#[cfg(test)]
+mod pause_ellipsis_tests {
+    use super::{filter_transcription_text, strip_pause_ellipses};
+
+    #[test]
+    fn a_pause_before_a_lowercase_word_becomes_a_space() {
+        assert_eq!(strip_pause_ellipses("well... maybe not"), "well maybe not");
+        assert_eq!(strip_pause_ellipses("well ... maybe not"), "well maybe not");
+        assert_eq!(strip_pause_ellipses("well\u{2026} maybe"), "well maybe");
+        assert_eq!(strip_pause_ellipses("so, ... yes"), "so, yes");
+    }
+
+    #[test]
+    fn a_pause_before_an_uppercase_word_becomes_a_sentence_break() {
+        assert_eq!(
+            strip_pause_ellipses("I think so... We should go"),
+            "I think so. We should go"
+        );
+        assert_eq!(
+            strip_pause_ellipses("I think so\u{2026} We should go"),
+            "I think so. We should go"
+        );
+        // Already punctuated: no doubled mark.
+        assert_eq!(strip_pause_ellipses("Right, ... Okay"), "Right, Okay");
+    }
+
+    #[test]
+    fn a_trailing_or_leading_ellipsis_is_removed() {
+        assert_eq!(
+            strip_pause_ellipses("so we shipped it..."),
+            "so we shipped it"
+        );
+        assert_eq!(
+            strip_pause_ellipses("so we shipped it \u{2026}"),
+            "so we shipped it"
+        );
+        assert_eq!(strip_pause_ellipses("... and then"), "and then");
+        assert_eq!(strip_pause_ellipses("..."), "");
+    }
+
+    #[test]
+    fn several_pauses_and_spaced_dots_are_all_handled() {
+        assert_eq!(
+            strip_pause_ellipses("um... so... I went... Home was far..."),
+            "um so. I went. Home was far"
+        );
+        assert_eq!(strip_pause_ellipses("wait. . . what"), "wait what");
+        assert_eq!(strip_pause_ellipses("wait..... what"), "wait what");
+    }
+
+    #[test]
+    fn dots_that_are_not_an_ellipsis_survive() {
+        assert_eq!(
+            strip_pause_ellipses("version 1.2.3 is out."),
+            "version 1.2.3 is out."
+        );
+        assert_eq!(strip_pause_ellipses("hmm.. okay"), "hmm.. okay");
+        assert_eq!(
+            strip_pause_ellipses("Dr. Smith said hi"),
+            "Dr. Smith said hi"
+        );
+    }
+
+    #[test]
+    fn the_filter_strips_pause_ellipses_too() {
+        assert_eq!(
+            filter_transcription_text("hello [BLANK_AUDIO] world... and more..."),
+            "hello world and more"
+        );
     }
 }

@@ -101,6 +101,7 @@ pub mod audio_keys {
     pub const DICTATION_CLIPBOARD_ENABLED: &str = "dictation_clipboard_enabled";
     pub const DICTATION_INSERTION_MODE: &str = "dictation_insertion_mode";
     pub const DICTATION_COPY_TO_CLIPBOARD: &str = "dictation_copy_to_clipboard";
+    pub const DICTATION_CLEANUP: &str = "dictation_cleanup";
     pub const ALWAYS_LISTENING_ACTIVE: &str = "always_listening_active";
     pub const ALWAYS_LISTENING_SENSITIVITY: &str = "always_listening_sensitivity";
     pub const ALWAYS_LISTENING_WAKE_WORDS: &str = "always_listening_wake_words";
@@ -175,6 +176,15 @@ pub mod defaults {
     /// provider. An explicit `false` in the store still wins.
     pub const CLI_PERSISTENT_SESSION_ENABLED: bool = true;
     pub const DICTATION_CLIPBOARD_ENABLED: bool = true;
+    /// Dictation gets a grammar and punctuation pass from Apple's on-device
+    /// model before it is typed. On by default: where the model is missing
+    /// (Intel, macOS before 26, Apple Intelligence off) it does nothing, so
+    /// the default costs nobody anything.
+    pub const DICTATION_CLEANUP: bool = true;
+
+    pub fn dictation_cleanup() -> bool {
+        DICTATION_CLEANUP
+    }
     /// Paste stays the default while clipboard-free proves itself in the field.
     /// Literal (not a re-export of `dictation_insertion_modes::PASTE`) because
     /// the TS constants generator only understands string literals; a test

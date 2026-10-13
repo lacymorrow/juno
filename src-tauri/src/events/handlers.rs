@@ -487,6 +487,10 @@ async fn handle_dictation_transcription_start(
         session.describe()
     );
 
+    // Warm Apple's on-device model now, while the person is still talking, so
+    // the release only pays for generation. No-op where it cannot run.
+    crate::dictation_cleanup::prewarm(&app_handle);
+
     // Mark this as Dictation Mode in AppState BEFORE starting transcription.
     // This is a liveness flag for the UI only; the session above is what says
     // who the transcript belongs to.
