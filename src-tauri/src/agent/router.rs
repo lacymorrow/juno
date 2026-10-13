@@ -468,9 +468,11 @@ mod tests {
         let chat = chat_model(&provider).expect("a chat model");
         assert!(provider.knows_model(classifier));
         assert!(provider.knows_model(chat));
-        // Verified against the table, not memory.
+        // Verified against the table, not memory. Chat moved from Sonnet 5 to
+        // Sonnet 5.5 when Sonnet 5 went legacy (the role requires a current
+        // model) — 2026-10-05 weekly model check, LAC-4142.
         assert_eq!(classifier, model_ids::CLAUDE_HAIKU_4_5);
-        assert_eq!(chat, model_ids::CLAUDE_SONNET_5);
+        assert_eq!(chat, model_ids::CLAUDE_SONNET_5_5);
     }
 
     #[test]
