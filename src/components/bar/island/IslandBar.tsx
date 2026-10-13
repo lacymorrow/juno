@@ -31,7 +31,7 @@ import type { ChatMessage } from "@/types/chat";
 import { contentRect } from "@/lib/steadyFrame";
 import { IslandDot, IslandShell, IslandWords } from "./IslandShell";
 import { NotchShell } from "../notch/NotchShell";
-import { notchShape, restingDotPlacement } from "../notch/notchModel";
+import { notchShape, restingDotPlacement, standsOnSide } from "../notch/notchModel";
 import { useNotchFrame } from "../notch/useNotchFrame";
 import { LingerRing } from "./LingerRing";
 import { VoiceTurnControls, useVoiceTurn } from "../VoiceTurnControls";
@@ -604,10 +604,18 @@ export function IslandBar({ frame = "island" }: { frame?: "island" | "notch" } =
         "hover:bg-white/[0.12] hover:text-white",
         hover.hoveredButton === name && "bg-white/[0.12] text-white",
       );
+    // A side notch stands along its edge, so its controls stack top to bottom.
+    const upright = notch && notchFrame.form === "notch" && standsOnSide(notchFrame.edge, posture);
     layer = (
-      <div className="flex h-full w-full items-center gap-2 pl-3.5 pr-1" data-testid="island-hover">
+      <div
+        className={cn(
+          "flex h-full w-full items-center gap-2",
+          upright ? "flex-col pt-3.5 pb-1" : "pl-3.5 pr-1",
+        )}
+        data-testid="island-hover"
+      >
         <IslandDot look={dot} level={dotLevel} />
-        <div className="ml-auto flex items-center gap-0.5">
+        <div className={cn("flex items-center gap-0.5", upright ? "mt-auto flex-col" : "ml-auto")}>
           <button
             type="button"
             {...{ [ISLAND_BUTTON_ATTR]: "mic" }}

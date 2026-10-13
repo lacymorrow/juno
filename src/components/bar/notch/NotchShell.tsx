@@ -28,6 +28,15 @@ const EASE = { duration: 0.15, ease: "easeOut" as const };
 /** The page's underside: light at the folded tip, shaded toward the crease. */
 const FLAP_FILL = "linear-gradient(315deg, #fafafa 0%, #e6e6e9 45%, #b8b8be 100%)";
 
+/** The flap: the half of its box below the fold line. */
+const FLAP_CLIP = "polygon(100% 0, 100% 100%, 0 100%)";
+
+/** Shadow then hairline, each a triangle `out` points past the flap's fold line. */
+const FLAP_EDGES = [
+  { out: 2, color: "rgba(0,0,0,0.22)" },
+  { out: 1, color: "rgba(0,0,0,0.45)" },
+] as const;
+
 interface NotchShellProps {
   shape: NotchShape;
   corner: CurlCorner;
@@ -183,22 +192,29 @@ function CurlBody({
         animate={{ clipPath: curlUnderClip(shape.width, shape.height, shape.fold) }}
         transition={transition}
       />
-      {/* The shadow sits on a wrapper: a clip-path would cut its own. */}
       <motion.div
         className="absolute bottom-0 right-0"
         initial={false}
         animate={{ width: shape.fold, height: shape.fold }}
         transition={transition}
-        // A hairline so the page reads on a light wallpaper too, and a
-        // short shadow where it lifts off the black.
-        style={{
-          filter: "drop-shadow(0 0 0.5px rgba(0,0,0,0.45)) drop-shadow(-1px -1px 2px rgba(0,0,0,0.4))",
-        }}
       >
+        {/* The edge where the page lifts off the black: two flat triangles
+            just outside the flap, a short shadow and a hairline, so the page
+            reads on a light wallpaper too. Not a CSS filter: a filter on a
+            shape that shrinks leaves its old pixels behind in a transparent
+            window, which is the trail a closing corner left. */}
+        {FLAP_EDGES.map(({ out, color }) => (
+          <div
+            key={out}
+            aria-hidden
+            className="absolute bottom-0 right-0"
+            style={{ top: -out, left: -out, background: color, clipPath: FLAP_CLIP }}
+          />
+        ))}
         <div
           data-testid="notch-curl-flap"
-          className="h-full w-full"
-          style={{ background: FLAP_FILL, clipPath: "polygon(100% 0, 100% 100%, 0 100%)" }}
+          className="absolute inset-0"
+          style={{ background: FLAP_FILL, clipPath: FLAP_CLIP }}
         />
       </motion.div>
     </div>

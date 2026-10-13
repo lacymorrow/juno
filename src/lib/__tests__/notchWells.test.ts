@@ -191,6 +191,12 @@ describe("the Notch's shapes", () => {
     expect(side).toMatchObject({ edge: "left", width: 360, height: 200 + 2 * SHOULDER });
     const restSide = notchShape("notch", "capsule", ISLAND_SIZES.capsule, 38, "top-left", "right");
     expect(restSide).toMatchObject({ width: EDGE_REST_DEPTH, height: SIDE_REST_LENGTH });
+    // Hovered, a side notch is the notch on its side: it runs along the edge.
+    const hoverSide = notchShape("notch", "hover", ISLAND_SIZES.hover, 38, "top-left", "left");
+    expect(hoverSide).toMatchObject({
+      width: ISLAND_SIZES.hover.height,
+      height: ISLAND_SIZES.hover.width + 2 * SHOULDER,
+    });
   });
 
   it("rests as a peeled corner, and opens into a card with its corner folded", () => {

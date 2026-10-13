@@ -116,7 +116,29 @@ pub fn apply_bar_stacking(
     // the re-order being corrected.
     if let Err(e) = app_handle.run_on_main_thread(move || unsafe {
         let bar = bar_addr as cocoa_id;
+        #[allow(unexpected_cfgs)]
+        let was: i64 = msg_send![bar, level];
+        let frame: NSRect = msg_send![bar, frame];
+        if was == crate::bar_stacking::OVER_MENU_BAR_LEVEL && level < was {
+            // Stepping down from over the menu bar: AppKit may push the window
+            // under the menu bar. Remember where it was to put it back.
+            if let Ok(mut held) = HELD_OVER_MENU_BAR.lock() {
+                *held = Some(frame);
+            }
+        }
         bar.setLevel_(level);
+        if level == crate::bar_stacking::OVER_MENU_BAR_LEVEL {
+            let held = HELD_OVER_MENU_BAR
+                .lock()
+                .ok()
+                .and_then(|mut held| held.take());
+            if let Some(held) = held {
+                if pushed_under_menu_bar(held, frame) {
+                    #[allow(unexpected_cfgs)]
+                    let _: () = msg_send![bar, setFrame: held display: YES];
+                }
+            }
+        }
         if let Some(front_addr) = front_addr {
             let front = front_addr as cocoa_id;
             #[allow(unexpected_cfgs)]
@@ -127,6 +149,24 @@ pub fn apply_bar_stacking(
     }) {
         warn!("Could not restack the floating bar: {}", e);
     }
+}
+
+/// Where the bar was the last time it stepped down from over the menu bar.
+#[cfg(target_os = "macos")]
+static HELD_OVER_MENU_BAR: Mutex<Option<NSRect>> = Mutex::new(None);
+
+/// True when `now` is `held` moved straight down by no more than a menu bar:
+/// what AppKit does to a window below the menu bar's level that sat over it.
+/// Anything else (a drag, a resize, another display) is the person's or the
+/// page's doing and is left alone.
+#[cfg(target_os = "macos")]
+fn pushed_under_menu_bar(held: NSRect, now: NSRect) -> bool {
+    let dropped = held.origin.y - now.origin.y;
+    (held.origin.x - now.origin.x).abs() < 0.5
+        && (held.size.width - now.size.width).abs() < 0.5
+        && (held.size.height - now.size.height).abs() < 0.5
+        && dropped > 0.5
+        && dropped <= 64.0
 }
 
 #[cfg(not(target_os = "macos"))]

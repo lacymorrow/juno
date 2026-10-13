@@ -51,6 +51,16 @@ export const NOTCH_STEADY_SPEC: SteadySpec = {
   wells: "notch",
 };
 
+/**
+ * Whether a posture is drawn standing along a side edge. The resting tab and
+ * the hover controls are a notch turned on its side: they run along the edge,
+ * stacked top to bottom. Anything with words grows out of the edge instead,
+ * because words cannot be read standing up.
+ */
+export function standsOnSide(edge: NotchEdge, posture: Posture): boolean {
+  return (edge === "left" || edge === "right") && (posture === "capsule" || posture === "hover");
+}
+
 /** One frame of the body. */
 export interface NotchShape {
   form: NotchForm;
@@ -84,7 +94,7 @@ export function notchShape(
   edge: NotchEdge = "top",
 ): NotchShape {
   const resting = posture === "capsule";
-  if (form === "notch") return edgeNotch(edge, resting, size, strip);
+  if (form === "notch") return edgeNotch(edge, posture, size, strip);
 
   if (resting) {
     return {
@@ -120,10 +130,12 @@ export function notchShape(
  * of the shape; the far corners are round.
  *
  * Top: the menu bar strip comes first and the island hangs below it. Bottom:
- * the island stands on the screen's bottom edge. Left and right: the island
- * grows sideways out of the edge, with shoulders above and below it.
+ * the island stands on the screen's bottom edge. Left and right: the resting
+ * tab and the hover controls are the notch turned on its side, running along
+ * the edge; words grow sideways out of it. Shoulders sit above and below.
  */
-function edgeNotch(edge: NotchEdge, resting: boolean, size: IslandSize, strip: number): NotchShape {
+function edgeNotch(edge: NotchEdge, posture: Posture, size: IslandSize, strip: number): NotchShape {
+  const resting = posture === "capsule";
   const radius = resting ? NOTCH_REST_RADIUS : size.radius;
   if (edge === "top" || edge === "bottom") {
     const minBody = NOTCH_REST_WIDTH - 2 * SHOULDER;
@@ -143,10 +155,12 @@ function edgeNotch(edge: NotchEdge, resting: boolean, size: IslandSize, strip: n
         : { top: lead, left: SHOULDER, width: body, height: size.height },
     };
   }
-  // Open, the body is exactly the island's height: a side has no camera to
-  // clear, so nothing makes it longer than what it holds.
-  const body = resting ? SIDE_REST_LENGTH - 2 * SHOULDER : size.height;
-  const depth = resting ? EDGE_REST_DEPTH : size.width;
+  // On its side, the island's width runs along the edge and its height is
+  // how far it stands out. With words, the body is exactly the island's
+  // height: a side has no camera to clear, so nothing makes it longer.
+  const upright = standsOnSide(edge, posture);
+  const body = resting ? SIDE_REST_LENGTH - 2 * SHOULDER : upright ? size.width : size.height;
+  const depth = resting ? EDGE_REST_DEPTH : upright ? size.height : size.width;
   return {
     form: "notch",
     edge,
