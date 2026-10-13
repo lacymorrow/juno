@@ -239,6 +239,9 @@ fn build_plugin<R: Runtime + 'static>(
                 match permission_status {
                     mic_permissions::MicrophonePermissionStatus::Granted => {
                         tracing::info!("✅ Microphone permission is already granted");
+                        // Have the microphone built and waiting before the
+                        // first press, and again after every device change.
+                        devices::keep_microphone_warm();
                     }
                     mic_permissions::MicrophonePermissionStatus::Denied => {
                         tracing::warn!("⚠️ Microphone permission is denied. Voice features will not work until permission is granted.");

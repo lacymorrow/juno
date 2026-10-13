@@ -45,6 +45,8 @@ pub fn set_preferred_input_device(name: Option<String>) {
         }
         Err(e) => tracing::error!("[VoiceDevices] Could not store the microphone choice: {e}"),
     }
+    // Get the new one ready before the next press, not during it.
+    request_warm();
 }
 
 /// The microphone the person picked, if any.
@@ -355,7 +357,7 @@ pub fn start_mono_stream(
     sample_format: SampleFormat,
     audio_data_tx: Sender<Vec<f32>>,
 ) -> std::result::Result<LiveInput, CaptureStartFailure> {
-    let stream = build_started_stream(
+    let stream = build_stream(
         device,
         device_name,
         config,
@@ -367,12 +369,14 @@ pub fn start_mono_stream(
         },
         |err| tracing::error!("[VoiceDevices] Input stream error: {err}"),
     )?;
+    start(&stream, device_name)?;
     Ok(LiveInput::new(Box::new(stream)))
 }
 
 /// Build an input stream that hands each buffer, downmixed to mono, to
-/// `deliver`, and start it.
-fn build_started_stream(
+/// `deliver`. It is built stopped (see `vendor/cpal/JUNO_PATCH.md`): nothing
+/// is recorded and no indicator shows until [`start`].
+fn build_stream(
     device: &cpal::Device,
     device_name: &str,
     config: &cpal::StreamConfig,
@@ -412,47 +416,91 @@ fn build_started_stream(
         }
     };
 
-    let stream = built.map_err(|e| CaptureStartFailure::StreamBuildFailed {
+    built.map_err(|e| CaptureStartFailure::StreamBuildFailed {
         device: device_name.to_string(),
         detail: format!("{e:?}"),
-    })?;
+    })
+}
 
-    if let Err(e) = stream.play() {
-        // cpal starts the audio unit while building the stream, so a failed
-        // `play` can still leave a running input behind. Stop it.
+/// Start a built stream. A failed start is stopped again, in case the device
+/// got as far as running.
+fn start(stream: &cpal::Stream, device_name: &str) -> std::result::Result<(), CaptureStartFailure> {
+    stream.play().map_err(|e| {
         stream.halt();
-        return Err(CaptureStartFailure::StreamStartFailed {
+        CaptureStartFailure::StreamStartFailed {
             device: device_name.to_string(),
             detail: format!("{e:?}"),
-        });
+        }
+    })
+}
+
+/// The format to record in: the device's own. Opening it then never changes
+/// its rate under other apps, and a rate another app sets later is a change
+/// [`keep_microphone_warm`] hears about. The final decode resamples anyway.
+pub fn input_config(
+    device: &cpal::Device,
+    device_name: &str,
+) -> std::result::Result<(cpal::StreamConfig, SampleFormat), CaptureStartFailure> {
+    let native = device.default_input_config().map_err(|e| {
+        CaptureStartFailure::DeviceConfigUnavailable {
+            device: device_name.to_string(),
+            detail: format!("{e:?}"),
+        }
+    })?;
+    if matches!(
+        native.sample_format(),
+        SampleFormat::F32 | SampleFormat::I16
+    ) {
+        return Ok((native.config(), native.sample_format()));
     }
 
-    Ok(stream)
+    // The device's own format is one we cannot read: the same rate in one we
+    // can.
+    let rate = native.sample_rate();
+    device
+        .supported_input_configs()
+        .ok()
+        .and_then(|mut ranges| {
+            ranges.find(|r| {
+                matches!(r.sample_format(), SampleFormat::F32 | SampleFormat::I16)
+                    && (r.min_sample_rate()..=r.max_sample_rate()).contains(&rate)
+            })
+        })
+        .map(|range| {
+            let config = range.with_sample_rate(rate);
+            (config.config(), config.sample_format())
+        })
+        .ok_or_else(|| CaptureStartFailure::UnsupportedSampleFormat {
+            device: device_name.to_string(),
+            format: format!("{:?}", native.sample_format()),
+        })
 }
 
 /// Where a warm stream's audio goes: the recording that holds it, or nowhere
-/// while it is parked.
+/// while it waits.
 type AudioSink = Arc<Mutex<Option<Sender<Vec<f32>>>>>;
 
 /// cpal marks every `Stream` `!Send` because some backends are bound to the
 /// thread that made them. CoreAudio's is not: it is an `Arc<Mutex<..>>` around
 /// an audio unit that may be started, stopped and disposed from any thread.
-/// Juno's capture only runs on macOS, which is what makes handing one from a
-/// finished recording's thread to the next one's sound.
+/// Juno's capture only runs on macOS, which is what makes handing one from the
+/// thread that built it to the recording that runs it sound.
 struct SendStream(cpal::Stream);
 
 // SAFETY: see the type's doc comment. The stream is only ever used by one
 // thread at a time, under `WARM_INPUT` or by the recording that took it.
 unsafe impl Send for SendStream {}
 
-/// The dictation microphone, paused between recordings.
+/// The dictation microphone, built and stopped, waiting for the key.
 ///
-/// Building a CoreAudio input took 0.1s on a quiet Mac and over a second on a
-/// busy one, and every word said before it ran was lost. So a dictation's
-/// stream is paused when it ends, not closed, and the next press only starts
-/// it again. A paused input is not a hot microphone: the device is stopped,
-/// macOS draws no orange indicator, and [`open_input_streams`] does not count
-/// it.
+/// It is built before anyone presses anything: at launch, whenever the Mac's
+/// microphones change (one plugged in or out, a new default, a new rate), and
+/// whenever the person picks a different one. A press only starts it, which
+/// takes milliseconds; building one took up to three seconds, while the
+/// person was already talking. Built and stopped is not a hot microphone: the
+/// device is not running, macOS draws no orange indicator, and
+/// [`open_input_streams`] does not count it. When a recording ends its stream
+/// is stopped and waits again.
 pub struct WarmInput {
     device: cpal::Device,
     name: String,
@@ -461,8 +509,11 @@ pub struct WarmInput {
     stream: SendStream,
     sink: AudioSink,
     /// Set by the stream's error callback (the device went away). A broken
-    /// stream is never resumed.
+    /// stream is never started.
     broken: Arc<AtomicBool>,
+    /// Hears another app changing this device's rate, so the stream is
+    /// rebuilt before the next press rather than during it.
+    _rate_watch: Option<watch::RateWatch>,
 }
 
 static WARM_INPUT: Mutex<Option<WarmInput>> = Mutex::new(None);
@@ -480,37 +531,49 @@ impl WarmInput {
         self.config.channels
     }
 
-    /// Start it again, delivering to `audio_data_tx`. A stream that will not
-    /// start (CoreAudio restarted under it) is replaced by a fresh one on the
-    /// same device at the same rate, so the recording that claimed it never
-    /// pays for it.
+    /// True while it is still the device's current rate: a stream built for
+    /// another rate would record garbage.
+    fn rate_is_current(&self) -> bool {
+        self.device
+            .default_input_config()
+            .is_ok_and(|current| current.sample_rate() == self.config.sample_rate)
+    }
+
+    /// Start it, delivering to `audio_data_tx`. A stream that will not start
+    /// (CoreAudio restarted under it) is rebuilt on the same device at the
+    /// same rate, so the recording that claimed it never pays for it.
     pub fn resume(
         self,
         audio_data_tx: Sender<Vec<f32>>,
     ) -> std::result::Result<LiveInput, CaptureStartFailure> {
-        set_sink(&self.sink, Some(audio_data_tx.clone()));
-        match self.stream.0.play() {
-            Ok(()) => Ok(LiveInput::new(Box::new(WarmLease(Some(self))))),
-            Err(e) => {
+        let device = self.device.clone();
+        let name = self.name.clone();
+        let config = self.config.clone();
+        let sample_format = self.sample_format;
+        match self.lend(audio_data_tx.clone()) {
+            Ok(input) => Ok(input),
+            Err(failure) => {
                 tracing::warn!(
-                    "[VoiceDevices] {} would not start again ({e:?}); opening it fresh",
-                    self.name
+                    "[VoiceDevices] {name} would not start ({}); building it again",
+                    failure.message()
                 );
-                let WarmInput {
-                    device,
-                    name,
-                    config,
-                    sample_format,
-                    stream,
-                    sink,
-                    ..
-                } = self;
-                stream.0.halt();
-                set_sink(&sink, None);
-                drop(stream);
-                start_warm_stream(device, name, config, sample_format, audio_data_tx)
+                build_warm(device, name, config, sample_format)?.lend(audio_data_tx)
             }
         }
+    }
+
+    /// Start it for one recording. Dropping the returned input stops it and
+    /// puts it back to wait for the next press.
+    fn lend(
+        self,
+        audio_data_tx: Sender<Vec<f32>>,
+    ) -> std::result::Result<LiveInput, CaptureStartFailure> {
+        set_sink(&self.sink, Some(audio_data_tx));
+        if let Err(failure) = start(&self.stream.0, &self.name) {
+            set_sink(&self.sink, None);
+            return Err(failure);
+        }
+        Ok(LiveInput::new(Box::new(WarmLease(Some(self)))))
     }
 }
 
@@ -521,8 +584,8 @@ fn set_sink(sink: &AudioSink, tx: Option<Sender<Vec<f32>>>) {
     }
 }
 
-/// A warm stream lent to one recording. Halting it pauses the device; dropping
-/// it parks the paused stream for the next press.
+/// A warm stream lent to one recording. Halting it stops the device; dropping
+/// it puts the stopped stream back for the next press.
 struct WarmLease(Option<WarmInput>);
 
 impl InputHalt for WarmLease {
@@ -537,83 +600,91 @@ impl InputHalt for WarmLease {
 impl Drop for WarmLease {
     fn drop(&mut self) {
         if let Some(warm) = self.0.take() {
-            park(warm);
+            put_back(warm);
         }
     }
 }
 
-fn park(warm: WarmInput) {
+/// A recording is over: its stream waits for the next press, unless the
+/// device went away or a newer one was built while it recorded (the Mac's
+/// microphones changed mid-sentence), in which case the newer one stays.
+fn put_back(warm: WarmInput) {
     if warm.broken.load(Ordering::SeqCst) {
         tracing::info!(
-            "[VoiceDevices] {} went away; not keeping it warm",
+            "[VoiceDevices] {} went away; building the next one",
             warm.name
         );
+        request_warm();
         return;
     }
     match WARM_INPUT.lock() {
-        Ok(mut slot) => *slot = Some(warm),
-        Err(e) => tracing::error!("[VoiceDevices] Could not keep the microphone warm: {e}"),
+        Ok(mut slot) => {
+            if slot.is_none() {
+                *slot = Some(warm);
+            }
+        }
+        Err(e) => tracing::error!("[VoiceDevices] Could not keep the microphone ready: {e}"),
     }
+    // A first dictation that had to ask for microphone access: from now on
+    // the next one is ready before the press.
+    keep_microphone_warm();
 }
 
-/// The paused stream from the last dictation, if it is still the microphone
-/// this one should open and still runs at the rate it was built for.
+/// The stream waiting for this press, if it is still the microphone this
+/// press should open, still there, and still at its rate.
 ///
-/// Cheap on purpose: two property reads on one device, never the device list.
-/// Anything that does not match is dropped, and the press takes the full path.
+/// Cheap on purpose: a few property reads on one device, never the device
+/// list. Anything that does not match is dropped, this press opens the device
+/// itself, and a fresh one is built for the next.
 pub fn claim_warm_input(preferred: Option<&str>) -> Option<WarmInput> {
-    let warm = WARM_INPUT.lock().ok()?.take()?;
+    let warm = WARM_INPUT.lock().ok()?.take();
+    let Some(warm) = warm else {
+        tracing::info!("[VoiceDevices] No microphone was ready for this press");
+        request_warm();
+        return None;
+    };
     if warm.broken.load(Ordering::SeqCst) {
+        request_warm();
         return None;
     }
 
+    // Following the system means the device macOS has as its default right
+    // now, compared by CoreAudio id: two microphones can share a name.
     let wanted = match preferred.map(str::trim).filter(|w| !w.is_empty()) {
-        Some(wanted) => wanted.to_string(),
-        None => cpal::default_host().default_input_device()?.name().ok()?,
+        Some(wanted) => warm.name == wanted,
+        None => cpal::default_host()
+            .default_input_device()
+            .is_some_and(|current| watch::same_device(&current, &warm.device)),
     };
-    if warm.name != wanted {
+    if !wanted || !warm.rate_is_current() {
         tracing::info!(
-            "[VoiceDevices] Listening moves from {} to {wanted}; opening it fresh",
+            "[VoiceDevices] {} is not the microphone this press needs; opening it directly",
             warm.name
         );
+        request_warm();
         return None;
     }
-
-    // Still plugged in, and nothing has changed its rate underneath it.
-    match warm.device.default_input_config() {
-        Ok(current) if current.sample_rate() == warm.config.sample_rate => Some(warm),
-        _ => {
-            tracing::info!(
-                "[VoiceDevices] {} changed since the last dictation; opening it fresh",
-                warm.name
-            );
-            None
-        }
-    }
+    Some(warm)
 }
 
-/// Open the dictation microphone so that it is kept warm when the recording
-/// ends. The first press after launch, or after a device change, comes here;
-/// every press after that resumes it through [`claim_warm_input`].
-pub fn start_warm_stream(
+/// Build a stopped stream on `device`, ready to be lent to a recording.
+fn build_warm(
     device: cpal::Device,
     device_name: String,
     config: cpal::StreamConfig,
     sample_format: SampleFormat,
-    audio_data_tx: Sender<Vec<f32>>,
-) -> std::result::Result<LiveInput, CaptureStartFailure> {
-    let sink: AudioSink = Arc::new(Mutex::new(Some(audio_data_tx)));
+) -> std::result::Result<WarmInput, CaptureStartFailure> {
+    let sink: AudioSink = Arc::new(Mutex::new(None));
     let broken = Arc::new(AtomicBool::new(false));
 
     let deliver_to = Arc::clone(&sink);
     let broken_by = Arc::clone(&broken);
-    let stream = build_started_stream(
+    let stream = build_stream(
         &device,
         &device_name,
         &config,
         sample_format,
         move |mono| {
-            // Parked: nobody is recording, and the device is stopped anyway.
             if let Ok(slot) = deliver_to.lock() {
                 if let Some(tx) = slot.as_ref() {
                     if let Err(e) = tx.send(mono) {
@@ -626,11 +697,13 @@ pub fn start_warm_stream(
             tracing::error!("[VoiceDevices] Input stream error: {err}");
             if matches!(err, cpal::StreamError::DeviceNotAvailable) {
                 broken_by.store(true, Ordering::SeqCst);
+                request_warm();
             }
         },
     )?;
 
-    Ok(LiveInput::new(Box::new(WarmLease(Some(WarmInput {
+    Ok(WarmInput {
+        _rate_watch: watch::RateWatch::new(&device),
         device,
         name: device_name,
         config,
@@ -638,7 +711,225 @@ pub fn start_warm_stream(
         stream: SendStream(stream),
         sink,
         broken,
-    })))))
+    })
+}
+
+/// Open the dictation microphone for a press that found nothing ready, and
+/// keep it ready afterwards.
+pub fn start_warm_stream(
+    device: cpal::Device,
+    device_name: String,
+    config: cpal::StreamConfig,
+    sample_format: SampleFormat,
+    audio_data_tx: Sender<Vec<f32>>,
+) -> std::result::Result<LiveInput, CaptureStartFailure> {
+    build_warm(device, device_name, config, sample_format)?.lend(audio_data_tx)
+}
+
+/// Ask for the dictation microphone to be made ready, off the caller's thread.
+///
+/// Driven only by events. Requests that arrive while one is being served are
+/// served together by one more pass, which finds the microphone already ready
+/// unless something changed again; nothing waits on a clock for a burst of
+/// changes to finish.
+pub fn request_warm() {
+    static WARMER: OnceLock<Option<Sender<()>>> = OnceLock::new();
+    let warmer = WARMER.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        std::thread::Builder::new()
+            .name("juno-mic-ready".into())
+            .spawn(move || {
+                while rx.recv().is_ok() {
+                    while rx.try_recv().is_ok() {}
+                    ensure_warm();
+                }
+            })
+            .map_err(|e| {
+                tracing::error!("[VoiceDevices] Could not start the microphone warmer: {e}")
+            })
+            .ok()
+            .map(|_| tx)
+    });
+    if let Some(tx) = warmer {
+        let _ = tx.send(());
+    }
+}
+
+/// From now on, keep the dictation microphone built and waiting: now, and
+/// again whenever the Mac's microphones change. Safe to call more than once.
+/// Only call it once microphone access is granted; building the device is
+/// what would ask for it.
+pub fn keep_microphone_warm() {
+    static WATCHING: OnceLock<()> = OnceLock::new();
+    WATCHING.get_or_init(|| {
+        watch::system_changes();
+        request_warm();
+    });
+}
+
+/// Build the stream for the microphone the next press will open, unless the
+/// one waiting already is.
+fn ensure_warm() {
+    use crate::mic_permissions::{check_microphone_permission, MicrophonePermissionStatus};
+    if !matches!(
+        check_microphone_permission(),
+        MicrophonePermissionStatus::Granted | MicrophonePermissionStatus::NotApplicable
+    ) {
+        return;
+    }
+
+    let began = std::time::Instant::now();
+    let resolved = match resolve_input_device(preferred_input_device().as_deref()) {
+        Ok(resolved) => resolved,
+        Err(failure) => {
+            tracing::info!("[VoiceDevices] Nothing to get ready: {}", failure.message());
+            if let Ok(mut slot) = WARM_INPUT.lock() {
+                *slot = None;
+            }
+            return;
+        }
+    };
+
+    if let Ok(slot) = WARM_INPUT.lock() {
+        if let Some(waiting) = slot.as_ref() {
+            if waiting.name == resolved.name
+                && watch::same_device(&waiting.device, &resolved.device)
+                && !waiting.broken.load(Ordering::SeqCst)
+                && waiting.rate_is_current()
+            {
+                return;
+            }
+        }
+    }
+
+    let built = input_config(&resolved.device, &resolved.name).and_then(|(config, format)| {
+        build_warm(resolved.device, resolved.name.clone(), config, format)
+    });
+    match built {
+        Ok(warm) => {
+            tracing::info!(
+                "[VoiceDevices] {} is ready for the next press at {} Hz ({} ms)",
+                warm.name,
+                warm.sample_rate(),
+                began.elapsed().as_millis()
+            );
+            match WARM_INPUT.lock() {
+                Ok(mut slot) => *slot = Some(warm),
+                Err(e) => {
+                    tracing::error!("[VoiceDevices] Could not keep the microphone ready: {e}")
+                }
+            }
+        }
+        Err(failure) => tracing::warn!(
+            "[VoiceDevices] Could not get {} ready: {}",
+            resolved.name,
+            failure.message()
+        ),
+    }
+}
+
+/// CoreAudio change notifications, each of which asks for the microphone to
+/// be made ready again.
+#[cfg(target_os = "macos")]
+mod watch {
+    use coreaudio::sys::{
+        kAudioDevicePropertyNominalSampleRate, kAudioHardwarePropertyDefaultInputDevice,
+        kAudioHardwarePropertyDevices, kAudioObjectPropertyElementMaster,
+        kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, AudioObjectAddPropertyListener,
+        AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertySelector,
+        AudioObjectRemovePropertyListener, OSStatus,
+    };
+    use std::ffi::c_void;
+    use std::ptr::null_mut;
+
+    unsafe extern "C" fn changed(
+        _object: AudioObjectID,
+        _count: u32,
+        _addresses: *const AudioObjectPropertyAddress,
+        _data: *mut c_void,
+    ) -> OSStatus {
+        super::request_warm();
+        0
+    }
+
+    fn address(selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress {
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMaster,
+        }
+    }
+
+    fn listen(object: AudioObjectID, selector: AudioObjectPropertySelector) -> bool {
+        let address = address(selector);
+        // SAFETY: `changed` is a plain function with the listener signature,
+        // and the address outlives the call (CoreAudio copies it).
+        let status =
+            unsafe { AudioObjectAddPropertyListener(object, &address, Some(changed), null_mut()) };
+        if status != 0 {
+            tracing::warn!("[VoiceDevices] Could not watch for microphone changes ({status})");
+        }
+        status == 0
+    }
+
+    /// A microphone plugged in or out, or a new default.
+    pub fn system_changes() {
+        listen(
+            kAudioObjectSystemObject,
+            kAudioHardwarePropertyDefaultInputDevice,
+        );
+        listen(kAudioObjectSystemObject, kAudioHardwarePropertyDevices);
+    }
+
+    fn device_id(device: &cpal::Device) -> AudioObjectID {
+        let cpal::platform::DeviceInner::CoreAudio(device) = device.as_inner();
+        device.audio_device_id()
+    }
+
+    /// The same physical device. Names are not enough: two microphones can
+    /// share one, and a device unplugged and plugged back in gets a new id.
+    pub fn same_device(a: &cpal::Device, b: &cpal::Device) -> bool {
+        device_id(a) == device_id(b)
+    }
+
+    /// A rate change on one device, for as long as this is held.
+    pub struct RateWatch(AudioObjectID);
+
+    impl RateWatch {
+        pub fn new(device: &cpal::Device) -> Option<Self> {
+            let id = device_id(device);
+            listen(id, kAudioDevicePropertyNominalSampleRate).then_some(Self(id))
+        }
+    }
+
+    impl Drop for RateWatch {
+        fn drop(&mut self) {
+            let address = address(kAudioDevicePropertyNominalSampleRate);
+            // SAFETY: the same object, address and function that were added.
+            unsafe {
+                AudioObjectRemovePropertyListener(self.0, &address, Some(changed), null_mut());
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+mod watch {
+    use cpal::traits::DeviceTrait;
+
+    pub fn system_changes() {}
+
+    pub fn same_device(a: &cpal::Device, b: &cpal::Device) -> bool {
+        a.name().ok() == b.name().ok()
+    }
+
+    pub struct RateWatch;
+
+    impl RateWatch {
+        pub fn new(_device: &cpal::Device) -> Option<Self> {
+            None
+        }
+    }
 }
 
 /// The device the next capture will open, for the settings window to show
