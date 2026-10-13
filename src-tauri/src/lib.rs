@@ -38,6 +38,7 @@ pub mod cursor_overlay; // Juno's cursor on screen: glow behind the real one, or
 pub mod cursor_scale_migration; // Undo a pointer an older build left enlarged
 pub mod deep_link; // juno:// links: navigation only, never a change
 pub mod demo; // Golden demo builds that carry their own Anthropic key
+pub mod dictation_cleanup; // On-device grammar pass for dictation (Apple FoundationModels)
 pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
 pub mod events; // Event handling system for shortcuts and voice transcription
@@ -500,6 +501,9 @@ pub fn run() {
             // Dictation Settings Commands
             get_dictation_clipboard_enabled,
             set_dictation_clipboard_enabled,
+            commands::dictation::get_dictation_cleanup_status,
+            commands::dictation::set_dictation_cleanup_enabled,
+            commands::dictation::open_apple_intelligence_settings,
             commands::dictation::get_dictation_insertion_mode,
             commands::dictation::set_dictation_insertion_mode,
             // Dictation State Management Commands

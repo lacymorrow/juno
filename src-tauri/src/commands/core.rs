@@ -610,19 +610,6 @@ pub async fn set_debug_mode(
     Ok(())
 }
 
-/// Whether debug mode is on: the Advanced switch, a debug build, or
-/// `RUST_LOG=debug`. Debug mode now means extra logging and the bar window
-/// outline only. Features still being finished belong to
-/// [`crate::settings::beta_features_active`].
-#[allow(dead_code)] // kept for callers still gated on it; settings now use beta_features_active
-pub fn debug_mode_active(state: &AppState) -> bool {
-    state.is_debug_mode()
-        || cfg!(debug_assertions)
-        || std::env::var("RUST_LOG")
-            .unwrap_or_default()
-            .contains("debug")
-}
-
 /// Get current debug mode status
 #[tauri::command]
 pub async fn get_debug_mode(state: State<'_, AppState>) -> Result<bool, String> {

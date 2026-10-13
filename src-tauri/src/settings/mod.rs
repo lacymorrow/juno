@@ -321,6 +321,10 @@ pub struct AudioSettings {
     /// existing installs keep their choice.
     #[serde(default)]
     pub dictation_copy_to_clipboard: Option<bool>,
+    /// Fix grammar and punctuation of dictation with Apple's on-device model
+    /// before typing it. Dictation only; never voice turns sent to the agent.
+    #[serde(default = "defaults::dictation_cleanup")]
+    pub dictation_cleanup: bool,
     pub dictation_trigger_mode: String, // "tap" or "hold"
     pub always_listening_active: bool,
     pub always_listening_sensitivity: f32,
@@ -676,6 +680,7 @@ impl Default for AudioSettings {
             dictation_clipboard_enabled: defaults::DICTATION_CLIPBOARD_ENABLED,
             dictation_insertion_mode: defaults::dictation_insertion_mode(),
             dictation_copy_to_clipboard: Some(defaults::DICTATION_CLIPBOARD_ENABLED),
+            dictation_cleanup: defaults::DICTATION_CLEANUP,
             dictation_trigger_mode: "hold".to_string(),
             always_listening_active: defaults::ALWAYS_LISTENING_ACTIVE,
             always_listening_sensitivity: defaults::ALWAYS_LISTENING_SENSITIVITY,
@@ -761,11 +766,31 @@ mod tests {
         let map = value.as_object_mut().expect("AudioSettings is an object");
         map.remove("dictation_insertion_mode");
         map.remove("dictation_copy_to_clipboard");
+        map.remove("dictation_cleanup");
         map.insert(
             "dictation_clipboard_enabled".to_string(),
             serde_json::Value::Bool(clipboard_enabled),
         );
         value
+    }
+
+    #[test]
+    fn legacy_store_defaults_dictation_cleanup_on() {
+        let settings: AudioSettings =
+            serde_json::from_value(legacy_store_json(true)).expect("legacy store parses");
+        assert!(settings.dictation_cleanup);
+        assert!(AudioSettings::default().dictation_cleanup);
+    }
+
+    #[test]
+    fn an_explicit_cleanup_off_survives_a_round_trip() {
+        let settings = AudioSettings {
+            dictation_cleanup: false,
+            ..AudioSettings::default()
+        };
+        let json = serde_json::to_value(&settings).expect("serializes");
+        let back: AudioSettings = serde_json::from_value(json).expect("parses");
+        assert!(!back.dictation_cleanup);
     }
 
     #[test]
