@@ -687,7 +687,7 @@ mod hold_edges {
     async fn run(app: &AppHandle, edge: HoldEdge) {
         match edge {
             HoldEdge::Press(TriggerTarget::Agent) => {
-                crate::agent_monitor::on_agent_input_pressed().await;
+                crate::agent_monitor::on_agent_input_pressed(app).await;
             }
             HoldEdge::Press(TriggerTarget::Dictation) => {
                 crate::dictation_monitor::on_dictation_input_pressed(app).await;

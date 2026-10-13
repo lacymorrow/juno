@@ -211,9 +211,9 @@ enum AudioThreadMessage {
 }
 
 /// Opens the dictation microphone on the audio thread and hands back whatever
-/// keeps it open. Dropping that value is what stops capture. A cpal stream is
-/// not `Send`, so it is created (and dropped) on the thread that owns it; a
-/// test hands in a token instead of a real stream.
+/// keeps it open. Dropping that value is what stops capture, and parks the
+/// paused stream for the next press (see [`devices::WarmInput`]); a test hands
+/// in a token instead of a real stream.
 type CaptureOpen = Box<
     dyn FnOnce(Sender<Vec<f32>>) -> std::result::Result<Box<dyn std::any::Any>, CaptureStartFailure>
         + Send,
@@ -539,11 +539,29 @@ impl VoiceController {
             *buffer_guard = None;
         }
 
+        let preferred = devices::preferred_input_device();
+
+        // The last dictation's microphone, paused. Resuming it takes
+        // milliseconds; resolving and building one took up to three seconds
+        // while the person was already talking.
+        if let Some(warm) = devices::claim_warm_input(preferred.as_deref()) {
+            let actual_rate = warm.sample_rate();
+            let channels = warm.channels();
+            self.set_recording_rate(actual_rate);
+            let open: CaptureOpen = Box::new(move |audio_data_tx: Sender<Vec<f32>>| {
+                let name = warm.name().to_string();
+                let stream = warm.resume(audio_data_tx)?;
+                info!("[AudioThread] Audio stream resumed on {name}.");
+                Ok(Box::new(stream) as Box<dyn std::any::Any>)
+            });
+            return self.spawn_audio_worker(app_handle, open, actual_rate, channels);
+        }
+
         // The microphone the person picked, or the system's, or the system's
         // standing in for one that was unplugged. A failure here is a sentence
         // the UI can show, which is why it comes from `CaptureStartFailure`
         // rather than being written out again.
-        let resolved = devices::resolve_input_device(devices::preferred_input_device().as_deref())
+        let resolved = devices::resolve_input_device(preferred.as_deref())
             .map_err(|failure| Error::AudioDevice(failure.message()))?;
         if let Some(requested) = &resolved.substituted_for {
             tracing::warn!(
@@ -605,28 +623,34 @@ impl VoiceController {
         let actual_rate = config.sample_rate.0;
         let channels = config.channels;
 
-        // Store the actual sample rate safely
+        self.set_recording_rate(actual_rate);
+
+        let open: CaptureOpen = Box::new(move |audio_data_tx: Sender<Vec<f32>>| {
+            let name = device_name.clone();
+            let stream = devices::start_warm_stream(
+                device,
+                device_name,
+                config,
+                sample_format,
+                audio_data_tx,
+            )?;
+            info!("[AudioThread] Audio stream started on {name}.");
+            Ok(Box::new(stream) as Box<dyn std::any::Any>)
+        });
+
+        self.spawn_audio_worker(app_handle, open, actual_rate, channels)
+    }
+
+    /// The rate the microphone records at, for the final decode to resample
+    /// from.
+    fn set_recording_rate(&self, rate: u32) {
         if let Ok(mut rate_guard) = self.actual_recording_sample_rate.lock() {
-            *rate_guard = Some(actual_rate);
+            *rate_guard = Some(rate);
         } else {
             tracing::error!(
                 "Failed to acquire lock for actual_recording_sample_rate - lock may be poisoned"
             );
         }
-
-        let open: CaptureOpen = Box::new(move |audio_data_tx: Sender<Vec<f32>>| {
-            let stream = devices::start_mono_stream(
-                &device,
-                &device_name,
-                &config,
-                sample_format,
-                audio_data_tx,
-            )?;
-            info!("[AudioThread] Audio stream started on {device_name}.");
-            Ok(Box::new((stream, device)) as Box<dyn std::any::Any>)
-        });
-
-        self.spawn_audio_worker(app_handle, open, actual_rate, channels)
     }
 
     /// Start the thread that owns the microphone. Everything after device
