@@ -1179,7 +1179,9 @@ fn stt_provider_from_settings(value: Option<&serde_json::Value>) -> Option<Strin
 /// Whisper model file that is not the plugin's default — and is a no-op when
 /// the plugin got there first. Nothing is downloaded here: the Parakeet offer
 /// is an onboarding step, and the Models pane is the only other place a
-/// download starts.
+/// download starts. A saved model that is not on disk is replaced in settings
+/// by the model actually running, so Settings never names a model dictation
+/// is not using.
 pub async fn apply_persisted_stt_model(app: &AppHandle) {
     let settings = match load_voice_settings(app).await {
         Ok(s) => s,
@@ -1205,10 +1207,22 @@ pub async fn apply_persisted_stt_model(app: &AppHandle) {
         return;
     }
     if !find_def(id).is_some_and(|d| is_downloaded(app, d)) {
+        // The setting has to name the model that is really running, or
+        // Settings shows one model while dictation uses another.
         warn!(
-            "[SttModels] Saved model '{}' is not on disk; staying on {}",
+            "[SttModels] Saved model '{}' is not on disk; switching the setting to {}",
             id, running
         );
+        if let Some(def) = find_def(&running) {
+            if let Err(e) = persist_choice(app, def, false).await {
+                warn!("[SttModels] Could not save fallback model: {}", e);
+                return;
+            }
+            let _ = app.emit(
+                events::CHANGED,
+                serde_json::json!({ "model_id": running, "automatic": true }),
+            );
+        }
         return;
     }
     match switch_engine_to(app, id).await {
