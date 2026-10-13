@@ -343,44 +343,6 @@ export default function AdvancedSettings({
         </SettingsRow>
       </SettingsGroup>
 
-      <SettingsGroup
-        title="Developer Options"
-      >
-        <SettingsRow
-          htmlFor="debug-mode"
-          label="Debug Mode"
-          description="Extra logging and a window outline, for troubleshooting."
-        >
-          <Switch
-            id="debug-mode"
-            checked={debugMode}
-            onCheckedChange={async (enabled) => {
-              try {
-                await invoke(COMMANDS.CORE_SET_DEBUG_MODE, { enabled });
-                setDebugMode(enabled);
-                toast.success(
-                  `Debug mode ${enabled ? "enabled" : "disabled"}`
-                );
-              } catch (error) {
-                toast.error("Failed to toggle debug mode");
-              }
-            }}
-          />
-        </SettingsRow>
-
-        <SettingsRow
-          htmlFor="performance-monitoring"
-          label="Performance Monitoring"
-          description="Monitor system resource usage"
-        >
-          <Switch
-            id="performance-monitoring"
-            checked={settings.performanceMonitoringEnabled}
-            onCheckedChange={settings.handlePerformanceMonitoringChange}
-          />
-        </SettingsRow>
-      </SettingsGroup>
-
       <SettingsGroup title="Claude CLI">
         <SettingsRow
           htmlFor="cli-persistent-session"
@@ -428,7 +390,47 @@ export default function AdvancedSettings({
 
       <OnboardingGroup />
 
-      <SettingsGroup title="Reset Settings">
+      <SettingsGroup
+        title="Developer Options"
+        collapsible
+        summary={debugMode ? "Debug Mode is on" : undefined}
+      >
+        <SettingsRow
+          htmlFor="debug-mode"
+          label="Debug Mode"
+          description="Extra logging and a window outline, for troubleshooting."
+        >
+          <Switch
+            id="debug-mode"
+            checked={debugMode}
+            onCheckedChange={async (enabled) => {
+              try {
+                await invoke(COMMANDS.CORE_SET_DEBUG_MODE, { enabled });
+                setDebugMode(enabled);
+                toast.success(
+                  `Debug mode ${enabled ? "enabled" : "disabled"}`
+                );
+              } catch (error) {
+                toast.error("Failed to toggle debug mode");
+              }
+            }}
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          htmlFor="performance-monitoring"
+          label="Performance Monitoring"
+          description="Monitor system resource usage"
+        >
+          <Switch
+            id="performance-monitoring"
+            checked={settings.performanceMonitoringEnabled}
+            onCheckedChange={settings.handlePerformanceMonitoringChange}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Reset Settings" collapsible>
         <SettingsRow
           id="reset-all-settings"
           label="Reset all settings"

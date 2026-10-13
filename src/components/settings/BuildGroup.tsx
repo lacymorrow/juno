@@ -52,7 +52,7 @@ export function BuildGroup() {
   };
 
   return (
-    <SettingsGroup title="Build">
+    <SettingsGroup title="Build" collapsible summary={info.version}>
       <SettingsRow
         label={label}
         description={`${info.branch}, built ${new Date(info.built_at).toLocaleString()}`}

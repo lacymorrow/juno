@@ -1,4 +1,4 @@
-import { SETTINGS_ROW_ID_PREFIX } from "./ui";
+import { SETTINGS_REVEAL_EVENT, SETTINGS_ROW_ID_PREFIX } from "./ui";
 
 /**
  * Point at one settings row: scroll it into view and tint it system blue for
@@ -80,6 +80,13 @@ export function revealRow(rowId: string, waitMs = ROW_WAIT_MS): () => void {
     if (cancelled) return;
     const el = document.getElementById(`${SETTINGS_ROW_ID_PREFIX}${rowId}`);
     if (el) {
+      // A row inside a folded group is in the DOM but hidden: open the group,
+      // then scroll on the next frame once it has a layout.
+      if (el.closest("[hidden]")) {
+        el.dispatchEvent(new CustomEvent(SETTINGS_REVEAL_EVENT, { bubbles: true }));
+        if (Date.now() - started < waitMs) frame = requestAnimationFrame(look);
+        return;
+      }
       el.scrollIntoView?.({
         block: "center",
         behavior: prefersReducedMotion() ? "auto" : "smooth",

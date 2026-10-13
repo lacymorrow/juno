@@ -212,8 +212,101 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
 
   return (
     <div className="space-y-6">
-      {/* MCP Server Configuration - Enhanced JSON Interface */}
-      <SettingsGroup title="MCP Server Configuration">
+      {/* Active MCP Servers */}
+      <SettingsGroup
+        title="Active MCP Servers"
+      >
+        <SettingsRow
+          below={
+            settings.mcpLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <RefreshCw className="h-6 w-6 animate-spin" />
+                <span className="ml-2">Loading MCP servers...</span>
+              </div>
+            ) : settings.mcpServers.length > 0 ? (
+              <div className="space-y-2">
+                {settings.mcpServers.map((server) => {
+                  const status = settings.mcpServerStatuses[server.id] || {
+                    Disconnected: null,
+                  };
+                  const hasError = status.Error !== undefined;
+                  const serverTools = settings.mcpTools.filter(
+                    (tool) => tool.server_id === server.id
+                  );
+
+                  return (
+                    <div
+                      key={server.id}
+                      className="flex items-center justify-between p-3 border rounded-lg"
+                    >
+                      <div className="flex items-center gap-3">
+                        {getMcpServerStatusIcon(status)}
+                        <div className="flex-1">
+                          <div className="font-medium">{server.name}</div>
+                          <div className="text-sm text-muted-foreground">
+                            {server.description || server.command}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="outline" className="text-xs">
+                              {serverTools.length} tools
+                            </Badge>
+                            {server.auto_start && (
+                              <Badge variant="secondary" className="text-xs">
+                                Auto-start
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {getMcpServerStatusBadge(status)}
+                        {hasError && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              toast.error(`Server Error: ${status.Error}`, {
+                                duration: 5000,
+                              });
+                            }}
+                            className="text-red-600 p-1 h-8 w-8"
+                          >
+                            <AlertCircle className="h-4 w-4" />
+                          </Button>
+                        )}
+                        <Switch
+                          checked={server.enabled}
+                          onCheckedChange={(enabled) =>
+                            handleToggleServer(server.id, enabled)
+                          }
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Server className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                <p className="text-lg font-medium mb-2">
+                  No MCP servers configured
+                </p>
+                <p className="text-sm">
+                  Add your first MCP server below
+                </p>
+              </div>
+            )
+          }
+        />
+      </SettingsGroup>
+
+      {/* Adding a server is occasional, so the JSON editor folds away once
+          there is at least one. With none, it is the next step, so it's open. */}
+      <SettingsGroup
+        title="Add a server"
+        collapsible
+        defaultOpen={!settings.mcpLoading && settings.mcpServers.length === 0}
+      >
         <SettingsRow
           htmlFor="mcp-json-config"
           label="Server Configuration (JSON)"
@@ -326,98 +419,12 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
         />
       </SettingsGroup>
 
-      {/* Active MCP Servers */}
-      <SettingsGroup
-        title="Active MCP Servers"
-      >
-        <SettingsRow
-          below={
-            settings.mcpLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <RefreshCw className="h-6 w-6 animate-spin" />
-                <span className="ml-2">Loading MCP servers...</span>
-              </div>
-            ) : settings.mcpServers.length > 0 ? (
-              <div className="space-y-2">
-                {settings.mcpServers.map((server) => {
-                  const status = settings.mcpServerStatuses[server.id] || {
-                    Disconnected: null,
-                  };
-                  const hasError = status.Error !== undefined;
-                  const serverTools = settings.mcpTools.filter(
-                    (tool) => tool.server_id === server.id
-                  );
-
-                  return (
-                    <div
-                      key={server.id}
-                      className="flex items-center justify-between p-3 border rounded-lg"
-                    >
-                      <div className="flex items-center gap-3">
-                        {getMcpServerStatusIcon(status)}
-                        <div className="flex-1">
-                          <div className="font-medium">{server.name}</div>
-                          <div className="text-sm text-muted-foreground">
-                            {server.description || server.command}
-                          </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <Badge variant="outline" className="text-xs">
-                              {serverTools.length} tools
-                            </Badge>
-                            {server.auto_start && (
-                              <Badge variant="secondary" className="text-xs">
-                                Auto-start
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {getMcpServerStatusBadge(status)}
-                        {hasError && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              toast.error(`Server Error: ${status.Error}`, {
-                                duration: 5000,
-                              });
-                            }}
-                            className="text-red-600 p-1 h-8 w-8"
-                          >
-                            <AlertCircle className="h-4 w-4" />
-                          </Button>
-                        )}
-                        <Switch
-                          checked={server.enabled}
-                          onCheckedChange={(enabled) =>
-                            handleToggleServer(server.id, enabled)
-                          }
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                <Server className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-                <p className="text-lg font-medium mb-2">
-                  No MCP servers configured
-                </p>
-                <p className="text-sm">
-                  Add your first MCP server using the configuration above
-                </p>
-              </div>
-            )
-          }
-        />
-      </SettingsGroup>
-
       {/* Available MCP Tools */}
       {settings.mcpTools.length > 0 && (
         <SettingsGroup
           title="Available MCP Tools"
+          collapsible
+          summary={`${settings.mcpTools.filter((t) => t.enabled).length} of ${settings.mcpTools.length} on`}
           footer="Toggle individual tools on or off."
         >
           <SettingsRow
