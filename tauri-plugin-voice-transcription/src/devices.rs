@@ -648,13 +648,17 @@ pub fn claim_warm_input(preferred: Option<&str>) -> Option<WarmInput> {
         return None;
     }
 
+    // Following the system means the device macOS has as its default right
+    // now, compared by CoreAudio id: two microphones can share a name.
     let wanted = match preferred.map(str::trim).filter(|w| !w.is_empty()) {
-        Some(wanted) => wanted.to_string(),
-        None => cpal::default_host().default_input_device()?.name().ok()?,
+        Some(wanted) => warm.name == wanted,
+        None => cpal::default_host()
+            .default_input_device()
+            .is_some_and(|current| watch::same_device(&current, &warm.device)),
     };
-    if warm.name != wanted || !warm.rate_is_current() {
+    if !wanted || !warm.rate_is_current() {
         tracing::info!(
-            "[VoiceDevices] {} is not what this press needs ({wanted}); opening it directly",
+            "[VoiceDevices] {} is not the microphone this press needs; opening it directly",
             warm.name
         );
         request_warm();
@@ -790,6 +794,7 @@ fn ensure_warm() {
     if let Ok(slot) = WARM_INPUT.lock() {
         if let Some(waiting) = slot.as_ref() {
             if waiting.name == resolved.name
+                && watch::same_device(&waiting.device, &resolved.device)
                 && !waiting.broken.load(Ordering::SeqCst)
                 && waiting.rate_is_current()
             {
@@ -877,13 +882,23 @@ mod watch {
         listen(kAudioObjectSystemObject, kAudioHardwarePropertyDevices);
     }
 
+    fn device_id(device: &cpal::Device) -> AudioObjectID {
+        let cpal::platform::DeviceInner::CoreAudio(device) = device.as_inner();
+        device.audio_device_id()
+    }
+
+    /// The same physical device. Names are not enough: two microphones can
+    /// share one, and a device unplugged and plugged back in gets a new id.
+    pub fn same_device(a: &cpal::Device, b: &cpal::Device) -> bool {
+        device_id(a) == device_id(b)
+    }
+
     /// A rate change on one device, for as long as this is held.
     pub struct RateWatch(AudioObjectID);
 
     impl RateWatch {
         pub fn new(device: &cpal::Device) -> Option<Self> {
-            let cpal::platform::DeviceInner::CoreAudio(device) = device.as_inner();
-            let id = device.audio_device_id();
+            let id = device_id(device);
             listen(id, kAudioDevicePropertyNominalSampleRate).then_some(Self(id))
         }
     }
@@ -901,7 +916,13 @@ mod watch {
 
 #[cfg(not(target_os = "macos"))]
 mod watch {
+    use cpal::traits::DeviceTrait;
+
     pub fn system_changes() {}
+
+    pub fn same_device(a: &cpal::Device, b: &cpal::Device) -> bool {
+        a.name().ok() == b.name().ok()
+    }
 
     pub struct RateWatch;
 
