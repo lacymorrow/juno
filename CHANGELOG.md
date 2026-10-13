@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.180] - 2026-10-13
+
+### Added
+
+- **models:** add Claude Sonnet 5.5, move Sonnet 5 to legacy (#711) (50fc1148)
+
 ## [0.8.179] - 2026-10-13
 
 ### Changed
@@ -1337,7 +1343,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.179...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.180...HEAD
+[0.8.180]: https://github.com/lacymorrow/juno/compare/cua-v0.8.179...v0.8.180
 [0.8.179]: https://github.com/lacymorrow/juno/compare/cua-v0.8.178...v0.8.179
 [0.8.175]: https://github.com/lacymorrow/juno/compare/cua-v0.8.174...v0.8.175
 [0.8.174]: https://github.com/lacymorrow/juno/compare/cua-v0.8.173...v0.8.174
