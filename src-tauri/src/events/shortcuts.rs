@@ -772,12 +772,8 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
     } else {
         info!("[Dictation Input Shortcut] Tap mode - starting dictation mode transcription");
 
-        // Immediate start cue on the tap edge — before the async start that
-        // initializes audio capture.
-        crate::commands::sound::play_cue(
-            app,
-            crate::commands::sound::SoundType::NotificationAmbient,
-        );
+        // The start cue follows the live microphone (`show_live_microphone`
+        // in integration.rs), not this tap: the microphone starts first.
 
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {

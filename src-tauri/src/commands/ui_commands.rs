@@ -801,6 +801,10 @@ impl UIManager {
         if is_active {
             self.voice_mode = ui::voice_modes::ALWAYS_LISTENING.to_string();
             self.set_bar_state(BarState::AlwaysListening).await;
+        } else if self.is_dictation_mode {
+            // A dictation paused the wake-phrase engine, and it does so after
+            // its own microphone went live, so this can land on a dictation
+            // already drawn. The mode and the meter are the dictation's.
         } else {
             self.voice_mode = ui::voice_modes::IDLE.to_string();
             self.audio_level = 0.0;
