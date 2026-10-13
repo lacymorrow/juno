@@ -726,12 +726,12 @@ pub fn start_warm_stream(
     build_warm(device, device_name, config, sample_format)?.lend(audio_data_tx)
 }
 
-/// How long the Mac's microphones get to settle before a stream is built for
-/// them. Plugging in a headset fires several changes in a row.
-const WARM_SETTLE: std::time::Duration = std::time::Duration::from_millis(200);
-
 /// Ask for the dictation microphone to be made ready, off the caller's thread.
-/// Requests that arrive together are served once.
+///
+/// Driven only by events. Requests that arrive while one is being served are
+/// served together by one more pass, which finds the microphone already ready
+/// unless something changed again; nothing waits on a clock for a burst of
+/// changes to finish.
 pub fn request_warm() {
     static WARMER: OnceLock<Option<Sender<()>>> = OnceLock::new();
     let warmer = WARMER.get_or_init(|| {
@@ -740,7 +740,6 @@ pub fn request_warm() {
             .name("juno-mic-ready".into())
             .spawn(move || {
                 while rx.recv().is_ok() {
-                    std::thread::sleep(WARM_SETTLE);
                     while rx.try_recv().is_ok() {}
                     ensure_warm();
                 }
