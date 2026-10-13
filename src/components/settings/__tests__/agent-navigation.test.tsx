@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -255,5 +255,20 @@ describe("the agent points the Settings window", () => {
       });
     });
     expect(await screen.findByTestId("section-advanced")).toBeTruthy();
+  });
+});
+
+describe("the search field", () => {
+  it("shows a clear button only while there is text, and it empties the field", async () => {
+    invokeMock.mockResolvedValue(false);
+    render(<ModularSettingsWindow />);
+    const field = screen.getByRole("textbox", { name: "Search settings" });
+    expect(screen.queryByRole("button", { name: "Clear search" })).toBeNull();
+
+    fireEvent.change(field, { target: { value: "debug" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Clear search" }));
+
+    expect(field).toHaveValue("");
+    expect(screen.queryByRole("button", { name: "Clear search" })).toBeNull();
   });
 });
