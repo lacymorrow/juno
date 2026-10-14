@@ -29,6 +29,7 @@ import {
   AgendaCard,
   MessageCard,
   PermissionAskCard,
+  ImageCard,
 } from "@/components/ui/agent-cards";
 import { WhyBlock } from "@/components/ui/why-block";
 import {
@@ -449,6 +450,7 @@ const availableComponents = {
   TimerCard,
   LinkCard,
   TaskSummaryCard,
+  ImageCard,
   // Live components — bound to real player state, never fake
   NowPlayingCard,
   // Events and reminders from the Mac's own apps, one shape
