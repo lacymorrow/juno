@@ -212,7 +212,7 @@ pub mod bar_appearances {
 
         #[test]
         fn only_presence_and_halo_are_beta() {
-            for id in [FLOATING, DYNAMIC, PERSONA, SHADER_ORB] {
+            for id in [FLOATING, DYNAMIC, PERSONA, SHADER_ORB, NOTCH] {
                 assert!(!is_beta(id), "{id} should be out of beta");
                 assert_eq!(effective(id, false), id);
             }
