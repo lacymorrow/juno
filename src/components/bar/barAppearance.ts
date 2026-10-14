@@ -27,7 +27,8 @@ export type BarAppearance =
   | typeof UI.BAR_APPEARANCES_ORB
   | typeof UI.BAR_APPEARANCES_REACT_ORB
   | typeof UI.BAR_APPEARANCES_SHADER_ORB
-  | typeof UI.BAR_APPEARANCES_PERSONA;
+  | typeof UI.BAR_APPEARANCES_PERSONA
+  | typeof UI.BAR_APPEARANCES_NOTCH;
 
 export function getBarLayoutWindowLabel(appearance: BarAppearance): string {
   switch (appearance) {

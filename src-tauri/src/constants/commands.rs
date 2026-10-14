@@ -370,6 +370,7 @@ pub mod bar {
     pub const SET_BAR_POSITION: &str = "set_bar_position";
     pub const SET_BAR_FRAME: &str = "set_bar_frame";
     pub const SET_BAR_HIT_REGIONS: &str = "set_bar_hit_regions";
+    pub const SET_BAR_OVER_MENU_BAR: &str = "set_bar_over_menu_bar";
     pub const POINTER_HELD: &str = "bar_pointer_held";
     pub const DRAG_RELEASED: &str = "bar_drag_released";
     pub const ORDER_ABOVE_SNAP_WELLS: &str = "bar_order_above_snap_wells";

@@ -8,7 +8,7 @@
 #
 #   scripts/bench-record.sh <appearance> [mode] [seconds] [out.mp4]
 #
-#   appearance  floating | app | voice_ai | dynamic | orb | react_orb | persona
+#   appearance  floating | app | voice_ai | dynamic | orb | react_orb | persona | notch
 #   mode        loop (default: the picker's resting/listening/dictating/done loop)
 #               card (one full turn: question, answer with a component, ring)
 #               spoken (one spoken turn: your words, a tool step, the answer said sentence by sentence)

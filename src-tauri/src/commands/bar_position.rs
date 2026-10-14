@@ -523,6 +523,19 @@ pub async fn set_bar_hit_regions(
     Ok(())
 }
 
+/// The look in the bar sits flush with the top of the display (the Notch):
+/// lift the bar over the menu bar while it rests, or put it back.
+///
+/// The look reports it as it mounts and unmounts, the same way it reports its
+/// hit regions. The decision itself stays in `crate::bar_stacking`, which only
+/// lifts the resting intent and still steps the bar aside for system prompts
+/// and Juno's own windows.
+#[command]
+pub async fn set_bar_over_menu_bar(app_handle: AppHandle, over: bool) -> Result<(), String> {
+    crate::bar_stacking::note_over_menu_bar(&app_handle, over);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

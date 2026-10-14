@@ -52,7 +52,13 @@ import {
   type Well,
 } from "@/lib/snapWells";
 import { distinctWells, predictedWindowOrigin } from "@/lib/barDock";
-import { cursorInPoints, monitorsInPoints, type TauriMonitorLike } from "@/lib/desktopPoints";
+import {
+  cursorInPoints,
+  monitorsInPoints,
+  windowOriginInPoints,
+  type TauriMonitorLike,
+} from "@/lib/desktopPoints";
+import { nearestNotchWell, notchWells } from "@/lib/notchWells";
 import {
   overlayDisplayIndex,
   wellToOverlayRect,
@@ -87,7 +93,27 @@ type ShowPayload = {
   windowHeight: number;
   grabOffsetX?: number;
   grabOffsetY?: number;
+  /** 1 when the bar is the Notch: draw its five flush wells, not the grid. */
+  notchWells?: number;
 };
+
+/**
+ * The least of a flush top well that shows below the menu bar, in points.
+ * The overlay sits under the menu bar like every floating window, so a well
+ * inside the menu bar (the notch, the top corners) is drawn as a tab hanging
+ * from it instead.
+ */
+export const HANGING_WELL_MIN = 14;
+
+/**
+ * A hole for a well that starts above the overlay's top edge: square at the
+ * top (it continues behind the menu bar) and at least `HANGING_WELL_MIN` tall.
+ */
+export function hangingRect(rect: OverlayRect, radius: number): OverlayRect {
+  if (rect.y >= 0) return rect;
+  const bottom = Math.max(rect.y + rect.h, HANGING_WELL_MIN);
+  return { x: rect.x, y: -radius, w: rect.w, h: bottom + radius };
+}
 
 // A rendered hole: overlay-local CSS rect, the well it draws (global points,
 // for the nearest-well highlight) and a stable key.
@@ -121,6 +147,10 @@ export const SnapWellsOverlay = () => {
   const monitorsRef = useRef<TauriMonitorLike[]>([]);
   const allWellsRef = useRef<Well[]>([]);
   const grabOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  // The dragged footprint and whether it is the Notch, whose wells differ in
+  // size and are judged by their centres.
+  const footprintRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
+  const notchRef = useRef(false);
   const autoHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const heldTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -164,7 +194,9 @@ export const SnapWellsOverlay = () => {
         const list = holesRef.current;
         if (!list.length) return;
         const origin = predictedWindowOrigin(c, grabOffsetRef.current);
-        const target = nearestWell(origin, allWellsRef.current);
+        const target = notchRef.current
+          ? nearestNotchWell(origin, footprintRef.current, allWellsRef.current)
+          : nearestWell(origin, allWellsRef.current);
         const bestIdx = target ? list.findIndex((h) => h.well === target) : -1;
         // Only re-render when the nearest well actually changes.
         setHighlight((prev) => (prev === bestIdx ? prev : bestIdx));
@@ -176,7 +208,7 @@ export const SnapWellsOverlay = () => {
 
   // ── Show: size+position the overlay over all monitors, then compute holes ──
   const show = useCallback(
-    async ({ windowWidth, windowHeight, grabOffsetX, grabOffsetY }: ShowPayload) => {
+    async ({ windowWidth, windowHeight, grabOffsetX, grabOffsetY, notchWells: notch }: ShowPayload) => {
       try {
         const win = getCurrentWindow();
 
@@ -207,17 +239,36 @@ export const SnapWellsOverlay = () => {
         // well per real landing spot: a look wider than the inset area has its
         // columns converge on the same x, and rings stacked on one rectangle
         // only read as a single brighter ring.
-        const wells: Well[] = distinctWells(
-          computeWells(monitorRects, {
-            windowWidth,
-            windowHeight,
-            includeCenter: true,
-          }),
-        );
+        //
+        // The Notch has its own five wells, flush with the display's edges.
+        // Its top ones are inside the menu bar, which this overlay is kept
+        // below, so they are measured from where the overlay actually is and
+        // drawn hanging from the menu bar.
+        const isNotch = notch === 1;
+        const wells: Well[] = isNotch
+          ? notchWells(monitorRects)
+          : distinctWells(
+              computeWells(monitorRects, {
+                windowWidth,
+                windowHeight,
+                includeCenter: true,
+              }),
+            );
+        let drawnAt: MonitorRect = display;
+        if (isNotch) {
+          try {
+            const [pos, scale] = await Promise.all([win.outerPosition(), win.scaleFactor()]);
+            drawnAt = { ...display, position: windowOriginInPoints(pos, scale) };
+          } catch {
+            // Measured from the display; a top well may then be drawn short.
+          }
+        }
 
         const nextHoles: Hole[] = wellsForDisplay(wells, displayIndex.current).map((w, i) => ({
           key: `${w.monitorIndex}-${w.fy}-${w.fx}-${i}`,
-          rect: wellToOverlayRect(w, display),
+          rect: isNotch
+            ? hangingRect(wellToOverlayRect(w, drawnAt), HOLE_RADIUS)
+            : wellToOverlayRect(w, display),
           well: w,
         }));
         const spanW = display.size.width;
@@ -226,6 +277,8 @@ export const SnapWellsOverlay = () => {
 
         monitorsRef.current = monitors;
         grabOffsetRef.current = { x: grabOffsetX ?? 0, y: grabOffsetY ?? 0 };
+        footprintRef.current = { width: windowWidth, height: windowHeight };
+        notchRef.current = isNotch;
         holesRef.current = nextHoles;
         setSpan({ w: spanW, h: spanH });
         setHoles(nextHoles);

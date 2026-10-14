@@ -112,7 +112,7 @@ describe("AppearancePicker with Beta features off", () => {
     beta.enabled = false;
     render(<AppearancePicker value={UI.BAR_APPEARANCES_FLOATING} onChange={() => {}} />);
     const dots = screen.getAllByRole("tab").map((t) => t.getAttribute("aria-label"));
-    expect(dots).toEqual(["Pill", "Avatar", "Island", "Orb"]);
+    expect(dots).toEqual(["Pill", "Avatar", "Island", "Notch", "Orb"]);
   });
 
   it("shows a saved beta look as the default it is drawn as", () => {
