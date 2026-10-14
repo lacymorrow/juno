@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -27,7 +28,11 @@ import { InputControlNotices } from "@/components/input-control/InputControlNoti
 import { drivingLabel, type InputControlStatePayload } from "@/lib/inputControl";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 import type { ChatMessage } from "@/types/chat";
+import { contentRect } from "@/lib/steadyFrame";
 import { IslandDot, IslandShell, IslandWords } from "./IslandShell";
+import { NotchShell } from "../notch/NotchShell";
+import { notchShape, restingDotPlacement, standsOnSide } from "../notch/notchModel";
+import { useNotchFrame } from "../notch/useNotchFrame";
 import { LingerRing } from "./LingerRing";
 import { VoiceTurnControls, useVoiceTurn } from "../VoiceTurnControls";
 import { useLinger } from "./useLinger";
@@ -196,7 +201,14 @@ function ApprovalRow({
 
 // === THE BAR ===
 
-export function IslandBar() {
+/**
+ * `frame="notch"` is the Notch look: the same island, every posture and every
+ * control, in the hardware notch or peeled back from a corner of the screen
+ * (`../notch/`), or growing out of any other edge. It lives on the steady frame, so it never resizes its window.
+ */
+export function IslandBar({ frame = "island" }: { frame?: "island" | "notch" } = {}) {
+  const notch = frame === "notch";
+  const notchFrame = useNotchFrame(notch);
   const reducedMotion = useReducedMotion() ?? false;
   const { resizeWindowIfChanged } = useWindowSize(WINDOW_LABEL);
   const chat = useBarConversation();
@@ -287,7 +299,7 @@ export function IslandBar() {
   }, [bar.barState, closeCard]);
 
   // ── Hover, engagement and the ring ──
-  const hover = useIslandHover();
+  const hover = useIslandHover(notch ? notchFrame.region : undefined);
   const hovered = hover.hovered;
   useEffect(() => {
     if (!hovered && hoverHeld) setHoverHeld(false);
@@ -509,6 +521,8 @@ export function IslandBar() {
   const prevWinRef = useRef(windowSize(islandSize("capsule")));
   const shrinkTimerRef = useRef<number | null>(null);
   useEffect(() => {
+    // The Notch's window never resizes: its shape changes inside it.
+    if (notch) return;
     const prev = prevWinRef.current;
     const growing = win.width > prev.width || win.height > prev.height;
     if (shrinkTimerRef.current) {
@@ -535,7 +549,7 @@ export function IslandBar() {
     };
     // The sizes are value objects; their fields are the real dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [win.width, win.height, target.width, target.height, target.radius, resizeWindowIfChanged]);
+  }, [notch, win.width, win.height, target.width, target.height, target.radius, resizeWindowIfChanged]);
   useEffect(
     () => () => {
       if (shrinkTimerRef.current) window.clearTimeout(shrinkTimerRef.current);
@@ -563,8 +577,23 @@ export function IslandBar() {
   // ── Layers ──
   let layer: ReactNode;
   if (posture === "capsule") {
+    // The Notch's resting dot sits in the notch's ear, or in the corner of a
+    // peeled-back page; the Island's in its middle.
+    const rest = notch ? restingDotPlacement(notchFrame.form, notchFrame.corner, notchFrame.edge) : null;
     layer = (
-      <div className="flex h-full w-full items-center justify-center" data-testid="island-capsule">
+      <div
+        className="flex h-full w-full items-center justify-center"
+        data-testid="island-capsule"
+        style={
+          rest
+            ? {
+                justifyContent: FLEX_EDGE[rest.justify],
+                alignItems: FLEX_EDGE[rest.align],
+                padding: rest.inset,
+              }
+            : undefined
+        }
+      >
         <IslandDot look={dot} level={dotLevel} />
       </div>
     );
@@ -575,10 +604,18 @@ export function IslandBar() {
         "hover:bg-white/[0.12] hover:text-white",
         hover.hoveredButton === name && "bg-white/[0.12] text-white",
       );
+    // A side notch stands along its edge, so its controls stack top to bottom.
+    const upright = notch && notchFrame.form === "notch" && standsOnSide(notchFrame.edge, posture);
     layer = (
-      <div className="flex h-full w-full items-center gap-2 pl-3.5 pr-1" data-testid="island-hover">
+      <div
+        className={cn(
+          "flex h-full w-full items-center gap-2",
+          upright ? "flex-col pt-3.5 pb-1" : "pl-3.5 pr-1",
+        )}
+        data-testid="island-hover"
+      >
         <IslandDot look={dot} level={dotLevel} />
-        <div className="ml-auto flex items-center gap-0.5">
+        <div className={cn("flex items-center gap-0.5", upright ? "mt-auto flex-col" : "ml-auto")}>
           <button
             type="button"
             {...{ [ISLAND_BUTTON_ATTR]: "mic" }}
@@ -780,6 +817,44 @@ export function IslandBar() {
     );
   }
 
+  if (notch) {
+    return (
+      <NotchStage
+        frame={notchFrame}
+        posture={posture}
+        size={target}
+        reducedMotion={reducedMotion}
+        onShapeClick={idle ? onIslandClick : undefined}
+        suggestions={
+          posture === "line" && skill.open ? (
+            <SkillSuggestionList
+              variant="bar"
+              suggestions={skill.suggestions}
+              selectedIndex={skill.selectedIndex}
+              onSelect={skill.accept}
+              onHighlight={skill.setSelectedIndex}
+            />
+          ) : null
+        }
+        suggestionsHeight={suggestionExtra}
+        rootProps={{
+          ...dragProps,
+          ...hover.pointerProps,
+          onFocusCapture: () => setFocusWithin(true),
+          onBlurCapture: (e: React.FocusEvent<HTMLDivElement>) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
+          },
+          onClickCapture: (e: React.MouseEvent<HTMLDivElement>) => {
+            if (swallowClickAfterDrag(e)) return;
+            if (cardOpen && (e.target as HTMLElement).closest("button, input, a")) engage();
+          },
+        }}
+      >
+        {layer}
+      </NotchStage>
+    );
+  }
+
   return (
     <div
       className="relative h-screen w-screen cursor-grab overflow-hidden bg-transparent select-none active:cursor-grabbing"
@@ -821,6 +896,115 @@ export function IslandBar() {
           />
         </div>
       )}
+    </div>
+  );
+}
+
+const FLEX_EDGE = { start: "flex-start", end: "flex-end", center: "center" } as const;
+
+/**
+ * The Notch's stage: the steady window, mostly transparent, with the shape
+ * pinned to its well's docked edges. Everything the shape draws (and the skill
+ * suggestions under it) is reported to the frame, which the drag carries and
+ * the hit test lets the rest of the window click through.
+ */
+function NotchStage({
+  frame,
+  posture,
+  size,
+  reducedMotion,
+  onShapeClick,
+  suggestions,
+  suggestionsHeight,
+  rootProps,
+  children,
+}: {
+  frame: ReturnType<typeof useNotchFrame>;
+  posture: ReturnType<typeof postureFor>;
+  size: IslandSize;
+  reducedMotion: boolean;
+  onShapeClick?: () => void;
+  suggestions: ReactNode;
+  suggestionsHeight: number;
+  rootProps: React.HTMLAttributes<HTMLDivElement>;
+  children: ReactNode;
+}) {
+  const { layout, placement, form, corner, edge, strip, report } = frame;
+  const shape = notchShape(form, posture, size, strip, corner, edge);
+  const gap = suggestions ? 8 : 0;
+  const suggestionsWidth = ISLAND_SIZES.line.width - 24;
+  // On a side the shape grows out of the edge centred on its tab, so the
+  // suggestions hang below it without moving it; elsewhere they join the
+  // column the shape is pinned in.
+  const centred = layout.centerY;
+  const block = centred
+    ? { width: shape.width, height: shape.height }
+    : {
+        width: Math.max(shape.width, suggestions ? suggestionsWidth : 0),
+        height: shape.height + (suggestions ? gap + suggestionsHeight : 0),
+      };
+  const placed = contentRect(layout, block);
+  const hangWidth = Math.max(placed.width, suggestionsWidth);
+  const drawn =
+    centred && suggestions
+      ? {
+          x: layout.anchorX === "end" ? placed.x + placed.width - hangWidth : placed.x,
+          y: placed.y,
+          width: hangWidth,
+          height: placed.height + gap + suggestionsHeight,
+        }
+      : placed;
+  useLayoutEffect(() => {
+    report(drawn);
+  }, [report, drawn.x, drawn.y, drawn.width, drawn.height]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="relative h-screen w-screen overflow-hidden bg-transparent select-none">
+      <div
+        {...rootProps}
+        data-testid="notch-stage"
+        className={cn(
+          "absolute flex cursor-grab active:cursor-grabbing",
+          layout.growUp ? "flex-col-reverse" : "flex-col",
+          layout.anchorX === "start" ? "items-start" : layout.anchorX === "end" ? "items-end" : "items-center",
+        )}
+        style={{
+          left: placement.left,
+          right: placement.right,
+          top: placement.top,
+          bottom: placement.bottom,
+          transform:
+            [placement.translateX && "translateX(-50%)", placement.translateY && "translateY(-50%)"]
+              .filter(Boolean)
+              .join(" ") || undefined,
+          // A drop into a well that draws differently swaps behind this.
+          opacity: frame.hidden ? 0 : 1,
+          gap,
+        }}
+      >
+        <NotchShell
+          shape={shape}
+          corner={corner}
+          layerKey={posture}
+          reducedMotion={reducedMotion}
+          onClick={onShapeClick}
+        >
+          {children}
+        </NotchShell>
+        {suggestions && (
+          <div
+            className={cn("z-20", centred && "absolute")}
+            style={{
+              width: suggestionsWidth,
+              ...(centred
+                ? { top: `calc(100% + ${gap}px)`, [layout.anchorX === "end" ? "right" : "left"]: 0 }
+                : null),
+            }}
+          >
+            {suggestions}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

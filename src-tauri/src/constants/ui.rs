@@ -137,6 +137,10 @@ pub mod bar_appearances {
     /// because "react_orb" above still belongs to the ring.
     pub const SHADER_ORB: &str = "shader_orb";
     pub const PERSONA: &str = "persona";
+    /// Lives in the MacBook notch, flush with the top of the display, or as
+    /// the same tab on any other edge; dropped in a corner it becomes a page
+    /// peeled back from the corner. It has no well in the middle of the screen.
+    pub const NOTCH: &str = "notch";
 
     /// The look a new install (and a settings reset) starts on: the Pill, a
     /// small pill that opens when you speak. The others stay in the picker
@@ -197,7 +201,9 @@ pub mod bar_appearances {
                 assert!(is_hidden(id), "{id} should be hidden");
                 assert_eq!(resolve(id), DEFAULT);
             }
-            for id in [FLOATING, DYNAMIC, ORB, REACT_ORB, SHADER_ORB, PERSONA] {
+            for id in [
+                FLOATING, DYNAMIC, ORB, REACT_ORB, SHADER_ORB, PERSONA, NOTCH,
+            ] {
                 assert!(!is_hidden(id), "{id} should be offered");
                 assert_eq!(resolve(id), id);
             }
@@ -206,7 +212,7 @@ pub mod bar_appearances {
 
         #[test]
         fn only_presence_and_halo_are_beta() {
-            for id in [FLOATING, DYNAMIC, PERSONA, SHADER_ORB] {
+            for id in [FLOATING, DYNAMIC, PERSONA, SHADER_ORB, NOTCH] {
                 assert!(!is_beta(id), "{id} should be out of beta");
                 assert_eq!(effective(id, false), id);
             }

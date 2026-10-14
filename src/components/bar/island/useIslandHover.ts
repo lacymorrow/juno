@@ -20,7 +20,7 @@ export const ISLAND_BUTTON_ATTR = "data-island-button";
  * scales the cursor by the primary display and the window by its own, which
  * disagree on a second display of another density.
  */
-async function cursorInsideWindow(): Promise<boolean> {
+async function cursorInsideWindow(region?: HoverRegion | null): Promise<boolean> {
   const w = getCurrentWindow();
   const [raw, pos, size, sf, mons] = await Promise.all([
     cursorPosition(),
@@ -31,9 +31,22 @@ async function cursorInsideWindow(): Promise<boolean> {
   ]);
   const c = cursorInPoints(raw, mons);
   const p = windowOriginInPoints(pos, sf);
+  if (region) {
+    const x = p.x + region.x;
+    const y = p.y + region.y;
+    return c.x >= x && c.x < x + region.width && c.y >= y && c.y < y + region.height;
+  }
   const width = size.width / (sf || 1);
   const height = size.height / (sf || 1);
   return c.x >= p.x && c.x < p.x + width && c.y >= p.y && c.y < p.y + height;
+}
+
+/** The part of the window that counts as the island, from its top-left, in points. */
+export interface HoverRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface IslandHover {
@@ -58,7 +71,13 @@ export interface IslandHover {
  * hit-tested here, because macOS does not route mouse-moved into an inactive
  * window's web view and CSS :hover never fires there.
  */
-export function useIslandHover(): IslandHover {
+export function useIslandHover(
+  /**
+   * A steady window is mostly empty room around the shape. When given, a leave
+   * is checked against this region (the shape) rather than the whole window.
+   */
+  region?: { readonly current: HoverRegion | null },
+): IslandHover {
   const [hovered, setHovered] = useState(false);
   const [hoveredButton, setHoveredButton] = useState<string | null>(null);
   const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -77,7 +96,7 @@ export function useIslandHover(): IslandHover {
       leaveTimerRef.current = null;
       let inside = false;
       try {
-        inside = await cursorInsideWindow();
+        inside = await cursorInsideWindow(region?.current);
       } catch {
         inside = false;
       }

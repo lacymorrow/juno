@@ -84,11 +84,33 @@ impl BarStacking {
         }
     }
 
+    /// The level the bar is put at for this intent, given whether the look in
+    /// it lives over the menu bar (the Notch).
+    ///
+    /// A look that sits flush with the top of the display has to be above
+    /// `NSMainMenuWindowLevel`: AppKit keeps every window from the normal level
+    /// up to (not including) the menu bar's level out of the menu bar on every
+    /// frame change, so at the floating level the notch would be pushed down
+    /// under it. `NSMainMenuWindowLevel + 3` is what NotchNook, Boring Notch and
+    /// Sentient use. Only the resting intent is lifted: when the bar steps aside
+    /// for a system prompt or a Juno window it goes to the normal level like
+    /// every other look, so a prompt is never covered by it.
+    pub const fn bar_level(self, over_menu_bar: bool) -> i64 {
+        match (self, over_menu_bar) {
+            (BarStacking::Floating, true) => OVER_MENU_BAR_LEVEL,
+            _ => self.ns_window_level(),
+        }
+    }
+
     /// Whether this intent needs the bar ordered below the front Juno window.
     pub const fn orders_below_front(self) -> bool {
         matches!(self, BarStacking::BelowFront)
     }
 }
+
+/// `NSMainMenuWindowLevel` (24) + 3: above the menu bar, below pop-up menus
+/// (101) so the menu bar's own menus still open over the notch.
+pub const OVER_MENU_BAR_LEVEL: i64 = 27;
 
 /// Which of Juno's own windows the person is currently working in.
 ///
@@ -184,15 +206,19 @@ struct Observed {
     /// The person-facing Juno window that holds the keyboard.
     front: Option<&'static str>,
     agent_driving: bool,
+    /// The look in the bar sits flush with the top of the display, over the
+    /// menu bar (the Notch). Reported by the look itself as it mounts.
+    over_menu_bar: bool,
     /// What was last handed to AppKit, so repeated reports cost nothing. The
     /// agent-driving fact arrives on every mouse action during computer use.
-    applied: Option<(BarStacking, Option<&'static str>)>,
+    applied: Option<(BarStacking, Option<&'static str>, bool)>,
 }
 
 static OBSERVED: Mutex<Observed> = Mutex::new(Observed {
     prompt_holds: 0,
     front: None,
     agent_driving: false,
+    over_menu_bar: false,
     applied: None,
 });
 
@@ -287,6 +313,21 @@ pub fn note_agent_driving(app: &AppHandle, driving: bool) {
     apply(app);
 }
 
+/// Record whether the look in the bar lives over the menu bar. The Notch says
+/// yes as it mounts and no as it unmounts; every other look never says.
+pub fn note_over_menu_bar(app: &AppHandle, over: bool) {
+    {
+        let Ok(mut observed) = OBSERVED.lock() else {
+            return;
+        };
+        if observed.over_menu_bar == over {
+            return;
+        }
+        observed.over_menu_bar = over;
+    }
+    apply(app);
+}
+
 /// Stand down while macOS is expected to raise a dialog on Juno's behalf.
 ///
 /// Balanced by [`release_system_prompt_hold`] (one prompt answered or timed
@@ -349,31 +390,33 @@ pub fn apply(app: &AppHandle) {
         let situation = observed.situation();
         let stacking = stacking_for(situation);
         let front = observed.front;
-        if observed.applied == Some((stacking, front)) {
+        let over = observed.over_menu_bar;
+        if observed.applied == Some((stacking, front, over)) {
             None
         } else {
-            observed.applied = Some((stacking, front));
-            Some((stacking, front, situation))
+            observed.applied = Some((stacking, front, over));
+            Some((stacking, front, situation, over))
         }
     };
 
-    let Some((stacking, front, situation)) = decided else {
+    let Some((stacking, front, situation, over_menu_bar)) = decided else {
         return;
     };
 
     info!(
-        "Floating bar stacking: {:?} (prompt expected: {}, front window: {}, agent driving: {})",
+        "Floating bar stacking: {:?} (prompt expected: {}, front window: {}, agent driving: {}, over menu bar: {})",
         stacking,
         situation.system_prompt_expected,
         front.unwrap_or("none"),
-        situation.agent_driving
+        situation.agent_driving,
+        over_menu_bar
     );
 
     // Only macOS has a window stack to argue with; elsewhere the decision is
     // made and logged and there is nothing to apply it to. Every value above is
     // used on both paths, so nothing needs silencing here.
     #[cfg(target_os = "macos")]
-    crate::platform::macos::apply_bar_stacking(app, stacking, front);
+    crate::platform::macos::apply_bar_stacking(app, stacking, front, over_menu_bar);
 }
 
 /// Whether the bar should be ordered above a drop overlay, given the stacking
@@ -393,7 +436,7 @@ pub fn bar_goes_over_overlay(applied: Option<BarStacking>) -> bool {
 /// with every other one.
 pub fn raise_over_overlay(app: &AppHandle, overlay_label: &str) {
     let applied = match OBSERVED.lock() {
-        Ok(observed) => observed.applied.map(|(stacking, _)| stacking),
+        Ok(observed) => observed.applied.map(|(stacking, _, _)| stacking),
         Err(_) => return,
     };
     if !bar_goes_over_overlay(applied) {
@@ -503,6 +546,18 @@ mod tests {
         // is where a system permission prompt came up behind the bar.
         assert_eq!(BarStacking::Floating.ns_window_level(), 3);
         assert!(BarStacking::Floating.ns_window_level() < 8);
+    }
+
+    #[test]
+    fn only_a_resting_notch_is_lifted_over_the_menu_bar() {
+        assert_eq!(BarStacking::Floating.bar_level(true), OVER_MENU_BAR_LEVEL);
+        assert_eq!(BarStacking::Floating.bar_level(false), 3);
+        // Stepping aside for a prompt or a Juno window drops the notch to the
+        // normal level like any other look.
+        assert_eq!(BarStacking::Normal.bar_level(true), 0);
+        assert_eq!(BarStacking::BelowFront.bar_level(true), 0);
+        // Above the menu bar (24), below pop-up menus (101).
+        const { assert!(OVER_MENU_BAR_LEVEL > 24 && OVER_MENU_BAR_LEVEL < 101) };
     }
 
     #[test]
