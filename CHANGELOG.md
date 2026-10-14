@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.198] - 2026-10-14
+
+### Added
+
+- **bar:** Notch appearance; a corner peels back like a page (#802) (769e2175)
+
 ## [0.8.197] - 2026-10-14
 
 ### Added
@@ -1434,7 +1440,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.197...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.198...HEAD
+[0.8.198]: https://github.com/lacymorrow/juno/compare/cua-v0.8.197...v0.8.198
 [0.8.197]: https://github.com/lacymorrow/juno/compare/cua-v0.8.196...v0.8.197
 [0.8.196]: https://github.com/lacymorrow/juno/compare/cua-v0.8.195...v0.8.196
 [0.8.195]: https://github.com/lacymorrow/juno/compare/cua-v0.8.194...v0.8.195
