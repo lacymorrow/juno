@@ -138,8 +138,8 @@ impl GeminiImageProvider {
         if !status.is_success() {
             return Err(format!("gemini image {status}: {text}"));
         }
-        let parsed: Value = serde_json::from_str(&text)
-            .map_err(|e| format!("gemini image parse failed: {e}"))?;
+        let parsed: Value =
+            serde_json::from_str(&text).map_err(|e| format!("gemini image parse failed: {e}"))?;
         extract_inline_image(&parsed)
     }
 }
@@ -218,8 +218,8 @@ impl OpenAIGptImageProvider {
 }
 
 async fn openai_decode_first_image(resp_text: &str) -> Result<Vec<u8>, String> {
-    let parsed: Value = serde_json::from_str(resp_text)
-        .map_err(|e| format!("openai image parse failed: {e}"))?;
+    let parsed: Value =
+        serde_json::from_str(resp_text).map_err(|e| format!("openai image parse failed: {e}"))?;
     let data = parsed
         .get("data")
         .and_then(|v| v.as_array())
@@ -318,7 +318,11 @@ pub fn select_provider(cfg: &ProviderConfig) -> Option<Box<dyn ImageProvider>> {
         .get_provider_settings(Provider::Gemini.id())
         .and_then(|p| p.api_key.clone())
         .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("GEMINI_API_KEY").ok().filter(|s| !s.is_empty()))
+        .or_else(|| {
+            std::env::var("GEMINI_API_KEY")
+                .ok()
+                .filter(|s| !s.is_empty())
+        })
     {
         return Some(Box::new(GeminiImageProvider::new(key)));
     }
@@ -326,7 +330,11 @@ pub fn select_provider(cfg: &ProviderConfig) -> Option<Box<dyn ImageProvider>> {
         .get_provider_settings(Provider::OpenAI.id())
         .and_then(|p| p.api_key.clone())
         .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("OPENAI_API_KEY").ok().filter(|s| !s.is_empty()))
+        .or_else(|| {
+            std::env::var("OPENAI_API_KEY")
+                .ok()
+                .filter(|s| !s.is_empty())
+        })
     {
         return Some(Box::new(OpenAIGptImageProvider::new(key)));
     }
