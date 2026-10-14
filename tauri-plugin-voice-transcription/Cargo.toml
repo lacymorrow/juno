@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-voice-transcription"
-version = "0.8.198"
+version = "0.8.199"
 edition = "2021"
 links = "tauri-plugin-voice-transcription"
 authors = ["Juno Contributors"]
