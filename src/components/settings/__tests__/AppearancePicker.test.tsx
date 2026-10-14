@@ -108,21 +108,21 @@ describe("AppearancePicker loading state", () => {
 });
 
 describe("AppearancePicker with Beta features off", () => {
-  it("offers only the Pill and the Island", () => {
+  it("offers the finished looks, not Presence or Halo", () => {
     beta.enabled = false;
     render(<AppearancePicker value={UI.BAR_APPEARANCES_FLOATING} onChange={() => {}} />);
     const dots = screen.getAllByRole("tab").map((t) => t.getAttribute("aria-label"));
-    expect(dots).toEqual(["Pill", "Island"]);
+    expect(dots).toEqual(["Pill", "Avatar", "Island", "Orb"]);
   });
 
   it("shows a saved beta look as the default it is drawn as", () => {
     beta.enabled = false;
-    render(<AppearancePicker value={UI.BAR_APPEARANCES_PERSONA} onChange={() => {}} />);
+    render(<AppearancePicker value={UI.BAR_APPEARANCES_REACT_ORB} onChange={() => {}} />);
     expect(screen.getByRole("tab", { selected: true }).getAttribute("aria-label")).toBe("Pill");
   });
 
   it("marks beta looks with the Beta badge when beta is on", () => {
-    render(<AppearancePicker value={UI.BAR_APPEARANCES_PERSONA} onChange={() => {}} />);
+    render(<AppearancePicker value={UI.BAR_APPEARANCES_REACT_ORB} onChange={() => {}} />);
     expect(screen.getByText("Beta")).toBeTruthy();
     expect(isBetaAppearance(UI.BAR_APPEARANCES_DYNAMIC)).toBe(false);
   });
