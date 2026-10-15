@@ -297,7 +297,11 @@ fn show_overlay(app: &AppHandle) {
 
 #[cfg(target_os = "macos")]
 fn style_overlay(app: &AppHandle, window: &tauri::WebviewWindow) {
-    crate::platform::macos::style_cursor_overlay(app, window);
+    crate::platform::macos::style_passive_overlay(
+        app,
+        window,
+        crate::platform::macos::OVERLAY_LEVEL_ABOVE_EVERYTHING,
+    );
 }
 
 #[cfg(not(target_os = "macos"))]

@@ -209,6 +209,14 @@ pub async fn request_accessibility_permission_native(app: AppHandle) -> Result<b
                 // the same pane, the split bought nothing but a second window.
                 match NativePermissionChecker::request_accessibility_permission() {
                     Ok(()) => {
+                        // The pane is opening. Point at the row, because the
+                        // list it opens on says nothing about which one is
+                        // Juno's. The other route into a pane is
+                        // `open_system_preferences`, which does the same.
+                        crate::permission_coach::point_at(
+                            &app,
+                            crate::constants::permissions::types::ACCESSIBILITY,
+                        );
                         tokio::time::sleep(tokio::time::Duration::from_millis(
                             timeouts::PERMISSION_CHECK_DELAY_MS,
                         ))
@@ -486,10 +494,19 @@ pub async fn request_input_monitoring_permission_native(app: AppHandle) -> Resul
     }
 }
 
-/// Open system preferences for a specific permission type
+/// Open system preferences for a specific permission type.
+///
+/// Also the moment the coaching card goes up: the person is about to be looking
+/// at a list of applications with no idea which row is Juno's.
+/// `permission_coach` returns without doing anything for a pane it does not
+/// coach, so every route into a Privacy pane can call it.
 #[tauri::command]
-pub async fn open_system_preferences(preference_pane: String) -> Result<(), String> {
+pub async fn open_system_preferences(
+    app: AppHandle,
+    preference_pane: String,
+) -> Result<(), String> {
     info!("Opening system preferences for: {}", preference_pane);
+    crate::permission_coach::point_at(&app, &preference_pane);
 
     #[cfg(target_os = "macos")]
     {
@@ -544,11 +561,17 @@ pub async fn open_system_preferences(preference_pane: String) -> Result<(), Stri
     }
 }
 
-/// Enhanced system settings opening with better URL handling
+/// Enhanced system settings opening with better URL handling.
+///
+/// What the permission card's one button calls, so the coaching card goes up
+/// through the same path as every other route into a Privacy pane.
 #[tauri::command]
-pub async fn open_system_settings_enhanced(permission_type: String) -> Result<(), String> {
+pub async fn open_system_settings_enhanced(
+    app: AppHandle,
+    permission_type: String,
+) -> Result<(), String> {
     info!("Opening enhanced system settings for: {}", permission_type);
-    open_system_preferences(permission_type).await
+    open_system_preferences(app, permission_type).await
 }
 
 /// Start continuous permission monitoring at 1-second intervals.
@@ -647,6 +670,10 @@ fn emit_granted_if_flipped(
         clear_relaunch_pending(permission_type);
         // Whatever prompt was up has been answered.
         restore_bar_after_prompt(app);
+        // The coaching card beside System Settings has nothing left to point
+        // at. It says the switch is on for a moment, then goes. This is the
+        // event the card leaves on: it never polls for the grant itself.
+        crate::permission_coach::note_granted(app, permission_type);
         // The person granted it in System Settings and is on their way back
         // to setup. Meet them there rather than leave it behind Settings.
         crate::window_management::bring_onboarding_forward(app);
