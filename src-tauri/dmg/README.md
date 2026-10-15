@@ -43,6 +43,12 @@ position is baked into the disk image at build time, when the screen it will
 open on is unknown. 390,220 is centred on a 1440x900 desktop and fits entirely
 on the smallest Mac display still shipping (1280x800).
 
+A position that does not fit is corrected rather than lost: Finder clamps the
+window to the visible screen. On the 1024x768 virtual display in
+`dmg-preview.yml` the window opens at `364, 220, 1024, 652` — shifted left by
+26pt to stay on screen, intact. So the worst case of a fixed position is a
+window that is not quite centred, never one with its edge cut off.
+
 **Icon size cannot be set.** `DmgConfig` has no field for it and tauri-bundler
 never passes `--icon-size`, so create-dmg's 128pt default applies. The ticket
 asked for "larger icons"; 128pt is already the large end, and the only way to
