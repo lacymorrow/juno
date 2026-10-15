@@ -309,6 +309,13 @@ The default is `prerelease` while Juno's own team are the only testers. Flip `de
 
 **The endpoint is chosen at runtime** via `UpdaterExt::updater_builder().endpoints(...)`, not from `tauri.conf.json`. The `pubkey` there still applies to both feeds: the channel decides which manifest is read, never whether the signature is checked. Rotating the signing key still breaks auto-update silently for everyone on an older build, because a failed signature check is indistinguishable from "no update available".
 
+## The DMG, and two ways it breaks silently
+
+The branded install window (background, icon positions, window size) is configured in `bundle.macOS.dmg` and explained in **`src-tauri/dmg/README.md`**. `scripts/verify-dmg.sh <dmg>` asserts all of it and runs on every release. Two traps, both invisible to anyone building locally, both of which shipped for 200 releases (LAC-4196):
+
+- **tauri-bundler throws the layout away on CI.** It appends `--skip-jenkins` to `bundle_dmg.sh` whenever `CI=true`, which skips the AppleScript that applies the background and the icon positions. The build still succeeds and still produces a `.dmg` — just a stock one. `release-tauri.yml` sets `TAURI_BUNDLER_DMG_IGNORE_CI: "true"`.
+- **Tauri never notarizes the DMG.** It notarizes and staples the `.app`, then wraps it in a `.dmg` it only *signs* (no notarize call in the bundler's `dmg/mod.rs`). Gatekeeper judges the file the person double-clicks, so a signed-but-unnotarized disk image is **rejected** and the notarized app inside is never reached. `release-tauri.yml` notarizes and staples the DMG itself, then re-uploads it over the copy `tauri-action` attached. `scripts/tauri-build.sh` has always done this for local builds, which is why nobody noticed.
+
 ## Testing
 
 Frontend tests mock Tauri APIs:

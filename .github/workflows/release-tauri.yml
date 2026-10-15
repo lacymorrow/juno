@@ -122,6 +122,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Without this the DMG comes out stock, silently.
+          #
+          # tauri-bundler appends --skip-jenkins to bundle_dmg.sh whenever
+          # CI=true (crates/tauri-bundler/.../dmg/mod.rs), and --skip-jenkins
+          # skips the AppleScript that applies everything under
+          # bundle.macOS.dmg: the background picture and both icon positions.
+          # The build still succeeds and still produces a .dmg. It just ignores
+          # the whole branded layout. The flag exists because CI usually has no
+          # Finder to drive; GitHub's macOS runners do have one, and the
+          # "Verify the DMG" step below fails the release if that ever stops
+          # being true, rather than quietly shipping a stock window.
+          TAURI_BUNDLER_DMG_IGNORE_CI: "true"
         with:
           tagName: ${{ inputs.tag || github.ref_name }}
           releaseName: "Juno ${{ inputs.tag || github.ref_name }}"
@@ -195,3 +207,146 @@ jobs:
           newest="v${newest}"
           gh release edit "$newest" --repo "${{ github.repository }}" --latest
           echo "Latest is ${newest}."
+
+      # ---------------------------------------------------------------- DMG
+      # These run LAST, after both updater channels have been pointed at this
+      # build, and that ordering is deliberate.
+      #
+      # The updater reads .app.tar.gz + latest.json and never touches the DMG.
+      # If these steps ran earlier and Apple's notary service were down, a
+      # hard failure here would skip "Publish the canary feed" and silently
+      # freeze the prerelease update channel on an old version — breaking
+      # updates for everyone over a cosmetic-by-comparison problem with a file
+      # they are not downloading. Updates advance first; the DMG is then
+      # checked and the job still fails loudly if it is wrong.
+      #
+      # Known gap, deliberately not fixed here: tauri-action publishes the
+      # release (releaseDraft: false) before this step staples, so for the few
+      # minutes notarization takes, that release's DMG asset is the unstapled
+      # copy. Closing it means building to a draft release and publishing
+      # after verification, which reshapes the canary-feed and Latest steps
+      # too — a change to the release flow that wants its own PR, filed as
+      # LAC-4498. The exposure is a prerelease asset, and the website and the
+      # stable channel read /releases/latest, which only moves on promotion.
+
+      # Notarize and staple the DISK IMAGE itself.
+      #
+      # Tauri notarizes and staples the .app, then wraps it in a .dmg that it
+      # only signs — there is no notarize call anywhere in the bundler's
+      # dmg/mod.rs. Gatekeeper judges the quarantined file the person actually
+      # double-clicks, which is the .dmg, so a signed-but-unnotarized disk
+      # image is REJECTED ("Apple cannot check it for malicious software")
+      # before the notarized app inside is ever reachable. Every Juno release
+      # up to v0.8.201 shipped that way; spctl on v0.8.200 reported
+      # "rejected / source=Unnotarized Developer ID" (LAC-4196).
+      #
+      # Stapling rewrites the file, so the copy tauri-action already attached
+      # to the release is replaced below.
+      - name: Notarize and staple the DMG
+        if: ${{ env.APPLE_SIGNING_IDENTITY != '' }}
+        # APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID are already in the job
+        # environment: the signing step above wrote them to $GITHUB_ENV, and
+        # only the secrets that actually exist.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # The signing step exports only the secrets that exist, and this one
+          # is gated on APPLE_SIGNING_IDENTITY alone, so a half-configured set
+          # (a revoked app-specific password, say) would otherwise surface as
+          # "APPLE_PASSWORD: unbound variable" from set -u. Name what is
+          # missing instead.
+          missing=""
+          for var in APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            eval "value=\${$var:-}"
+            [ -n "$value" ] || missing="$missing $var"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::the build is signed but cannot be notarized; missing secret(s):$missing"
+            echo "A signed, unnotarized DMG is rejected by Gatekeeper. Add the secret(s) or unset APPLE_SIGNING_IDENTITY." >&2
+            exit 1
+          fi
+
+          shopt -s nullglob
+          dmgs=(target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          if [ ${#dmgs[@]} -ne 1 ]; then
+            echo "expected exactly one DMG, found ${#dmgs[@]}" >&2
+            # The runner's /bin/bash is 3.2, where "${arr[@]}" on an EMPTY
+            # array is an unbound variable under set -u — so the line meant to
+            # explain the failure would fail instead, taking the diagnostic
+            # with it. Same guard as scripts/tauri-build.sh.
+            printf '%s\n' ${dmgs[@]+"${dmgs[@]}"} >&2
+            exit 1
+          fi
+          dmg="${dmgs[0]}"
+          echo "Notarizing $(basename "$dmg")"
+
+          log="$RUNNER_TEMP/notary.log"
+          set +e
+          xcrun notarytool submit "$dmg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait --timeout 30m 2>&1 | tee "$log"
+          rc=${PIPESTATUS[0]}
+          set -e
+
+          # notarytool has been known to exit 0 on an Invalid verdict, so the
+          # status line is checked as well as the exit code. Same guard as
+          # scripts/tauri-build.sh, which has notarized the local build
+          # correctly since #560.
+          status="$(sed -n 's/^ *status: *//p' "$log" | tail -1)"
+          if [ "$rc" -ne 0 ] || [ "$status" != "Accepted" ]; then
+            echo "::error::notarization failed (status: ${status:-none}, exit $rc)"
+            # "Invalid" alone says nothing; the log names the nested binary
+            # that was unsigned or missing the hardened runtime.
+            id="$(sed -n 's/^ *id: *//p' "$log" | head -1)"
+            if [ -n "$id" ]; then
+              xcrun notarytool log "$id" \
+                --apple-id "$APPLE_ID" \
+                --password "$APPLE_PASSWORD" \
+                --team-id "$APPLE_TEAM_ID" || true
+            fi
+            exit 1
+          fi
+
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+
+          # Replace the unstapled copy tauri-action uploaded. This touches only
+          # the .dmg; the updater reads .app.tar.gz + latest.json and is
+          # unaffected.
+          gh release upload "$TAG" "$dmg" --repo "$REPO" --clobber
+          echo "Stapled and re-uploaded $(basename "$dmg")."
+
+      # Fail the release rather than hand a stranger a disk image that is
+      # Gatekeeper-blocked or has lost its branded layout. Checks signature,
+      # stapled ticket, spctl verdict, the embedded background and its logical
+      # size, and both icon positions read back out of the .DS_Store.
+      #
+      # Deliberately NOT gated on the signing identity. If the Developer ID
+      # ever lapses, the signature half stops being checkable but the layout
+      # half does not, and that is exactly when losing the guard would let the
+      # stock-DMG regression back in unnoticed. No `if:` is needed for that: a
+      # SKIPPED step is not a failed one, so this still runs when the notarize
+      # step above gates itself out — while a genuinely failed build correctly
+      # stops before here, instead of adding "found 0 DMGs" to the noise.
+      - name: Verify the DMG
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmgs=(target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          if [ ${#dmgs[@]} -ne 1 ]; then
+            echo "expected exactly one DMG to verify, found ${#dmgs[@]}" >&2
+            printf '%s\n' ${dmgs[@]+"${dmgs[@]}"} >&2
+            exit 1
+          fi
+          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            scripts/verify-dmg.sh "${dmgs[0]}"
+          else
+            echo "unsigned build: asserting the window layout only"
+            scripts/verify-dmg.sh --skip-gatekeeper "${dmgs[0]}"
+          fi

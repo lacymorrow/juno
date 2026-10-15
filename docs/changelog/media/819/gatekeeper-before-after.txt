@@ -1,0 +1,41 @@
+Gatekeeper assessment of the shipped disk image and of the fix.
+Captured 2026-10-15. Commands are the exact assessment Gatekeeper runs
+on a quarantined download.
+
+=== SHIPPED TODAY: Juno_0.8.200_universal.dmg (from GitHub releases) ===
+$ xcrun stapler validate Juno_0.8.200_universal.dmg
+Juno_0.8.200_universal.dmg does not have a ticket stapled to it.
+
+$ spctl -a -t open --context context:primary-signature -vvv Juno_0.8.200_universal.dmg
+Juno_0.8.200_universal.dmg: rejected
+source=Unnotarized Developer ID
+origin=Developer ID Application: Lacy Morrow (DPFY6AHP57)
+
+--- the app INSIDE that same image ---
+$ xcrun stapler validate /Volumes/Juno/Juno.app
+The validate action worked!
+$ spctl -a -t exec --context context:primary-signature -vvv /Volumes/Juno/Juno.app
+/Volumes/Juno/Juno.app: accepted
+source=Notarized Developer ID
+
+The app is notarized. The person never reaches it: Gatekeeper blocks
+the disk image first.
+
+=== AFTER THE FIX: same build steps, notarized and stapled ===
+$ xcrun notarytool submit Juno.dmg --keychain-profile juno --wait
+  status: Accepted
+$ xcrun stapler staple Juno.dmg
+The staple and validate action worked!
+
+$ scripts/verify-dmg.sh Juno.dmg
+  ok   disk image is signed: Developer ID Application: Lacy Morrow (DPFY6AHP57)
+  ok   notarization ticket is stapled to the disk image
+  ok   spctl accepts the disk image
+  ok   Applications symlink present
+  ok   Juno.app present
+  ok   background embedded as .background/background@2x.png
+  ok   .DS_Store written (Finder layout saved)
+  ok   logical size 660x400pt fills the content area (pixels 1320x800)
+  ok   Juno.app at 180,190
+  ok   Applications at 480,190
+All checks passed.
