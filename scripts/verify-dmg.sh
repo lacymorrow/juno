@@ -60,10 +60,18 @@ ok()   { printf '\033[32m  ok\033[0m   %s\n' "$*"; }
 bad()  { printf '\033[31m  FAIL\033[0m %s\n' "$*"; fail=1; }
 
 # ---------------------------------------------------------------- expectations
-eval "$(python3 - "$conf" <<'PY'
+# Assigned first and eval'd second on purpose: `eval "$(cmd)"` throws away
+# cmd's exit status, so a config without a dmg block would eval nothing and
+# then die on "EXP_BG: unbound variable" — naming neither the file nor the
+# cause.
+expectations="$(python3 - "$conf" <<'PY'
 import json, sys, shlex
 d = json.load(open(sys.argv[1]))
-dmg = d["bundle"]["macOS"]["dmg"]
+try:
+    dmg = d["bundle"]["macOS"]["dmg"]
+except KeyError:
+    sys.exit("tauri.conf.json has no bundle.macOS.dmg block: "
+             "there is no configured layout to verify")
 out = {
     "EXP_BG": dmg["background"],
     "EXP_W": dmg["windowSize"]["width"],
@@ -77,7 +85,8 @@ out = {
 for k, v in out.items():
     print(f"{k}={shlex.quote(str(v))}")
 PY
-)"
+)" || exit 1
+eval "$expectations"
 bg_name="$(basename "$EXP_BG")"
 
 echo "Verifying $(basename "$dmg")"

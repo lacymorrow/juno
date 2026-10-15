@@ -174,7 +174,11 @@ jobs:
           dmgs=(target/universal-apple-darwin/release/bundle/dmg/*.dmg)
           if [ ${#dmgs[@]} -ne 1 ]; then
             echo "expected exactly one DMG, found ${#dmgs[@]}" >&2
-            printf '%s\n' "${dmgs[@]}" >&2
+            # The runner's /bin/bash is 3.2, where "${arr[@]}" on an EMPTY
+            # array is an unbound variable under set -u — so the line meant to
+            # explain the failure would fail instead, taking the diagnostic
+            # with it. Same guard as scripts/tauri-build.sh.
+            printf '%s\n' ${dmgs[@]+"${dmgs[@]}"} >&2
             exit 1
           fi
           dmg="${dmgs[0]}"
