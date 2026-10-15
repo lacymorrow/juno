@@ -31,7 +31,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use tokio::fs;
 use tokio::sync::Mutex;
-use tokio::time::{sleep, MissedTickBehavior};
+use tokio::time::MissedTickBehavior;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
