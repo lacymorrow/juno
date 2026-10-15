@@ -28,7 +28,7 @@ pub(crate) const INDEX_FILE: &str = "conversations-index.json";
 const INDEX_KEY: &str = "conversations";
 const CONVERSATION_KEY: &str = "conversation";
 const VERSION: u32 = 1;
-const TITLE_MAX_CHARS: usize = 60;
+pub(crate) const TITLE_MAX_CHARS: usize = 60;
 const SAVE_DEBOUNCE_MS: u64 = 500;
 
 fn conversation_file(id: &str) -> String {
