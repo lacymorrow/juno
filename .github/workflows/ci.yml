@@ -15,10 +15,10 @@ permissions:
   contents: read
 
 jobs:
-  # TypeScript typecheck + Vite bundle. Cheap and fast; catches the most common
-  # breakage class in this codebase.
+  # ESLint, vitest, TypeScript typecheck and the Vite bundle. Cheap and fast;
+  # catches the most common breakage class in this codebase.
   frontend:
-    name: Frontend (typecheck + build)
+    name: Frontend (lint + test + build)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -30,9 +30,18 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      # Vitest needs no build — run it first so test failures surface fast.
-      # Must be `bun run test` (the vitest script); plain `bun test` invokes
-      # Bun's own runner and false-fails on this suite.
+      # Cheapest gate first, same reasoning as `cargo fmt` in the rust job: ~9s
+      # and it compiles nothing. Catches React hooks violations and breaches of
+      # the "backend owns logic" boundary (localStorage, getUserMedia, raw
+      # WebSocket) that tsc and vitest both pass clean. See eslint.config.js —
+      # the enforced rule set is a ratchet, so a red check here is always a new
+      # problem, never pre-existing debt.
+      - name: Lint frontend (eslint)
+        run: bun run lint
+
+      # Vitest needs no build — run it before the build so test failures
+      # surface fast. Must be `bun run test` (the vitest script); plain
+      # `bun test` invokes Bun's own runner and false-fails on this suite.
       - name: Frontend tests (vitest)
         run: bun run test
 

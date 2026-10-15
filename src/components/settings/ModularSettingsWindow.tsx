@@ -442,6 +442,7 @@ function SettingsWindowContent() {
         <aside className="flex w-[220px] shrink-0 flex-col border-r border-border bg-sidebar/70">
           {/* Drag region + traffic-light clearance */}
           <div
+            // eslint-disable-next-line no-restricted-syntax -- Boundary debt, LAC-4502: replace with useDragWindow.
             data-tauri-drag-region
             className="h-9 shrink-0"
           />
@@ -544,6 +545,7 @@ function SettingsWindowContent() {
         {/* Content */}
         <main className="flex min-w-0 flex-1 flex-col bg-background">
           <div
+            // eslint-disable-next-line no-restricted-syntax -- Boundary debt, LAC-4502: replace with useDragWindow.
             data-tauri-drag-region
             className="flex h-9 shrink-0 items-center"
           />
