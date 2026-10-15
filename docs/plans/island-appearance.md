@@ -23,11 +23,21 @@ A dark capsule sits at the top of the screen with one breathing dot. They hold t
 | Face | Shape | What is in it |
 |---|---|---|
 | idle | 92 x 28 capsule, radius 14. Under the pointer 132 x 32 with Talk, Type and (once there is a turn) Show last answer | the dot |
-| compose | 360 wide; 36 tall, growing with the text to four lines (90) | the composer only |
+| compose | 360 wide; 36 tall, growing with the text to four lines (90). The small bar (248 x 36) while nobody is writing, see below | the composer only |
 | answer | 360 wide; composer plus content, up to 400 tall, then the body scrolls | question line (dot, your words dimmed, speaker toggle when there is both text and speech, linger ring), the answer body, the composer as the follow-up field |
 | component | 360 wide, same height rule | caption line (the prose folded to one line, click to expand), the component edge to edge, the composer |
 
 The composer is not part of any face. It is one textarea mounted for the life of the island, anchored to the far edge of the shape (bottom when the island grows down from a top well, top when it grows up from a low well, from `barDock`'s `growUp`). In idle it is transparent and takes no pointer, but it is still the same node, so it keeps its draft and its caret through every state.
+
+### The small bar
+
+Lacy, 2026-10-15: "compose listening, compose working, and compose error all could be a small bar unless the user has turned on see dictated text as you speak."
+
+The compose face is 248 wide, one line, whenever nobody is writing in it: no draft, no caret, Rust not in its input state, and (while a mic is open) "See dictated text as you speak" (`live_partial_transcription`) off. Listening, transcribing, sending, working, an error, a reply being spoken and Juno driving all show as the small bar with their placeholder ("Listening…", "Working…", the error text) and their controls. A Send with nothing to send is not drawn in it. With the setting on, a recording is the full 360 box so the words can be read as they arrive; work and errors stay small either way. A click in the box, or typing, makes it the full box: only the width moves, under the same spring. The setting is read at mount and again as each recording starts or ends (`get_live_partial_transcription`). With it off, the box says "Listening…" and never shows words mid-recording.
+
+### The activity flame
+
+The Island carries the Pill's canvas-ui flame border (`BarFlameBorder`) with the same language, from one shared module (`bar/barFlame.ts`: `flameForState`, `useShowGlowBorder`): green for your dictation, blue for listening, red for an error, the focused session's colour breathing while Juno works, dim blue breathing for the wake phrase. It follows the glow-border setting. The shape is `isolate` and no longer clips, so the flame sits at z-index -1 above the black face, behind the content, and licks outward; the content clips in an inner layer that inherits the radius.
 
 ## Every Rust bar state
 

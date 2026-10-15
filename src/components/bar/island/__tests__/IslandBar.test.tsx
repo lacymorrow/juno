@@ -23,6 +23,9 @@ const { invoke, emit, listenHandlers, eventHandlers, chat, focusHandlers, setFoc
   },
 }));
 
+vi.mock("@/hooks/useAgentSessions", () => ({
+  useAgentSessions: () => ({ sessions: [], focusSession: vi.fn(), cancelSession: vi.fn() }),
+}));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invoke(...args) }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async (event: string, handler: (event: { payload: unknown }) => void) => {
@@ -259,10 +262,15 @@ describe("IslandBar: one surface", () => {
     expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "cancel" });
   });
 
-  it("once the mic has closed, Send is the typed line again", async () => {
+  it("once the mic has closed, the small bar has nothing to send until you type", async () => {
     render(<IslandBar />);
     await send(UI.BAR_STATES_TRANSCRIBING, { transcriptionProvisional: false });
     expect(screen.queryByTestId("island-level")).toBeNull();
+    expect(screen.getByTestId("island-composer")).toHaveAttribute("data-compact", "true");
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    // The caret in the box makes it the full text box, with Send for the typed line.
+    fireEvent.focus(composer());
+    expect(screen.getByTestId("island-composer")).not.toHaveAttribute("data-compact");
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { UI } from "@/lib/constants.generated";
 import type { ChatMessage } from "@/types/chat";
 import {
+  COMPACT_COMPOSE_WIDTH,
+  composeIsCompact,
   COMPOSER_LINE_PX,
   COMPOSER_MAX_TEXT_PX,
   HOVER_SHAPE,
@@ -106,6 +108,42 @@ describe("shape", () => {
     });
     expect(ISLAND_STEADY_SPEC.max.width).toBe(ISLAND_WIDTH + 2 * SHADOW_PAD);
     expect(ISLAND_STEADY_SPEC.max.height).toBeGreaterThanOrEqual(SHAPE_MAX_HEIGHT + 2 * SHADOW_PAD);
+  });
+});
+
+describe("small bar", () => {
+  const base = { face: "compose" as const, composerActive: false, livePartials: false };
+  it("is the small bar while listening, working, on an error and while speaking", () => {
+    for (const state of [
+      UI.BAR_STATES_LISTENING,
+      UI.BAR_STATES_DICTATING,
+      UI.BAR_STATES_TRANSCRIBING,
+      UI.BAR_STATES_LOADING,
+      UI.BAR_STATES_AGENT_RESPONDING,
+      UI.BAR_STATES_ERROR,
+      UI.BAR_STATES_SPEAKING,
+    ]) {
+      expect(composeIsCompact({ ...base, state }), state).toBe(true);
+    }
+  });
+  it("is the full box while writing: a draft, the caret, or Rust's input state", () => {
+    expect(composeIsCompact({ ...base, state: UI.BAR_STATES_LOADING, composerActive: true })).toBe(false);
+    expect(composeIsCompact({ ...base, state: UI.BAR_STATES_INPUT })).toBe(false);
+  });
+  it("is the full box while recording when dictated text shows as you speak", () => {
+    expect(composeIsCompact({ ...base, state: UI.BAR_STATES_LISTENING, livePartials: true })).toBe(false);
+    // The setting is about words while you speak; work and errors stay small.
+    expect(composeIsCompact({ ...base, state: UI.BAR_STATES_LOADING, livePartials: true })).toBe(true);
+  });
+  it("only applies to the compose face", () => {
+    expect(composeIsCompact({ ...base, face: "answer", state: UI.BAR_STATES_LOADING })).toBe(false);
+  });
+  it("narrows the shape without changing its height", () => {
+    const full = shapeFor("compose", { hovered: false, composerHeight: 36, contentHeight: 0 });
+    const small = shapeFor("compose", { hovered: false, compact: true, composerHeight: 36, contentHeight: 0 });
+    expect(small.width).toBe(COMPACT_COMPOSE_WIDTH);
+    expect(small.width).toBeLessThan(full.width);
+    expect(small.height).toBe(full.height);
   });
 });
 

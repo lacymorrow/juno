@@ -276,8 +276,9 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     case COMMANDS.SETTINGS_GET_FLOATING_BAR_SETTINGS:
       return { follow_cursor_display: true, show_glow_border: true };
     // The preview dictates a sentence; showing it as it arrives is the point.
+    // `live=0` in the URL turns it off, to see the Island's small bar.
     case COMMANDS.STT_MODELS_GET_LIVE_PARTIAL_TRANSCRIPTION:
-      return true;
+      return new URLSearchParams(window.location.search).get("live") !== "0";
     case COMMANDS.BAR_GET_BAR_POSITION:
       return state.savedPosition;
     case COMMANDS.TRIGGERS_GET_TRIGGERS:

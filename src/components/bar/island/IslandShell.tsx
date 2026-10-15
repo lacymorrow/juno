@@ -3,6 +3,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import type { DotLook, ShapeSize, Words } from "./islandModel";
 import { VOICE_TRANSITION, voiceScale } from "../voiceLevel";
+import { BarFlameBorder } from "../BarFlameBorder";
+import type { flameForState } from "../barFlame";
 
 /**
  * The island's body: one black shape whose width, height and corner radius
@@ -60,6 +62,8 @@ interface IslandShellProps {
   /** Mounted for the life of the island and never keyed: the composer. */
   children?: ReactNode;
   reducedMotion: boolean;
+  /** The Pill's activity flame around the shape's border; null when idle. */
+  flame?: ReturnType<typeof flameForState>;
   onClick?: () => void;
   className?: string;
 }
@@ -71,6 +75,7 @@ export function IslandShell({
   layerStyle,
   children,
   reducedMotion,
+  flame = null,
   onClick,
   className,
 }: IslandShellProps) {
@@ -83,22 +88,35 @@ export function IslandShell({
       initial={false}
       animate={{ width: size.width, height: size.height, borderRadius: size.radius }}
       transition={reducedMotion ? ISLAND_EASE : ISLAND_SPRING}
-      className={cn("relative shrink-0 overflow-hidden bg-black text-white", className)}
+      // Isolated, and not clipped: the flame sits at z-index -1, above the
+      // black face but behind the content, and licks outward past the edge.
+      // The content clips in the inner layer, which follows the radius.
+      className={cn("relative isolate shrink-0 bg-black text-white", className)}
       style={{ boxShadow: ISLAND_GLOW, willChange: "width, height, border-radius" }}
     >
-      <AnimatePresence initial={false}>
-        <motion.div
-          key={layerKey}
-          className="absolute inset-x-0"
-          style={layerStyle ?? { top: 0, bottom: 0 }}
-          initial={m.initial}
-          animate={m.animate}
-          exit={m.exit}
-        >
-          {layer}
-        </motion.div>
-      </AnimatePresence>
-      {children}
+      {flame && (
+        <BarFlameBorder
+          color={flame.color}
+          intensity={flame.intensity}
+          pulse={flame.pulse}
+          radius={size.radius}
+        />
+      )}
+      <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: "inherit" }}>
+        <AnimatePresence initial={false}>
+          <motion.div
+            key={layerKey}
+            className="absolute inset-x-0"
+            style={layerStyle ?? { top: 0, bottom: 0 }}
+            initial={m.initial}
+            animate={m.animate}
+            exit={m.exit}
+          >
+            {layer}
+          </motion.div>
+        </AnimatePresence>
+        {children}
+      </div>
     </motion.div>
   );
 }

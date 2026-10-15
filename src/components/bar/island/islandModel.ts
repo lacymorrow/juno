@@ -184,8 +184,38 @@ export function faceFor({
   return "compose";
 }
 
+/**
+ * The compose face as a small bar: one line, narrow. Listening, working, an
+ * error, a reply being spoken: none of these needs a 360px box, only the words
+ * that say what is happening and the controls. Lacy, 2026-10-15.
+ */
+export const COMPACT_COMPOSE_WIDTH = 248;
+
+export interface CompactInput {
+  face: Face;
+  state: string;
+  provisional?: boolean;
+  /** The composer has a draft, the caret, or was asked to stay open. */
+  composerActive: boolean;
+  /** "See dictated text as you speak" (live partial transcription) is on. */
+  livePartials: boolean;
+}
+
+/**
+ * Whether the compose face is the small bar. It is, unless the person is
+ * writing (a draft, the caret, Rust's input state) or their words are showing
+ * live as they speak, which needs the full width to be read.
+ */
+export function composeIsCompact({ face, state, provisional, composerActive, livePartials }: CompactInput): boolean {
+  if (face !== "compose" || composerActive || isInputState(state)) return false;
+  if (livePartials && isRecording(state, provisional)) return false;
+  return true;
+}
+
 export interface ShapeInput {
   hovered: boolean;
+  /** The compose face is the small bar (`composeIsCompact`). */
+  compact?: boolean;
   /** The composer's own height (`composerHeightFor`). */
   composerHeight: number;
   /** The measured height of what sits beside the composer in the answer and component faces. */
@@ -193,9 +223,14 @@ export interface ShapeInput {
 }
 
 /** The shape's size for a face. */
-export function shapeFor(face: Face, { hovered, composerHeight, contentHeight }: ShapeInput): ShapeSize {
+export function shapeFor(
+  face: Face,
+  { hovered, compact = false, composerHeight, contentHeight }: ShapeInput,
+): ShapeSize {
   if (face === "idle") return { ...(hovered ? HOVER_SHAPE : IDLE_SHAPE) };
-  if (face === "compose") return { width: ISLAND_WIDTH, height: composerHeight, radius: 18 };
+  if (face === "compose") {
+    return { width: compact ? COMPACT_COMPOSE_WIDTH : ISLAND_WIDTH, height: composerHeight, radius: 18 };
+  }
   const height = Math.min(SHAPE_MAX_HEIGHT, Math.ceil(composerHeight + Math.max(0, contentHeight)));
   return { width: ISLAND_WIDTH, height: Math.max(composerHeight, height), radius: 20 };
 }

@@ -35,6 +35,8 @@ import { useLinger } from "./useLinger";
 import { ISLAND_BUTTON_ATTR, useIslandHover } from "./useIslandHover";
 import { useIslandFrame } from "./useIslandFrame";
 import { clampLevel } from "../voiceLevel";
+import { flameForState, useShowGlowBorder } from "../barFlame";
+import { useAgentSessions } from "@/hooks/useAgentSessions";
 import {
   COMPOSER_LINE_PX,
   COMPOSER_MAX_TEXT_PX,
@@ -43,6 +45,7 @@ import {
   SHADOW_PAD,
   STOP_LABELS,
   answerKey,
+  composeIsCompact,
   composerHeightFor,
   composerPlaceholder,
   dotFor,
@@ -260,6 +263,14 @@ export function IslandBar() {
   const streaming = !!answer?.isStreaming;
   const recording = isRecording(bar.barState, bar.transcriptionProvisional);
   const working = (isWorkingState(bar.barState) && !recording) || chat.isProcessing;
+
+  // The Pill's activity flame, same language: green for your dictation, blue
+  // for listening, red for an error, the focused session's colour while Juno
+  // works. Off when the glow-border setting is off.
+  const { sessions: agentSessions } = useAgentSessions();
+  const showGlowBorder = useShowGlowBorder();
+  const sessionColor = agentSessions.find((s) => s.focused)?.display_color ?? "#0A84FF";
+  const flame = showGlowBorder ? flameForState(bar.barState, working, sessionColor) : null;
   const hero = useMemo(
     () => (visibleText ? splitHeroContent(visibleText, streaming) : null),
     [visibleText, streaming],
@@ -532,6 +543,29 @@ export function IslandBar() {
     }
   }, [stopKind, chat, putAway]);
 
+  // ── "See dictated text as you speak" ──
+  // Read at mount and again as each recording starts or ends, so a change in
+  // Settings lands on the next turn without a listener of its own.
+  const [livePartials, setLivePartials] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void invoke<boolean>(COMMANDS.STT_MODELS_GET_LIVE_PARTIAL_TRANSCRIPTION)
+      .then((on) => {
+        if (!cancelled && typeof on === "boolean") setLivePartials(on);
+      })
+      .catch((error) => console.debug("Island: could not read the live dictation setting:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, [recording]);
+  const compact = composeIsCompact({
+    face,
+    state: bar.barState,
+    provisional: bar.transcriptionProvisional,
+    composerActive: composerEngaged || composerHeld,
+    livePartials,
+  });
+
   // ── Size ──
   const [measureEl, setMeasureEl] = useState<HTMLDivElement | null>(null);
   const [bodyH, setBodyH] = useState(0);
@@ -548,6 +582,7 @@ export function IslandBar() {
   const hoverShown = face === "idle" && hovered && !hoverHeld;
   const shape = shapeFor(face, {
     hovered: hoverShown,
+    compact,
     composerHeight: composerH,
     contentHeight: HEADER_H + bodyH + BODY_PAD_BOTTOM,
   });
@@ -577,7 +612,8 @@ export function IslandBar() {
   const layerKey = face === "idle" ? (hoverShown ? "hover" : "idle") : face;
   const placeholder = composerPlaceholder({
     state: bar.barState,
-    transcriptionText: bar.transcriptionText,
+    // Words while you speak only when the person asked to see them.
+    transcriptionText: recording && !livePartials ? "" : bar.transcriptionText,
     transcriptionProvisional: bar.transcriptionProvisional,
     spokenText: bar.spokenText,
     currentError: bar.currentError,
@@ -754,6 +790,7 @@ export function IslandBar() {
   const composerNode = (
     <motion.div
       data-testid="island-composer"
+      data-compact={compact ? "true" : undefined}
       data-no-drag
       aria-hidden={idle ? true : undefined}
       initial={false}
@@ -845,7 +882,7 @@ export function IslandBar() {
           >
             <ArrowUp className="size-3" />
           </button>
-        ) : (
+        ) : compact ? null : (
           <button
             type="button"
             onClick={submit}
@@ -912,6 +949,7 @@ export function IslandBar() {
           layer={layer}
           layerStyle={layerStyle}
           reducedMotion={reducedMotion}
+          flame={flame}
           onClick={idle ? onShapeClick : undefined}
         >
           {composerNode}
