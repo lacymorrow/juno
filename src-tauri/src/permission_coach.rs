@@ -856,6 +856,42 @@ mod tests {
     }
 
     #[test]
+    fn the_real_settings_window_on_a_real_mac_gets_a_card_on_its_left() {
+        // Not invented. Measured on 2026-10-14 with
+        // CGWindowListCopyWindowInfo, which reported, for the Accessibility
+        // pane on a 1440x900 display with a 30 point menu bar:
+        //
+        //     owner="System Settings" layer=0 x=533 y=185 w=723 h=510 title=nil
+        //
+        // Three things that matter are in that one line. The owner string is
+        // the one this module matches on. The layer clears the SDK's -1..20
+        // filter. And the title came back nil, which is the live proof that
+        // matching on the title would need Screen Recording and so could never
+        // have worked here.
+        let settings = PointRect {
+            x: 533.0,
+            y: 185.0,
+            width: 723.0,
+            height: 510.0,
+        };
+        let usable = PointRect {
+            x: 0.0,
+            y: 30.0,
+            width: 1440.0,
+            height: 870.0,
+        };
+
+        assert!(settings.width >= SETTINGS_MIN.0 && settings.height >= SETTINGS_MIN.1);
+
+        let p = place(settings, usable, CARD).expect("a card fits beside the real window");
+        assert_eq!(p.side, Side::Left);
+        assert_eq!(p.rect.x, 217.0);
+        assert_eq!(p.rect.y, 185.0);
+        assert!(!overlaps(&p.rect, &settings));
+        assert!(fits_in(&p.rect, &usable));
+    }
+
+    #[test]
     fn the_card_is_declared_the_size_this_module_places_it_at() {
         // `place` works in CARD and the window is built from its declaration,
         // so the two drifting apart means the card is placed as one size and
