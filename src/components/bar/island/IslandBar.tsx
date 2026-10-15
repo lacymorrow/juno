@@ -432,6 +432,9 @@ export function IslandBar() {
     getCurrentWindow()
       .onFocusChanged(({ payload: focused }) => {
         if (!mounted || focused) return;
+        // Left for another app with nothing typed: a composer held open
+        // after a step back folds away.
+        if (!draftRef.current.trim()) setComposerHeld(false);
         void sendInteraction(UI.INTERACTION_TYPES_BLUR);
       })
       .then((fn) => {
@@ -801,7 +804,6 @@ export function IslandBar() {
           }}
           onBlur={() => {
             setComposerFocused(false);
-            setComposerHeld(false);
             // The window losing focus is reported by the window listener.
             if (typeof document.hasFocus === "function" && !document.hasFocus()) return;
             if (!draftRef.current.trim()) void sendInteraction(UI.INTERACTION_TYPES_BLUR);

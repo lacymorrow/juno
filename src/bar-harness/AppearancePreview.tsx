@@ -320,16 +320,21 @@ function playTurnDemo(later: (fn: () => void, ms: number) => void, prose = false
     }, start + 100 + i * 45);
   });
   const end = start + 100 + chunks.length * 45 + 200;
+  // Everything after the stream is timed from its end, not from the start,
+  // so a slow machine still holds each face for as long as it should.
   later(() => {
     void emit(EVENTS.STREAMING_STREAM_END, { message_id: messageId, complete_text: answer });
     void emit(EVENTS.AGENT_ACTIVE, false);
     frame(UI.BAR_STATES_FINISHING);
+    later(() => frame(UI.BAR_STATES_DEFAULT), 300);
+    if (prose) return;
+    // Escape, as Rust's stop-key monitor reports it when nothing is running:
+    // the component steps back to the composer, then the composer to rest.
+    later(() => {
+      void emit(EVENTS.BAR_DISMISS_PANE, {});
+      later(() => void emit(EVENTS.BAR_DISMISS_PANE, {}), 1500);
+    }, 2800);
   }, end);
-  later(() => frame(UI.BAR_STATES_DEFAULT), end + 300);
-  if (prose) return;
-  // Escape, as Rust's stop-key monitor reports it when nothing is running.
-  later(() => void emit(EVENTS.BAR_DISMISS_PANE, {}), end + 2800);
-  later(() => void emit(EVENTS.BAR_DISMISS_PANE, {}), end + 4200);
 }
 
 /** What `demo=script` and `demo=approval` ask. */
