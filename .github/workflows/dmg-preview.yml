@@ -1,0 +1,126 @@
+# See the install window without waiting 45 minutes for a release build.
+#
+# The DMG's appearance depends on bundle.macOS.dmg, src-tauri/dmg/ and the
+# bundler — none of which involve a single line of Rust. So this stands a stub
+# binary at the path the bundler expects and runs the REAL `tauri bundle`,
+# which produces a disk image whose window is pixel-identical to the shipped
+# one. No cargo, about three minutes.
+#
+# Dispatch it after changing the art or the geometry:
+#   gh workflow run dmg-preview.yml --ref <branch>
+# then download the "dmg-preview" artifact for the screenshot.
+#
+# It also guards the thing that cannot be checked on a developer's Mac:
+# tauri-bundler appends --skip-jenkins to bundle_dmg.sh whenever CI=true,
+# which silently drops the background and icon positions. This job runs with
+# CI=true like any other, so if TAURI_BUNDLER_DMG_IGNORE_CI ever stops working
+# the verify step fails here rather than in a release.
+#
+# It runs on pull requests that touch the DMG, and only those. A release build
+# does verify the real artifact, but not until after the merge, and reviewing
+# a change to the install window without seeing the window is guesswork.
+#
+# workflow_dispatch alone would not do: GitHub only offers that trigger for
+# workflows already on the default branch, so a dispatch-only version of this
+# file could not be run from the very branch that changes the art.
+name: DMG preview
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src-tauri/dmg/**"
+      - "src-tauri/tauri.conf.json"
+      - "scripts/verify-dmg.sh"
+      - "scripts/build-dmg-background.sh"
+      - "scripts/crop-window.py"
+      - ".github/workflows/dmg-preview.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      # tauri bundle reads bundle.frontendDist, so the frontend has to exist.
+      - name: Build frontend
+        run: bun run build
+
+      # A real Mach-O at the path the bundler expects, in place of the 20
+      # minutes of rustc that would produce an identical-looking window.
+      - name: Stand in a stub binary
+        run: |
+          set -euo pipefail
+          mkdir -p target/universal-apple-darwin/release
+          echo 'int main(void) { return 0; }' > /tmp/stub.c
+          cc -arch arm64 -arch x86_64 -o target/universal-apple-darwin/release/Juno /tmp/stub.c
+          file target/universal-apple-darwin/release/Juno
+
+      - name: Bundle the DMG
+        env:
+          # The point of this job. Without it, CI=true makes the bundler skip
+          # the AppleScript that applies the background and icon positions.
+          TAURI_BUNDLER_DMG_IGNORE_CI: "true"
+        run: bunx tauri bundle --bundles dmg --target universal-apple-darwin
+
+      # Unsigned here, so signature and notarization are not asserted; the
+      # release build checks those against the real artifact.
+      - name: Verify the layout
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmgs=(target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          [ ${#dmgs[@]} -eq 1 ] || { echo "expected one DMG, got ${#dmgs[@]}" >&2; exit 1; }
+          echo "DMG_PATH=${dmgs[0]}" >> "$GITHUB_ENV"
+          scripts/verify-dmg.sh --skip-gatekeeper "${dmgs[0]}"
+
+      # Best effort: screen capture needs a window server and, on a Mac that
+      # has one, Screen Recording permission. The layout is already asserted
+      # above, so a runner that cannot capture should not fail the job.
+      - name: Photograph the window
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p out
+
+          # Mount where a person would, at /Volumes. Mounting anywhere else
+          # makes Finder treat it as an ordinary folder: it shows the sidebar
+          # and ignores the saved window geometry.
+          hdiutil attach "$DMG_PATH" -readonly
+          vol="$(hdiutil info | awk '/\/Volumes\/Juno/ {print $NF; exit}')"
+          echo "mounted at ${vol:-/Volumes/Juno}"
+          open "${vol:-/Volumes/Juno}"
+          sleep 6
+
+          screencapture -x out/dmg-screen.png
+
+          # Crop to the window. Finder reports bounds in points; the capture is
+          # in pixels, so scale by (capture width / desktop width in points).
+          bounds="$(osascript -e 'tell application "Finder" to get bounds of window 1')"
+          desktop_w="$(osascript -e 'tell application "Finder" to get item 3 of (bounds of window of desktop)')"
+          echo "window bounds: $bounds   desktop width: ${desktop_w}pt"
+          BOUNDS="$bounds" DESKTOP_W="$desktop_w" python3 scripts/crop-window.py \
+            out/dmg-screen.png out/dmg-window.png
+
+          hdiutil detach "${vol:-/Volumes/Juno}" || true
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dmg-preview
+          path: |
+            out/*.png
+            ${{ env.DMG_PATH }}
+          if-no-files-found: warn
+          retention-days: 14
