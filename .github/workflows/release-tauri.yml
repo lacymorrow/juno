@@ -145,7 +145,6 @@ jobs:
           prerelease: ${{ inputs.prerelease == true }}
           args: --target universal-apple-darwin
 
-
       # The prerelease channel's feed. Every build lands here, promoted or not,
       # so an install with "Get prereleases" on sees a merge within the hour
       # instead of waiting for someone to run `juno-build promote`.
