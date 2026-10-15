@@ -51,6 +51,7 @@ pub mod integration; // Application integration patterns, component coordination
 pub mod intro; // How Juno first appears: the smoke reveal around the bar
 pub mod menu; // Menu management for app and tray menus
 pub mod path_gate; // The one place that answers "may this path be touched, for this purpose"
+pub mod permission_coach; // The card beside System Settings that points at the row
 pub mod permission_gate; // Asking for a macOS permission at the moment it is needed
 pub mod persistent_memory; // Cross-session persistent user memory
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
@@ -530,6 +531,7 @@ pub fn run() {
             // Where one capability stands right now, and whether a restart is
             // the missing step rather than something the person did wrong
             permission_moment,
+            permission_coach::permission_coach_state,
             // Juno's own Automation moment, in place of the OS asking cold
             allow_automation_permission,
             // Permission diagnostics: the live answer, and the reset for a stale grant
