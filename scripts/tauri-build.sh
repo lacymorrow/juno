@@ -55,6 +55,19 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Keep the branded install window on a CI runner.
+#
+# tauri-bundler appends --skip-jenkins to bundle_dmg.sh whenever CI=true, and
+# that flag skips the AppleScript applying bundle.macOS.dmg: the background
+# picture and both icon positions. The build still succeeds and still writes a
+# .dmg — it just comes out stock, with no .DS_Store to point Finder at the
+# background that was copied into it.
+#
+# This is a no-op on a developer's Mac, where CI is unset. It matters in
+# demo-build.yml, which runs this wrapper on a GitHub runner and hands the
+# resulting DMG to actual people. See src-tauri/dmg/README.md.
+export TAURI_BUNDLER_DMG_IGNORE_CI=true
+
 key_path="$HOME/.tauri/juno.key"
 demo_key_path="$HOME/.tauri/juno-demo.key"
 demo=0
