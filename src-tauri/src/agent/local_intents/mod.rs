@@ -31,7 +31,8 @@
 //! - [`media`]: play, pause, skip, "what's playing?" (Spotify, Apple Music)
 //! - [`system`]: volume, dark mode, lock, display and Mac sleep, battery,
 //!   time, date
-//! - [`timer`]: start, check, cancel countdown timers (backend-owned)
+//! - [`timer`]: "set a timer" opens Clock on its Timers tab (Clock owns
+//!   timers; Juno's own are gone)
 //! - [`apps`]: open or quit an installed app, open a website
 //! - [`agenda`]: "what's on my calendar today", "read my reminders", "what's
 //!   my next meeting", "turn on do not disturb" (only once already allowed)
@@ -274,7 +275,7 @@ pub async fn try_handle_local_intent(app_handle: &AppHandle, query: &str) -> boo
     };
     let reply = match intent.clone() {
         LocalIntent::System(i) => system::handle(app_handle, i).await,
-        LocalIntent::Timer(i) => timer::handle(app_handle, i),
+        LocalIntent::Timer(i) => timer::handle(app_handle, i).await,
         LocalIntent::App(i) => apps::handle(app_handle, i).await,
         LocalIntent::Settings(i) => settings_follow::handle(app_handle, i).await,
         LocalIntent::Agenda(i) => agenda::handle(app_handle, i).await,
@@ -391,7 +392,7 @@ mod tests {
         ));
         assert!(matches!(
             parse_local_intent("set a timer for 5 minutes"),
-            Some(LocalIntent::Timer(timer::TimerIntent::Start { secs: 300 }))
+            Some(LocalIntent::Timer(timer::TimerIntent::OpenTimers))
         ));
         assert!(matches!(
             parse_local_intent("open Spotify"),
@@ -404,7 +405,7 @@ mod tests {
         // "stop the timer" is a timer command, not media and not an app.
         assert_eq!(
             parse_local_intent("stop the timer"),
-            Some(LocalIntent::Timer(timer::TimerIntent::Cancel))
+            Some(LocalIntent::Timer(timer::TimerIntent::OpenTimers))
         );
         // "turn off the display" is a system command, not "open ...".
         assert_eq!(

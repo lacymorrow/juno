@@ -105,14 +105,13 @@ pub mod tool_names {
     pub const TEXT_EDITOR_EDIT: &str = "text_editor_edit";
     pub const EXECUTE_SHELL_COMMAND: &str = "execute_shell_command";
 
-    // Timer tools standardized names
+    // Monitor tools. `list_timers` and `cancel_timer` keep their names: they
+    // list and stop whatever watch is armed, and renaming a tool the model
+    // has been taught buys nothing.
     pub const LIST_TIMERS: &str = "list_timers";
     pub const CANCEL_TIMER: &str = "cancel_timer";
-    pub const TIMER_STATUS: &str = "timer_status";
-    pub const SET_TIMER: &str = "set_timer";
     pub const SET_SCREEN_MONITOR: &str = "set_screen_monitor";
     pub const SET_FILE_MONITOR: &str = "set_file_monitor";
-    pub const CHECK_EXPIRED_TIMERS: &str = "check_expired_timers";
 
     // Juno's own Settings window: list, read, change, open and highlight
     pub const SETTINGS: &str = "settings";
@@ -154,17 +153,6 @@ pub mod tool_names {
     // Image tools (LAC-4206). The pair LAC-4204 extends.
     pub const GENERATE_IMAGE: &str = "generate_image";
     pub const EDIT_IMAGE: &str = "edit_image";
-
-    // Timer tools
-    pub const TIMER_CREATE: &str = "timer_create";
-    pub const TIMER_START: &str = "timer_start";
-    pub const TIMER_STOP: &str = "timer_stop";
-    pub const TIMER_PAUSE: &str = "timer_pause";
-    pub const TIMER_RESUME: &str = "timer_resume";
-    pub const TIMER_GET_STATUS: &str = "timer_get_status";
-    pub const TIMER_LIST: &str = "timer_list";
-    pub const TIMER_DELETE: &str = "timer_delete";
-    pub const CREATE_TIMER: &str = "create_timer";
 
     // Computer use actions
     pub const ACTION_SCREENSHOT: &str = "screenshot";

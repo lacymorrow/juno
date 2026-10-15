@@ -1,0 +1,40 @@
+LAC-4305 / PR #816 -- evidence that 'open clock-timer:' opens Clock on its Timers tab
+Captured 2026-10-14 23:43:33 EDT on macOS 26.6.2 (arm64)
+
+NOTE: no screenshot. The Screen Recording permission is not granted to the agent
+process on this Mac, so screencapture fails ('could not create image from display').
+The accessibility readout below is the stronger evidence anyway: it proves which tab
+Clock actually selected, which a picture of Clock would not.
+
+=== 1. Clock.app is not scriptable, so no timer can be started or read back ===
+$ sdef /System/Applications/Clock.app
+sdef: couldn't get sdef for /System/Applications/Clock.app (error -192)
+$ PlistBuddy -c 'Print :OSAScriptingDefinition' .../Clock.app/Contents/Info.plist
+Print: Entry, ":OSAScriptingDefinition", Does Not Exist
+
+=== 2. Clock's only automation surface is an open-tab intent, and it is URLRepresentable ===
+$ strings .../WorldClockWidget.appex/.../extract.actionsdata | (OpenTabIntent excerpt)
+"com.apple.link.systemProtocol.URLRepresentable"
+"com.apple.link.systemProtocol.URLRepresentable"]
+"identifier":"OpenTabIntent"
+"identifier":"timer"}
+"key":"TIMERS"
+
+=== 3. LaunchServices names the URL behind it ===
+$ lsregister -dump | grep 'claimed schemes' (Clock's claim)
+claimed schemes:            clock-alarm:, clock-sleep-alarm:, clock-stopwatch:, clock-timer-running:, clock-timer:, clock-worldclock:
+
+=== 4. Opening it selects the Timers tab (the result the feature promises) ===
+$ open clock-timer:
+exit=0
+$ osascript -- read each toolbar radio button back over the accessibility API
+World Clock value=0
+Alarms value=0
+Stopwatch value=0
+Timers value=1
+                                              ^ value=1 is the selected tab
+
+=== 5. No duration can ride the URL, which is why none is parsed ===
+open clock-timer://300  -> selected tab: Timers  (tab opens, the rest is ignored; no timer is created)
+open clock-timer:300  -> selected tab: Timers  (tab opens, the rest is ignored; no timer is created)
+open clock-timer://?duration=300  -> selected tab: Timers  (tab opens, the rest is ignored; no timer is created)
