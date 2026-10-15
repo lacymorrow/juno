@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.203] - 2026-10-15
+
+### Added
+
+- **timers:** Clock owns timers; "set a timer" opens Clock on Timers (#816) (903d56f9)
+
 ## [0.8.201] - 2026-10-15
 
 ### Added
@@ -1446,7 +1452,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.201...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.203...HEAD
+[0.8.203]: https://github.com/lacymorrow/juno/compare/cua-v0.8.202...v0.8.203
 [0.8.201]: https://github.com/lacymorrow/juno/compare/cua-v0.8.200...v0.8.201
 [0.8.198]: https://github.com/lacymorrow/juno/compare/cua-v0.8.197...v0.8.198
 [0.8.197]: https://github.com/lacymorrow/juno/compare/cua-v0.8.196...v0.8.197
