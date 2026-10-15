@@ -106,6 +106,12 @@ const HOOKS_ENFORCED = {
  * each needs a sweep of its own. Fix the findings, then turn the rule on in
  * that same PR — see LAC-4500.
  *
+ * Every entry is `"off"`, which is already ESLint's default, so this object
+ * changes no behaviour. It is here on purpose: it makes the ratchet's remaining
+ * work visible in the file that enforces it rather than only in an issue, and
+ * it makes enabling a rule a one-word diff instead of a new line. Do not
+ * "simplify" it away — the counts are the map.
+ *
  *   react-hooks/set-state-in-effect          72
  *   react-hooks/refs                         64
  *   react-hooks/exhaustive-deps              33
