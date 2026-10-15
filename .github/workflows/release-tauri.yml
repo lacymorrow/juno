@@ -226,8 +226,8 @@ jobs:
       # minutes notarization takes, that release's DMG asset is the unstapled
       # copy. Closing it means building to a draft release and publishing
       # after verification, which reshapes the canary-feed and Latest steps
-      # too — a change to the release flow that wants its own PR. Tracked
-      # separately; the exposure is a prerelease asset, and the website and
+      # too — a change to the release flow that wants its own PR, filed as
+      # LAC-4498. The exposure is a prerelease asset, and the website and the
       # stable channel read /releases/latest, which only moves on promotion.
 
       # Notarize and staple the DISK IMAGE itself.
