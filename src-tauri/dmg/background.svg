@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Juno DMG install window background.
+
+  Source of truth for src-tauri/dmg/background@2x.png. Regenerate with
+  scripts/build-dmg-background.sh after editing this file.
+
+  Coordinates are POINTS and match src-tauri/tauri.conf.json exactly:
+    content area            660 x 400   (bundle.macOS.dmg.windowSize minus the
+                                         22pt title bar; see the script header)
+    Juno icon centre        180, 190    (dmg.appPosition)
+    Applications centre     480, 190    (dmg.applicationFolderPosition)
+
+  Finder draws both icons at 128pt, so their graphics occupy x 116..244 and
+  x 416..544. The arrow lives in the 172pt channel between them and must not
+  intrude on either.
+
+  Palette is sampled from the app icon itself (src-tauri/icons/icon.png), not
+  invented: violet #484D92 is the icon's lower-left felt.
+
+  The field is deliberately LIGHT. Finder draws disk-image icon labels in
+  black in both light and dark appearance, and that colour cannot be
+  configured, so a dark field would need capsules painted behind each label to
+  stay legible. A light field needs no such device: black on #EFEEF7 is
+  18.2:1. Do not darken this art without re-solving that problem.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="400" viewBox="0 0 660 400">
+  <defs>
+    <!-- Near-white, faintly violet. Carries the brand hue without competing
+         with the icon, which is highly saturated felt. -->
+    <linearGradient id="field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FCFBFE"/>
+      <stop offset="1" stop-color="#EFEEF7"/>
+    </linearGradient>
+
+    <!-- A single very faint wash behind the arrow, tying the two icons into
+         one gesture. 5% at the centre; anything stronger reads as a glow. -->
+    <radialGradient id="wash" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#484D92" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#484D92" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- The shaft fades in from the app icon: direction of travel, stated
+         without an animation we cannot play.
+
+         userSpaceOnUse is required, not a style choice: the shaft is a
+         horizontal line, so its bounding box has zero height and the default
+         objectBoundingBox mapping is degenerate. The line then renders as
+         nothing at all. -->
+    <linearGradient id="shaft" gradientUnits="userSpaceOnUse"
+                    x1="258" y1="190" x2="384" y2="190">
+      <stop offset="0" stop-color="#484D92" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#484D92" stop-opacity="0.95"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="660" height="400" fill="url(#field)"/>
+  <ellipse cx="330" cy="190" rx="250" ry="150" fill="url(#wash)"/>
+
+  <!-- Drag affordance: Juno -> Applications. 14pt clear of both icon boxes. -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="5">
+    <line x1="258" y1="190" x2="384" y2="190" stroke="url(#shaft)"/>
+    <polyline points="384,176 402,190 384,204" stroke="#484D92" stroke-opacity="0.95"/>
+  </g>
+</svg>
