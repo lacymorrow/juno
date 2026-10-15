@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.201] - 2026-10-15
+
+### Added
+
+- **starters:** starters grow with you, three fresh ones per conversation (#817) (a700c6fd)
+
 ## [0.8.198] - 2026-10-14
 
 ### Added
@@ -1440,7 +1446,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.198...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.201...HEAD
+[0.8.201]: https://github.com/lacymorrow/juno/compare/cua-v0.8.200...v0.8.201
 [0.8.198]: https://github.com/lacymorrow/juno/compare/cua-v0.8.197...v0.8.198
 [0.8.197]: https://github.com/lacymorrow/juno/compare/cua-v0.8.196...v0.8.197
 [0.8.196]: https://github.com/lacymorrow/juno/compare/cua-v0.8.195...v0.8.196
