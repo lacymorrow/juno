@@ -44,7 +44,12 @@ const ROTATION: Record<string, string> = {
   down: "rotate(90deg)",
 };
 
-/** The card sits on the far side from the arrow, so the arrow touches the window. */
+/**
+ * The card sits on the far side from the arrow, so the arrow ends up on the
+ * window edge that faces System Settings. The card takes all the room the
+ * arrow does not (`flex-1`), which is what puts the arrow on that edge rather
+ * than somewhere in the middle.
+ */
 const LAYOUT: Record<string, string> = {
   right: "flex-row",
   left: "flex-row-reverse",
@@ -102,7 +107,7 @@ export const PermissionCoach = () => {
       data-testid="permission-coach"
       role="status"
       aria-live="polite"
-      className={cn("flex h-screen w-screen items-center justify-center gap-0", LAYOUT[arrow])}
+      className={cn("flex h-screen w-screen items-stretch", LAYOUT[arrow])}
     >
       <style>{`
         @keyframes juno-coach-drift {
@@ -115,7 +120,7 @@ export const PermissionCoach = () => {
         }
       `}</style>
 
-      <div className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl bg-black/80 px-3.5 py-3 ring-1 ring-inset ring-white/15 backdrop-blur-xl">
+      <div className="flex min-w-0 min-h-0 flex-1 items-center gap-3 rounded-2xl bg-black/80 px-3.5 py-3 ring-1 ring-inset ring-white/15 backdrop-blur-xl">
         {state.granted ? (
           <span
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
