@@ -48,7 +48,7 @@ pub async fn list_armed_monitors() -> Result<serde_json::Value, String> {
     }))
 }
 
-/// Stop every armed watch and pending timer. Idempotent.
+/// Stop every armed watch. Idempotent.
 ///
 /// The same call Escape makes through the stop coordinator, exposed on its own
 /// so a surface can offer "stop watching" without stopping everything else in

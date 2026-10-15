@@ -29,7 +29,6 @@ import {
   HardDrive,
   ExternalLink,
   Globe,
-  Clock,
   CheckCircle2,
   Circle,
   ListTodo,
@@ -510,64 +509,6 @@ export function ComparisonCard({
             )}
           </div>
         ))}
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// TimerCard — with animated clock
-// ============================================================
-
-interface TimerCardProps {
-  label?: string;
-  duration?: string; // e.g. "5:00", "1:30:00"
-  status?: "running" | "paused" | "finished";
-}
-
-export function TimerCard({
-  label = "Timer",
-  duration = "0:00",
-  status = "running",
-}: TimerCardProps) {
-  return (
-    <div className="rounded-xl border bg-card p-4 flex items-center gap-4 juno-animate-in shadow-sm">
-      <div className="relative">
-        <Clock
-          className={cn(
-            "h-7 w-7 transition-colors",
-            status === "running"
-              ? "text-blue-500"
-              : status === "finished"
-                ? "text-green-500"
-                : "text-muted-foreground",
-          )}
-        />
-        {status === "running" && (
-          <div
-            className="absolute inset-0 rounded-full border-2 border-blue-500/40"
-            style={{ animation: "juno-pulse-ring 2s ease-out infinite" }}
-          />
-        )}
-      </div>
-      <div>
-        <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="text-2xl font-mono font-bold tabular-nums">
-          {duration}
-        </div>
-      </div>
-      <div
-        className={cn(
-          "text-xs px-2.5 py-1 rounded-full ml-auto font-medium",
-          status === "running" &&
-            "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
-          status === "paused" &&
-            "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300",
-          status === "finished" &&
-            "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
-        )}
-      >
-        {status}
       </div>
     </div>
   );

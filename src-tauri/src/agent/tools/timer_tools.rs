@@ -1,16 +1,23 @@
 //! # Timer Tools Module
 //!
-//! Advanced scheduling and monitoring tools for delayed agent execution and system monitoring.
-//! Enables agents to set timers, monitor screen changes, file system events, and application states.
+//! Monitoring tools that can start a turn on their own: the agent arms a
+//! watch on the screen or the filesystem, and a change wakes it.
 //!
 //! ## Core Capabilities:
-//! - Simple time-based delays with context restoration
 //! - Screen region monitoring for visual changes
 //! - File system monitoring (creation, modification, deletion)
 //! - Application state monitoring (launch, focus, termination)
+//! - Listing and cancelling whatever is armed
+//!
+//! ## Not here: countdown timers
+//!
+//! There was a `set_timer` tool for a plain delay, and the person-facing
+//! countdown it backed. Both are gone (Lacy, 2026-10-12): Juno drives the
+//! Mac's own apps and features, and a timer is Clock's. See
+//! `agent/local_intents/timer.rs` for what "set a timer" does now.
 //!
 //! ## Usage
-//! Used by: Game automation, long-running tasks, system monitoring, waiting for external events
+//! Used by: long-running tasks, system monitoring, waiting for external events
 //! Registration: Called via `register_timer_tools()` during agent setup
 
 use crate::agent::implementations::tool_provider::LocalToolProvider;
@@ -60,8 +67,6 @@ pub struct TimerTask {
 /// Used by: Timer task creation, monitoring system dispatch, timer execution logic
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TimerType {
-    /// Simple time-based delay timer
-    Simple,
     /// Screen monitoring with change detection
     ScreenMonitor {
         /// Optional screen region to monitor (full screen if None)
@@ -100,9 +105,14 @@ impl TimerType {
     /// Matched exhaustively on purpose. A new timer kind has to answer this
     /// question at the point it is added, rather than defaulting to "not a
     /// watch" behind a wildcard and quietly shipping something unstoppable.
+    ///
+    /// Every kind left is a watch, now that the plain delay (`Simple`) is
+    /// gone with Juno's own timers. The method stays rather than collapsing
+    /// to `true` so that the exhaustive match keeps asking the question: the
+    /// next kind added might not be a watch, and the compiler should be the
+    /// thing that notices.
     pub fn is_monitor(&self) -> bool {
         match self {
-            TimerType::Simple => false,
             TimerType::ScreenMonitor { .. }
             | TimerType::FileMonitor { .. }
             | TimerType::ApplicationMonitor { .. } => true,
@@ -112,7 +122,6 @@ impl TimerType {
     /// Short human label, for logs and the status command.
     pub fn label(&self) -> &'static str {
         match self {
-            TimerType::Simple => "delay",
             TimerType::ScreenMonitor { .. } => "screen monitor",
             TimerType::FileMonitor { .. } => "file monitor",
             TimerType::ApplicationMonitor { .. } => "application monitor",
@@ -491,36 +500,6 @@ impl TimerManager {
         let timers = self.active_timers.lock().await;
         timers.values().cloned().collect()
     }
-
-    /// Gets all expired timers from the active timer collection.
-    ///
-    /// Used by: Timer expiration checking, cleanup processes
-    ///
-    /// # Returns
-    /// Vector of expired `TimerTask` instances
-    pub async fn get_expired_timers(&self) -> Vec<TimerTask> {
-        let timers = self.active_timers.lock().await;
-
-        // Get current time, or return empty vector if system time error
-        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(duration) => duration.as_secs(),
-            Err(e) => {
-                warn!("System time error in get_expired_timers: {}", e);
-                return Vec::new(); // Return empty vector if we can't get current time
-            }
-        };
-
-        timers
-            .values()
-            .filter(|timer| {
-                match timer.timer_type {
-                    TimerType::Simple => timer.trigger_time <= now,
-                    _ => false, // Monitoring timers don't expire by time
-                }
-            })
-            .cloned()
-            .collect()
-    }
 }
 
 // Tool implementations
@@ -846,126 +825,6 @@ mod timer_tools_impl {
             *frame.get_pixel(rect.x + x, rect.y + y)
         });
         Ok((rect, cropped))
-    }
-
-    /// Creates the tool definition for the `set_timer` tool.
-    ///
-    /// Used by: Tool registration system, agent tool discovery
-    /// Creates schema for simple time-based delay timers.
-    ///
-    /// # Returns
-    /// `ToolDefinition` for setting simple delay timers with context
-    pub fn set_timer_definition() -> ToolDefinition {
-        ToolDefinition {
-            name: agent::tool_names::SET_TIMER.to_string(),
-            description: "Sets a timer that will restart the agent after a specified delay. Useful for long-running tasks like games where the agent needs to wait for external events or take breaks. The agent will be restarted with the saved context when the timer expires.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "delay_seconds": {
-                        "type": "number",
-                        "description": "Number of seconds to wait before restarting the agent",
-                        "minimum": 1
-                    },
-                    "context": {
-                        "type": "object",
-                        "description": "Context data to restore when the timer expires (game state, conversation history, etc.)",
-                        "additionalProperties": true
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Human-readable description of what this timer is for"
-                    }
-                },
-                "required": ["delay_seconds", "context", "description"]
-            }),
-            api_type: None,
-            beta_flag: None,
-        }
-    }
-
-    /// Executes the `set_timer` tool operation.
-    ///
-    /// Creates a simple delay timer that will emit a timer-expired event
-    /// to restart the agent with saved context after the delay.
-    ///
-    /// Used by: Game automation, long-running processes, scheduled tasks
-    ///
-    /// # Arguments
-    /// * `input` - JSON with delay_seconds, context, and description
-    /// * `app_handle` - Tauri app handle for event emission
-    ///
-    /// # Returns
-    /// Success response with timer details or error message
-    pub async fn set_timer_exec(input: Value, app_handle: AppHandle) -> Result<Value, String> {
-        let delay_seconds = schedule_seconds(&input, "delay_seconds").ok_or_else(|| {
-            error_messages::tool_errors::MISSING_DELAY_SECONDS_PARAMETER.to_string()
-        })?;
-
-        let context = input["context"]
-            .as_object()
-            .ok_or_else(|| error_messages::tool_errors::MISSING_CONTEXT_PARAMETER.to_string())?
-            .clone();
-
-        let description = input["description"]
-            .as_str()
-            .ok_or_else(|| error_messages::tool_errors::MISSING_DESCRIPTION_PARAMETER.to_string())?
-            .to_string();
-
-        let timer_id = Uuid::new_v4().to_string();
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| {
-                error_messages::format_strings::SYSTEM_TIME_ERROR.replace("{}", &e.to_string())
-            })?
-            .as_secs();
-        let trigger_time = now.saturating_add(delay_seconds);
-
-        let timer_task = TimerTask {
-            id: timer_id.clone(),
-            trigger_time,
-            context: Value::Object(context),
-            description,
-            created_at: now,
-            timer_type: TimerType::Simple,
-        };
-
-        timer_manager().add_timer(timer_task).await;
-
-        // Start the timer task
-        let app_handle_clone = app_handle.clone();
-        let timer_id_clone = timer_id.clone();
-        tauri::async_runtime::spawn(async move {
-            sleep(Duration::from_secs(delay_seconds)).await;
-
-            // Check if timer is still active (might have been cancelled)
-            if let Some(expired_timer) = timer_manager()
-                .release_timer(Some(&app_handle_clone), &timer_id_clone)
-                .await
-            {
-                info!(
-                    "{}",
-                    error_messages::format_strings::TIMER_EXPIRED_TRIGGERING_RESTART
-                        .replace("{}", &timer_id_clone)
-                );
-
-                // Emit event to frontend to restart agent with context
-                if let Err(e) = app_handle_clone.emit(events::timer::EXPIRED, &expired_timer) {
-                    error!(
-                        "{}",
-                        error_messages::format_strings::FAILED_TO_EMIT_TIMER_EXPIRED_EVENT
-                            .replace("{}", &e.to_string())
-                    );
-                }
-            }
-        });
-
-        Ok(json!({
-            "success": true,
-            "timer_id": timer_id,
-            "trigger_time": trigger_time,
-            "message": format!("Timer set for {} seconds from now", delay_seconds)
-        }))
     }
 
     /// Creates the tool definition for the `set_screen_monitor` tool.
@@ -1714,82 +1573,6 @@ mod timer_tools_impl {
             "max_wakes_per_hour": MAX_WAKES_PER_WINDOW
         }))
     }
-
-    /// Creates the tool definition for the `check_expired_timers` tool.
-    ///
-    /// Used by: Tool registration system for expired timer checking
-    /// Critical for agent startup to detect if previous timers have expired
-    /// and need context restoration.
-    ///
-    /// # Returns
-    /// `ToolDefinition` for checking and retrieving expired timer contexts
-    pub fn check_expired_timers_definition() -> ToolDefinition {
-        ToolDefinition {
-            name: agent::tool_names::CHECK_EXPIRED_TIMERS.to_string(),
-            description: "Checks for any expired timers and returns their contexts. This is useful during agent startup to see if the agent should resume a previous task.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {},
-                "additionalProperties": false
-            }),
-            api_type: None,
-            beta_flag: None,
-        }
-    }
-
-    /// Executes the `check_expired_timers` tool operation.
-    ///
-    /// Scans for expired timers and returns their contexts for agent resumption.
-    /// Automatically removes expired timers from the active collection.
-    ///
-    /// Used by: Agent startup, context restoration, expired timer cleanup
-    ///
-    /// # Arguments
-    /// * `_input` - Unused (no parameters required)
-    /// * `app_handle` - Tauri app handle for state access
-    ///
-    /// # Returns
-    /// JSON with expired timer details and contexts for restoration
-    pub async fn check_expired_timers_exec(
-        _input: Value,
-        app_handle: AppHandle,
-    ) -> Result<Value, String> {
-        let timer_manager = timer_manager();
-
-        let expired_timers = timer_manager.get_expired_timers().await;
-
-        // Remove expired timers from active list
-        for timer in &expired_timers {
-            let _ = timer_manager
-                .release_timer(Some(&app_handle), &timer.id)
-                .await;
-        }
-
-        let expired_info: Vec<Value> = expired_timers
-            .iter()
-            .map(|timer| {
-                json!({
-                    "id": timer.id,
-                    "description": timer.description,
-                    "context": timer.context,
-                    "trigger_time": timer.trigger_time,
-                    "created_at": timer.created_at,
-                    "timer_type": timer.timer_type
-                })
-            })
-            .collect();
-
-        Ok(json!({
-            "success": true,
-            "expired_timers": expired_info,
-            "count": expired_timers.len(),
-            "message": if expired_timers.is_empty() {
-                error_messages::tool_errors::NO_EXPIRED_TIMERS_FOUND
-            } else {
-                error_messages::tool_errors::FOUND_EXPIRED_TIMERS_WITH_CONTEXT
-            }
-        }))
-    }
 }
 
 /// Registers all timer tools with the provider for agent task scheduling and resumption.
@@ -1804,24 +1587,15 @@ mod timer_tools_impl {
 /// * `app_handle` - Tauri app handle for state access and event emission
 ///
 /// # Tools Registered
-/// - `set_timer`: Simple delay timers with context restoration
 /// - `set_screen_monitor`: Screen change monitoring (macOS only)
 /// - `set_file_monitor`: File system event monitoring
 /// - `cancel_timer`: Timer cancellation by ID
 /// - `list_timers`: List all active timers with status
-/// - `check_expired_timers`: Check for expired timers needing context restoration
+///
+/// `cancel_timer` and `list_timers` are the only surface a person or the
+/// model has for stopping and seeing an armed watch, so they stay even though
+/// the plain `set_timer` delay they were also written for is gone.
 pub async fn register_timer_tools(provider: &mut LocalToolProvider, app_handle: AppHandle) {
-    // set_timer
-    let set_timer_def = timer_tools_impl::set_timer_definition();
-    let app_handle_clone1 = app_handle.clone();
-    let set_timer_exec = move |input| {
-        let handle = app_handle_clone1.clone();
-        async move { timer_tools_impl::set_timer_exec(input, handle).await }
-    };
-    provider
-        .register_async_tool(set_timer_def, set_timer_exec)
-        .await;
-
     // set_screen_monitor
     let set_screen_monitor_def = timer_tools_impl::set_screen_monitor_definition();
     let app_handle_clone2 = app_handle.clone();
@@ -1866,18 +1640,9 @@ pub async fn register_timer_tools(provider: &mut LocalToolProvider, app_handle: 
         .register_async_tool(list_timers_def, list_timers_exec)
         .await;
 
-    // check_expired_timers
-    let check_expired_def = timer_tools_impl::check_expired_timers_definition();
-    let app_handle_clone6 = app_handle.clone();
-    let check_expired_exec = move |input| {
-        let handle = app_handle_clone6.clone();
-        async move { timer_tools_impl::check_expired_timers_exec(input, handle).await }
-    };
-    provider
-        .register_async_tool(check_expired_def, check_expired_exec)
-        .await;
-
-    info!("Registered enhanced timer tools: set_timer, set_screen_monitor, set_file_monitor, cancel_timer, list_timers, check_expired_timers");
+    info!(
+        "Registered timer tools: set_screen_monitor, set_file_monitor, cancel_timer, list_timers"
+    );
 }
 
 /// Every number of seconds these tools take comes from a model, so the reader
@@ -2089,16 +1854,15 @@ mod stoppability_tests {
         let manager = TimerManager::new();
         manager.add_timer(screen_monitor("screen")).await;
         manager.add_timer(file_monitor("file")).await;
-        manager.add_timer(task("delay", TimerType::Simple)).await;
 
         assert!(manager.has_armed_monitor().await);
         assert_eq!(manager.armed_monitors().await.len(), 2);
 
         let cancelled = manager.cancel_all_timers(None).await;
 
-        // Monitors and plain delays alike: all three can start a turn on their
-        // own, and Escape means stop all of it.
-        assert_eq!(cancelled.len(), 3);
+        // Every armed watch can start a turn on its own, and Escape means
+        // stop all of it.
+        assert_eq!(cancelled.len(), 2);
         assert!(!manager.has_armed_monitor().await);
         assert!(manager.list_active_timers().await.is_empty());
 
@@ -2133,8 +1897,7 @@ mod stoppability_tests {
     }
 
     #[test]
-    fn a_plain_delay_is_not_a_watch_and_every_monitor_is() {
-        assert!(!TimerType::Simple.is_monitor());
+    fn every_monitor_is_a_watch() {
         assert!(TimerType::ScreenMonitor {
             region: None,
             threshold: 0.1,
