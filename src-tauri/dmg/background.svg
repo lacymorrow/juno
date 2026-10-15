@@ -6,8 +6,9 @@
   scripts/build-dmg-background.sh after editing this file.
 
   Coordinates are POINTS and match src-tauri/tauri.conf.json exactly:
-    content area            660 x 400   (bundle.macOS.dmg.windowSize minus the
-                                         22pt title bar; see the script header)
+    content area            660 x 400   (bundle.macOS.dmg.windowSize, 660x432,
+                                         minus the 32pt title bar; measured,
+                                         see src-tauri/dmg/README.md)
     Juno icon centre        180, 190    (dmg.appPosition)
     Applications centre     480, 190    (dmg.applicationFolderPosition)
 

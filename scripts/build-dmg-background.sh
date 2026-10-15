@@ -15,18 +15,33 @@
 #   640pt window), and scripts/verify-dmg.sh asserts the logical size so a
 #   rename cannot break it silently.
 #
-# Why 400 points tall when tauri.conf.json says windowSize.height = 422:
-#   create-dmg sets the Finder window's *outer* bounds, which include the 22pt
-#   title bar. The background fills the content area underneath it.
-#   422 - 22 = 400. verify-dmg.sh checks this against a real built DMG.
+# The size is DERIVED from tauri.conf.json, never typed in here:
+#   create-dmg sets the Finder window's *outer* bounds, which include the
+#   title bar, so the background fills windowSize minus TITLE_BAR_PT. Hardcoding
+#   it meant this header went stale the moment the window was resized, which is
+#   exactly how it got committed saying 422 while the config said 432.
+#   verify-dmg.sh asserts the same relation against a real built DMG.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 src="src-tauri/dmg/background.svg"
 out="src-tauri/dmg/background@2x.png"
-width=660
-height=400
+
+# Keep in step with TITLE_BAR_PT in scripts/verify-dmg.sh.
+title_bar=32
+
+read -r width height <<EOF
+$(python3 - src-tauri/tauri.conf.json "$title_bar" <<'PY'
+import json, sys
+dmg = json.load(open(sys.argv[1]))["bundle"]["macOS"]["dmg"]
+print(dmg["windowSize"]["width"], dmg["windowSize"]["height"] - int(sys.argv[2]))
+PY
+)
+EOF
+[ -n "${width:-}" ] && [ -n "${height:-}" ] || {
+  echo "could not read windowSize from src-tauri/tauri.conf.json" >&2; exit 1; }
+echo "content area from tauri.conf.json: ${width}x${height}pt"
 
 [ -f "$src" ] || { echo "missing $src" >&2; exit 1; }
 

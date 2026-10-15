@@ -180,7 +180,15 @@ blob = open(path, 'rb').read()
 # structure id + 4-byte type + payload. Rather than walk the Buddy allocator's
 # B-tree, find each 'Iloc' structure id and read the filename backwards from
 # it; an Iloc payload is a 16-byte blob whose first two BE longs are x and y.
+#
+# A linear scan is safe here only because this file is one create-dmg just
+# wrote for a handful of items — a freshly built image has four Iloc records
+# and no stale ones in the allocator's free space. It is not a general
+# .DS_Store parser, so rather than trust that assumption silently, a duplicate
+# or unreadable record is reported as a failure instead of being resolved by
+# guessing which copy is current.
 found = {}
+seen = {}
 pos = 0
 while True:
     pos = blob.find(b'Iloc', pos)
@@ -202,14 +210,24 @@ while True:
             if struct.unpack('>I', blob[name_start - 4:name_start])[0] != n:
                 continue
             try:
-                found[blob[name_start:name_end].decode('utf-16-be')] = (x, y)
+                name = blob[name_start:name_end].decode('utf-16-be')
             except UnicodeDecodeError:
-                pass
+                break
+            seen[name] = seen.get(name, 0) + 1
+            found[name] = (x, y)
             break
     pos += 4
 
 rc = 0
 for name, want in ((app_name, (ax, ay)), ('Applications', (fx, fy))):
+    if seen.get(name, 0) > 1:
+        # Two records for one item means the scan is reading stale allocator
+        # space, and picking either one would be a guess. Say so rather than
+        # pass or fail the release on a coin toss.
+        print(f'\033[31m  FAIL\033[0m {seen[name]} icon positions recorded for '
+              f'{name!r}; cannot tell which is current')
+        rc = 1
+        continue
     got = found.get(name)
     if got is None:
         print(f'\033[31m  FAIL\033[0m no icon position recorded for {name!r}')
