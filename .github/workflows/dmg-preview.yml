@@ -33,7 +33,6 @@ on:
       - "src-tauri/tauri.conf.json"
       - "scripts/verify-dmg.sh"
       - "scripts/build-dmg-background.sh"
-      - "scripts/crop-window.py"
       - ".github/workflows/dmg-preview.yml"
 
 permissions:
@@ -102,15 +101,26 @@ jobs:
           open "${vol:-/Volumes/Juno}"
           sleep 6
 
-          screencapture -x out/dmg-screen.png
+          echo "as opened: $(osascript -e 'tell application "Finder" to get bounds of window 1')"
 
-          # Crop to the window. Finder reports bounds in points; the capture is
-          # in pixels, so scale by (capture width / desktop width in points).
-          bounds="$(osascript -e 'tell application "Finder" to get bounds of window 1')"
-          desktop_w="$(osascript -e 'tell application "Finder" to get item 3 of (bounds of window of desktop)')"
-          echo "window bounds: $bounds   desktop width: ${desktop_w}pt"
-          BOUNDS="$bounds" DESKTOP_W="$desktop_w" python3 scripts/crop-window.py \
-            out/dmg-screen.png out/dmg-window.png
+          # Park the window at a position that fits this runner's virtual
+          # display, which is 1024x768 — smaller than any Mac still shipping,
+          # and narrower than windowPosition.x + windowSize.width. Without
+          # this the right edge of the window falls off the screen and the
+          # picture is clipped.
+          #
+          # Moving it is safe and does not weaken the evidence: the volume is
+          # mounted read-only so the saved layout cannot change, and the
+          # position actually stored in the .DS_Store is asserted by
+          # verify-dmg.sh above. What this step is for is the window's
+          # contents.
+          osascript -e 'tell application "Finder" to set bounds of window 1 to {20, 60, 680, 492}'
+          sleep 2
+
+          # -R takes a rect in POINTS and writes it at the display's own
+          # scale, so there is no pixel/point conversion to get wrong.
+          screencapture -x -R20,60,660,432 out/dmg-window.png
+          screencapture -x out/dmg-screen.png
 
           hdiutil detach "${vol:-/Volumes/Juno}" || true
           ls -la out
