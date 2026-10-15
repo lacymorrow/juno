@@ -8,13 +8,13 @@ import {
   type NotchEdge,
   type NotchForm,
 } from "@/lib/notchWells";
-import { ISLAND_SIZES, type IslandSize, type Posture } from "../island/islandModel";
+import { POSTURE_SIZES as ISLAND_SIZES, type PostureSize as IslandSize, type Posture } from "./notchPosture";
 
 /**
  * The Notch's shapes, as pure numbers.
  *
- * The Notch says everything the Island says, with the Island's own posture
- * table (`islandModel.ts`): the same dot, the same words, the same card. What
+ * The Notch says everything the Island used to say, with its posture table
+ * (`notchPosture.ts`): the same dot, the same words, the same card. What
  * changes is the body. In the top notch the island's content hangs below the
  * menu bar strip, out from under the camera; on another edge it grows straight
  * out of that edge; in a corner it sits on the black of a page peeled back

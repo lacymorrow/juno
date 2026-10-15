@@ -2,99 +2,198 @@ import { describe, expect, it } from "vitest";
 import { UI } from "@/lib/constants.generated";
 import type { ChatMessage } from "@/types/chat";
 import {
-  ISLAND_SIZES,
+  COMPOSER_LINE_PX,
+  COMPOSER_MAX_TEXT_PX,
+  HOVER_SHAPE,
+  IDLE_SHAPE,
+  ISLAND_STEADY_SPEC,
+  ISLAND_WIDTH,
   SHADOW_PAD,
+  SHAPE_MAX_HEIGHT,
+  STOP_LABELS,
   answerKey,
-  cardHeightFor,
+  composerHeightFor,
+  composerPlaceholder,
   dotFor,
-  islandSize,
+  faceFor,
   latestTurn,
-  posture,
-  ringShouldRun,
-  windowSize,
+  lingerShouldRun,
+  shapeFor,
+  stopControl,
   wordsFor,
+  type FaceInput,
 } from "../islandModel";
 
 const EVERY_STATE = Object.entries(UI)
   .filter(([k]) => k.startsWith("BAR_STATES_"))
   .map(([, v]) => v as string);
 
-describe("posture", () => {
-  it("rests as a capsule, opens an ear to speak, a line to type, a status line to work", () => {
-    const at = (state: string) => posture({ state, cardOpen: false });
-    expect(at(UI.BAR_STATES_DEFAULT)).toBe("capsule");
-    expect(at(UI.BAR_STATES_DICTATION_READY)).toBe("capsule");
-    expect(at(UI.BAR_STATES_SHRINKING)).toBe("capsule");
-    expect(at(UI.BAR_STATES_LISTENING)).toBe("ear");
-    expect(at(UI.BAR_STATES_DICTATING)).toBe("ear");
-    expect(at(UI.BAR_STATES_ALWAYS_LISTENING)).toBe("ear");
-    expect(at(UI.BAR_STATES_INPUT)).toBe("line");
-    expect(at(UI.BAR_STATES_EXPANDING)).toBe("line");
-    for (const s of [
-      UI.BAR_STATES_TRANSCRIBING,
-      UI.BAR_STATES_SUBMITTING,
-      UI.BAR_STATES_LOADING,
-      UI.BAR_STATES_AGENT_RESPONDING,
-      UI.BAR_STATES_FINISHING,
-      UI.BAR_STATES_SUCCESS,
-      UI.BAR_STATES_SPEAKING,
-      UI.BAR_STATES_ERROR,
-      UI.BAR_STATES_STOPPING,
-    ]) {
-      expect(at(s)).toBe("status");
-    }
-  });
+const at = (state: string, extra: Partial<FaceInput> = {}) =>
+  faceFor({ state, answerOpen: false, componentShown: false, composerActive: false, dictation: false, ...extra });
 
-  it("maps every state Rust can send to a posture", () => {
+const RESTING: readonly string[] = [
+  UI.BAR_STATES_DEFAULT,
+  UI.BAR_STATES_DICTATION_READY,
+  UI.BAR_STATES_SHRINKING,
+  UI.BAR_STATES_ALWAYS_LISTENING,
+];
+
+describe("face", () => {
+  it("rests as the capsule, and past rest the island is the text box in every state", () => {
     for (const state of EVERY_STATE) {
-      expect(["capsule", "ear", "line", "status", "card"]).toContain(posture({ state, cardOpen: false }));
+      expect(at(state)).toBe(RESTING.includes(state) ? "idle" : "compose");
     }
   });
 
-  it("an open card wins over everything, driving wins over the line", () => {
-    expect(posture({ state: UI.BAR_STATES_INPUT, cardOpen: true })).toBe("card");
-    expect(posture({ state: UI.BAR_STATES_LISTENING, cardOpen: true })).toBe("card");
-    expect(posture({ state: UI.BAR_STATES_INPUT, cardOpen: false, driving: true })).toBe("status");
+  it("a draft, the caret or a step back keeps the composer up at rest", () => {
+    expect(at(UI.BAR_STATES_DEFAULT, { composerActive: true })).toBe("compose");
+    expect(at(UI.BAR_STATES_ALWAYS_LISTENING, { composerActive: true })).toBe("compose");
   });
 
-  it("only an idle island answers the pointer with its controls", () => {
-    expect(posture({ state: UI.BAR_STATES_DEFAULT, cardOpen: false, hovered: true })).toBe("hover");
-    expect(posture({ state: UI.BAR_STATES_DICTATION_READY, cardOpen: false, hovered: true })).toBe("hover");
-    expect(posture({ state: UI.BAR_STATES_LISTENING, cardOpen: false, hovered: true })).toBe("ear");
-    expect(posture({ state: UI.BAR_STATES_LOADING, cardOpen: false, hovered: true })).toBe("status");
-    expect(posture({ state: UI.BAR_STATES_INPUT, cardOpen: false, hovered: true })).toBe("line");
-    expect(posture({ state: UI.BAR_STATES_DEFAULT, cardOpen: true, hovered: true })).toBe("card");
-    // Barely bigger than the capsule, so it reads as the same object.
-    const h = islandSize("hover");
-    const c = islandSize("capsule");
-    expect(h.height - c.height).toBeLessThanOrEqual(4);
-    expect(h.width).toBeLessThan(islandSize("ear").width);
+  it("an open answer shows, as a component when it is one", () => {
+    expect(at(UI.BAR_STATES_DEFAULT, { answerOpen: true })).toBe("answer");
+    expect(at(UI.BAR_STATES_AGENT_RESPONDING, { answerOpen: true })).toBe("answer");
+    expect(at(UI.BAR_STATES_INPUT, { answerOpen: true })).toBe("answer");
+    expect(at(UI.BAR_STATES_DEFAULT, { answerOpen: true, componentShown: true })).toBe("component");
+  });
+
+  it("a spoken turn to Juno turns the answer back into the composer", () => {
+    expect(at(UI.BAR_STATES_LISTENING, { answerOpen: true })).toBe("compose");
+    expect(at(UI.BAR_STATES_LISTENING, { answerOpen: true, componentShown: true })).toBe("compose");
+    // The wake phrase merely armed is rest, not a turn.
+    expect(at(UI.BAR_STATES_ALWAYS_LISTENING, { answerOpen: true })).toBe("answer");
+  });
+
+  it("a dictation leaves the answer up, so the follow-up field it types into stays", () => {
+    expect(at(UI.BAR_STATES_DICTATING, { answerOpen: true, dictation: true })).toBe("answer");
+    expect(at(UI.BAR_STATES_LISTENING, { answerOpen: true, dictation: true })).toBe("answer");
+    expect(at(UI.BAR_STATES_TRANSCRIBING, { answerOpen: true, dictation: true })).toBe("answer");
   });
 });
 
-describe("sizes", () => {
-  it("ear and status share a size so the island never lurches when the mic closes", () => {
-    expect(islandSize("ear")).toEqual(islandSize("status"));
+describe("shape", () => {
+  const base = { hovered: false, composerHeight: composerHeightFor(COMPOSER_LINE_PX), contentHeight: 0 };
+
+  it("the capsule is a mark, and hover barely grows it", () => {
+    expect(shapeFor("idle", base)).toEqual(IDLE_SHAPE);
+    expect(shapeFor("idle", { ...base, hovered: true })).toEqual(HOVER_SHAPE);
+    expect(IDLE_SHAPE.radius).toBe(IDLE_SHAPE.height / 2);
+    expect(HOVER_SHAPE.height - IDLE_SHAPE.height).toBeLessThanOrEqual(4);
   });
 
-  it("the capsule is a mark, not a bar", () => {
-    const c = islandSize("capsule");
-    expect(c.width).toBeLessThan(100);
-    expect(c.height).toBeLessThan(32);
-    expect(c.radius).toBe(c.height / 2);
+  it("every face past idle is one width, so the composer never changes width", () => {
+    for (const face of ["compose", "answer", "component"] as const) {
+      expect(shapeFor(face, { ...base, contentHeight: 120 }).width).toBe(ISLAND_WIDTH);
+    }
   });
 
-  it("the card follows its content in steps, within its range", () => {
-    expect(cardHeightFor(10)).toBe(ISLAND_SIZES.card.minHeight);
-    expect(cardHeightFor(150)).toBe(152);
-    expect(cardHeightFor(153)).toBe(160);
-    expect(cardHeightFor(9000)).toBe(ISLAND_SIZES.card.maxHeight);
-    expect(islandSize("card", 150).height).toBe(152);
+  it("the composer grows with its text to four lines", () => {
+    expect(composerHeightFor(0)).toBe(36);
+    expect(composerHeightFor(COMPOSER_LINE_PX * 2)).toBe(54);
+    expect(composerHeightFor(9000)).toBe(COMPOSER_MAX_TEXT_PX + 18);
+    expect(shapeFor("compose", { ...base, composerHeight: 54 }).height).toBe(54);
   });
 
-  it("the window is the island plus its shadow, plus room below when asked", () => {
-    expect(windowSize(islandSize("capsule"))).toEqual({ width: 92 + 2 * SHADOW_PAD, height: 28 + 2 * SHADOW_PAD });
-    expect(windowSize(islandSize("line"), 60).height).toBe(36 + 2 * SHADOW_PAD + 60);
+  it("an answer is its content plus the composer, up to the cap", () => {
+    expect(shapeFor("answer", { ...base, contentHeight: 120 }).height).toBe(156);
+    expect(shapeFor("answer", { ...base, contentHeight: 9000 }).height).toBe(SHAPE_MAX_HEIGHT);
+  });
+
+  it("the window holds the largest face once, and wells are the capsule's", () => {
+    expect(ISLAND_STEADY_SPEC.rest).toEqual({
+      width: IDLE_SHAPE.width + 2 * SHADOW_PAD,
+      height: IDLE_SHAPE.height + 2 * SHADOW_PAD,
+    });
+    expect(ISLAND_STEADY_SPEC.max.width).toBe(ISLAND_WIDTH + 2 * SHADOW_PAD);
+    expect(ISLAND_STEADY_SPEC.max.height).toBeGreaterThanOrEqual(SHAPE_MAX_HEIGHT + 2 * SHADOW_PAD);
+  });
+});
+
+describe("placeholder", () => {
+  const base = {
+    transcriptionText: "",
+    spokenText: "",
+    currentError: null,
+    working: false,
+    answerShown: false,
+  };
+  const say = (state: string, extra: Partial<Parameters<typeof composerPlaceholder>[0]> = {}) =>
+    composerPlaceholder({ ...base, state, ...extra });
+
+  it("says what is happening, in sentence case", () => {
+    expect(say(UI.BAR_STATES_DEFAULT).text).toBe("Ask Juno");
+    expect(say(UI.BAR_STATES_INPUT, { answerShown: true }).text).toBe("Follow up");
+    expect(say(UI.BAR_STATES_LISTENING).text).toBe("Listening…");
+    expect(say(UI.BAR_STATES_TRANSCRIBING).text).toBe("Transcribing…");
+    expect(say(UI.BAR_STATES_SUBMITTING).text).toBe("Sending…");
+    expect(say(UI.BAR_STATES_LOADING).text).toBe("Working…");
+    expect(say(UI.BAR_STATES_LOADING, { runningTool: "Reading the page" }).text).toBe("Reading the page…");
+    expect(say(UI.BAR_STATES_STOPPING).text).toBe("Stopping…");
+    expect(say(UI.BAR_STATES_ERROR, { currentError: "Connection unavailable" })).toEqual({
+      text: "Connection unavailable",
+      tone: "error",
+    });
+  });
+
+  it("shows your words live while the mic is open", () => {
+    expect(say(UI.BAR_STATES_LISTENING, { transcriptionText: "Send the draft" })).toEqual({
+      text: "Send the draft",
+      tone: "live",
+    });
+    expect(
+      say(UI.BAR_STATES_TRANSCRIBING, { transcriptionText: "Send the", transcriptionProvisional: true }),
+    ).toEqual({ text: "Send the", tone: "provisional" });
+  });
+
+  it("speaks the spoken sentence when there is no answer to read, and names the driving", () => {
+    expect(say(UI.BAR_STATES_SPEAKING, { spokenText: "Here you go." }).text).toBe("Here you go.");
+    expect(say(UI.BAR_STATES_SPEAKING, { spokenText: "Here you go.", answerShown: true }).text).toBe("Follow up");
+    expect(say(UI.BAR_STATES_LOADING, { drivingLabel: "using the mouse" }).text).toBe("Juno is using the mouse");
+  });
+});
+
+describe("stop control", () => {
+  const stop = (extra: Partial<Parameters<typeof stopControl>[0]>) =>
+    stopControl({ face: "compose", state: UI.BAR_STATES_INPUT, working: false, driving: false, ...extra });
+
+  it("is named for what it stops", () => {
+    expect(stop({ state: UI.BAR_STATES_LISTENING })).toBe("cancel");
+    expect(stop({ state: UI.BAR_STATES_TRANSCRIBING, provisional: true })).toBe("cancel");
+    expect(stop({ state: UI.BAR_STATES_LOADING, working: true })).toBe("stop");
+    expect(stop({ driving: true })).toBe("stop");
+    expect(stop({})).toBe("close");
+    expect(STOP_LABELS.cancel).toBe("Cancel without sending");
+    expect(STOP_LABELS.stop).toBe("Stop Juno");
+  });
+
+  it("leaves an answer with nothing running to its own close control", () => {
+    expect(stop({ face: "answer", state: UI.BAR_STATES_DEFAULT })).toBeNull();
+  });
+});
+
+describe("linger", () => {
+  const run = (extra: Partial<Parameters<typeof lingerShouldRun>[0]>) =>
+    lingerShouldRun({
+      face: "answer",
+      streaming: false,
+      working: false,
+      approvalPending: false,
+      composerEngaged: false,
+      ...extra,
+    });
+
+  it("counts on a finished answer or component only", () => {
+    expect(run({})).toBe(true);
+    expect(run({ face: "component" })).toBe(true);
+    expect(run({ face: "compose" })).toBe(false);
+    expect(run({ face: "idle" })).toBe(false);
+  });
+
+  it("never while it streams, Juno works, a tool waits, or the composer is in use", () => {
+    expect(run({ streaming: true })).toBe(false);
+    expect(run({ working: true })).toBe(false);
+    expect(run({ approvalPending: true })).toBe(false);
+    expect(run({ composerEngaged: true })).toBe(false);
   });
 });
 
@@ -173,15 +272,6 @@ describe("words", () => {
   });
 });
 
-describe("ring", () => {
-  it("counts only once the answer is complete, Juno is idle and nothing waits on you", () => {
-    expect(ringShouldRun({ cardOpen: true, streaming: false, working: false, approvalPending: false })).toBe(true);
-    expect(ringShouldRun({ cardOpen: true, streaming: true, working: false, approvalPending: false })).toBe(false);
-    expect(ringShouldRun({ cardOpen: true, streaming: false, working: true, approvalPending: false })).toBe(false);
-    expect(ringShouldRun({ cardOpen: true, streaming: false, working: false, approvalPending: true })).toBe(false);
-    expect(ringShouldRun({ cardOpen: false, streaming: false, working: false, approvalPending: false })).toBe(false);
-  });
-});
 
 describe("latestTurn", () => {
   const user = (content: string): ChatMessage => ({ role: "user", content, timestamp: 1 });

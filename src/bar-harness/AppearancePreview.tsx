@@ -13,6 +13,9 @@
  * Query: `appearance=<bar_appearance value>`, `motion=reduced` (optional),
  * `state=<bar state>` to hold one frame (the bench and the docs screenshots),
  * `demo=card` to play one full turn (question, answer with a component) once,
+ * `demo=turn` to play the Island's clip (rest, speak, an answer with a
+ * component, Escape down the ladder to rest), `demo=answer` to stream a
+ * words-only answer and hold it,
  * `demo=script` to play a turn with a tool and a spoken answer (the studio's
  * clip), `demo=approval` to hold a tool waiting on Allow or Don't,
  * `demo=spoken` to play a spoken turn (you speak, a tool runs, the answer is
@@ -255,6 +258,78 @@ function playCardDemo(later: (fn: () => void, ms: number) => void): void {
     frame(UI.BAR_STATES_FINISHING);
   }, end);
   later(() => frame(UI.BAR_STATES_DEFAULT), end + 300);
+}
+
+/** The prose-only answer `demo=answer` streams. */
+const DEMO_PROSE =
+  "Done. The draft is with Maya and I asked her for Friday. " +
+  "She usually replies within the hour, so I will tell you as soon as she does.";
+
+/**
+ * Play one full turn for the Island's clip: resting, then you speak (a level
+ * and your words), the answer streams with a component in it, it holds, and
+ * two Escapes walk it back down the ladder (component, composer, rest). With
+ * `prose`, the answer is words only and it holds there (`demo=answer`).
+ */
+function playTurnDemo(later: (fn: () => void, ms: number) => void, prose = false): void {
+  const messageId = prose ? "preview-answer" : "preview-turn";
+  const answer = prose ? DEMO_PROSE : DEMO_ANSWER;
+  const frame = (barState: string, audioLevel = 0, transcriptionText = "", provisional = false) =>
+    void emit(EVENTS.BAR_STATE_UPDATE, {
+      barState,
+      inputValue: "",
+      lastSubmittedValue: DEMO_SENTENCE,
+      currentError: null,
+      transcriptionText,
+      transcriptionProvisional: provisional,
+      spokenText: "",
+      voiceMode: UI.VOICE_MODES_IDLE,
+      audioLevel,
+      isAgentWorking: false,
+      isDictationMode: false,
+      isAlwaysListening: false,
+      agentState: null,
+    });
+  const rest = prose ? 0 : 900;
+  later(() => frame(UI.BAR_STATES_DEFAULT), 0);
+  const words = DEMO_SENTENCE.split(" ");
+  const hearing = prose ? 0 : 2200;
+  for (let t = 0; t < hearing; t += 80) {
+    later(() => {
+      const level = 0.4 + 0.3 * Math.sin(t / 160) + 0.15 * Math.sin(t / 55);
+      const said = Math.min(words.length, Math.floor((t / hearing) * (words.length + 1)));
+      frame(UI.BAR_STATES_LISTENING, level, words.slice(0, said).join(" "), true);
+    }, rest + t);
+  }
+  const ask = rest + hearing + (prose ? 0 : 300);
+  if (!prose) later(() => frame(UI.BAR_STATES_TRANSCRIBING, 0, DEMO_SENTENCE), rest + hearing);
+  later(() => {
+    void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: DEMO_SENTENCE, timestamp: Date.now() });
+    frame(UI.BAR_STATES_SUBMITTING);
+  }, ask);
+  later(() => frame(UI.BAR_STATES_LOADING), ask + 400);
+  const start = ask + 1000;
+  later(() => {
+    frame(UI.BAR_STATES_AGENT_RESPONDING);
+    void emit(EVENTS.STREAMING_STREAM_START, { message_id: messageId });
+  }, start);
+  const chunks = answer.split(" ");
+  chunks.forEach((word, i) => {
+    later(() => {
+      void emit(EVENTS.STREAMING_TEXT_STREAM, { message_id: messageId, chunk: (i === 0 ? "" : " ") + word });
+    }, start + 100 + i * 45);
+  });
+  const end = start + 100 + chunks.length * 45 + 200;
+  later(() => {
+    void emit(EVENTS.STREAMING_STREAM_END, { message_id: messageId, complete_text: answer });
+    void emit(EVENTS.AGENT_ACTIVE, false);
+    frame(UI.BAR_STATES_FINISHING);
+  }, end);
+  later(() => frame(UI.BAR_STATES_DEFAULT), end + 300);
+  if (prose) return;
+  // Escape, as Rust's stop-key monitor reports it when nothing is running.
+  later(() => void emit(EVENTS.BAR_DISMISS_PANE, {}), end + 2800);
+  later(() => void emit(EVENTS.BAR_DISMISS_PANE, {}), end + 4200);
 }
 
 /** What `demo=script` and `demo=approval` ask. */
@@ -682,10 +757,10 @@ export default function AppearancePreview() {
       const { monitor, frame } = harness.snapshot();
       harness.setFrame({ y: Math.round(monitor.height * 0.8) - frame.height });
     }
-    // The Pill places itself from the well it was left in; leave it in a
-    // centre one (top, or bottom with `dock=low`) so the tile shows it growing
+    // The Pill and the Island place themselves from the well they were left
+    // in; leave them in a centre one (top, or bottom with `dock=low`) so the tile shows it growing
     // evenly from the middle.
-    if (appearance === UI.BAR_APPEARANCES_FLOATING) {
+    if (appearance === UI.BAR_APPEARANCES_FLOATING || appearance === UI.BAR_APPEARANCES_DYNAMIC) {
       const { monitor } = harness.snapshot();
       harness.setSavedPosition({
         x: Math.round(monitor.width / 2),
@@ -736,6 +811,10 @@ export default function AppearancePreview() {
       return stop;
     }
 
+    if (demo === "turn" || demo === "answer") {
+      playTurnDemo(later, demo === "answer");
+      return stop;
+    }
     if (demo === "spoken") {
       playSpokenDemo(later);
       return stop;
@@ -891,6 +970,12 @@ export default function AppearancePreview() {
       if (!steady.layout.centerY) {
         top = growUp ? viewport.h - (stage.y + stage.height) * fit : -stage.y * fit;
       }
+    } else if (pinFrame && steady?.layout) {
+      // `pin=frame` on a steady look: seat the strip by the edge it grows
+      // from, so a look that opens into an answer has the stage to grow into.
+      top = steady.layout.growUp
+        ? viewport.h * 0.96 - (stage.y + stage.height) * fit
+        : viewport.h * 0.04 - stage.y * fit;
     }
   } else if (pinFrame && driven) {
     if (!originRef.current) {

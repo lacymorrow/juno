@@ -34,8 +34,7 @@ const COMPONENT_FOR_APPEARANCE: Record<string, string> = {
   orb: "src/components/bar/elevenlabs-orb-bar.tsx",
   react_orb: "src/components/bar/halo/HaloBar.tsx",
   persona: "src/components/bar/persona-bar.tsx",
-  // The Notch is the Island in another body: the same component and hook.
-  notch: "src/components/bar/island/IslandBar.tsx",
+  notch: "src/components/bar/notch/NotchBar.tsx",
 };
 
 /** Every field one appearance has to hand the hook. */

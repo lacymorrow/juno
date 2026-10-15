@@ -26,10 +26,8 @@ vi.mock("@tauri-apps/api/event", () => ({ listen, emit: vi.fn(async () => {}) })
 
 vi.mock("@/components/FloatingBar", () => ({ FloatingBar: stub("pill") }));
 vi.mock("@/components/bar/app-bar", () => ({ AppBar: stub("bar") }));
-// One component, two looks: the Notch is the Island with `frame="notch"`.
-vi.mock("@/components/bar/island/IslandBar", () => ({
-  IslandBar: ({ frame }: { frame?: string }) => stub(frame === "notch" ? "notch" : "island")(),
-}));
+vi.mock("@/components/bar/island/IslandBar", () => ({ IslandBar: stub("island") }));
+vi.mock("@/components/bar/notch/NotchBar", () => ({ NotchBar: stub("notch") }));
 vi.mock("@/components/bar/voice-ai-bar", () => ({ VoiceAIBar: stub("studio") }));
 vi.mock("@/components/bar/elevenlabs-orb-bar", () => ({ ElevenLabsOrbBar: stub("elevenlabs-orb") }));
 vi.mock("@/components/bar/react-orb-bar", () => ({ ReactOrbBar: stub("halo-ring") }));

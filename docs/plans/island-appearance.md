@@ -1,156 +1,119 @@
-# Island: one window that grows to hold the answer (spec)
+# Island: one surface with four faces (spec)
 
-**Status:** Built on `feat/island-appearance`; every posture captured from the preview route; unit tests green; CI (fmt, clippy, cargo test) on the draft PR.
-**DRI:** Frontend Engineer. Lacy is DRI for the hardware pass (tap, hold, drag, real answers).
-**Companion fixes in the same branch:** appearance switch no longer reloads the bar window; settings toasts no longer stack; orb and avatar chunks preload; the picker keeps its neighbours warm.
+**Status:** Built on `feat/island-one-surface`; tests green; evidence from the preview route. Draft PR, waiting on the hardware pass.
+**DRI:** Frontend Engineer. Lacy is DRI for the hardware pass (tap, hold, dictate, drag, real answers) and the QA gate.
+**Issue:** LAC-4240 (dictation into the follow-up field landed nowhere).
 
 ## The ask
 
-Lacy, 2026-09-29: every appearance but Pill is broken or wildly incomplete. Start with Island because it is closest to Pill. Island must not open a chat pane. It is one dynamic, constantly changing floating window with a beautiful resize animation. Spoken text sits behind a button. When a component is shown, a circular countdown runs; if nobody interacts, the island settles back to a small idle bar, which itself needs to shrink a lot. Think every state through from scratch: how words display, how components show, everything.
+Lacy, 2026-10-15: "make the island basically just like the pill except it's got a much better animation. combine the floating bar [and] floating chat into the same component so it might flip between showing the idle bar or the text input or transcript ... or a text response or a custom component that it generates."
 
-## Jobs Standard critique of Island as of main `a0d16c26`
-
-```
-For: someone who chose Island because they want Juno to be one small object on their desk, not a pill plus a pane.
-Verdict: REDO
-Remove:
-- The generic `dynamic-island.tsx` primitive (14 aspect-ratio presets, a 691px MIN_WIDTH, clip paths to squircles that do not exist, hover shadow, focus-within background).
-- The 150x44 idle island. Idle should be a mark, not a bar.
-- The fixed 419px-wide window in every state: a 92px capsule inside a 419px transparent window steals clicks from whatever sits beside it.
-- Response text that fades in 350ms AFTER the island has already grown (a blank box, then words).
-- The pinned response that never leaves until someone finds the 8px close button.
-- Two different follow-up inputs (one for input mode, one for pinned mode).
-- The lowercase-everything labels ("listening", "done", "finishing"). Juno's other surfaces use sentence case.
-Fails:
-- 1: the first ten seconds are a big black lozenge that does nothing until you click it -> a capsule the size of the iPhone's island, a dot that breathes, words the instant you speak.
-- 4: growing then fading content in -> content and size move together, one spring, content blurs in as the island opens.
-- 4: no way to know an answer will go away -> the ring on the dismiss control is the timer; hover stops it.
-- 6: "spoken text" arrives twice (TTS ticker in the bar and prose in the card) -> the spoken channel lives behind one speaker button.
-- 7: island next to Pill on a slide: Pill wins on every state -> redo below.
-Ship as: the state table below, complete. No chat history, no roster, no wake-phrase button, no settings shortcuts in the island.
-Evidence needed: a screenshot of every posture from the preview route, tsc, vitest, CI green.
-```
-
-## Research (what was worth taking)
-
-- **Apple, Live Activities / Dynamic Island (HIG, WWDC23 "Design dynamic Live Activities").** Compact is 36pt tall; expanded stays under 160pt. The expanded view is an enlarged version of the compact one, so layouts must expand predictably: the same elements keep their places. No background imagery; the island is a canvas of foreground elements. Interactive controls confuse people when they are not obviously controls.
-  https://developer.apple.com/design/human-interface-guidelines/live-activities and https://developer.apple.com/videos/play/wwdc2023/10194/
-- **Sentient OS "Notch Magic", Boring Notch, NotchNook.** State transitions are content-level; the shape morphs with a spring while the content crossfades. Sentient never resizes the window during a morph because a notch must stay glued to the bezel. Juno's island floats, so it keeps Pill's proven protocol instead: grow the window first, then spring the island; spring first, then shrink the window.
-  https://github.com/Sentient-OS-Labs/sentient-os and https://theboring.name/
-- **Raycast Quick AI, ChatGPT companion window, macOS 27 Siri pill.** The answer arrives in the same small window you asked from, and you keep typing to follow up. Siri's pill floats beside your work and expands into an answer card. That is the whole model: one surface, ask and answer in place.
-  https://manual.raycast.com/ai/quick-ai and https://www.macrumors.com/2026/07/20/secret-siri-interface-macos-27-beta-enable/
-- **Auto-dismiss with a visible timer (WCAG 2.2.1 Timing Adjustable).** The countdown must be visible, must pause on hover and focus, and the person must be able to stop it. The shrinking ring is the timer; hover pauses it; any interaction cancels it until the pointer leaves.
-- **"Jarvis" HUDs.** Surveyed a dozen (GitHub and Blink clones). What they share is decoration: rings, tick marks, scan lines, orbiting dots, cyan on black. None of it survives the stage test and all of it is banned by Juno's flat, system-blue rule. Two ideas do survive and both are already in Island's DNA: the response comes to you where you are, and status is shown by motion rather than by words or icons.
+The first Island (2026-09-29, `feat/island-appearance`) had six postures (capsule, hover, ear, line, status, card) and resized its window for each. Two things were wrong with it. The window protocol (grow the window, then spring; spring, then shrink the window) chopped every morph, because AppKit and WebKit land a resize on different frames. And the card owned its own follow-up field, which the island unmounted the moment any voice state began, so a dictation aimed at that field had nowhere to land (LAC-4240).
 
 ## The person and the moment
 
-Someone at their desk who chose Island. They press their key, say a thing, let go. They expect one small object to react at once, show the answer, and get out of the way without being told to.
+Someone at their desk who chose Island. They press their key or click the capsule, say or type a thing, and read the answer in the same small object, then type the next line right under it. It goes away on its own when they stop looking.
 
 ## Ten seconds
 
-A dark capsule the size of a pill's cap sits where they left it. A dot inside breathes slowly. They hold the key: the capsule widens, the dot turns blue, and their words appear inside as they speak, newest words always visible. They let go: the dot orbits, their sentence dims. The island grows downward into a card and the answer types in. If the answer is a component (weather, a file list, a timer) the component is the whole card. A thin ring around the close control drains over twelve seconds. They read, they move the mouse away, the ring runs out, the card shrinks back into the capsule. Nothing was clicked.
+A dark capsule sits at the top of the screen with one breathing dot. They hold their key: the capsule opens into a text box that says "Listening…", level bars where the mic button was, and their words appear in the box as they speak. They let go: "Transcribing…", "Sending…", "Working…". The answer streams in above the box, their question as one dim line on top. If the answer is a component (a task list, the weather), the component fills the island edge to edge and the prose folds into one caption line. A thin ring drains around the close control. They type a follow-up into the same box, or move away and the island settles back to the capsule. Nothing jumps: one shape, one spring, the box never moves relative to the edge it is anchored to.
 
-## Postures
+## The four faces
 
-Every Rust bar state, every stream event and every local condition maps to one of five postures. The posture decides size, corner radius and which layer is on stage. The dot and the words inside are decided per state, below.
+| Face | Shape | What is in it |
+|---|---|---|
+| idle | 92 x 28 capsule, radius 14. Under the pointer 132 x 32 with Talk, Type and (once there is a turn) Show last answer | the dot |
+| compose | 360 wide; 36 tall, growing with the text to four lines (90) | the composer only |
+| answer | 360 wide; composer plus content, up to 400 tall, then the body scrolls | question line (dot, your words dimmed, speaker toggle when there is both text and speech, linger ring), the answer body, the composer as the follow-up field |
+| component | 360 wide, same height rule | caption line (the prose folded to one line, click to expand), the component edge to edge, the composer |
 
-| Posture | Island size | Radius | Window (island + 24px shadow each side) | On stage |
+The composer is not part of any face. It is one textarea mounted for the life of the island, anchored to the far edge of the shape (bottom when the island grows down from a top well, top when it grows up from a low well, from `barDock`'s `growUp`). In idle it is transparent and takes no pointer, but it is still the same node, so it keeps its draft and its caret through every state.
+
+## Every Rust bar state
+
+"Answer open" means an answer or a tool waiting on Allow arrived in this turn and has not been put away. Placeholder text shows only when the box is empty; a typed draft always wins.
+
+| Rust bar state | Face, nothing open | Face, answer open | Placeholder | Controls in the box |
 |---|---|---|---|---|
-| capsule | 92 x 28 | 14 | 140 x 76 | dot |
-| ear | 300 x 32 | 16 | 348 x 80 | dot + live words |
-| line | 340 x 36 | 18 | 388 x 84 | dot + composer + "return" |
-| status | 300 x 32 | 16 | 348 x 80 | dot + one line |
-| card | 360 x 96..320 | 20 | 408 x 144..368 | header (dot + your words + ring) + body + follow-up |
+| default | idle (compose if there is a draft, the caret, or a step back from a component) | answer / component | Ask Juno, or Follow up beside an answer | Talk, Send (disabled when empty), Close without sending in compose |
+| dictation_ready | idle | answer / component | as default | as default |
+| shrinking | idle | answer / component | as default | as default |
+| always_listening (wake phrase armed: a resting state) | idle | answer / component | as default | as default |
+| expanding | compose | answer / component | Ask Juno / Follow up | Talk, Send, Close without sending |
+| input | compose, caret in the box | answer / component, caret in the follow-up field | Ask Juno / Follow up | Talk, Send, Close without sending |
+| listening (spoken turn to Juno) | compose | compose: the answer turns back into the box, the draft kept | your words as they arrive, else Listening… | level bars, Send (sends what was said), Cancel without sending |
+| listening or dictating with the dictation flag | compose | stays answer / component, so the field the dictation types into stays | as listening | as listening |
+| dictating | compose | answer / component | as listening | as listening |
+| transcribing, provisional (mic still open) | compose | answer / component (dictation) or compose (spoken) | your words, provisional | as listening |
+| transcribing, final decode | compose | answer / component | the final words, else Transcribing… | Send (typed line), Stop Juno |
+| submitting | compose | compose until the new answer arrives (the open one belongs to the last question) | Sending… | Send disabled, Stop Juno |
+| loading | compose | as submitting | the running tool's description plus …, else Working… | Send disabled, Stop Juno |
+| agent_responding | compose | answer / component, streaming | Working… | Send disabled, Stop Juno |
+| finishing | compose | answer / component | Done, or Follow up beside an answer | Send disabled, Stop Juno (Rust still counts it as work) |
+| success | compose | answer / component | Done / Follow up | Talk, Send, Close without sending (compose) |
+| speaking | compose | answer / component | the sentence being spoken (no answer), Follow up (answer) | Talk, Send, Close without sending (compose) |
+| error | compose | answer / component | the error text, in red | Talk, Send, Close without sending |
+| stopping | compose | answer / component | Stopping… | Stop Juno |
 
-Ear and status share a size on purpose, the same lesson Pill learned: the island must not lurch wider the instant someone stops talking.
-
-Posture is chosen in this order: card if a card is open, line if Rust is in an input state, ear for listening, dictating and always listening, status for every working, speaking, error, success, finishing and stopping state, capsule otherwise.
-
-## Every state
-
-The "words" column is the single line inside the island. Newest words stay visible: the line is right-aligned inside an overflow-hidden box with a fade on its left edge, so a long dictation scrolls like a ticker without motion.
-
-| Rust bar state | Posture | Dot | Words | Leaves when |
-|---|---|---|---|---|
-| default | capsule | white 45%, breathes 4s | none | any state change, click (Rust: Expanding). Under the pointer it widens to the hover posture (132x32): talk, type, and "Show last answer" once there is a turn, the way back to a closed card. The tray Show/Hide Chat toggles the same card. After Escape or a dismissed card it stays a capsule until the pointer leaves and returns |
-| dictation_ready | capsule | green 60%, still | none | dictation starts |
-| shrinking | capsule | white 25% | none | Rust: Default after 300ms |
-| expanding | line | white 70%, still | composer, disabled | Rust: Input after 300ms |
-| input | line | white 70%, still | composer, focused; "return" appears once there is text | submit, blur with empty text (Rust: Shrinking), Escape |
-| listening | ear | system blue, breathes, ring pulses | "Listening" until the first partial arrives, then the live transcript | mic closes (Rust: Transcribing) |
-| dictating | ear | green, breathes | live transcript, provisional text dimmed | dictation ends |
-| always_listening | ear | blue 40%, slow breath | "Listening for “hey Juno”" | wake word (Rust: Listening) or off |
-| transcribing | status | green, breathes | the final transcript, dimmed | Rust: Submitting or Default |
-| submitting | status | white, orbits | the words you said, dimmed | agent starts |
-| loading | status | white, orbits | the words you said; a running tool's description replaces it while the tool runs | first stream chunk (Rust: AgentResponding) |
-| agent_responding | card | white, orbits (in the card header) | your words in the header, the answer typing in the body | stream ends |
-| finishing | card if open, else status | green flash 600ms | header unchanged, ring starts | 300ms (Rust: Default) |
-| success | card if open, else status | green flash | "Done" when no card | 300ms |
-| speaking | card if open, else status | white, ripples | the sentence being spoken, dimmed, when no card | TTS ends |
-| error | card if open, else status | red, one shake | the error text, red | 3s (Rust: Default) or Escape |
-| stopping | status | white 50%, orbits slower | "Stopping" | Rust: Default |
-
-Local conditions layered on top:
+Local conditions on top:
 
 | Condition | Effect |
 |---|---|
-| card open, Rust in `input` | the follow-up field at the bottom of the card is the composer; the island does not change posture |
-| card open, Rust goes to listening or dictating | the card closes; the person is speaking again and the ear must be free |
-| pending tool approval in the conversation | the card opens (if not open) and shows one row: "Juno wants to <description>" with Allow and Don't. The ring does not run while an approval is pending |
-| Juno is driving the cursor (input-control state) | status posture, the driving label, no ring |
-| response has only spoken text and no visible content | the card body shows the spoken sentence itself; the speaker button is not shown twice |
-| response has visible content and spoken text | body shows the content; a small speaker button in the footer reveals the spoken text under it |
-| response is a component | the component is the body, edge to edge inside the card padding; prose before and after it renders as usual around it |
-| answer taller than 320 | the body scrolls; the ring pauses while the pointer is over the card |
-| new turn starts while a card is open | body clears at the first chunk; header takes the new question; ring resets |
-| window loses focus with the composer empty | Rust shrinks to Default; an open card stays open |
-| Reduce Motion on | springs become 150ms ease-out; no blur on content; the ring still drains (it is the timer, not decoration) |
+| Juno is driving the pointer | placeholder "Juno is using the mouse in <app>", the stop control is Stop Juno |
+| a tool waits on Allow | the answer opens with one row: "Juno wants to <description>", Don't and Allow. The ring does not run |
+| answer is spoken only | the body is the spoken sentence; no speaker toggle |
+| answer has text and speech | the speaker toggle in the question line reveals the spoken text under the body |
+| answer taller than 400 | the body scrolls inside the shape |
+| a new answer while the island is up | the answer face opens; an answer already there at mount (history) does not |
+| hover over idle | the hover controls; Show last answer brings a settled answer back |
+| tray Show/Hide Chat | toggles the last answer |
+| Reduce Motion | size changes and fades are a 150ms ease-out; no blur, no travel |
+
+## Escape and the close controls
+
+Escape is still the shared one (`useEscapeToIdle`, `barEscape.ts`, the ladder from #797). The island only says what one rung down is:
+
+- component: X or Escape steps back to compose, draft and caret kept.
+- answer: X or Escape settles to idle.
+- compose at rest: Escape (or Close without sending) puts the box away and clears the draft. Rust is told the composer blurred so it leaves its input state; until it does the island stays idle rather than flashing the box back.
+- compose while Juno works: Escape stops the work (Rust's call). The draft is kept.
 
 ## The ring
 
-- Starts when the answer is complete: the message is no longer streaming, Rust is no longer working and no approval is pending.
-- Lasts 12 seconds. Long enough to read three lines; anything longer is meant to be read on hover.
-- Draws as a 22px circle around the close control in the card header. The stroke drains clockwise. Its colour is white at 35%: it is a timer, not an alert.
-- Pauses while the pointer is over the island, while anything inside it has focus, and while the body is being scrolled. Resumes from where it stopped when the pointer leaves and nothing has focus.
-- Cancelled outright by typing in the follow-up field or pressing a button. Starts fresh once the pointer leaves.
-- When it runs out: the card closes and the island springs back to the capsule. Escape does the same at once. Clicking the control does the same.
+- Runs on the answer and component faces only, once the answer has finished streaming, Rust is not working and no tool waits on Allow.
+- Never runs while the composer has text or the caret.
+- Twelve seconds. Pauses while the pointer is over the island or anything in it has focus. A press on a control inside cancels it until the pointer leaves, then it starts over.
+- On expiry the island settles to idle.
 
 ## Motion
 
-- One spring for width, height and radius: stiffness 380, damping 34, mass 1. Settles in roughly 320ms without overshoot on the corners.
-- Content layers crossfade: entering layer opacity 0 to 1, blur 6px to 0, scale 0.98 to 1 over 180ms, 60ms after the spring begins. Leaving layer opacity 1 to 0, blur to 6px over 120ms. Both layers are absolutely positioned so nothing reflows.
-- The dot is drawn at one fixed home (16px from the left edge, vertically centred) in every posture except the capsule, where it is centred. Growing from the capsule reveals words to the dot's right; the dot itself slides the short distance from centre to home under the same spring.
-- Window protocol, unchanged from Pill and the old Island: growing, resize the window then spring; shrinking, spring then resize 350ms later. Both through `set_bar_frame` so position and size land in one frame.
-- The card's height follows its content through a ResizeObserver, clamped to 96..320, so a streaming answer grows the card word by word under the same spring.
+- **The steady frame.** The Island now lives on the Pill's steady frame (`lib/steadyFrame.ts`, `useIslandFrame`). The window is sized once for the largest face (408 x 648: the 360 shape at its 400 cap, 24 of shadow room each side, 200 for the skill suggestions) and placed once per well. Every face change is animation inside it. The page reports the drawn shape through `set_bar_hit_regions`, so the transparent rest of the window passes clicks through, and through `setSteadyFootprint`, so a drag carries a window the size of the shape.
+- **One shape.** One `motion.div` animates width, height and corner radius on a critically damped spring (stiffness 440, damping 42, mass 1: damping is exactly 2 * sqrt(stiffness * mass), so there is no overshoot) that settles in about 300ms. Height follows content through a ResizeObserver on the body.
+- **Pinned edges.** The shape is pinned to the well's docked edges (`contentPlacement`): a top well grows down, a low well grows up, a left or right well grows away from its side. Wells are computed for the resting capsule, so idle sits exactly where it always did.
+- **Content.** The face's content is one absolutely positioned layer that crossfades: in, opacity 0 to 1, blur 4px to 0, y 4px to 0, 180ms starting 60ms into the spring; out, opacity to 0 and blur to 4px over 120ms. The composer is outside that layer and only fades in and out of idle.
+- **Reduce Motion:** 150ms ease-out for size and fades, no blur, no travel.
+- Flat macOS look: black shape, hairline, system blue only on Allow and an armed Send, sentence case.
 
-## Removed (and considered, then cut)
+## Removed
 
-- The `dynamic-island.tsx` primitive and `dynamic-bar.tsx`. Replaced by `IslandShell` (one motion.div) and `IslandBar`.
-- The fixed-width window. The window is now the island plus shadow, in every posture.
-- The 20-character streaming threshold before content shows.
-- The content fade-in delay after the spring.
-- Two follow-up inputs. There is one composer, in the line posture, and one follow-up field, in the card.
-- Chat history in the island. The island shows the current turn. History lives in the main window; a follow-up continues the same conversation there too.
-- The roster strip, wake-phrase button, "open in window" and settings buttons that Pill's pane carries. Considered "open in window" for long answers; cut for now because the body scrolls and the main window already has the conversation. Revisit if people ask.
-- Lowercase status words.
+- The ear, line, status and card postures, and the hover posture as its own posture (it is idle under the pointer now).
+- The separate follow-up field in the card. There is one composer.
+- The status-words line. The placeholder carries status.
+- Per-posture window resizes: the grow-then-spring and spring-then-shrink protocol, `windowSize`, `SHRINK_DELAY_MS`, and the 8px card height steps.
+- "The card closes on any voice state". A spoken turn turns the answer back into the composer with the draft kept; a dictation leaves the answer where it is.
+- The "return" hint in the line, and the "Type instead" voice control (the box is already the text box).
+- The dot in the composer. The placeholder and the level bars say what the dot used to.
 
-## Companion fixes (same branch)
+Kept on purpose: no chat history in the island (current turn only), no roster, no settings or wake-phrase buttons.
 
-1. **Appearance switch reloads the bar window.** `ui_set_bar_config` navigated the bar window to a per-appearance route on every change. Every route renders `BarHost`, which already swaps the component when `floating-bar-config-changed` arrives, so the navigation only caused a full page load: a blank window, a second `useSettings` load in the bar window and its "Failed to load some settings" toast, and the lazy orb and avatar chunks fetched from cold. The navigation is removed.
-2. **Settings toasts stack.** `SettingsProvider` wrapped every route, so each bar page and each preview frame ran the whole settings loader on mount. The provider now wraps only the windows that read settings (`/`, `/settings`). The loader's error toast also carries a fixed id so a repeat can never stack.
-3. **Orb and avatar start blank.** `BarHost` preloads the lazy chunks after the first paint of any bar, so a switch lands on warm code. The picker mounts the previous and next looks hidden beside the current one, so stepping is instant, and the preview reports "ready" one frame after the bar has painted so a WebGL canvas has drawn before the frame fades in.
+## The Notch
+
+The Notch was the Island's component with `frame="notch"`. It is now `notch/NotchBar.tsx` with the old posture model in `notch/notchPosture.ts`, unchanged in behaviour. It should get the same one-surface pass; that is a follow-up, not this branch.
 
 ## Evidence
 
-- `docs/frontend/screenshots/island/`: one PNG per posture from `/__bar-preview?appearance=dynamic&state=<state>` and `&demo=card` (default, listening, dictating, input, submitting, error, always_listening, card-streaming, card), plus `card-demo.mp4`, a nine-second clip of one full turn made with `scripts/bench-record.sh dynamic card`. Any appearance can be recorded the same way; the clip is what a release post should carry.
-- Unit tests: `islandModel.test.ts` (posture, size, dot and words for every bar state; the ring rule; the current-turn reducer), `IslandBar.test.tsx` (state to posture, window protocol, card opens on a new answer and not on history, ring counts only when idle, pauses on hover, cancels on a press and restarts on leave, Escape closes or stops, approvals reach the backend, the spoken channel stays behind its button), `AppearancePicker.test.tsx` (neighbours mounted hidden, warm neighbour shows at once).
-- `tsc` clean; `vitest` 34 files, 342 tests green (2026-09-29).
-- Not verified here: the real window on hardware. The bench runs the same components on the fake Tauri layer, so resize timing, drag, focus and the Rust side of every interaction are for the hardware pass (Lacy, DRI). CI compiles the Rust change.
+Committed with the PR under `docs/changelog/media/<PR>/`: one PNG per face from `/__bar-preview?appearance=dynamic` (`state=default`, `state=listening`, `state=loading`, `state=error`, `demo=answer`, `demo=card`) and an MP4 of one full turn from `scripts/bench-record.sh dynamic demo=turn` (rest, speak, an answer with a component, two Escapes down the ladder to rest).
 
-## Follow-ups (not in this branch)
+Tests: `islandModel.test.ts` (face for every state, shapes, placeholder, stop control, ring rule, the turn reducer), `IslandBar.test.tsx` (one composer node through every state, answer and component faces, Escape ladder, ring, approvals, hover, and Rust's real dictation key-up sequence replayed into the follow-up field), `notchPosture.test.ts`, `mixed-content-renderer.test.tsx` (`splitHeroContent`).
 
-- The recording caught a real one, now fixed in the same branch: the island was pinned to the window's left edge, so the capsule jumped left when the window grew first. It is centred now and grows around itself.
-- Grow upward when the island is docked in the bottom half of a display, the way Pill's pane does. The island grows downward today and the window is clamped to the monitor, so nothing is lost, but a low island will jump up when the card opens.
-- The agent cards (`agent-cards/index.tsx`) still carry a purple icon tint. Out of scope here; it shows in the card body for task lists.
-- A component that is still streaming renders as empty space until its closing tag arrives. Same in the pane; belongs to the JSX renderer.
-- Pill, Bar, Studio, Orb, Halo and Avatar: each needs the same from-scratch pass. Island is the template.
+Not verified here: the real window on hardware. The bench runs the same components on the fake Tauri layer, so click-through, drag, focus, a real dictation paste and the Rust side of each interaction are for the hardware pass.
