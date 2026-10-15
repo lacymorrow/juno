@@ -49,9 +49,15 @@ use crate::constants::events;
 use crate::constants::ui::window_labels;
 use crate::platform::desktop_points::{monitor_rect_points, PointRect};
 
-/// The card, in points. Wide enough for the icon and one line, and no wider: it
-/// sits beside a window somebody is reading.
-pub const CARD: (f64, f64) = (296.0, 104.0);
+/// The card's window, in points. Wide enough for the icon and the one line, and
+/// no wider: it sits beside a window somebody is reading.
+///
+/// It must match the declaration in `tauri.conf.json`, and the page divides it
+/// between the card and the arrow: the arrow takes 20 points on the edge facing
+/// System Settings and the card takes the rest. So the height has to hold the
+/// line wrapped to two, plus that 20 for the one case where the arrow is above
+/// or below the card rather than beside it.
+pub const CARD: (f64, f64) = (300.0, 88.0);
 
 /// Between the card and the window, and between the card and the display edge.
 const GAP: f64 = 16.0;
@@ -821,6 +827,36 @@ mod tests {
             "the card is off the bottom: {:?}",
             p.rect
         );
+    }
+
+    #[test]
+    fn the_card_is_declared_the_size_this_module_places_it_at() {
+        // `place` works in CARD and the window is built from its declaration,
+        // so the two drifting apart means the card is placed as one size and
+        // drawn as another: a gap on one side and an overlap on the other.
+        let raw = include_str!("../tauri.conf.json");
+        let value: serde_json::Value =
+            serde_json::from_str(raw).expect("tauri.conf.json is not valid JSON");
+        let windows = value["app"]["windows"]
+            .as_array()
+            .expect("app.windows is an array");
+        let card = windows
+            .iter()
+            .find(|w| w["label"] == window_labels::PERMISSION_COACH)
+            .expect("the coaching card is declared in tauri.conf.json");
+
+        assert_eq!(card["width"].as_f64(), Some(CARD.0));
+        assert_eq!(card["height"].as_f64(), Some(CARD.1));
+        // Click-through and non-activating are the two properties that keep it
+        // from covering or stealing focus from the switch it points at. The
+        // click-through half is applied in `platform::macos`; this is the half
+        // that has to be declared, because Tauri's show() is
+        // makeKeyAndOrderFront: on macOS.
+        assert_eq!(card["focusable"].as_bool(), Some(false));
+        assert_eq!(card["focus"].as_bool(), Some(false));
+        assert_eq!(card["alwaysOnTop"].as_bool(), Some(true));
+        assert_eq!(card["transparent"].as_bool(), Some(true));
+        assert_eq!(card["visible"].as_bool(), Some(false));
     }
 
     #[test]
