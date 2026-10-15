@@ -546,31 +546,48 @@ fn setup_main_window(app_handle: &AppHandle) {
 #[cfg(target_os = "macos")]
 fn setup_desktop_cursor_overlay_window(app_handle: &AppHandle) {
     match app_handle.get_webview_window(crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL) {
-        Some(window) => style_cursor_overlay(app_handle, &window),
+        Some(window) => style_passive_overlay(app_handle, &window, OVERLAY_LEVEL_ABOVE_EVERYTHING),
         None => info!(
             "desktop-cursor-overlay not found during macOS setup; it is styled when first shown."
         ),
     }
 }
 
-/// Make the cursor overlay a window that can be seen wherever Juno acts.
+/// Above all application content, full-screen windows included
+/// (NSScreenSaverWindowLevel). What the agent cursor needs, because Juno may be
+/// driving an application that is full screen.
+#[cfg(target_os = "macos")]
+pub const OVERLAY_LEVEL_ABOVE_EVERYTHING: i64 = 1000;
+
+/// Above ordinary windows and nothing more (NSFloatingWindowLevel, the level
+/// the resting bar sits at). What the coaching card needs: it has to clear the
+/// System Settings window and has no business over a system alert.
+#[cfg(target_os = "macos")]
+pub const OVERLAY_LEVEL_ABOVE_WINDOWS: i64 = 3;
+
+/// Make a window one the person can see but never touch.
 ///
-/// It must be:
-///   - At NSScreenSaverWindowLevel (1000) so it appears above all app content
-///   - Fully click-through (ignoresMouseEvents) so it never blocks user input
-///   - Non-activating: must not steal focus from the user's active application
-///   - Persistent across spaces and full-screen apps
+/// Used by the two overlays that draw over other applications: the agent
+/// cursor, and the card that points at a row in System Settings. Both must be:
+///   - at `level`, above the application content they are drawn over
+///   - fully click-through (ignoresMouseEvents) so they never block input.
+///     For the coaching card this is the whole reason it cannot cover the
+///     control it points at, whatever else goes wrong
+///   - non-activating: must not steal focus from the active application, which
+///     for the card is System Settings itself
+///   - persistent across spaces and full-screen apps
 ///
 /// Called at setup and again on every show, because a window rebuilt from its
-/// config comes back at the floating level with none of this, which put it
-/// under every full-screen app.
+/// config comes back at the floating level with none of this, which put the
+/// cursor overlay under every full-screen app.
 #[cfg(target_os = "macos")]
-pub fn style_cursor_overlay(app_handle: &AppHandle, window: &tauri::WebviewWindow) {
+pub fn style_passive_overlay(app_handle: &AppHandle, window: &tauri::WebviewWindow, level: i64) {
     let ns_window_addr = match window.ns_window() {
         Ok(ptr) => ptr as usize,
         Err(e) => {
             error!(
-                "Error getting NSWindow for styling desktop-cursor-overlay: {}",
+                "Error getting NSWindow for styling the '{}' overlay: {}",
+                window.label(),
                 e
             );
             return;
@@ -580,9 +597,8 @@ pub fn style_cursor_overlay(app_handle: &AppHandle, window: &tauri::WebviewWindo
     // raw pointer is not Send.
     if let Err(e) = app_handle.run_on_main_thread(move || unsafe {
         let ns_window = ns_window_addr as cocoa_id;
-        // NSScreenSaverWindowLevel (1000): above all app content, full-screen included.
-        ns_window.setLevel_(1000);
-        // Fully click-through: the agent cursor must never intercept input.
+        ns_window.setLevel_(level);
+        // Fully click-through: neither overlay may ever intercept input.
         #[allow(unexpected_cfgs)]
         let _: () = msg_send![ns_window, setIgnoresMouseEvents: YES];
         // On every Space, and allowed over a full-screen app.
@@ -597,7 +613,7 @@ pub fn style_cursor_overlay(app_handle: &AppHandle, window: &tauri::WebviewWindo
         ns_window.setOpaque_(NO);
         ns_window.setHasShadow_(NO);
     }) {
-        warn!("Could not style the cursor overlay: {}", e);
+        warn!("Could not style the '{}' overlay: {}", window.label(), e);
     }
 }
 
@@ -1035,6 +1051,17 @@ pub fn configure_deferred_window(app_handle: &AppHandle, label: &str) {
     if label == crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL {
         // Already dispatches to the main thread itself.
         setup_desktop_cursor_overlay_window(app_handle);
+        return;
+    }
+    if label == constants::window_labels::PERMISSION_COACH {
+        // Click-through, so the card can never cover the switch it is pointing
+        // at, and non-activating, so showing it does not take the keyboard off
+        // System Settings. Floating level rather than screen-saver level: it
+        // only has to clear an ordinary window, and it has no business over a
+        // system alert. Also dispatches to the main thread itself.
+        if let Some(window) = app_handle.get_webview_window(label) {
+            style_passive_overlay(app_handle, &window, OVERLAY_LEVEL_ABOVE_WINDOWS);
+        }
         return;
     }
     let app = app_handle.clone();

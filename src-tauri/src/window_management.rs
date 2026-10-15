@@ -888,6 +888,9 @@ mod tests {
             window_labels::ONBOARDING,
             window_labels::FLOATING_BAR,
             DESKTOP_CURSOR_OVERLAY_LABEL,
+            // `permission_coach` builds it from its declaration when a
+            // permission is asked for before the deferred list reaches it.
+            window_labels::PERMISSION_COACH,
         ] {
             assert!(
                 find_declared_window(&windows, label).is_some(),
