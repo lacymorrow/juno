@@ -120,7 +120,16 @@ export const PermissionCoach = () => {
         }
       `}</style>
 
-      <div className="flex min-w-0 min-h-0 flex-1 items-center gap-3 rounded-2xl bg-black/80 px-3.5 py-3 ring-1 ring-inset ring-white/15 backdrop-blur-xl">
+      {/* Plain alpha, not `backdrop-blur`: in a transparent Tauri window CSS
+          has no backdrop to sample, because the System Settings window behind
+          it is another application and not part of this page's compositing.
+          Real frost would be `window_vibrancy::apply_vibrancy` with the HUD
+          material, which is how the settings window gets its sidebar; it is
+          not taken here because it frosts the whole rectangular window,
+          including the strip the arrow lives in, so it would need the arrow
+          moved inside the card first. Worth doing, with a build in front of
+          you. */}
+      <div className="flex min-h-0 min-w-0 flex-1 items-center gap-3 rounded-2xl bg-black/85 px-3.5 py-3 ring-1 ring-inset ring-white/15">
         {state.granted ? (
           <span
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
