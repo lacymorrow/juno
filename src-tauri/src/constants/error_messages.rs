@@ -179,9 +179,7 @@ pub mod tool_errors {
     pub const KEYBOARD_ACTION_ALREADY_MATCHED: &str =
         "Keyboard action already matched in outer pattern";
 
-    // Timer tool errors
-    pub const MISSING_DELAY_SECONDS_PARAMETER: &str =
-        "Missing or invalid 'delay_seconds' parameter";
+    // Monitor tool errors
     pub const MISSING_CONTEXT_PARAMETER: &str = "Missing or invalid 'context' parameter";
     pub const MISSING_DESCRIPTION_PARAMETER: &str = "Missing or invalid 'description' parameter";
     pub const MISSING_MONITOR_TYPE_PARAMETER: &str = "Missing or invalid 'monitor_type' parameter";
@@ -192,9 +190,6 @@ pub mod tool_errors {
     pub const SCREEN_MONITORING_MACOS_ONLY: &str =
         "Screen monitoring is only supported on macOS currently";
     pub const TIMER_MANAGER_NOT_INITIALIZED: &str = "Timer manager not initialized";
-    pub const NO_EXPIRED_TIMERS_FOUND: &str = "No expired timers found";
-    pub const FOUND_EXPIRED_TIMERS_WITH_CONTEXT: &str =
-        "Found expired timers with context to resume";
 }
 
 // Tool-specific success messages

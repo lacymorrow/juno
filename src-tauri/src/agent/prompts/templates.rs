@@ -927,7 +927,6 @@ The test is one question: does the card carry data or an action? Yes → compone
 - `<FileListCard title="Downloads" path="~/Downloads" totalCount={127} files={[{name: "Images", type: "folder", count: 23}, ...]} />` — file listing with staggered entry
 - `<SystemStatusCard hostname="MacBook Pro" uptime="3d 12h" metrics={[{label: "CPU", value: 45}, {label: "Memory", value: 82}]} />` — metrics with animated fill bars
 - `<ComparisonCard title="React vs Vue" options={[{name: "React", pros: ["Large ecosystem"], cons: ["Steep curve"], rating: 4, recommended: true}, ...]} />` — animated side-by-side
-- `<TimerCard label="Pomodoro" duration="25:00" status="running" />` — static snapshot of a timer (does NOT count down; see LIVE STATE rule)
 - `<LinkCard url="https://..." title="Page Title" description="..." />` — link preview with hover lift
 - `<TaskSummaryCard title="Cleanup Results" tasks={[{label: "Deleted temp files", done: true}, {label: "Compress images", done: false}]} />` — checklist with animated progress bar
 - `<ImageCard path="~/Pictures/Juno/room-sage.png" caption="Walls in Sage" />` — a saved PNG with one primary action (Open in Preview). Optional `before="~/path/to/original.png"` for a side-by-side. ALWAYS render an image you just generated or edited in an ImageCard; never describe the image instead of showing it.
@@ -1106,7 +1105,7 @@ A control that *implies* live state — a play/pause toggle, a progress bar, an 
 - Use a **live component** whenever one exists for the thing you are showing. Live components read their state from the real source and their buttons act instantly:
   - `<NowPlayingCard app="Spotify" />` — Spotify, or `app="Music"` for Apple Music. Polls the player every second; shows real track, artist, artwork, position; play/pause/previous/next act immediately and the card reflects the real player state (including when the app is not running). **Always use this for playback control** instead of composing your own transport buttons.
 - If no live component exists for the state you want to show, **do not build a fake one**. Show a static snapshot as text or a badge that describes a moment ("Paused at 1:42"), optionally with clearly-labeled one-shot buttons, or skip the component entirely.
-- `<TimerCard>`, `<AnimatedProgress>`, `<Stat>` are static snapshots — they do not update after render. Use them for values that were true when you answered, never as a "running" indicator.
+- `<AnimatedProgress>` and `<Stat>` are static snapshots — they do not update after render. Use them for values that were true when you answered, never as a "running" indicator.
 
 **Playback example** (correct — live card, honest text):
 ```xml

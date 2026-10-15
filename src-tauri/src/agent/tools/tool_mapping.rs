@@ -170,23 +170,13 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
         map.insert(name, ToolCategory::MacApps);
     }
 
-    // Timer tools
-    map.insert(tool_names::TIMER_CREATE, ToolCategory::Timer);
-    map.insert(tool_names::TIMER_START, ToolCategory::Timer);
-    map.insert(tool_names::TIMER_STOP, ToolCategory::Timer);
-    map.insert(tool_names::TIMER_PAUSE, ToolCategory::Timer);
-    map.insert(tool_names::TIMER_RESUME, ToolCategory::Timer);
-    map.insert(tool_names::TIMER_GET_STATUS, ToolCategory::Timer);
-    map.insert(tool_names::TIMER_LIST, ToolCategory::Timer);
-    map.insert(tool_names::TIMER_DELETE, ToolCategory::Timer);
-
-    // Additional timer tools that are actually registered
-    map.insert("set_timer", ToolCategory::Timer);
-    map.insert("set_screen_monitor", ToolCategory::Timer);
-    map.insert("set_file_monitor", ToolCategory::Timer);
-    map.insert("cancel_timer", ToolCategory::Timer);
-    map.insert("list_timers", ToolCategory::Timer);
-    map.insert("check_expired_timers", ToolCategory::Timer);
+    // Monitor tools. This list is exactly what `register_timer_tools` registers;
+    // the eight `timer_*` names that used to sit above it were never registered
+    // as tools at all, and went with Juno's own timers.
+    map.insert(tool_names::SET_SCREEN_MONITOR, ToolCategory::Timer);
+    map.insert(tool_names::SET_FILE_MONITOR, ToolCategory::Timer);
+    map.insert(tool_names::CANCEL_TIMER, ToolCategory::Timer);
+    map.insert(tool_names::LIST_TIMERS, ToolCategory::Timer);
 
     // Self-awareness tools (development only)
     map.insert("build_self", ToolCategory::Desktop); // Development build tool
@@ -457,7 +447,7 @@ mod tests {
             Some(ToolCategory::Basic)
         );
         assert_eq!(
-            ToolMappingService::get_tool_category(tool_names::TIMER_CREATE),
+            ToolMappingService::get_tool_category(tool_names::SET_SCREEN_MONITOR),
             Some(ToolCategory::Timer)
         );
         assert_eq!(
@@ -481,7 +471,7 @@ mod tests {
             Some(AgentType::CodingExpert)
         );
         assert_eq!(
-            ToolMappingService::get_agent_for_tool(tool_names::TIMER_CREATE),
+            ToolMappingService::get_agent_for_tool(tool_names::SET_SCREEN_MONITOR),
             Some(AgentType::GeneralExpert)
         );
     }

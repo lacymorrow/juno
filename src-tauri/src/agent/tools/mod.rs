@@ -8,7 +8,7 @@
 //! - `browser_controller`: Low-level browser control and management
 //! - `basic_tools`: Core system tools (file operations, terminal commands)
 //! - `anthropic_computer_use`: Full Anthropic Computer Use API implementation with 17 actions
-//! - `timer_tools`: Scheduling and monitoring tools for delayed agent execution
+//! - `timer_tools`: Screen and file monitors that can start a turn on their own
 //! - `tool_config`: Tool configuration and category management system
 //! - `enhanced_coding_tools`: Advanced development and coding assistance tools
 //! - `cursor_integration`: Integration with Cursor IDE for development workflows
@@ -48,7 +48,7 @@ pub mod settings_tool; // The agent drives its own Settings window (list, get, s
 
 pub mod risk_classifier; // Automatic risk level classification for tool approval gating
 pub mod schedule_tools; // User-facing scheduled automations (cron-based agent tasks)
-pub mod timer_tools; // Add timer tools for agent scheduling
+pub mod timer_tools; // Screen and file monitors
 pub mod tool_config; // Configuration and category management for all tools
 pub mod tool_mapping; // Add tool mapping service
 pub mod tool_versioning; // API versioning and compatibility management
@@ -73,6 +73,6 @@ pub use self_awareness_tools::register_self_awareness_tools; // Export self-awar
 
 pub use image_tools::register_image_tools; // Export image tool registration (LAC-4206)
 pub use schedule_tools::register_schedule_tools; // Export scheduled automation tool registration
-pub use timer_tools::{register_timer_tools, TimerManager, TimerTask}; // Export timer functions and types
+pub use timer_tools::{register_timer_tools, TimerManager, TimerTask}; // Monitor registration and types
 pub use tool_config::{ToolCategory, ToolConfig, ToolConfigManager}; // Export tool configuration types
 pub use tool_mapping::ToolMappingService; // Export centralized tool mapping service // Export enhanced visual reasoning components

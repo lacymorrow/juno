@@ -28,8 +28,8 @@ Three layers exist and the plan keeps them:
 
 | Layer | Where | What it covers now |
 | --- | --- | --- |
-| Tier 0, local intents (no model, under a second) | `~/repo/juno/src-tauri/src/agent/local_intents/` | play/pause/next/now playing, volume, dark mode, lock, sleep, battery, time, timers, open/quit app, open a site |
-| Tier 1, typed tools the agent calls | `~/repo/juno/src-tauri/src/agent/tools/` | desktop, browser, Safari, shell, files, timers, schedules, MCP |
+| Tier 0, local intents (no model, under a second) | `~/repo/juno/src-tauri/src/agent/local_intents/` | play/pause/next/now playing, volume, dark mode, lock, sleep, battery, time, open Clock on Timers, open/quit app, open a site |
+| Tier 1, typed tools the agent calls | `~/repo/juno/src-tauri/src/agent/tools/` | desktop, browser, Safari, shell, files, monitors, schedules, MCP |
 | Tier 2, computer use | `anthropic_computer_use.rs`, `accessibility_tools.rs` | AX-first control of any app (#748) |
 
 Nothing typed exists for Reminders, Calendar, Contacts, Messages, Mail, Notes, Music search, Maps, Focus or Shortcuts. The system prompt tells the model to write AppleScript for these on the fly (`agent/prompts/templates.rs`, "TIER 0"), which is slow, wrong often enough to notice, and classed `High` risk as a blanket, so a harmless "what's on my calendar" and a "send this email" get the same treatment. Composio (LAC-4210) brings Gmail and Google Calendar through the cloud, for accounts that are not on the Mac. It does not touch the Apple apps and should not.
@@ -53,7 +53,7 @@ Nothing typed exists for Reminders, Calendar, Contacts, Messages, Mail, Notes, M
 | Wi-Fi | on/off | agent can via `networksetup` | keep in tier 1 | none |
 | Brightness | yes | cut | slice 5: built-in display via DisplayServices, brightness keys as fallback (LAC-4302) | none |
 | Bluetooth | yes | cut | tier 2 drives System Settings; not promised | Accessibility |
-| Timers | yes | tier 0, Juno's own, lost on quit | cut: no Mac feature to drive (Clock is not scriptable); open Clock instead | none |
+| Timers | yes | **done (LAC-4305)**: Juno's own are removed | `open clock-timer:` opens Clock on its Timers tab and Juno says one line | none |
 | Open app, files, dark mode, lock, sleep, volume | yes | tier 0 | keep | none |
 | Knowledge, weather, web | yes, with daily caps | the model | keep; measure before building anything | none |
 | On-screen awareness | "add this to my calendar" | screenshot + AX text exist | the prompt names the new tools as targets | Screen Recording |
@@ -181,7 +181,7 @@ Build rule: one agent per slice, Sonnet unless the send gate is in scope (slice 
 | Candidate | Why it was cut |
 | --- | --- |
 | Bluetooth typed tool | No public API. Tier 2 can drive System Settings; not promised, not in the scorecard as a pass. |
-| Juno's own timers | Clock.app has no scripting dictionary and exposes only an "open tab" action, so there is no Mac feature to drive. Cut by the rule above (Lacy 2026-10-12); Juno can open Clock to its Timers tab. |
+| Juno's own timers | Clock.app has no scripting dictionary and exposes only an "open tab" action, so there is no Mac feature to drive. Cut by the rule above (Lacy 2026-10-12). Removed in LAC-4305; `open clock-timer:` (the URL behind that open-tab action, found in LaunchServices) opens Clock on its Timers tab. |
 | Siri as a backend (Juno asks Siri) | Siri has no scripting dictionary and no Shortcuts action on the Mac. Only UI automation of Type to Siri, which cannot read the answer back reliably. The reverse, Siri calling Juno, is LAC-4304. |
 | A third-party weather service | Cut by the rule above. |
 | Stocks, Translate tools | The model answers both. Measure latency first; build only if a row misses. (Weather moved to slice 5.) |

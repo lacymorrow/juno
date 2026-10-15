@@ -170,7 +170,7 @@ impl StopCoordinator {
     ///
     /// Escape takes the newest layer off first. When Juno started a turn while
     /// the person was already dictating, the turn is that layer: her run, her
-    /// voice and her timers stop, and the microphone, the dictation's claim on
+    /// voice and her monitors stop, and the microphone, the dictation's claim on
     /// the stop key and its place on the bar all stay.
     pub async fn stop_work_keeping_dictation(
         &self,

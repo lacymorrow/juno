@@ -20,7 +20,6 @@ const CARD_HEIGHTS: Record<string, string> = {
   FileListCard: "h-44",
   SystemStatusCard: "h-40",
   ComparisonCard: "h-48",
-  TimerCard: "h-24",
   LinkCard: "h-20",
   TaskSummaryCard: "h-40",
   AnimatedCard: "h-32",
