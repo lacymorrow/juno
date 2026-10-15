@@ -178,6 +178,22 @@ pub fn pane_for(permission: &str) -> Option<CoachPane> {
     }
 }
 
+/// Whether macOS already says yes to this permission, read live.
+///
+/// Deliberately [`crate::permission_gate::process_answer`] and not the
+/// permissions-state cache: a five-second-old yes is exactly the answer that
+/// would put a card up a moment after somebody flipped the switch.
+///
+/// An answer that cannot be read is not treated as "already on". The cost of
+/// being wrong one way is a card nobody needed for two minutes, and the other
+/// way is the stranger this whole feature exists for getting no help at all.
+fn already_on(permission: &str) -> bool {
+    crate::permission_gate::Capability::from_key(permission).is_some_and(|capability| {
+        crate::permission_gate::process_answer(capability)
+            == crate::permission_gate::ProcessAnswer::Granted
+    })
+}
+
 /// Where the card goes, given where System Settings is.
 ///
 /// Tried in order: left of the window, right of it, below, above. The first that
@@ -308,8 +324,8 @@ pub async fn permission_coach_state() -> Result<Option<CoachState>, String> {
 /// Juno has just sent somebody to a Privacy pane. Coach them through it.
 ///
 /// Returns without doing anything for a permission with no pane
-/// ([`pane_for`]), which is every permission but Accessibility today, so the
-/// call is safe to make from anywhere that opens a pane.
+/// ([`pane_for`]), and for a permission that is already on, so the call is safe
+/// to make from anywhere that opens a pane.
 pub fn point_at(app: &AppHandle, permission: &str) {
     let Some(pane) = pane_for(permission) else {
         debug!(
@@ -318,6 +334,16 @@ pub fn point_at(app: &AppHandle, permission: &str) {
         );
         return;
     };
+
+    // Not every trip to a Privacy pane is a request. The permission rows in
+    // Juno's own settings open the same pane, and somebody pressing one while
+    // the switch is already on is on their way to turn it *off*. Coaching them
+    // to turn on what is already on is the kind of wrongness that makes a
+    // person trust nothing else the app says.
+    if already_on(permission) {
+        debug!("{} is already on; no coaching card", permission);
+        return;
+    }
     let Some((id, token)) = register(pane) else {
         return;
     };
