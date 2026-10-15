@@ -371,6 +371,9 @@ pub mod permissions {
     pub const NEEDED: &str = "permission-needed";
     /// Streamed progress of the post-Accessibility auto-grant run (auto_grant_permissions)
     pub const AUTO_GRANT_PROGRESS: &str = "permissions-auto-grant-progress";
+    /// What the card beside System Settings should say, and which way it points.
+    /// Payload fields: permission, headline, arrow, granted, receipt.
+    pub const COACH: &str = "permission-coach";
 }
 
 /// Development tool events

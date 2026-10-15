@@ -581,6 +581,7 @@ mod tests {
             "desktop-cursor-overlay",
             "snap-wells-overlay",
             "listening-overlay",
+            window_labels::PERMISSION_COACH,
         ] {
             assert_eq!(
                 front_window_for(label),

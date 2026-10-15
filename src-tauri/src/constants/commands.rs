@@ -201,6 +201,9 @@ pub mod permissions {
     pub const OPEN_SYSTEM_PREFERENCES: &str = "open_system_preferences";
     pub const START_PERMISSIONS_MONITORING: &str = "start_permissions_monitoring";
     pub const STOP_PERMISSIONS_MONITORING: &str = "stop_permissions_monitoring";
+    /// What the card beside System Settings should say, for a page that mounted
+    /// after the event carrying it
+    pub const COACH_STATE: &str = "permission_coach_state";
 }
 
 /// Window management
