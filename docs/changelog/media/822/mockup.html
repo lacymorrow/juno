@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Juno agent components, redesign mockup</title>
+<style>
+  :root {
+    --accent: #007AFF;
+    --label: #1D1D1F;
+    --label-2: rgba(60,60,67,0.6);
+    --label-3: rgba(60,60,67,0.3);
+    --sep: rgba(60,60,67,0.18);
+    --hair: rgba(0,0,0,0.12);
+    --fill-4: rgba(120,120,128,0.08);
+    --fill-3: rgba(120,120,128,0.12);
+    --fill-2: rgba(120,120,128,0.16);
+    --card: #FFFFFF;
+    --page: #F2F2F7;
+    --red: #FF3B30;
+    --amber: #FF9500;
+  }
+  .dark {
+    --accent: #0A84FF;
+    --label: #F5F5F7;
+    --label-2: rgba(235,235,245,0.6);
+    --label-3: rgba(235,235,245,0.3);
+    --sep: rgba(84,84,88,0.65);
+    --hair: rgba(255,255,255,0.10);
+    --fill-4: rgba(120,120,128,0.18);
+    --fill-3: rgba(120,120,128,0.24);
+    --fill-2: rgba(120,120,128,0.32);
+    --card: #1C1C1E;
+    --page: #000000;
+    --red: #FF453A;
+    --amber: #FF9F0A;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #d8d8dc; font-family: -apple-system, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .board { display: flex; gap: 24px; padding: 24px; align-items: flex-start; }
+  .col { display: flex; flex-direction: column; gap: 16px; }
+  .col.main { width: 560px; padding: 16px; background: var(--page); border-radius: 12px; }
+  .col.island { width: 360px; }
+  .col h2 { font: 600 11px/1 -apple-system, system-ui; letter-spacing: .02em; color: #6e6e73; margin: 0 0 4px 4px; }
+
+  /* ── Card primitive ── */
+  .card { background: var(--card); color: var(--label); border-radius: 12px; box-shadow: 0 0 0 0.5px var(--hair); font-size: 13px; line-height: 1.35; overflow: hidden; }
+  .island .card { background: #000; box-shadow: none; border-radius: 0; }
+  .hdr { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 14px 0 14px; }
+  .hdr .t { font-weight: 600; font-size: 13px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hdr .m { font-size: 11px; color: var(--label-2); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .body { padding: 6px 14px 12px; }
+  .island .hdr, .island .body { padding-left: 12px; padding-right: 12px; }
+  .cap { font-size: 11px; color: var(--label-2); }
+  .meter { height: 4px; border-radius: 2px; background: var(--fill-3); overflow: hidden; }
+  .meter > i { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+  .meter.warn > i { background: var(--amber); }
+  .row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 0; border-top: 0.5px solid var(--sep); font-size: 13px; }
+  .row:first-child { border-top: 0; }
+  .row .g { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; }
+  .row .x { flex: 1; min-width: 0; }
+  .row .x .d { font-size: 11px; color: var(--label-2); margin-top: 1px; }
+  .row .r { font-size: 11px; color: var(--label-2); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .row.pending .x { color: var(--label-2); }
+  .ck { border-radius: 50%; background: var(--accent); display: grid; place-items: center; }
+  .ck svg { width: 9px; height: 9px; }
+  .o { border-radius: 50%; box-shadow: inset 0 0 0 1.25px var(--label-3); }
+  .foot { display: flex; justify-content: flex-end; gap: 8px; padding: 2px 14px 12px; }
+  .island .foot { padding-left: 12px; padding-right: 12px; }
+  .btn { height: 24px; padding: 0 11px; border-radius: 6px; font: 500 12px/24px -apple-system, system-ui; background: var(--fill-2); color: var(--label); border: 0; white-space: nowrap; }
+  .btn.pri { background: var(--accent); color: #fff; }
+  .link { color: var(--accent); font-size: 12px; font-weight: 500; }
+  .g13 { font-size: 13px; }
+  .hero { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+  .stats { display: flex; gap: 24px; }
+  .stat .v { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 11px; color: var(--label-2); }
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 56px; margin-top: 8px; }
+  .bars i { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; display: block; }
+  .bars i.dim { background: var(--fill-2); }
+  .xl { display: flex; gap: 3px; margin-top: 4px; }
+  .xl span { flex: 1; text-align: center; font-size: 10px; color: var(--label-2); }
+  .sk { background: var(--fill-4); border-radius: 4px; height: 10px; }
+  .np { display: flex; align-items: center; gap: 12px; }
+  .np .art { width: 44px; height: 44px; border-radius: 6px; background: linear-gradient(135deg,#5b3fa6,#e2574c); flex-shrink: 0; }
+  .np .meta { flex: 1; min-width: 0; }
+  .np .meta b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np .meta span { display: block; font-size: 11px; color: var(--label-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tc { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+  .tc b { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; color: var(--label); }
+  .tc b.p { width: 32px; height: 32px; }
+  .tc svg { fill: currentColor; }
+  .times { display: flex; justify-content: space-between; font-size: 10px; color: var(--label-2); font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .island .cmp { grid-template-columns: 1fr; }
+  .opt { padding: 8px 0; }
+  .opt .n { display: flex; align-items: baseline; gap: 8px; font-weight: 600; }
+  .opt .n .rec { font-size: 11px; font-weight: 500; color: var(--accent); }
+  .dots { display: flex; gap: 3px; margin: 4px 0 6px; }
+  .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--fill-2); }
+  .dots i.on { background: var(--accent); }
+  .pc { font-size: 12.5px; color: var(--label); margin: 2px 0; padding-left: 14px; position: relative; }
+  .pc::before { position: absolute; left: 0; color: var(--label-2); }
+  .pc.p::before { content: "+"; }
+  .pc.c::before { content: "−"; }
+  .fc { display: grid; grid-template-columns: repeat(5,1fr); text-align: center; font-size: 11px; margin-top: 10px; padding-top: 8px; border-top: 0.5px solid var(--sep); }
+  .fc span { display: block; color: var(--label-2); }
+  .fc b { display: block; font-weight: 500; color: var(--label); font-variant-numeric: tabular-nums; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; }
+  .acc { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; }
+  .island .acc { padding: 12px; }
+</style>
+</head>
+<body>
+<div class="board">
+
+<!-- ───────── Light, main window ───────── -->
+<div class="col main" id="light">
+  <h2>Main window, light</h2>
+
+  <div class="card" data-m="task">
+    <div class="hdr"><span class="t">Organized Downloads</span><span class="m">2 of 3</span></div>
+    <div class="body">
+      <div class="meter"><i style="width:66.6%"></i></div>
+      <div style="height:8px"></div>
+      <div class="row"><span class="g ck"><svg viewBox="0 0 10 10"><path d="M1.5 5.2l2.3 2.3L8.5 2.5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="x">23 images moved to Images/</span></div>
+      <div class="row"><span class="g ck"><svg viewBox="0 0 10 10"><path d="M1.5 5.2l2.3 2.3L8.5 2.5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="x">45 documents sorted<div class="d">PDF, DOCX, TXT</div></span></div>
+      <div class="row pending"><span class="g o"></span><span class="x">15 videos categorized</span></div>
+    </div>
+    <div class="foot"><button class="btn">Clean duplicates</button><button class="btn pri">Open Downloads</button></div>
+  </div>
+
+  <div class="card" data-m="weather">
+    <div class="hdr"><span class="t">San Francisco</span><span class="m">Updated 3:41 PM</span></div>
+    <div class="body">
+      <div style="display:flex;align-items:flex-end;gap:10px;margin-top:2px">
+        <span class="hero">54°</span>
+        <span class="g13" style="color:var(--label-2);padding-bottom:3px">Rain</span>
+        <span style="flex:1"></span>
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="color:var(--label-2)"><path d="M16 13a4 4 0 0 0-1-7.9A6 6 0 0 0 4 7a4 4 0 0 0 0 8h12"/><path d="M8 19v2M12 19v2M16 19v2"/></svg>
+      </div>
+      <div class="cap" style="margin-top:8px;font-variant-numeric:tabular-nums">H 62°&nbsp;&nbsp;L 49°&nbsp;&nbsp;·&nbsp;&nbsp;Humidity 82%&nbsp;&nbsp;·&nbsp;&nbsp;Wind 12 mph</div>
+      <div class="fc"><div><span>Mon</span><b>84 / 61</b></div><div><span>Tue</span><b>80 / 60</b></div><div><span>Wed</span><b>71 / 58</b></div><div><span>Thu</span><b>69 / 55</b></div><div><span>Fri</span><b>73 / 57</b></div></div>
+    </div>
+  </div>
+
+  <div class="card" data-m="files">
+    <div class="hdr"><span class="t">Downloads</span><span class="m">127 items · 4.2 GB</span></div>
+    <div class="body">
+      <div class="cap mono" style="margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">~/Downloads</div>
+      <div class="row"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" style="color:var(--label-2)"><path d="M1.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h6.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg><span class="x">Images</span><span class="r">23 items</span></div>
+      <div class="row"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" style="color:var(--label-2)"><path d="M1.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h6.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg><span class="x">Documents</span><span class="r">45 items</span></div>
+      <div class="row"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" style="color:var(--label-2)"><path d="M4 1.5h5l3.5 3.5v9.5h-8.5z"/><path d="M9 1.5v3.5h3.5"/></svg><span class="x">invoice-2026-10.pdf</span><span class="r">212 KB</span></div>
+      <div class="row"><svg class="g" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" style="color:var(--label-2)"><rect x="2" y="3.5" width="12" height="9" rx="1"/><path d="M6.5 6v4l3.5-2z"/></svg><span class="x">screen-recording.mov</span><span class="r">1.8 GB</span></div>
+      <div class="row"><span class="g"></span><span class="x link">Show all 127</span></div>
+    </div>
+  </div>
+
+  <div class="card" data-m="metrics">
+    <div class="hdr"><span class="t">MacBook Pro</span><span class="m">Up 3d 12h</span></div>
+    <div class="body" style="display:flex;flex-direction:column;gap:10px;padding-top:8px">
+      <div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>CPU</span><span class="cap" style="font-variant-numeric:tabular-nums">23%</span></div><div class="meter"><i style="width:23%"></i></div></div>
+      <div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Memory</span><span class="cap" style="font-variant-numeric:tabular-nums">13.1 of 16 GB</span></div><div class="meter"><i style="width:82%"></i></div></div>
+      <div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Disk</span><span class="cap" style="font-variant-numeric:tabular-nums;color:var(--amber)">94%, almost full</span></div><div class="meter warn"><i style="width:94%"></i></div></div>
+    </div>
+  </div>
+
+  <div class="card" data-m="stats">
+    <div class="hdr"><span class="t">Weekly activity</span><span class="m">This week</span></div>
+    <div class="body">
+      <div class="bars"><i style="height:33%"></i><i style="height:50%"></i><i style="height:89%"></i><i style="height:72%"></i><i style="height:100%"></i><i class="dim" style="height:44%"></i><i class="dim" style="height:61%"></i></div>
+      <div class="xl"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+      <div class="stats" style="margin-top:12px"><div class="stat"><div class="v">405</div><div class="l">Total</div></div><div class="stat"><div class="v">58</div><div class="l">Average</div></div><div class="stat"><div class="v">90 <span style="font-size:11px;color:var(--label-2)">↑ Fri</span></div><div class="l">Peak</div></div></div>
+    </div>
+  </div>
+
+  <div class="card" data-m="np">
+    <div class="hdr"><span class="t">Spotify</span><span class="m">Playing</span></div>
+    <div class="body">
+      <div class="np">
+        <div class="art"></div>
+        <div class="meta"><b>Midnight City (Extended Night Drive Edition)</b><span>M83 · Hurry Up, We're Dreaming</span>
+          <div class="meter" style="height:3px;margin-top:6px"><i style="width:40%"></i></div>
+          <div class="times"><span>1:42</span><span>4:15</span></div>
+        </div>
+        <div class="tc"><b><svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 2h1.6v10H2zM12 2L4.6 7 12 12z"/></svg></b><b class="p"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 2h3v10H3zM8 2h3v10H8z"/></svg></b><b><svg width="14" height="14" viewBox="0 0 14 14"><path d="M10.4 2H12v10h-1.6zM2 2l7.4 5L2 12z"/></svg></b></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-m="cmp">
+    <div class="hdr"><span class="t">React vs Vue</span></div>
+    <div class="body cmp">
+      <div class="opt"><div class="n">React <span class="rec">Recommended</span></div><div class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div><div class="pc p">Large ecosystem</div><div class="pc p">Hiring pool</div><div class="pc c">Steep curve</div></div>
+      <div class="opt"><div class="n">Vue</div><div class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></div><div class="pc p">Gentle learning curve</div><div class="pc c">Smaller ecosystem</div><div class="pc c">Fewer jobs</div></div>
+    </div>
+  </div>
+
+  <div class="card" data-m="link" style="display:flex;align-items:center;gap:12px;padding:10px 14px">
+    <div style="flex:1;min-width:0"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Widgets | Apple Developer Documentation</div><div class="cap" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">developer.apple.com · Widgets display timely, glanceable content and offer focused…</div></div>
+    <button class="btn">Open</button>
+  </div>
+
+  <div class="card acc" data-m="access"><span>Juno needs your OK to use Reminders.</span><button class="btn pri">Turn on Reminders</button></div>
+
+  <div class="card" data-m="skeleton" aria-busy="true">
+    <div class="hdr"><span class="sk" style="width:38%"></span><span style="flex:1"></span><span class="sk" style="width:12%"></span></div>
+    <div class="body" style="display:flex;flex-direction:column;gap:12px;padding-top:10px"><span class="sk" style="width:72%"></span><span class="sk" style="width:58%"></span><span class="sk" style="width:64%"></span></div>
+  </div>
+</div>
+
+<!-- ───────── Dark, main window ───────── -->
+<div class="col main dark" id="dark" style="background:#1C1C1E">
+  <h2 style="color:#98989d">Main window, dark</h2>
+  <div class="card" style="background:#2C2C2E">
+    <div class="hdr"><span class="t">Organized Downloads</span><span class="m">2 of 3</span></div>
+    <div class="body">
+      <div class="meter"><i style="width:66.6%"></i></div>
+      <div style="height:8px"></div>
+      <div class="row"><span class="g ck"><svg viewBox="0 0 10 10"><path d="M1.5 5.2l2.3 2.3L8.5 2.5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="x">23 images moved to Images/</span></div>
+      <div class="row"><span class="g ck"><svg viewBox="0 0 10 10"><path d="M1.5 5.2l2.3 2.3L8.5 2.5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="x">45 documents sorted<div class="d">PDF, DOCX, TXT</div></span></div>
+      <div class="row pending"><span class="g o"></span><span class="x">15 videos categorized</span></div>
+    </div>
+    <div class="foot"><button class="btn">Clean duplicates</button><button class="btn pri">Open Downloads</button></div>
+  </div>
+  <div class="card" style="background:#2C2C2E">
+    <div class="hdr"><span class="t">San Francisco</span><span class="m">Updated 3:41 PM</span></div>
+    <div class="body">
+      <div style="display:flex;align-items:flex-end;gap:10px;margin-top:2px"><span class="hero">54°</span><span class="g13" style="color:var(--label-2);padding-bottom:3px">Rain</span><span style="flex:1"></span><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="color:var(--label-2)"><path d="M16 13a4 4 0 0 0-1-7.9A6 6 0 0 0 4 7a4 4 0 0 0 0 8h12"/><path d="M8 19v2M12 19v2M16 19v2"/></svg></div>
+      <div class="cap" style="margin-top:8px;font-variant-numeric:tabular-nums">H 62°&nbsp;&nbsp;L 49°&nbsp;&nbsp;·&nbsp;&nbsp;Humidity 82%&nbsp;&nbsp;·&nbsp;&nbsp;Wind 12 mph</div>
+    </div>
+  </div>
+  <div class="card" style="background:#2C2C2E">
+    <div class="hdr"><span class="t">Spotify</span><span class="m">Playing</span></div>
+    <div class="body"><div class="np"><div class="art"></div><div class="meta"><b>Midnight City (Extended Night Drive Edition)</b><span>M83 · Hurry Up, We're Dreaming</span><div class="meter" style="height:3px;margin-top:6px"><i style="width:40%"></i></div><div class="times"><span>1:42</span><span>4:15</span></div></div><div class="tc"><b><svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 2h1.6v10H2zM12 2L4.6 7 12 12z"/></svg></b><b class="p"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 2h3v10H3zM8 2h3v10H8z"/></svg></b><b><svg width="14" height="14" viewBox="0 0 14 14"><path d="M10.4 2H12v10h-1.6zM2 2l7.4 5L2 12z"/></svg></b></div></div></div>
+  </div>
+  <div class="card" style="background:#2C2C2E">
+    <div class="hdr"><span class="t">MacBook Pro</span><span class="m">Up 3d 12h</span></div>
+    <div class="body" style="display:flex;flex-direction:column;gap:10px;padding-top:8px">
+      <div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>CPU</span><span class="cap" style="font-variant-numeric:tabular-nums">23%</span></div><div class="meter"><i style="width:23%"></i></div></div>
+      <div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Memory</span><span class="cap" style="font-variant-numeric:tabular-nums">13.1 of 16 GB</span></div><div class="meter"><i style="width:82%"></i></div></div>
+      <div><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Disk</span><span class="cap" style="font-variant-numeric:tabular-nums;color:var(--amber)">94%, almost full</span></div><div class="meter warn"><i style="width:94%"></i></div></div>
+    </div>
+  </div>
+  <div class="card acc" style="background:#2C2C2E"><span>Juno needs your OK to use Reminders.</span><button class="btn pri">Turn on Reminders</button></div>
+</div>
+
+<!-- ───────── Island, 360 black, edge to edge ───────── -->
+<div class="col island dark" id="island">
+  <h2 style="color:#98989d">Island, 360, component face</h2>
+  <div style="background:#000;border-radius:20px;box-shadow:0 0 0 0.5px rgba(255,255,255,0.22),0 1px 2px rgba(0,0,0,0.5),0 4px 12px rgba(0,0,0,0.35);overflow:hidden;color:#fff">
+    <div style="display:flex;align-items:center;gap:10px;height:36px;padding:0 12px 0 16px"><span style="width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.7)"></span><span style="flex:1;font-size:13px;color:rgba(255,255,255,.55);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">All done. I organized your downloads into three folders.</span><span style="width:22px;height:22px;border-radius:50%;border:1.5px solid rgba(255,255,255,.35)"></span></div>
+    <div class="card" data-m="task-island">
+      <div class="hdr" style="padding-top:0;min-height:28px"><span class="t">Organized Downloads</span><span class="m">2 of 3</span></div>
+      <div class="body">
+        <div class="meter"><i style="width:66.6%"></i></div>
+        <div style="height:6px"></div>
+        <div class="row"><span class="g ck"><svg viewBox="0 0 10 10"><path d="M1.5 5.2l2.3 2.3L8.5 2.5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="x">23 images moved to Images/</span></div>
+        <div class="row"><span class="g ck"><svg viewBox="0 0 10 10"><path d="M1.5 5.2l2.3 2.3L8.5 2.5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="x">45 documents sorted<div class="d">PDF, DOCX, TXT</div></span></div>
+        <div class="row pending"><span class="g o"></span><span class="x">15 videos categorized</span></div>
+      </div>
+      <div class="foot"><button class="btn">Clean duplicates</button><button class="btn pri">Open Downloads</button></div>
+    </div>
+    <div style="margin:0 12px 12px;height:36px;border-radius:18px;background:rgba(255,255,255,.08);display:flex;align-items:center;padding:0 14px;font-size:13px;color:rgba(255,255,255,.4)">Follow up</div>
+  </div>
+
+  <div style="background:#000;border-radius:20px;box-shadow:0 0 0 0.5px rgba(255,255,255,0.22),0 1px 2px rgba(0,0,0,0.5),0 4px 12px rgba(0,0,0,0.35);overflow:hidden;color:#fff">
+    <div style="display:flex;align-items:center;gap:10px;height:36px;padding:0 12px 0 16px"><span style="width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.7)"></span><span style="flex:1;font-size:13px;color:rgba(255,255,255,.55)">It's a rainy afternoon. Grab an umbrella.</span><span style="width:22px;height:22px;border-radius:50%;border:1.5px solid rgba(255,255,255,.35)"></span></div>
+    <div class="card">
+      <div class="hdr" style="padding-top:0;min-height:28px"><span class="t">San Francisco</span><span class="m">Updated 3:41 PM</span></div>
+      <div class="body">
+        <div style="display:flex;align-items:flex-end;gap:10px"><span class="hero">54°</span><span class="g13" style="color:var(--label-2);padding-bottom:3px">Rain</span><span style="flex:1"></span><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="color:var(--label-2)"><path d="M16 13a4 4 0 0 0-1-7.9A6 6 0 0 0 4 7a4 4 0 0 0 0 8h12"/><path d="M8 19v2M12 19v2M16 19v2"/></svg></div>
+        <div class="cap" style="margin-top:8px;font-variant-numeric:tabular-nums">H 62°&nbsp;&nbsp;L 49°&nbsp;&nbsp;·&nbsp;&nbsp;Humidity 82%&nbsp;&nbsp;·&nbsp;&nbsp;Wind 12 mph</div>
+        <div class="fc"><div><span>Mon</span><b>84/61</b></div><div><span>Tue</span><b>80/60</b></div><div><span>Wed</span><b>71/58</b></div><div><span>Thu</span><b>69/55</b></div><div><span>Fri</span><b>73/57</b></div></div>
+      </div>
+    </div>
+    <div style="margin:0 12px 12px;height:36px;border-radius:18px;background:rgba(255,255,255,.08);display:flex;align-items:center;padding:0 14px;font-size:13px;color:rgba(255,255,255,.4)">Follow up</div>
+  </div>
+
+  <div style="background:#000;border-radius:20px;box-shadow:0 0 0 0.5px rgba(255,255,255,0.22),0 1px 2px rgba(0,0,0,0.5),0 4px 12px rgba(0,0,0,0.35);overflow:hidden;color:#fff">
+    <div style="display:flex;align-items:center;gap:10px;height:36px;padding:0 12px 0 16px"><span style="width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.7)"></span><span style="flex:1;font-size:13px;color:rgba(255,255,255,.55)">Paused.</span><span style="width:22px;height:22px;border-radius:50%;border:1.5px solid rgba(255,255,255,.35)"></span></div>
+    <div class="card">
+      <div class="body" style="padding-top:2px"><div class="np"><div class="art"></div><div class="meta"><b>Midnight City</b><span>M83 · Spotify</span><div class="meter" style="height:3px;margin-top:6px"><i style="width:40%"></i></div><div class="times"><span>1:42</span><span>4:15</span></div></div><div class="tc"><b><svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 2h1.6v10H2zM12 2L4.6 7 12 12z"/></svg></b><b class="p"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 1.5L12 7 3 12.5z"/></svg></b><b><svg width="14" height="14" viewBox="0 0 14 14"><path d="M10.4 2H12v10h-1.6zM2 2l7.4 5L2 12z"/></svg></b></div></div></div>
+    </div>
+    <div style="margin:0 12px 12px;height:36px;border-radius:18px;background:rgba(255,255,255,.08);display:flex;align-items:center;padding:0 14px;font-size:13px;color:rgba(255,255,255,.4)">Follow up</div>
+  </div>
+
+  <div style="background:#000;border-radius:20px;box-shadow:0 0 0 0.5px rgba(255,255,255,0.22),0 1px 2px rgba(0,0,0,0.5),0 4px 12px rgba(0,0,0,0.35);overflow:hidden;color:#fff">
+    <div style="display:flex;align-items:center;gap:10px;height:36px;padding:0 12px 0 16px"><span style="width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.7)"></span><span style="flex:1;font-size:13px;color:rgba(255,255,255,.55)">Comparing…</span><span style="width:22px;height:22px;border-radius:50%;border:1.5px solid rgba(255,255,255,.35)"></span></div>
+    <div class="card" aria-busy="true">
+      <div class="hdr" style="padding-top:0;min-height:28px"><span class="sk" style="width:38%"></span><span style="flex:1"></span><span class="sk" style="width:12%"></span></div>
+      <div class="body" style="display:flex;flex-direction:column;gap:12px;padding-top:8px"><span class="sk" style="width:72%"></span><span class="sk" style="width:58%"></span><span class="sk" style="width:64%"></span></div>
+    </div>
+    <div style="margin:0 12px 12px;height:36px;border-radius:18px;background:rgba(255,255,255,.08);display:flex;align-items:center;padding:0 14px;font-size:13px;color:rgba(255,255,255,.4)">Working…</div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>
