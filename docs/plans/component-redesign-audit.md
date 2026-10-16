@@ -4,7 +4,7 @@ Lacy, 2026-10-15: "a full redesign audit ... for the task card [and] all of the 
 
 This is an audit and a spec. No component source changes in this PR. The one code change is the bench that produced the evidence: `/__component-gallery` (`src/bar-harness/ComponentGallery.tsx`), which renders every tag in `availableComponents` through the real `MixedContentRenderer` on each chat surface, with the bar bench's fake Tauri layer so the live cards have something to read.
 
-Media: `docs/changelog/media/PRNUM/` (`before-*` from the gallery, `mockup-*` from a static HTML page of the proposed set).
+Media: `docs/changelog/media/822/` (`before-*` from the gallery, `mockup-*` from a static HTML page of the proposed set).
 
 ## Verdict
 
@@ -114,7 +114,7 @@ Everything below is in points at 1x, SF via `-apple-system`, sentence case. Ligh
 | **Motion** | card entry 180ms opacity + 4px rise, ease-out; rows stagger 40ms for the first three; meter fill 300ms; nothing infinite; `prefers-reduced-motion` removes rise and fills. |
 | **Type scale** | 28 hero, 17 stat, 13 body and title, 12.5 list secondary, 12 button, 11 caption, 10 chart axis. Nothing smaller (HIG minimum 11 for widgets; 10 only for axis labels). |
 
-Mockups: `mockup-main-light.png`, `mockup-main-dark.png`, `mockup-island.png`.
+Mockups: `mockup-main-light.png`, `mockup-main-dark.png`, `mockup-island.png`, rendered from `mockup.html` in the same folder (static HTML and CSS, the token values above as custom properties).
 
 ## Per-component audit
 
@@ -409,7 +409,7 @@ Sizes: S under half a day, M one to two days. 1 through 5 is the smallest scope 
 6. Instant: no card takes longer than 300ms to be readable.
 7. Seams closed: the Island draws the same card with no inner border; the Pill and the main window get the same width behaviour.
 8. Stage test: the task card mockup, yes. The current one, no.
-9. Evidence: `docs/changelog/media/PRNUM/`.
+9. Evidence: `docs/changelog/media/822/`.
 10. DRI: the engineer who picks up step 1; Lacy approves the primitive set before step 3.
 
 ## Running the gallery
