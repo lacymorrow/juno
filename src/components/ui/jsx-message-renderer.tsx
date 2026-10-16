@@ -20,8 +20,23 @@ import {
   MiniChart,
 } from "@/components/ui/animated-components";
 import {
+  Field,
+  Form,
+  FormCheckbox,
+  FormInput,
+  FormSelect,
+  FormSelectContent,
+  FormSelectItem,
+  FormSelectTrigger,
+  FormSelectValue,
+  FormSlider,
+  FormSwitch,
+  FormTextarea,
+} from "@/components/ui/agent-form";
+import {
   WeatherCard,
   FileListCard,
+  MetricList,
   SystemStatusCard,
   ComparisonCard,
   LinkCard,
@@ -37,7 +52,8 @@ import {
   ComponentFallback,
   ComponentSkeleton,
 } from "@/components/ui/component-skeleton";
-import { stripJsxMarkup } from "@/lib/jsx-utils";
+import { filterAgentClassName, setsSize } from "@/lib/agent-classnames";
+import { describeFallback } from "@/lib/jsx-utils";
 import { cn } from "@/lib/utils";
 import {
   AlertCircle,
@@ -87,25 +103,13 @@ import {
 } from "./card";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "./accordion";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
-import { Checkbox } from "./checkbox";
-import { Input } from "./input";
 import { JsxRenderer } from "./jsx-renderer";
 import { Label } from "./label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./select";
 import { Progress } from "./progress";
 import { Separator } from "./separator";
 import { Skeleton } from "./skeleton";
-import { Slider } from "./slider";
-import { Switch } from "./switch";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "./table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs";
-import { Textarea } from "./textarea";
 import {
   Tooltip,
   TooltipContent,
@@ -123,7 +127,7 @@ interface JsxMessageRendererProps {
 }
 
 // Available components for the agent to use
-const availableComponents = {
+const registry = {
   // Layout & Structure
   div: (props: React.HTMLAttributes<HTMLDivElement>) => <div {...props} />,
   span: (props: React.HTMLAttributes<HTMLSpanElement>) => <span {...props} />,
@@ -148,25 +152,17 @@ const availableComponents = {
   AlertDescription,
   AlertTitle,
   Badge,
-  Input,
   Label,
   Separator,
   Skeleton,
-  Switch,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-  Textarea,
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
 
   // More shadcn parts. They inherit the Mac tokens from `.agent-content`.
   Table,
@@ -184,10 +180,20 @@ const availableComponents = {
   Avatar,
   AvatarFallback,
   AvatarImage,
-  // Form controls stay registered, but the prompt does not teach them until a
-  // <Form> sends their values back as the next message.
-  Checkbox,
-  Slider,
+  // Form controls. They draw only inside a <Form>, which sends their values
+  // back as the next message; alone they would be bound to nothing.
+  Form,
+  Field,
+  Input: FormInput,
+  Textarea: FormTextarea,
+  Switch: FormSwitch,
+  Checkbox: FormCheckbox,
+  Slider: FormSlider,
+  Select: FormSelect,
+  SelectContent: FormSelectContent,
+  SelectItem: FormSelectItem,
+  SelectTrigger: FormSelectTrigger,
+  SelectValue: FormSelectValue,
 
   // Icons
   AlertCircle,
@@ -212,6 +218,8 @@ const availableComponents = {
   // Domain-specific agent response cards
   WeatherCard,
   FileListCard,
+  MetricList,
+  // The earlier tag for MetricList, kept for one prompt cycle
   SystemStatusCard,
   ComparisonCard,
   LinkCard,
@@ -265,6 +273,42 @@ const availableComponents = {
   OpenButton,
   CopyButton,
 } as Record<string, React.ComponentType<any>>;
+
+/** Registry entries that are icons: drawn small and quiet, whatever the agent asks. */
+const ICON_NAMES = new Set([
+  "AlertCircle", "Check", "X", "Star", "Heart", "ThumbsUp", "ThumbsDown", "Info", "AlertTriangle",
+  "CheckCircle", "XCircle", "Lightbulb", "Zap", "Sparkles", "Palette", "Paintbrush", "Brush", "Rainbow",
+  "TrendingUp", "TrendingDown", "Activity", "Clock", "Calendar", "MapPin", "Music", "Film", "Coffee",
+  "Flame", "Bookmark", "Globe", "Target",
+]);
+
+/** Drops colour, gradient and label-style classes the agent writes (see `agent-classnames.ts`). */
+function withClassFilter(Component: React.ComponentType<any>): React.ComponentType<any> {
+  const Filtered = (props: { className?: string }) => (
+    <Component {...props} className={filterAgentClassName(props.className)} />
+  );
+  // Statics the form layout reads (see `Field`).
+  Object.assign(Filtered, { inlineControl: (Component as { inlineControl?: boolean }).inlineControl });
+  Filtered.displayName = `Agent(${(Component as { displayName?: string }).displayName ?? Component.name ?? "Component"})`;
+  return Filtered;
+}
+
+/** Icons are 14px in the secondary label colour unless the agent sizes them. */
+function withIconDefaults(Icon: React.ComponentType<any>): React.ComponentType<any> {
+  const Quiet = (props: { className?: string }) => {
+    const className = filterAgentClassName(props.className);
+    return <Icon {...props} className={cn(!setsSize(className) && "size-3.5", "text-muted-foreground", className)} />;
+  };
+  Quiet.displayName = `AgentIcon(${(Icon as { displayName?: string }).displayName ?? "Icon"})`;
+  return Quiet;
+}
+
+const availableComponents: Record<string, React.ComponentType<any>> = Object.fromEntries(
+  Object.entries(registry).map(([name, Component]) => [
+    name,
+    ICON_NAMES.has(name) ? withIconDefaults(Component) : withClassFilter(Component),
+  ]),
+);
 
 interface ComponentErrorBoundaryProps {
   /** Markup being rendered; a change clears a previous failure. */
@@ -327,7 +371,7 @@ export function JsxMessageRenderer({
       partial ? (
         <ComponentSkeleton name={name} />
       ) : (
-        <ComponentFallback text={stripJsxMarkup(jsx)} />
+        <ComponentFallback text={describeFallback(jsx)} />
       ),
     [partial, name, jsx],
   );

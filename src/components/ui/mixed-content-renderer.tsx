@@ -10,8 +10,8 @@ import {
 } from "@/components/ui/jsx-message-renderer";
 import { WhyBlock } from "@/components/ui/why-block";
 import {
+  describeFallback,
   findOpenTagEnd,
-  stripJsxMarkup,
   trimPartialTrailingTag,
   trimUnresolvedTagTail,
 } from "@/lib/jsx-utils";
@@ -215,7 +215,7 @@ export function splitMixedContent(content: string, isStreaming = false): Content
         }
       } else if (Object.prototype.hasOwnProperty.call(availableComponents, componentName)) {
         // A known component that never closed is malformed: keep its words.
-        segments.push({ type: "fallback", content: stripJsxMarkup(rest) });
+        segments.push({ type: "fallback", content: describeFallback(rest) });
       } else {
         // Not a component (`Vec<String>`): it was prose all along.
         pushText(segments, rest);
@@ -224,7 +224,13 @@ export function splitMixedContent(content: string, isStreaming = false): Content
     }
 
     const jsxContent = remaining.slice(jsxStart, jsxEnd);
-    segments.push({ type: "jsx", content: jsxContent });
+    if (Object.prototype.hasOwnProperty.call(availableComponents, componentName)) {
+      segments.push({ type: "jsx", content: jsxContent });
+    } else {
+      // A tag nothing registers would render as a blank line. Its words are
+      // the answer, so they become prose.
+      pushText(segments, describeFallback(jsxContent));
+    }
     remaining = remaining.slice(jsxEnd);
   }
 
@@ -413,18 +419,20 @@ export const MixedContentRenderer = React.memo(
 
     // A skeleton turning into its card keeps the same key and wrapper, so the
     // card replaces it in place without replaying the entry animation.
+    // The cursor belongs to the words being written. It is never drawn after a
+    // card: a card arriving is already the sign that something is happening.
+    const tailIsText = isStreaming && segments[segments.length - 1]?.type === "text";
+
     return (
       <div className={cn("space-y-3", className)}>
         {segments.map((seg, i) => (
-          <div key={i} className="jsx-segment-enter">
+          <div
+            key={i}
+            className={cn("jsx-segment-enter", tailIsText && i === segments.length - 1 && "streaming-tail")}
+          >
             {renderSegment(seg)}
           </div>
         ))}
-        {isStreaming && (
-          <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">
-            |
-          </span>
-        )}
       </div>
     );
   },
