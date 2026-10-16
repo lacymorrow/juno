@@ -337,6 +337,31 @@ function findJsxBlockEnd(
   return -1;
 }
 
+/**
+ * An answer split for a surface that shows its component as the hero (the
+ * Island's component face): the component markup on its own, and the prose
+ * around it as one plain line. Null when the answer has no component.
+ *
+ * `components` is markup `MixedContentRenderer` renders as it would inside the
+ * full answer, so a component still streaming shows its skeleton there too.
+ * Rationale (`<Why>`) is method talk, not the answer, and is left out.
+ */
+export function splitHeroContent(
+  content: string,
+  isStreaming = false,
+): { components: string; prose: string } | null {
+  const segments = splitMixedContent(content, isStreaming);
+  const parts = segments.filter((s) => s.type === "jsx" || s.type === "pending");
+  if (parts.length === 0) return null;
+  const prose = segments
+    .filter((s) => s.type === "text" || s.type === "fallback")
+    .map((s) => s.content.trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ");
+  return { components: parts.map((s) => s.content).join("\n\n"), prose };
+}
+
 // Re-exported: the check lives in a module with no rendering in it, so the
 // bar can ask it without loading the renderer (see `lib/mixedContent.ts`).
 export { hasMixedContent };

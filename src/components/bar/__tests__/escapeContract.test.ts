@@ -34,8 +34,7 @@ const COMPONENT_FOR_APPEARANCE: Record<string, string> = {
   orb: "src/components/bar/elevenlabs-orb-bar.tsx",
   react_orb: "src/components/bar/halo/HaloBar.tsx",
   persona: "src/components/bar/persona-bar.tsx",
-  // The Notch is the Island in another body: the same component and hook.
-  notch: "src/components/bar/island/IslandBar.tsx",
+  notch: "src/components/bar/notch/NotchBar.tsx",
 };
 
 /** Every field one appearance has to hand the hook. */
@@ -120,6 +119,20 @@ describe("every bar appearance shares one Escape", () => {
         "BAR_DISMISS_PANE",
       );
     }
+  });
+});
+
+describe("the Island's own rungs", () => {
+  it("counts the chat face as a layer it opened, and steps down through one rule", () => {
+    // The chat face is the Island's floating chat: Escape takes it one rung
+    // down (to the answer, or the composer), never straight to the capsule,
+    // and the decision is the pure `islandEscapeStep`, not a branch in the view.
+    const call = escapeCall(read(COMPONENT_FOR_APPEARANCE.dynamic)) ?? "";
+    expect(call).toMatch(/overlayOpen:[^,]*face === "chat"/);
+    const source = read(COMPONENT_FOR_APPEARANCE.dynamic);
+    const collapse = source.slice(source.indexOf("const collapseOneRung"), source.indexOf("useEscapeToIdle({"));
+    expect(collapse).toContain("islandEscapeStep(");
+    expect(collapse).toContain("leaveChat(");
   });
 });
 

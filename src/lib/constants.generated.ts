@@ -447,7 +447,7 @@ export const UI = {
   BAR_APPEARANCES_NOTCH: 'notch',
   BAR_APPEARANCES_DEFAULT: 'floating',
   BAR_APPEARANCES_HIDDEN: ['app', 'voice_ai'],
-  BAR_APPEARANCES_BETA: ['orb', 'react_orb'],
+  BAR_APPEARANCES_BETA: ['orb', 'react_orb', 'notch'],
   BAR_STATES_DEFAULT: 'default',
   BAR_STATES_EXPANDING: 'expanding',
   BAR_STATES_INPUT: 'input',

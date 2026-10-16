@@ -37,10 +37,16 @@ import { cancelVoiceTurn, isRecordingTurn, sendVoiceTurn } from "@/lib/voiceTurn
 
 import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
+import { dispatchWithImages, usePastedImages } from "@/hooks/usePastedImages";
+import { useWakePhrase } from "@/hooks/useWakePhrase";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useEventListener } from "@/hooks/useEventListener";
 import { useEscapeToIdle, type ClimbTarget } from "@/hooks/useEscapeToIdle";
 import { BarFlameBorder } from "@/components/bar/BarFlameBorder";
+import { flameForState, useShowGlowBorder } from "@/components/bar/barFlame";
+
+// Re-exported for existing tests and callers.
+export { flameForState };
 import { BAR_DEPTH_GLOW } from "@/components/bar/barAppearance";
 import { cn } from "@/lib/utils";
 import { COMMANDS, EVENTS, UI } from "@/lib/constants.generated";
@@ -371,42 +377,6 @@ const WORKING_STATES: readonly string[] = [
   UI.BAR_STATES_FINISHING,
   UI.BAR_STATES_STOPPING,
 ];
-
-/**
- * The activity-indicator flame for a bar state: which colour, how bright, and
- * whether it breathes. `null` means no flame (idle). The colour/intensity are a
- * small language:
- *   blue  = Juno's own listening / working    green = your dictation input
- *   red   = error                             dim   = ambient, bright = engaged
- *   pulse = ongoing work (thinking / processing / ambient wait)
- * Named states win over the generic working fallback, because TRANSCRIBING is
- * itself a working state but belongs to the your-input (green) family.
- */
-export function flameForState(
-  state: string,
-  isWorking: boolean,
-  sessionColor: string,
-): { color: string; intensity: number; pulse: boolean } | null {
-  switch (state) {
-    case UI.BAR_STATES_DICTATING:
-      return { color: "#30D158", intensity: 0.2, pulse: false }; // green: your speech -> text
-    case UI.BAR_STATES_TRANSCRIBING:
-      return { color: "#30D158", intensity: 0.13, pulse: true }; // green breathe: converting your speech
-    case UI.BAR_STATES_LISTENING:
-      return { color: "#0A84FF", intensity: 0.2, pulse: false }; // blue: listening to your request
-    case UI.BAR_STATES_ALWAYS_LISTENING:
-      return { color: "#0A84FF", intensity: 0.07, pulse: true }; // dim blue breathe: ambient wait
-    case UI.BAR_STATES_ERROR:
-      return { color: "#FF453A", intensity: 0.24, pulse: false }; // red: something failed
-    default:
-      break;
-  }
-  if (isWorking) {
-    // Agent working: the focused session's own colour, breathing.
-    return { color: sessionColor, intensity: 0.22, pulse: true };
-  }
-  return null;
-}
 
 /** Is a point within a rect? Exported for the hover hit-test tests. */
 export function pointInRect(
@@ -1250,79 +1220,13 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
 
   // === THE WAKE PHRASE ===
   //
-  // Two separate facts, both answered by Rust rather than inferred here.
-  // `voiceConfigured` is whether a voice trigger exists at all, which is the
-  // person's standing intent and lives in the triggers list. `voiceListening`
-  // is whether the engine is actually running right now, which is an outcome:
-  // it can be false with a trigger enabled because the engine failed to start,
-  // or because this bar paused it. A dot that claims Juno is listening when it
-  // is not is worse than no dot, so neither is ever guessed.
-  const [voiceConfigured, setVoiceConfigured] = useState(false);
-  const [voiceListening, setVoiceListening] = useState(false);
-
-  // The startup arming happens while this webview is still loading, so the
-  // first voice-trigger-listening event is usually gone before anyone is
-  // listening for it. Ask once on mount for the same two facts.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const [listening, triggers] = await Promise.all([
-          invoke<boolean>(COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_STATUS),
-          invoke<Array<{ gesture?: string; enabled?: boolean; phrase?: string | null }>>(
-            COMMANDS.TRIGGERS_GET_TRIGGERS,
-          ),
-        ]);
-        if (cancelled) return;
-        setVoiceListening(Boolean(listening));
-        setVoiceConfigured(
-          triggers.some(
-            (t) => t.gesture === "say" && t.enabled === true && Boolean(t.phrase?.trim()),
-          ),
-        );
-      } catch (error) {
-        console.debug("FloatingBar: could not read the wake phrase state:", error);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // The one signal for both. Rust emits it whenever it arms or disarms the
-  // engine: at startup, when the triggers change, when this bar pauses or
-  // resumes it, and after a coordinated stop re-arms. It carries the outcome,
-  // so an engine that failed to start reads as not listening even though the
-  // trigger is there, which is the honest thing to draw.
-  useEventListener<{ listening?: boolean; phrases?: string[] } | null>(
-    EVENTS.VOICE_TRIGGER_LISTENING,
-    (payload) => {
-      setVoiceListening(Boolean(payload?.listening));
-      setVoiceConfigured((payload?.phrases?.length ?? 0) > 0);
-    },
-  );
-
-  /**
-   * Pause or resume the wake phrase, from the bar.
-   *
-   * This controls the engine, never the trigger. The trigger is the standing
-   * intent, so pausing writes nothing to the triggers list: it stops the engine
-   * and leaves `always_listening_active` false, and the next launch arms it
-   * again from the stored triggers (`apply_stored_voice_triggers` clears that
-   * flag first and re-applies). Resuming restarts the same controller, which
-   * still holds the wake words it was given.
-   *
-   * The bar does not move the dot itself. Both commands report what actually
-   * happened through `always-listening-mode-changed`, and the dot follows that.
-   */
-  const toggleVoiceListening = useCallback(() => {
-    const command = voiceListening
-      ? COMMANDS.ALWAYS_LISTENING_STOP_ALWAYS_LISTENING
-      : COMMANDS.ALWAYS_LISTENING_START_ALWAYS_LISTENING;
-    void invoke(command).catch((error) =>
-      console.error("FloatingBar: could not change the wake phrase engine:", error),
-    );
-  }, [voiceListening]);
+  // Whether a wake phrase exists and whether its engine runs right now are
+  // Rust's answers (`useWakePhrase`, shared with the Island).
+  const {
+    configured: voiceConfigured,
+    listening: voiceListening,
+    toggle: toggleVoiceListening,
+  } = useWakePhrase("FloatingBar");
 
   /** The mic button: a spoken query to the agent (same path as the hotkey). */
   const startTalking = useCallback(async () => {
@@ -1359,7 +1263,11 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   );
 
   // Pictures pasted into the pill, as data URLs, alongside the typed text.
-  const [pastedImages, setPastedImages] = useState<string[]>([]);
+  const {
+    images: pastedImages,
+    onPaste: handlePaste,
+    clear: clearPastedImages,
+  } = usePastedImages();
 
   /**
    * The one way a message leaves the bar. Typed follow-ups and the empty
@@ -1369,21 +1277,16 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   const sendMessage = useCallback(
     async (text: string, images: string[]) => {
       if (images.length > 0) {
-        // The bar-state interaction carries only a string, so an attachment
-        // goes straight to the agent rather than being quietly dropped.
-        await invoke(COMMANDS.AGENT_DISPATCH_QUERY, {
-          query: text,
-          images,
-        }).catch((error) => console.error("FloatingBar: submit failed:", error));
+        await dispatchWithImages(text, images, "FloatingBar");
       } else {
         await sendInteraction(
           createInteraction(UI.INTERACTION_TYPES_SUBMIT, { value: text }),
         );
       }
       setLocalInputValue("");
-      setPastedImages([]);
+      clearPastedImages();
     },
-    [sendInteraction, createInteraction],
+    [sendInteraction, createInteraction, clearPastedImages],
   );
 
   const handleSubmit = useCallback(
@@ -1417,24 +1320,6 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     },
     [chat.serverStatus, pastedImages, sendMessage],
   );
-
-  /** Read pasted images off the clipboard as data URLs. */
-  const handlePaste = useCallback((event: React.ClipboardEvent) => {
-    const files = Array.from(event.clipboardData?.items ?? [])
-      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
-      .map((item) => item.getAsFile())
-      .filter((file): file is File => file !== null);
-    if (files.length === 0) return;
-    event.preventDefault();
-    for (const file of files) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const url = reader.result;
-        if (typeof url === "string") setPastedImages((prev) => [...prev, url]);
-      };
-      reader.readAsDataURL(file);
-    }
-  }, []);
 
   const handleFocus = useCallback(async () => {
     await sendInteraction(createInteraction(UI.INTERACTION_TYPES_FOCUS, { isFocused: true }));
@@ -1539,33 +1424,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     agentSessions.find((s) => s.focused)?.display_color ?? "#0A84FF";
   const flame = flameForState(currentUiState, isWorking, focusedSessionColor);
 
-  // Whether the glowing border shows at all. Read from the same bar config the
-  // settings window writes, and kept current from the config-changed event so
-  // the toggle takes effect without a restart. On by default.
-  const [showGlowBorder, setShowGlowBorder] = useState(true);
-  useEffect(() => {
-    let cancelled = false;
-    void invoke<{ show_glow_border?: boolean }>(COMMANDS.BAR_UI_GET_BAR_CONFIG)
-      .then((config) => {
-        if (!cancelled && typeof config?.show_glow_border === "boolean") {
-          setShowGlowBorder(config.show_glow_border);
-        }
-      })
-      .catch((error) =>
-        console.debug("FloatingBar: could not read the glow-border setting:", error),
-      );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  useEventListener<{ show_glow_border?: boolean } | null>(
-    EVENTS.BAR_CONFIG_CHANGED,
-    (payload) => {
-      if (typeof payload?.show_glow_border === "boolean") {
-        setShowGlowBorder(payload.show_glow_border);
-      }
-    },
-  );
+  const showGlowBorder = useShowGlowBorder();
 
   const layout = pickLayout({
     state: currentUiState,
