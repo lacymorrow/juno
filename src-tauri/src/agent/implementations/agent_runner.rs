@@ -441,6 +441,20 @@ where
             self.state,
             new_state
         );
+        // How the task ended, taken from the state machine rather than from
+        // each of the loop's six exits: every one of them transitions before it
+        // returns, so this is the one place that sees all of them. Matched on
+        // the variant, never on the reason text: a terminal state is
+        // structured and `Failed`'s payload is free text (LAC-4008).
+        match &new_state {
+            AgentState::Finished => crate::task_timing::note_outcome("finished"),
+            AgentState::Failed(_) => crate::task_timing::note_outcome("failed"),
+            AgentState::Idle
+            | AgentState::Thinking
+            | AgentState::Executing
+            | AgentState::Responding
+            | AgentState::Paused => {}
+        }
         self.state = new_state;
         // TODO: Emit state change events if needed (e.g., for UI updates)
     }
@@ -1393,6 +1407,17 @@ where
         tool_call: &crate::agent::core::ToolCall,
         tool_result: Result<crate::agent::core::ToolResult, AgentError>,
     ) -> Result<(), AgentError> {
+        // Screenshots dominate the per-step token cost of a computer-use loop
+        // (roughly 1,000-1,800 input tokens each), so how many a task took is
+        // part of what it cost (LAC-4008). Counted for any tool that returns
+        // one, not just `computer`: the request pays for the image either way.
+        if tool_result
+            .as_ref()
+            .is_ok_and(|result| result.output.get("base64_image").is_some())
+        {
+            crate::task_timing::add_screenshot();
+        }
+
         let mut mem = self.memory.lock().await;
         mem.add_message(crate::agent::core::Message {
             role: crate::agent::core::Role::Tool,
@@ -1542,6 +1567,13 @@ where
             ));
         }
 
+        // Count the steps and the time this task takes, on whichever of the
+        // loop's six exits it leaves by (LAC-4008). A delegated specialist
+        // joins the task that delegated to it rather than opening its own.
+        let _task = crate::task_timing::TaskRun::begin(
+            self.session_id.as_ref().map(|id| id.as_str().to_string()),
+        );
+
         // Clone the receiver for the step function
         let step_cancel_rx = cancel_rx.clone();
 
@@ -1666,6 +1698,10 @@ where
             self.current_step += 1;
             log::info!("Agent step {} of {}", self.current_step, self.max_steps);
 
+            // Opening a step logs the one before it, so this is the only hook
+            // the loop needs: the last step is folded in when the task closes.
+            crate::task_timing::begin_step();
+
             // Update AppState with current step progress
             let app_state = self.app_handle.state::<crate::state::AppState>();
             let _ = app_state.update_agent_current_step(self.current_step);
@@ -1751,6 +1787,12 @@ where
             return Err(AgentError::Terminated);
         }
 
+        // Planning and reflection. OSWorld-Human measured this at 75-94% of a
+        // computer-use task's end-to-end latency, so it is recorded separately
+        // from the time spent actually driving the desktop (LAC-4008). Noted
+        // right after the await on both paths, so a turn that errors still
+        // reports what its thinking cost.
+        let thinking_started = std::time::Instant::now();
         // Check if brain supports streaming and use appropriate method
         let brain_action = if self.brain.supports_streaming() {
             // Brain supports streaming - generate a message ID and call streaming method
@@ -1769,6 +1811,7 @@ where
                     Some(cancel_rx.clone()),
                 )
                 .await;
+            crate::task_timing::add_model(thinking_started.elapsed());
             // Whatever was streamed is either the final reply (kept by the
             // run loop) or, if the turn was cut short, saved here.
             let streamed = crate::conversation_history::take_streamed(&message_id);
@@ -1783,7 +1826,9 @@ where
         } else {
             // Fall back to regular brain method
             log::debug!("Using non-streaming brain");
-            self.brain.decide_next_action(&messages, &tools).await?
+            let outcome = self.brain.decide_next_action(&messages, &tools).await;
+            crate::task_timing::add_model(thinking_started.elapsed());
+            outcome?
         };
 
         log::debug!("Brain decided action: {:?}", brain_action);
@@ -1815,9 +1860,16 @@ where
                 }
 
                 // Execute tools with intelligent batching for performance optimization
+                let tools_started = std::time::Instant::now();
                 let execution_result = self
                     .execute_tools_with_batching(tool_calls.clone(), &cancel_rx)
                     .await;
+                // The other half of the step's time: what driving the desktop
+                // cost, as against what thinking about it cost (LAC-4008).
+                crate::task_timing::add_tools(
+                    tools_started.elapsed(),
+                    u32::try_from(tool_calls.len()).unwrap_or(u32::MAX),
+                );
 
                 match execution_result {
                     Ok(()) => {
