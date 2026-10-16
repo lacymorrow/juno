@@ -1,3 +1,4 @@
+import { forwardRef, type ButtonHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 import { LINGER_MS } from "./islandModel";
 
@@ -5,7 +6,7 @@ const SIZE = 22;
 const RADIUS = 9;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-interface LingerRingProps {
+interface LingerRingProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> {
   /** 1 full, 0 empty. The ring is the timer: it drains clockwise. */
   progress: number;
   /** Draw the ring at all. Off while the answer is still arriving, while a
@@ -22,7 +23,10 @@ interface LingerRingProps {
  * around it. Clicking closes now; leaving it alone closes when the ring runs
  * out. Its label says which, for assistive tech.
  */
-export function LingerRing({ progress, counting, paused, onClose, className }: LingerRingProps) {
+export const LingerRing = forwardRef<HTMLButtonElement, LingerRingProps>(function LingerRing(
+  { progress, counting, paused, onClose, className, ...rest },
+  ref,
+) {
   const seconds = Math.ceil((progress * LINGER_MS) / 1000);
   const label = counting
     ? paused
@@ -31,6 +35,9 @@ export function LingerRing({ progress, counting, paused, onClose, className }: L
     : "Close";
   return (
     <button
+      // A tooltip wraps it as its trigger: its handlers and ref pass through.
+      {...rest}
+      ref={ref}
       type="button"
       onClick={(event) => {
         event.stopPropagation();
@@ -74,4 +81,4 @@ export function LingerRing({ progress, counting, paused, onClose, className }: L
       </svg>
     </button>
   );
-}
+});
