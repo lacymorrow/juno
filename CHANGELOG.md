@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.206] - 2026-10-16
+
+### Added
+
+- **bar:** the Notch moves behind Beta features (#821) (8fb7a60e)
+
 ## [0.8.204] - 2026-10-16
 
 ### Added
@@ -1458,7 +1464,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.204...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.206...HEAD
+[0.8.206]: https://github.com/lacymorrow/juno/compare/cua-v0.8.205...v0.8.206
 [0.8.204]: https://github.com/lacymorrow/juno/compare/cua-v0.8.203...v0.8.204
 [0.8.203]: https://github.com/lacymorrow/juno/compare/cua-v0.8.202...v0.8.203
 [0.8.201]: https://github.com/lacymorrow/juno/compare/cua-v0.8.200...v0.8.201
