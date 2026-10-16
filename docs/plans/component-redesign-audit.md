@@ -20,6 +20,16 @@ For: the person who just said "organize my downloads", in the three seconds afte
 4. **Cut the demo kit and the effects** (S). `GlowBadge`, `ShimmerText`, `PulseRing`, `Confetti`, `AnimatedDivider`, `Circle`, `Rectangle`, `Triangle`, `ColorShowcase`, `VisualDemo`, `StatusCard`, `ProgressBar`, `ActionButton`, the `glow` prop, and the dead passthrough controls (`Input`, `Textarea`, `Switch`, `Select`, `Dialog`, `Tooltip`, `Skeleton`, bare `Button`). Then remove them from `templates.rs`.
 5. **Flip the prompt from "compose with Tailwind" to "pick the card"** (S, `templates.rs`). The "COMPOSE RATHER THAN CONFIGURE" section is where the uppercase tracked labels, coloured badges, yellow humidity bars and `text-4xl font-bold` come from. The fix for all-or-nothing streaming is a good skeleton, not hand-rolled layouts.
 
+## Amendment (2026-10-16, Lacy): shadcn first
+
+The set was always meant to be built on shadcn/ui, and the app should stay feature-filled. This overrides the sections below where they disagree.
+
+- **Primitives are restyled shadcn, not new components.** Card is `ui/card.tsx` (`CardHeader`, `CardTitle`, `CardAction`, `CardContent`, `CardFooter`). Meter is `ui/progress.tsx`. Button is `ui/button.tsx` (add a `size="card"` at 24px if needed). Skeleton is `ui/skeleton.tsx`. MiniChart is rebuilt on `ui/chart.tsx`. List rows and Stat are thin compositions inside `CardContent`. The look comes from tokens, not from bespoke markup.
+- **Tokens are scoped.** The Mac token set (SF, system blue `--primary`, label and fill scale, hairline) applies under the agent-content scope (main window messages, Pill pane, Island face), so every shadcn part rendered there inherits it. Re-theming the whole app is a separate call for Lacy.
+- **shadcn passthroughs stay registered.** Keep `Card*`, `Alert*`, `Badge`, `Separator`, `Tabs*`, `Tooltip*`, `Skeleton`, `Button`, and add `Table*`, `Accordion*`, `Progress`, `Avatar`. They inherit the tokens. Form controls (`Input`, `Textarea`, `Switch`, `Select*`, `Checkbox`, `Slider`) stay registered but are not taught in the prompt until a `<Form>` sends their values as the next turn (follow-up step 10); a control that does nothing is the dead-control defect.
+- **Cuts that stand:** the demo kit (`Circle`, `Rectangle`, `Triangle`, `ColorShowcase`, `VisualDemo`, `StatusCard`, `ProgressBar`), the effects (`GlowBadge`, `ShimmerText`, `PulseRing`, `Confetti`, `AnimatedDivider`), and `ActionButton`. None are shadcn. The Animated* merges stand.
+- **Step 10 (new):** `<Form>` wrapper: shadcn controls inside it, one primary submit, values sent as the person's next message.
+
 ## Method
 
 - Rendered: every entry in `availableComponents` (`src/components/ui/jsx-message-renderer.tsx:360`), in every state the markup can put it in (populated, empty, overflow and long text, open tag still streaming, shell open and children streaming, closed-but-malformed fallback, thrown error, light, dark), on three surfaces: the main window at 720px (light and dark), the Pill's 419px dark pane, and the Island's 360px black component face from `feat/island-one-surface` (#818, header 36px, body `px-2`, `text-[13px]`, `.dark` scope). `NowPlayingCard` was driven through playing, paused, stopped, not running, loading, and error.
