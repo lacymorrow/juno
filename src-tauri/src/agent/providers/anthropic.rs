@@ -257,7 +257,39 @@ struct AnthropicMessageResponse {
     _model: String,
     stop_reason: String, // e.g., "end_turn", "tool_use", "max_tokens"
     _stop_sequence: Option<String>,
-    // usage: ApiUsageInfo,
+    /// What the request billed. Absent on no real response, but defaulted
+    /// rather than required so a shape change cannot fail the whole parse —
+    /// a missing cost figure must never cost the person their answer.
+    #[serde(default)]
+    usage: ApiUsageInfo,
+}
+
+/// The `usage` block on a non-streamed response.
+///
+/// Anthropic reports `input_tokens` **excluding** cache reads and writes, so
+/// the four are added, not nested. The cache fields are absent when nothing
+/// was cached, which is why every field defaults.
+#[derive(Serialize, Deserialize, Debug, Default)]
+struct ApiUsageInfo {
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
+    #[serde(default)]
+    cache_read_input_tokens: u64,
+    #[serde(default)]
+    cache_creation_input_tokens: u64,
+}
+
+impl From<&ApiUsageInfo> for crate::cost_log::TokenUsage {
+    fn from(usage: &ApiUsageInfo) -> Self {
+        crate::cost_log::TokenUsage {
+            input: usage.input_tokens,
+            output: usage.output_tokens,
+            cache_read: usage.cache_read_input_tokens,
+            cache_write: usage.cache_creation_input_tokens,
+        }
+    }
 }
 
 #[derive(Serialize, Debug)]
@@ -995,6 +1027,12 @@ impl AnthropicBrain {
         let mut tool_calls = Vec::new();
         let mut stop_reason = String::new();
 
+        // What this request billed. Accumulated across `message_start` and
+        // `message_delta`, written once when the stream ends — see the record
+        // after the loop.
+        let request_started = std::time::Instant::now();
+        let mut turn_usage = crate::cost_log::TokenUsage::default();
+
         // TTS XML parsing state (shared parser, see agent::tts_tags)
         let mut tts_stream = crate::agent::tts_tags::TtsTagStream::new();
 
@@ -1071,6 +1109,15 @@ impl AnthropicBrain {
                     match event_type {
                         "message_start" => {
                             log::debug!("Stream: message started");
+                            // The prompt's token counts arrive here, split into
+                            // fresh input, cache reads and cache writes. On a
+                            // computer-use turn the cache reads are most of the
+                            // bill, so dropping this event loses the cost.
+                            if let Some(usage) = event_data.pointer("/message/usage") {
+                                turn_usage.merge_max(
+                                    crate::cost_log::TokenUsage::from_anthropic_json(usage),
+                                );
+                            }
                         }
                         "content_block_start" => {
                             if let Some(content_block) = event_data.get("content_block") {
@@ -1352,6 +1399,13 @@ impl AnthropicBrain {
                                     stop_reason = reason.to_string();
                                 }
                             }
+                            // The final output count rides on this same event,
+                            // a sibling of `delta` rather than inside it.
+                            if let Some(usage) = event_data.get("usage") {
+                                turn_usage.merge_max(
+                                    crate::cost_log::TokenUsage::from_anthropic_json(usage),
+                                );
+                            }
                         }
                         "message_stop" => {
                             log::debug!("Stream: message completed");
@@ -1422,6 +1476,22 @@ impl AnthropicBrain {
             );
             accumulated_text.push_str(&tail_display);
         }
+
+        // One cost record per request, written here rather than at
+        // `message_stop` so a stream that dies mid-answer is still counted:
+        // those tokens were billed, and a failed task spends the person's
+        // credit exactly like a successful one.
+        crate::cost_log::record_turn(
+            &Provider::Anthropic,
+            &self.model,
+            turn_usage,
+            request_started.elapsed().as_millis() as u64,
+            if stop_reason.is_empty() {
+                "incomplete"
+            } else {
+                &stop_reason
+            },
+        );
 
         Ok((
             accumulated_text,
@@ -2227,6 +2297,10 @@ impl AgentBrain for AnthropicBrain {
         // retried twice with a short pause; nothing has reached the person
         // yet, so a retry is invisible. Anything else returns at once.
         let mut attempt = 0usize;
+        // Times the non-streaming path's request. The streaming path keeps its
+        // own clock inside `handle_streaming_response`, which is where its
+        // record is written.
+        let request_started = std::time::Instant::now();
         let response = loop {
             let sent = self
                 .client
@@ -2398,6 +2472,14 @@ impl AgentBrain for AnthropicBrain {
             log::debug!(
                 "Received response from Anthropic: {:?}",
                 Self::sanitize_response_for_logging(&response_body)
+            );
+
+            crate::cost_log::record_turn(
+                &Provider::Anthropic,
+                &self.model,
+                (&response_body.usage).into(),
+                request_started.elapsed().as_millis() as u64,
+                &response_body.stop_reason,
             );
 
             // --- 4. Determine AgentAction ---
