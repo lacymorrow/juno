@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.208] - 2026-10-16
+
+### Added
+
+- **cards:** rebuild the remaining cards on the primitives, add Form (audit steps 6-10) (#825) (cb8542b5)
+
 ## [0.8.207] - 2026-10-16
 
 ### Added
@@ -1470,7 +1476,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.207...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.208...HEAD
+[0.8.208]: https://github.com/lacymorrow/juno/compare/cua-v0.8.207...v0.8.208
 [0.8.207]: https://github.com/lacymorrow/juno/compare/cua-v0.8.206...v0.8.207
 [0.8.206]: https://github.com/lacymorrow/juno/compare/cua-v0.8.205...v0.8.206
 [0.8.204]: https://github.com/lacymorrow/juno/compare/cua-v0.8.203...v0.8.204
