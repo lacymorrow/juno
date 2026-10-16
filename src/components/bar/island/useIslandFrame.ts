@@ -30,6 +30,16 @@ const FALLBACK_LAYOUT: SteadyLayout = steadyLayout(
   ISLAND_STEADY_SPEC,
 );
 
+/** The smallest rect holding every rect given. */
+function boundsOf(rects: Rect[]): Rect | null {
+  if (!rects.length) return null;
+  const x = Math.min(...rects.map((r) => r.x));
+  const y = Math.min(...rects.map((r) => r.y));
+  const right = Math.max(...rects.map((r) => r.x + r.width));
+  const bottom = Math.max(...rects.map((r) => r.y + r.height));
+  return { x, y, width: right - x, height: bottom - y };
+}
+
 export interface IslandFrame {
   layout: SteadyLayout;
   /** A drop into a well that draws differently is drawn hidden for two frames. */
@@ -39,9 +49,10 @@ export interface IslandFrame {
   /**
    * Tell the frame what is drawn. `footprint` is the block pinned to the well
    * (shape plus its shadow room), which a drag shrinks the window to; `hit`
-   * is the part that takes the mouse. The rest of the window clicks through.
+   * is what takes the mouse: the shape, and the roster bubble beside it when
+   * there is one. The rest of the window clicks through.
    */
-  report: (footprint: { width: number; height: number }, hit: Rect) => void;
+  report: (footprint: { width: number; height: number }, hit: Rect | Rect[]) => void;
 }
 
 /**
@@ -139,14 +150,17 @@ export function useIslandFrame(): IslandFrame {
 
   const lastReported = useRef("");
   const report = useCallback(
-    (footprint: { width: number; height: number }, hit: Rect) => {
-      region.current = hit;
+    (footprint: { width: number; height: number }, hit: Rect | Rect[]) => {
+      const regions = Array.isArray(hit) ? hit : [hit];
+      // A leave is checked against everything drawn, so moving from the
+      // shape onto the roster beside it is not leaving the island.
+      region.current = boundsOf(regions);
       setSteadyFootprint(label, footprint);
       if (!placed) return;
-      const key = `${hit.x},${hit.y},${hit.width},${hit.height}`;
+      const key = regions.map((r) => `${r.x},${r.y},${r.width},${r.height}`).join(";");
       if (key === lastReported.current) return;
       lastReported.current = key;
-      void invoke(COMMANDS.BAR_SET_BAR_HIT_REGIONS, { regions: [hit] }).catch((error) =>
+      void invoke(COMMANDS.BAR_SET_BAR_HIT_REGIONS, { regions }).catch((error) =>
         console.error("Island: could not set hit regions:", error),
       );
     },

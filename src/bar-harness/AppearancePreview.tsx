@@ -36,6 +36,13 @@
  * `dock=corner` (bottom-right) or `dock=top-left` to show its page curl, and
  * `dock=bottom`, `dock=left` or `dock=right` for a notch on that edge.
  *
+ * The Island also takes `demo=hover` (the pointer over the capsule; with
+ * `tip=<control>` the native forwarded hover rests on that control, e.g.
+ * `tip=dot` or `tip=listen`, so its tooltip opens), `demo=paste` (a picture
+ * pasted into the composer), `demo=chat` (two turns, the answer, then the
+ * chat face, then Escape back to the answer) and the backend facts
+ * `net=offline`, `wake=on|paused` and `agents=<n>` (see `barHarnessTauri`).
+ *
  * A look on the steady frame (the Pill, see `lib/steadyFrame.ts`) never
  * resizes its window, so the preview frames the strip the look grows within
  * rather than the window: the strip is centred and fitted, and the shape grows
@@ -335,6 +342,120 @@ function playTurnDemo(later: (fn: () => void, ms: number) => void, prose = false
       later(() => void emit(EVENTS.BAR_DISMISS_PANE, {}), 1500);
     }, 2800);
   }, end);
+}
+
+/** The pointer over the island, as the native tracking area reports it, resting on `tip`. */
+function playHoverDemo(later: (fn: () => void, ms: number) => void, tip: string | null): void {
+  // Re-sent: the bar subscribes a moment after its first paint.
+  for (const t of [300, 700, 1100]) later(() => void emit(EVENTS.SYSTEM_MOUSE_ENTERED_WINDOW, {}), t);
+  if (!tip) return;
+  const rest = () => {
+    const el = document.querySelector(`[data-island-button="${tip}"]`);
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    void emit(EVENTS.SYSTEM_MOUSE_MOVED_WINDOW, { x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  };
+  later(rest, 1500);
+  later(rest, 1900);
+}
+
+/** A picture pasted into the composer, the way WebKit hands one over. */
+function playPasteDemo(later: (fn: () => void, ms: number) => void): void {
+  later(() => emitFrame({ barState: UI.BAR_STATES_INPUT, audioLevel: 0, transcriptionText: "" }), 200);
+  later(() => {
+    const box = document.querySelector<HTMLTextAreaElement>('[data-testid="island-composer"] textarea');
+    if (!box) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = 96;
+    canvas.height = 96;
+    const g = canvas.getContext("2d");
+    if (g) {
+      const grad = g.createLinearGradient(0, 0, 96, 96);
+      grad.addColorStop(0, "#0A84FF");
+      grad.addColorStop(1, "#BF5AF2");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 96, 96);
+      g.fillStyle = "rgba(255,255,255,0.85)";
+      g.fillRect(18, 22, 60, 8);
+      g.fillRect(18, 40, 44, 8);
+      g.fillRect(18, 58, 52, 8);
+    }
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const data = new DataTransfer();
+      data.items.add(new File([blob], "screenshot.png", { type: "image/png" }));
+      box.focus();
+      box.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    }, "image/png");
+  }, 800);
+  later(() => {
+    const box = document.querySelector<HTMLTextAreaElement>('[data-testid="island-composer"] textarea');
+    if (!box) return;
+    // Type through React's own setter so the draft lands in state.
+    const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    set?.call(box, "What is this chart saying?");
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  }, 1300);
+}
+
+/** One earlier turn, streamed through the same events Rust would send. */
+function playPastTurn(
+  later: (fn: () => void, ms: number) => void,
+  at: number,
+  id: string,
+  question: string,
+  answer: string,
+): number {
+  later(() => void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: question, timestamp: Date.now() }), at);
+  later(() => void emit(EVENTS.STREAMING_STREAM_START, { message_id: id }), at + 60);
+  later(() => void emit(EVENTS.STREAMING_TEXT_STREAM, { message_id: id, chunk: answer }), at + 120);
+  later(() => {
+    void emit(EVENTS.STREAMING_STREAM_END, { message_id: id, complete_text: answer });
+    void emit(EVENTS.AGENT_ACTIVE, false);
+  }, at + 180);
+  return at + 240;
+}
+
+/**
+ * The chat face: two earlier turns, then the answer to a third, then the
+ * tray's Show Chat grows it into the whole conversation, which holds; then
+ * Escape steps back down to the answer.
+ */
+function playChatDemo(later: (fn: () => void, ms: number) => void): void {
+  const frame = (barState: string) =>
+    emitFrame({ barState, audioLevel: 0, transcriptionText: "" }, { lastSubmittedValue: DEMO_SENTENCE });
+  let t = playPastTurn(later, 1200, "chat-1", "What's on my calendar this afternoon?", "Two things: design review at 2 and a call with Maya at 4.");
+  t = playPastTurn(later, t, "chat-2", "Move the call with Maya to Friday.", "Done. The call with Maya is now Friday at 4, and she has the new invite.");
+  later(() => frame(UI.BAR_STATES_DEFAULT), t + 100);
+  // The answer the clip starts on.
+  const start = t + 400;
+  later(() => {
+    void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: DEMO_SENTENCE, timestamp: Date.now() });
+    frame(UI.BAR_STATES_SUBMITTING);
+  }, start);
+  later(() => {
+    frame(UI.BAR_STATES_AGENT_RESPONDING);
+    void emit(EVENTS.STREAMING_STREAM_START, { message_id: "chat-3" });
+  }, start + 300);
+  const words = DEMO_PROSE.split(" ");
+  words.forEach((word, i) => {
+    later(
+      () => void emit(EVENTS.STREAMING_TEXT_STREAM, { message_id: "chat-3", chunk: (i === 0 ? "" : " ") + word }),
+      start + 400 + i * 40,
+    );
+  });
+  const end = start + 400 + words.length * 40 + 150;
+  later(() => {
+    void emit(EVENTS.STREAMING_STREAM_END, { message_id: "chat-3", complete_text: DEMO_PROSE });
+    void emit(EVENTS.AGENT_ACTIVE, false);
+    frame(UI.BAR_STATES_FINISHING);
+  }, end);
+  later(() => frame(UI.BAR_STATES_DEFAULT), end + 300);
+  const hold = new URLSearchParams(window.location.search).get("hold") === "chat";
+  // The tray's Show Chat, then (unless held) Escape as the stop-key monitor reports it.
+  later(() => void emit(EVENTS.BAR_TOGGLE_PANE, {}), end + 1800);
+  if (!hold) later(() => void emit(EVENTS.BAR_DISMISS_PANE, {}), end + 5200);
 }
 
 /** What `demo=script` and `demo=approval` ask. */
@@ -813,6 +934,18 @@ export default function AppearancePreview() {
 
     if (demo === "card") {
       playCardDemo(later);
+      return stop;
+    }
+    if (demo === "hover") {
+      playHoverDemo(later, new URLSearchParams(window.location.search).get("tip"));
+      return stop;
+    }
+    if (demo === "paste") {
+      playPasteDemo(later);
+      return stop;
+    }
+    if (demo === "chat") {
+      playChatDemo(later);
       return stop;
     }
 

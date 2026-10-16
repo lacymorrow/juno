@@ -6,13 +6,26 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type ReactElement,
   type ReactNode,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { motion, useReducedMotion } from "motion/react";
-import { ArrowUp, MessageSquare, Mic, Square, Type, Volume2, X } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import {
+  ArrowUp,
+  Ear,
+  EarOff,
+  Maximize2,
+  MessageSquare,
+  Mic,
+  Minimize2,
+  Square,
+  Type,
+  Volume2,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EVENTS, UI, COMMANDS } from "@/lib/constants.generated";
 import { useBarDrag } from "@/hooks/useDragWindow";
@@ -27,9 +40,9 @@ import { InputControlNotices } from "@/components/input-control/InputControlNoti
 import { drivingLabel, type InputControlStatePayload } from "@/lib/inputControl";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 import { cancelVoiceTurn, sendVoiceTurn } from "@/lib/voiceTurn";
-import { contentPlacement, contentRect } from "@/lib/steadyFrame";
+import { contentPlacement, contentRect, roomForContent } from "@/lib/steadyFrame";
 import type { ChatMessage } from "@/types/chat";
-import { IslandDot, IslandShell, IslandWords, ISLAND_EASE } from "./IslandShell";
+import { IslandDot, IslandShell, IslandWords, ISLAND_EASE, ISLAND_GLOW } from "./IslandShell";
 import { LingerRing } from "./LingerRing";
 import { useLinger } from "./useLinger";
 import { ISLAND_BUTTON_ATTR, useIslandHover } from "./useIslandHover";
@@ -37,13 +50,34 @@ import { useIslandFrame } from "./useIslandFrame";
 import { clampLevel } from "../voiceLevel";
 import { flameForState, useShowGlowBorder } from "../barFlame";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
+import { useBarDragging } from "@/hooks/useBarSnapWells";
+import { useConnectivity } from "@/hooks/useConnectivity";
+import { useStartupReadiness } from "@/hooks/useStartupReadiness";
+import { dispatchWithImages, usePastedImages } from "@/hooks/usePastedImages";
+import { useWakePhrase } from "@/hooks/useWakePhrase";
+import { dotLabel } from "@/lib/pillStatus";
+import { ChatContainerV2 } from "@/components/chat/ChatContainerV2";
+import { AgentRosterStrip } from "@/components/AgentRosterStrip";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { PillTooltip, PILL_TOOLTIP_DELAY_MS } from "../PillTooltip";
 import {
   COMPOSER_LINE_PX,
   COMPOSER_MAX_TEXT_PX,
+  COMPOSER_PAD_Y,
+  ROSTER_GAP,
+  ROSTER_HEIGHT,
+  THUMB_GAP,
+  THUMB_PX,
+  canSend,
+  chatSizeInWindow,
+  islandEscapeStep,
+  rosterShown,
+  rosterWidthFor,
   ISLAND_WIDTH,
   LINGER_MS,
   SHADOW_PAD,
   STOP_LABELS,
+  SYSTEM_RED,
   answerKey,
   composeIsCompact,
   composerHeightFor,
@@ -218,6 +252,11 @@ function LevelBars({ level }: { level: number }) {
 
 const CONTROL =
   "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-white/55 transition-colors hover:bg-white/[0.14] hover:text-white";
+/** A control the native tracking area says is under the cursor, where CSS :hover cannot see. */
+const CONTROL_LIT = "bg-white/[0.14] text-white";
+
+/** Attributes that name a control for the forwarded hover (`useIslandHover`). */
+const named = (name: string) => ({ [ISLAND_BUTTON_ATTR]: name });
 
 // === THE BAR ===
 
@@ -247,6 +286,12 @@ export function IslandBar() {
     };
   }, []);
 
+  // Whether Juno can answer, and whether it is still warming up: Rust's
+  // answers (`connectivity.rs`, `readiness.rs`), never derived here.
+  const connectivity = useConnectivity();
+  const warmingUp = useStartupReadiness();
+  const wake = useWakePhrase("Island");
+
   const [driving, setDriving] = useState<InputControlStatePayload | null>(null);
   useEventListener<InputControlStatePayload>(EVENTS.INPUT_CONTROL_STATE, setDriving);
   const isDriving = !!driving?.active;
@@ -267,7 +312,7 @@ export function IslandBar() {
   // The Pill's activity flame, same language: green for your dictation, blue
   // for listening, red for an error, the focused session's colour while Juno
   // works. Off when the glow-border setting is off.
-  const { sessions: agentSessions } = useAgentSessions();
+  const { sessions: agentSessions, focusSession } = useAgentSessions();
   const showGlowBorder = useShowGlowBorder();
   const sessionColor = agentSessions.find((s) => s.focused)?.display_color ?? "#0A84FF";
   const flame = showGlowBorder ? flameForState(bar.barState, working, sessionColor) : null;
@@ -288,6 +333,12 @@ export function IslandBar() {
   // Put away by hand while Rust still holds its input state: stay idle until it lets go.
   const [dismissed, setDismissed] = useState(false);
   const [draft, setDraft] = useState("");
+  // The whole conversation, grown out of the same shape (the chat face).
+  const [chatOpen, setChatOpen] = useState(false);
+  // Pictures pasted into the composer, sent with the text (the Pill's rule).
+  const pasted = usePastedImages();
+  const imagesRef = useRef(pasted.images);
+  imagesRef.current = pasted.images;
   const dismissedRef = useRef(dismissed);
   dismissedRef.current = dismissed;
   const draftRef = useRef(draft);
@@ -315,7 +366,8 @@ export function IslandBar() {
   const answerShowing = answerOpen && !!(turn.answer || turn.approval);
   const componentShown = !!hero && steppedBack !== key && !turn.approval;
   const dictation = bar.isDictationMode || bar.barState === UI.BAR_STATES_DICTATING;
-  const composerEngaged = draft.trim() !== "" || composerFocused;
+  // A pasted picture is a draft: the box is not the small bar while one waits.
+  const composerEngaged = draft.trim() !== "" || composerFocused || pasted.images.length > 0;
   const face: Face = faceFor({
     state: bar.barState,
     answerOpen: answerShowing,
@@ -323,6 +375,7 @@ export function IslandBar() {
     composerActive: composerEngaged || composerHeld,
     dictation,
     dismissed,
+    chatOpen,
   });
 
   // Drag from anywhere, land in a gravity well. Not re-homed to another
@@ -337,7 +390,7 @@ export function IslandBar() {
     maxHeightPx: COMPOSER_MAX_TEXT_PX,
     minHeightPx: COMPOSER_LINE_PX,
   });
-  const composerH = composerHeightFor(composer.height);
+  const composerH = composerHeightFor(composer.height, pasted.images.length);
   const skill = useSkillAutocomplete({
     value: draft,
     onAccept: setDraft,
@@ -361,17 +414,21 @@ export function IslandBar() {
     void sendInteraction(UI.INTERACTION_TYPES_INPUT_CHANGE, { value });
   }, []);
   const submit = useCallback(() => {
-    // A turn is already on its way; Enter pressed twice must not send twice.
-    if (working) return;
     const value = draftRef.current.trim();
-    if (!value) return;
-    void sendInteraction(UI.INTERACTION_TYPES_SUBMIT, { value });
+    const images = imagesRef.current;
+    // A turn is already on its way; Enter pressed twice must not send twice.
+    // A picture on its own is a message ("what is this?").
+    if (!canSend({ draft: value, images: images.length, working })) return;
+    if (images.length > 0) void dispatchWithImages(value, images, "Island");
+    else void sendInteraction(UI.INTERACTION_TYPES_SUBMIT, { value });
     setDraft("");
-  }, [working]);
+    pasted.clear();
+  }, [working, pasted]);
 
   /** Back to the capsule: the answer closes and the composer goes away. */
   const [hoverHeld, setHoverHeld] = useState(false);
   const settle = useCallback(() => {
+    setChatOpen(false);
     setAnswerOpen(false);
     setSpokenOpen(false);
     setComposerHeld(false);
@@ -400,6 +457,24 @@ export function IslandBar() {
     setComposerHeld(true);
     focusComposer();
   }, [key, focusComposer]);
+
+  /**
+   * Out of the chat face, one rung: back to the answer it grew from, or to
+   * the composer when there is no answer to go back to (`islandEscapeStep`).
+   */
+  const leaveChat = useCallback(
+    (to: Face) => {
+      setChatOpen(false);
+      if (to === "compose") {
+        setAnswerOpen(false);
+        setComposerHeld(true);
+        focusComposer();
+      } else {
+        setAnswerOpen(true);
+      }
+    },
+    [focusComposer],
+  );
 
   // ── Hover, engagement and the ring ──
   const hover = useIslandHover(frame.region);
@@ -469,7 +544,11 @@ export function IslandBar() {
 
   // ── The way back to the last answer ──
   const hasTurn = !!(turn.question || turn.answer);
+  const hasAnswer = !!(turn.answer || turn.approval);
+  const hasAnswerRef = useRef(hasAnswer);
+  hasAnswerRef.current = hasAnswer;
   const openAnswer = useCallback(() => {
+    setChatOpen(false);
     setAnswerOpen(true);
     setSteppedBack(null);
     setSpokenOpen(false);
@@ -480,22 +559,38 @@ export function IslandBar() {
   faceRef.current = face;
   const hasTurnRef = useRef(hasTurn);
   hasTurnRef.current = hasTurn;
-  // The tray's Show/Hide Chat.
+  /** Into the chat face: the whole conversation, from an answer or the tray. */
+  const openChat = useCallback(() => {
+    setChatOpen(true);
+    setEngaged(false);
+  }, []);
+  // The tray's Show/Hide Chat: the chat face, or back to the capsule.
   useEventListener(EVENTS.BAR_TOGGLE_PANE, () => {
-    const f = faceRef.current;
-    if (f === "answer" || f === "component") settle();
-    else if (hasTurnRef.current) openAnswer();
+    if (faceRef.current === "chat") settle();
+    else if (hasTurnRef.current) openChat();
   });
+
+  /**
+   * One rung down the island's own layers: chat to the answer (or the
+   * composer), a component to the composer, anything else to the capsule.
+   */
+  const collapseOneRung = useCallback(() => {
+    const from = faceRef.current;
+    const to = islandEscapeStep(from, { answerShown: hasAnswerRef.current });
+    if (from === "chat") leaveChat(to);
+    else if (to === "compose") stepBack();
+    else putAway();
+  }, [leaveChat, stepBack, putAway]);
 
   // Escape: one behaviour, shared by every appearance (src/lib/barEscape.ts).
   // A component steps back to the composer; anything else settles.
   useEscapeToIdle({
     barState: bar.barState,
     working: working,
-    overlayOpen: face === "answer" || face === "component",
+    overlayOpen: face === "answer" || face === "component" || face === "chat",
     composerOpen: face === "compose",
     popupOpen: skill.open,
-    collapse: () => (faceRef.current === "component" ? stepBack() : putAway()),
+    collapse: collapseOneRung,
     report: reportEscape,
     climb: (to: ClimbTarget) => {
       if (to === "floating" && hasTurn) {
@@ -580,16 +675,19 @@ export function IslandBar() {
     return () => observer.disconnect();
   }, [measureEl]);
   const hoverShown = face === "idle" && hovered && !hoverHeld;
+  const layout = frame.layout;
+  const growUp = layout.growUp;
+  const hoverButtons = 2 + (hasTurn ? 1 : 0) + (wake.configured ? 1 : 0);
   const shape = shapeFor(face, {
     hovered: hoverShown,
+    hoverButtons,
+    chat: chatSizeInWindow(layout.size, roomForContent(layout)),
     compact,
     composerHeight: composerH,
     contentHeight: HEADER_H + bodyH + BODY_PAD_BOTTOM,
   });
 
   // ── Where it is drawn, and what takes the mouse ──
-  const layout = frame.layout;
-  const growUp = layout.growUp;
   const suggestionsH =
     skill.open && face !== "idle" ? skill.suggestions.length * SUGGESTION_ROW_H + SUGGESTION_LIST_PAD : 0;
   const extra = suggestionsH ? SUGGESTION_GAP + suggestionsH : 0;
@@ -601,14 +699,65 @@ export function IslandBar() {
     width: shape.width,
     height: shape.height + extra,
   };
+  // The roster: a bubble of the same black beside the shape, on the side away
+  // from a side-docked edge, level with the docked edge. Apple's split island:
+  // a second activity is a second small shape, never a change to the first.
+  // Out of the way while the island is carried (the drag window is the shape).
+  const dragging = useBarDragging();
+  const rosterVisible = rosterShown(agentSessions.length) && !dragging;
+  const rosterW = rosterWidthFor(agentSessions.length);
+  const rosterOnLeft = layout.anchorX === "end";
+  const rosterHit = rosterVisible
+    ? {
+        x: rosterOnLeft ? hit.x - ROSTER_GAP - rosterW : hit.x + shape.width + ROSTER_GAP,
+        y: growUp ? hit.y + hit.height - ROSTER_HEIGHT : hit.y,
+        width: rosterW,
+        height: ROSTER_HEIGHT,
+      }
+    : null;
   const { report } = frame;
   useLayoutEffect(() => {
-    report({ width: block.width, height: block.height }, hit);
-  }, [report, block.width, block.height, hit.x, hit.y, hit.width, hit.height]); // eslint-disable-line react-hooks/exhaustive-deps
+    report({ width: block.width, height: block.height }, rosterHit ? [hit, rosterHit] : [hit]);
+  }, [report, block.width, block.height, hit.x, hit.y, hit.width, hit.height, rosterHit?.x, rosterHit?.y, rosterHit?.width]); // eslint-disable-line react-hooks/exhaustive-deps
   const place = contentPlacement(layout);
+  // Tooltips open toward the side the island grows: the frame always has room there.
+  const tooltipSide = growUp ? "top" : "bottom";
+
+  // ── Tooltips: the Pill's, for every control ──
+  const lit = hover.hoveredButton;
+  const tip = (name: string, label: string, control: ReactElement<{ title?: string }>) => (
+    <PillTooltip
+      label={label}
+      forcedOpen={lit === name}
+      blocked={lit === "dot" && name !== "dot"}
+      side={tooltipSide}
+    >
+      {control}
+    </PillTooltip>
+  );
 
   // ── Layers ──
-  const dot = dotFor(bar.barState, isDriving);
+  const dot = dotFor(bar.barState, isDriving, connectivity);
+  const dotText = dotLabel(bar.barState, connectivity, {
+    driving: isDriving,
+    voicePaused: wake.configured && !wake.listening,
+    loading: warmingUp,
+  });
+  // The dot with its label: a 15px target around the 7px dot.
+  const dotTarget = tip(
+    "dot",
+    dotText,
+    <span
+      {...named("dot")}
+      role="img"
+      aria-label={dotText}
+      data-testid="island-dot-target"
+      data-tone={dot.color === SYSTEM_RED ? "down" : undefined}
+      className="flex size-[15px] shrink-0 items-center justify-center"
+    >
+      <IslandDot look={dot} />
+    </span>,
+  );
   const layerKey = face === "idle" ? (hoverShown ? "hover" : "idle") : face;
   const placeholder = composerPlaceholder({
     state: bar.barState,
@@ -618,10 +767,12 @@ export function IslandBar() {
     spokenText: bar.spokenText,
     currentError: bar.currentError,
     working,
-    answerShown: face === "answer" || face === "component",
+    answerShown: face === "answer" || face === "component" || face === "chat",
     runningTool: turn.runningTool,
     drivingLabel: isDriving && driving ? drivingLabel(driving) : null,
   });
+
+  const wakeLabel = wake.listening ? "Stop listening for the wake phrase" : "Listen for the wake phrase";
 
   let layer: ReactNode = null;
   if (layerKey === "idle") {
@@ -631,44 +782,100 @@ export function IslandBar() {
       </div>
     );
   } else if (layerKey === "hover") {
-    const control = (name: string) =>
-      cn(CONTROL, hover.hoveredButton === name && "bg-white/[0.14] text-white");
+    const control = (name: string) => cn(CONTROL, lit === name && CONTROL_LIT);
     layer = (
-      <div className="flex h-full w-full items-center gap-2 pl-3.5 pr-1" data-testid="island-hover">
-        <IslandDot look={dot} />
+      <div className="flex h-full w-full items-center gap-2 pl-2.5 pr-1" data-testid="island-hover">
+        {dotTarget}
         <div className="ml-auto flex items-center gap-0.5">
-          <button
-            type="button"
-            {...{ [ISLAND_BUTTON_ATTR]: "mic" }}
-            onClick={startTalking}
-            aria-label="Talk to Juno"
-            title="Talk to Juno"
-            className={control("mic")}
-          >
-            <Mic className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            {...{ [ISLAND_BUTTON_ATTR]: "type" }}
-            onClick={startTyping}
-            aria-label="Type to Juno"
-            title="Type to Juno"
-            className={control("type")}
-          >
-            <Type className="size-3.5" />
-          </button>
-          {hasTurn && (
+          {tip(
+            "mic",
+            "Talk to Juno",
+            <button type="button" {...named("mic")} onClick={startTalking} aria-label="Talk to Juno" title="Talk to Juno" className={control("mic")}>
+              <Mic className="size-3.5" />
+            </button>,
+          )}
+          {tip(
+            "type",
+            "Type to Juno",
+            <button type="button" {...named("type")} onClick={startTyping} aria-label="Type to Juno" title="Type to Juno" className={control("type")}>
+              <Type className="size-3.5" />
+            </button>,
+          )}
+          {hasTurn &&
+            tip(
+              "answer",
+              "Show last answer",
+              <button type="button" {...named("answer")} onClick={showAnswer} aria-label="Show last answer" title="Show last answer" className={control("answer")}>
+                <MessageSquare className="size-3.5" />
+              </button>,
+            )}
+          {/* The wake phrase, when there is one: pause an all-day microphone
+              for a while without taking the trigger away in Settings. */}
+          {wake.configured &&
+            tip(
+              "listen",
+              wakeLabel,
+              <button
+                type="button"
+                {...named("listen")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  wake.toggle();
+                }}
+                aria-label={wakeLabel}
+                title={wakeLabel}
+                aria-pressed={wake.listening}
+                data-testid="island-wake-toggle"
+                data-listening={wake.listening ? "" : undefined}
+                className={control("listen")}
+              >
+                {wake.listening ? <Ear className="size-3.5" /> : <EarOff className="size-3.5" />}
+              </button>,
+            )}
+        </div>
+      </div>
+    );
+  } else if (layerKey === "chat") {
+    layer = (
+      <div className="dark flex h-full w-full flex-col" data-testid="island-chat">
+        <header className="flex shrink-0 items-center gap-2.5 pl-2.5 pr-3" style={{ height: HEADER_H }}>
+          {dotTarget}
+          <div className="flex-1" />
+          {tip(
+            "collapse",
+            hasAnswer ? "Back to the answer" : "Back to the text box",
             <button
               type="button"
-              {...{ [ISLAND_BUTTON_ATTR]: "answer" }}
-              onClick={showAnswer}
-              aria-label="Show last answer"
-              title="Show last answer"
-              className={control("answer")}
+              {...named("collapse")}
+              onClick={(e) => {
+                e.stopPropagation();
+                leaveChat(islandEscapeStep("chat", { answerShown: hasAnswer }));
+              }}
+              aria-label={hasAnswer ? "Back to the answer" : "Back to the text box"}
+              title={hasAnswer ? "Back to the answer" : "Back to the text box"}
+              className={cn(CONTROL, "text-white/40", lit === "collapse" && CONTROL_LIT)}
             >
-              <MessageSquare className="size-3.5" />
-            </button>
+              <Minimize2 className="size-3.5" />
+            </button>,
           )}
+        </header>
+        {/* select-text undoes the root's select-none so replies read like any Mac text. */}
+        <div data-no-drag className="flex min-h-0 flex-1 cursor-auto select-text flex-col" onScroll={engage}>
+          <ChatContainerV2
+            conversation={chat.messages}
+            copiedMessageId={chat.copiedMessageId}
+            onCopyResponse={chat.handleCopyResponse}
+            onShareResponse={chat.handleShareResponse}
+            onExamplePromptSelect={(prompt) => {
+              changeDraft(prompt);
+              focusComposer();
+            }}
+            backendStatus={chat.serverStatus}
+            onApprovalUpdate={chat.handleApprovalUpdate}
+            onContinuationUpdate={chat.handleContinuationUpdate}
+            className="island-scroll bg-transparent"
+            contentClassName="gap-4 px-4 py-3 text-[13px]"
+          />
         </div>
       </div>
     );
@@ -677,8 +884,8 @@ export function IslandBar() {
     const caption = (isComponent ? hero.prose : "") || question;
     layer = (
       <div className="dark flex h-full w-full flex-col" data-testid={`island-${layerKey}`}>
-        <header className="flex shrink-0 items-center gap-2.5 pl-4 pr-3" style={{ height: HEADER_H }}>
-          <IslandDot look={dot} />
+        <header className="flex shrink-0 items-center gap-2.5 pl-2.5 pr-3" style={{ height: HEADER_H }}>
+          {dotTarget}
           {isComponent && caption ? (
             <button
               type="button"
@@ -697,30 +904,60 @@ export function IslandBar() {
               {question}
             </p>
           )}
-          {!isComponent && visibleText && spokenText ? (
+          {!isComponent && visibleText && spokenText
+            ? tip(
+                "spoken",
+                "Spoken aloud",
+                <button
+                  type="button"
+                  {...named("spoken")}
+                  onClick={() => {
+                    engage();
+                    setSpokenOpen((v) => !v);
+                  }}
+                  aria-pressed={spokenOpen}
+                  aria-label="Spoken aloud"
+                  title="Spoken aloud"
+                  className={cn(
+                    "flex size-6 shrink-0 items-center justify-center rounded-full transition-colors",
+                    spokenOpen ? "bg-white/[0.12] text-white/85" : "text-white/40 hover:bg-white/[0.08] hover:text-white/80",
+                    lit === "spoken" && !spokenOpen && "bg-white/[0.08] text-white/80",
+                  )}
+                >
+                  <Volume2 className="size-3.5" />
+                </button>,
+              )
+            : null}
+          {tip(
+            "expand",
+            "Show the conversation",
             <button
               type="button"
-              onClick={() => {
-                engage();
-                setSpokenOpen((v) => !v);
+              {...named("expand")}
+              onClick={(e) => {
+                e.stopPropagation();
+                openChat();
               }}
-              aria-pressed={spokenOpen}
-              aria-label="Spoken aloud"
-              title="Spoken aloud"
-              className={cn(
-                "flex size-6 shrink-0 items-center justify-center rounded-full transition-colors",
-                spokenOpen ? "bg-white/[0.12] text-white/85" : "text-white/40 hover:bg-white/[0.08] hover:text-white/80",
-              )}
+              aria-label="Show the conversation"
+              title="Show the conversation"
+              data-testid="island-expand"
+              className={cn(CONTROL, "text-white/40", lit === "expand" && CONTROL_LIT)}
             >
-              <Volume2 className="size-3.5" />
-            </button>
-          ) : null}
-          <LingerRing
-            progress={progress}
-            counting={counting && !engaged}
-            paused={paused}
-            onClose={isComponent ? stepBack : putAway}
-          />
+              <Maximize2 className="size-3" />
+            </button>,
+          )}
+          {tip(
+            "close",
+            isComponent ? "Back to the text box" : "Close",
+            <LingerRing
+              {...named("close")}
+              title={isComponent ? "Back to the text box" : "Close"}
+              progress={progress}
+              counting={counting && !engaged}
+              paused={paused}
+              onClose={isComponent ? stepBack : putAway}
+            />,
+          )}
         </header>
         <div
           data-no-drag
@@ -773,12 +1010,12 @@ export function IslandBar() {
   }
 
   // The content sits between the docked edge and the composer.
-  const layerStyle =
-    layerKey === "answer" || layerKey === "component"
-      ? growUp
-        ? { top: composerH, bottom: 0 }
-        : { top: 0, bottom: composerH }
-      : { top: 0, bottom: 0 };
+  const beside = layerKey === "answer" || layerKey === "component" || layerKey === "chat";
+  const layerStyle = beside
+    ? growUp
+      ? { top: composerH, bottom: 0 }
+      : { top: 0, bottom: composerH }
+    : { top: 0, bottom: 0 };
 
   const idle = face === "idle";
   const onShapeClick = useCallback(() => {
@@ -787,6 +1024,8 @@ export function IslandBar() {
     void sendInteraction(UI.INTERACTION_TYPES_CLICK);
   }, []);
 
+  const sendable = canSend({ draft, images: pasted.images.length, working });
+  const textBlockH = composerHeightFor(composer.height);
   const composerNode = (
     <motion.div
       data-testid="island-composer"
@@ -803,169 +1042,253 @@ export function IslandBar() {
             : { duration: 0.18, delay: 0.06, ease: "easeOut" }
       }
       className={cn(
-        "absolute inset-x-0 flex items-start gap-2 pl-4 pr-2.5",
+        "absolute inset-x-0 flex flex-col pl-4 pr-2.5",
         idle && "pointer-events-none",
-        (face === "answer" || face === "component") && (growUp ? "border-b" : "border-t"),
+        beside && (growUp ? "border-b" : "border-t"),
         "border-white/[0.08]",
       )}
       style={{
         height: composerH,
-        paddingTop: (composerH - composer.height) / 2,
+        paddingTop: pasted.images.length ? COMPOSER_PAD_Y : (textBlockH - composer.height) / 2,
         ...(growUp ? { top: 0 } : { bottom: 0 }),
       }}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="relative min-w-0 flex-1">
-        <textarea
-          ref={composer.attach}
-          rows={1}
-          value={draft}
-          tabIndex={idle ? -1 : 0}
-          onChange={(e) => {
-            engage();
-            changeDraft(e.target.value);
-          }}
-          onKeyDown={(e) => {
-            skill.handleKeyDown(e);
-            if (e.defaultPrevented) return;
-            if (isSendKey(e)) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          onMouseDown={activateWindow}
-          onFocus={() => {
-            setComposerFocused(true);
-            setDismissed(false);
-            void sendInteraction(UI.INTERACTION_TYPES_FOCUS, { isFocused: true });
-          }}
-          onBlur={() => {
-            setComposerFocused(false);
-            // The window losing focus is reported by the window listener.
-            if (typeof document.hasFocus === "function" && !document.hasFocus()) return;
-            if (!draftRef.current.trim()) void sendInteraction(UI.INTERACTION_TYPES_BLUR);
-          }}
-          aria-label={face === "answer" || face === "component" ? "Follow up" : "Ask Juno"}
-          placeholder={placeholder.text}
-          className={cn(
-            "block w-full resize-none border-none bg-transparent outline-none placeholder:text-transparent",
-            "text-[13px] leading-[18px] tracking-[-0.01em] text-white/90",
-          )}
-        />
-        {draft === "" && (
-          <div className="pointer-events-none absolute inset-x-0 top-0 flex" aria-hidden="true" data-testid="island-placeholder">
-            <IslandWords words={placeholder} className="h-[18px] leading-[18px]" />
-          </div>
-        )}
-        <SkillGhostText
-          value={draft}
-          ghostText={skill.ghostText}
-          className="flex h-[18px] items-start text-[13px] leading-[18px] tracking-[-0.01em]"
-          ghostClassName="text-white/25"
-        />
-      </div>
-      <div className="flex h-[18px] shrink-0 items-center gap-1">
-        {recording ? (
-          <LevelBars level={bar.audioLevel} />
-        ) : working ? null : (
-          <button type="button" onClick={startTalking} aria-label="Talk to Juno" title="Talk to Juno" className={CONTROL}>
-            <Mic className="size-3" />
-          </button>
-        )}
-        {recording ? (
-          <button
-            type="button"
-            onClick={() => void sendVoiceTurn()}
-            aria-label="Send"
-            title="Send what was said"
-            className={cn(CONTROL, "bg-white/[0.16] text-white")}
-          >
-            <ArrowUp className="size-3" />
-          </button>
-        ) : compact ? null : (
-          <button
-            type="button"
-            onClick={submit}
-            aria-label="Send"
-            title="Send"
-            disabled={!draft.trim() || working}
+      {pasted.images.length > 0 && (
+        <div className="flex shrink-0 items-center gap-1.5" style={{ height: THUMB_PX, marginBottom: THUMB_GAP }} data-testid="island-thumbs">
+          {pasted.images.map((src, i) => (
+            <div key={`${i}-${src.length}`} className="relative shrink-0 overflow-hidden rounded-[7px] ring-1 ring-white/15" style={{ width: THUMB_PX, height: THUMB_PX }}>
+              <img src={src} alt={`Pasted image ${i + 1}`} className="size-full object-cover" draggable={false} />
+              {tip(
+                `remove-${i}`,
+                "Remove image",
+                <button
+                  type="button"
+                  {...named(`remove-${i}`)}
+                  onClick={() => pasted.remove(i)}
+                  aria-label={`Remove image ${i + 1}`}
+                  title="Remove image"
+                  className={cn(
+                    "absolute right-0.5 top-0.5 flex size-3.5 items-center justify-center rounded-full bg-black/75 text-white/80 hover:text-white",
+                    lit === `remove-${i}` && "text-white",
+                  )}
+                >
+                  <X className="size-2" />
+                </button>,
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex items-start gap-2">
+        <div className="relative min-w-0 flex-1">
+          <textarea
+            ref={composer.attach}
+            rows={1}
+            value={draft}
+            tabIndex={idle ? -1 : 0}
+            onChange={(e) => {
+              engage();
+              changeDraft(e.target.value);
+            }}
+            onPaste={pasted.onPaste}
+            onKeyDown={(e) => {
+              skill.handleKeyDown(e);
+              if (e.defaultPrevented) return;
+              if (isSendKey(e)) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            onMouseDown={activateWindow}
+            onFocus={() => {
+              setComposerFocused(true);
+              setDismissed(false);
+              void sendInteraction(UI.INTERACTION_TYPES_FOCUS, { isFocused: true });
+            }}
+            onBlur={() => {
+              setComposerFocused(false);
+              // The window losing focus is reported by the window listener.
+              if (typeof document.hasFocus === "function" && !document.hasFocus()) return;
+              if (!draftRef.current.trim()) void sendInteraction(UI.INTERACTION_TYPES_BLUR);
+            }}
+            aria-label={beside ? "Follow up" : "Ask Juno"}
+            placeholder={placeholder.text}
             className={cn(
-              CONTROL,
-              draft.trim() && !working ? "bg-[#0A84FF] text-white hover:bg-[#2B93FF]" : "cursor-default opacity-40",
+              "block w-full resize-none border-none bg-transparent outline-none placeholder:text-transparent",
+              "text-[13px] leading-[18px] tracking-[-0.01em] text-white/90",
             )}
-          >
-            <ArrowUp className="size-3" />
-          </button>
-        )}
-        {stopKind && (
-          <button
-            type="button"
-            onClick={stop}
-            aria-label={STOP_LABELS[stopKind]}
-            title={stopKind === "stop" ? `${STOP_LABELS[stopKind]} (Esc)` : STOP_LABELS[stopKind]}
-            className={cn(CONTROL, stopKind === "stop" && "bg-white/[0.08]")}
-          >
-            {stopKind === "stop" ? <Square className="size-2.5 fill-current" /> : <X className="size-3" />}
-          </button>
-        )}
+          />
+          {draft === "" && (
+            <div className="pointer-events-none absolute inset-x-0 top-0 flex" aria-hidden="true" data-testid="island-placeholder">
+              <IslandWords words={placeholder} className="h-[18px] leading-[18px]" />
+            </div>
+          )}
+          <SkillGhostText
+            value={draft}
+            ghostText={skill.ghostText}
+            className="flex h-[18px] items-start text-[13px] leading-[18px] tracking-[-0.01em]"
+            ghostClassName="text-white/25"
+          />
+        </div>
+        <div className="flex h-[18px] shrink-0 items-center gap-1">
+          {recording ? (
+            <LevelBars level={bar.audioLevel} />
+          ) : working ? null : (
+            tip(
+              "compose-mic",
+              "Talk to Juno",
+              <button type="button" {...named("compose-mic")} onClick={startTalking} aria-label="Talk to Juno" title="Talk to Juno" className={cn(CONTROL, lit === "compose-mic" && CONTROL_LIT)}>
+                <Mic className="size-3" />
+              </button>,
+            )
+          )}
+          {recording
+            ? tip(
+                "send",
+                "Send what was said",
+                <button
+                  type="button"
+                  {...named("send")}
+                  onClick={() => void sendVoiceTurn()}
+                  aria-label="Send"
+                  title="Send what was said"
+                  className={cn(CONTROL, "bg-white/[0.16] text-white")}
+                >
+                  <ArrowUp className="size-3" />
+                </button>,
+              )
+            : compact
+              ? null
+              : tip(
+                  "send",
+                  "Send",
+                  <button
+                    type="button"
+                    {...named("send")}
+                    onClick={submit}
+                    aria-label="Send"
+                    title="Send"
+                    disabled={!sendable}
+                    className={cn(
+                      CONTROL,
+                      sendable ? "bg-[#0A84FF] text-white hover:bg-[#2B93FF]" : "cursor-default opacity-40",
+                    )}
+                  >
+                    <ArrowUp className="size-3" />
+                  </button>,
+                )}
+          {stopKind &&
+            tip(
+              "stop",
+              stopKind === "stop" ? `${STOP_LABELS[stopKind]} (Esc)` : STOP_LABELS[stopKind],
+              <button
+                type="button"
+                {...named("stop")}
+                onClick={stop}
+                aria-label={STOP_LABELS[stopKind]}
+                title={stopKind === "stop" ? `${STOP_LABELS[stopKind]} (Esc)` : STOP_LABELS[stopKind]}
+                className={cn(CONTROL, stopKind === "stop" && "bg-white/[0.08]", lit === "stop" && CONTROL_LIT)}
+              >
+                {stopKind === "stop" ? <Square className="size-2.5 fill-current" /> : <X className="size-3" />}
+              </button>,
+            )}
+        </div>
       </div>
     </motion.div>
   );
 
-  return (
-    <div className="relative h-screen w-screen overflow-hidden bg-transparent select-none">
-      <div
-        {...dragProps}
-        {...hover.pointerProps}
-        data-testid="island-stage"
-        onFocusCapture={() => setFocusWithin(true)}
-        onBlurCapture={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
-        }}
-        onClickCapture={(e) => {
-          if (swallowClickAfterDrag(e)) return;
-          if (face !== "idle" && (e.target as HTMLElement).closest("button, textarea, a")) engage();
-        }}
-        className={cn(
-          "absolute flex cursor-grab active:cursor-grabbing",
-          growUp ? "flex-col-reverse" : "flex-col",
-          layout.anchorX === "start" ? "items-start" : layout.anchorX === "end" ? "items-end" : "items-center",
-        )}
-        style={{
-          left: place.left,
-          right: place.right,
-          top: place.top,
-          bottom: place.bottom,
-          transform: place.translateX ? "translateX(-50%)" : undefined,
-          padding: SHADOW_PAD,
-          gap: suggestionsH ? SUGGESTION_GAP : 0,
-          // A drop into a well that draws differently swaps behind this.
-          opacity: frame.hidden ? 0 : 1,
-        }}
-      >
-        <IslandShell
-          size={shape}
-          layerKey={layerKey}
-          layer={layer}
-          layerStyle={layerStyle}
-          reducedMotion={reducedMotion}
-          flame={flame}
-          onClick={idle ? onShapeClick : undefined}
+  const rosterNode = (
+    <AnimatePresence initial={false}>
+      {rosterVisible && (
+        <motion.div
+          key="roster"
+          data-testid="island-roster"
+          initial={{ opacity: 0, scale: 0.85 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.85 }}
+          transition={reducedMotion ? ISLAND_EASE : { duration: 0.18, ease: "easeOut" }}
+          className="absolute flex items-center justify-center rounded-full bg-black"
+          style={{
+            width: rosterW,
+            height: ROSTER_HEIGHT,
+            boxShadow: ISLAND_GLOW,
+            [rosterOnLeft ? "right" : "left"]: `calc(100% + ${ROSTER_GAP}px)`,
+            [growUp ? "bottom" : "top"]: 0,
+          }}
         >
-          {composerNode}
-        </IslandShell>
-        {suggestionsH > 0 && (
-          <div style={{ width: ISLAND_WIDTH - 24 }} className="z-20">
-            <SkillSuggestionList
-              variant="bar"
-              suggestions={skill.suggestions}
-              selectedIndex={skill.selectedIndex}
-              onSelect={skill.accept}
-              onHighlight={skill.setSelectedIndex}
-            />
+          <AgentRosterStrip
+            sessions={agentSessions}
+            onFocus={focusSession}
+            tooltipSide={tooltipSide}
+            className="gap-2 border-0 bg-transparent p-0 backdrop-blur-none"
+          />
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
+  return (
+    <TooltipProvider delayDuration={PILL_TOOLTIP_DELAY_MS} skipDelayDuration={300}>
+      <div className="relative h-screen w-screen overflow-hidden bg-transparent select-none">
+        <div
+          {...dragProps}
+          {...hover.pointerProps}
+          data-testid="island-stage"
+          onFocusCapture={() => setFocusWithin(true)}
+          onBlurCapture={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusWithin(false);
+          }}
+          onClickCapture={(e) => {
+            if (swallowClickAfterDrag(e)) return;
+            if (face !== "idle" && (e.target as HTMLElement).closest("button, textarea, a")) engage();
+          }}
+          className={cn(
+            "absolute flex cursor-grab active:cursor-grabbing",
+            growUp ? "flex-col-reverse" : "flex-col",
+            layout.anchorX === "start" ? "items-start" : layout.anchorX === "end" ? "items-end" : "items-center",
+          )}
+          style={{
+            left: place.left,
+            right: place.right,
+            top: place.top,
+            bottom: place.bottom,
+            transform: place.translateX ? "translateX(-50%)" : undefined,
+            padding: SHADOW_PAD,
+            gap: suggestionsH ? SUGGESTION_GAP : 0,
+            // A drop into a well that draws differently swaps behind this.
+            opacity: frame.hidden ? 0 : 1,
+          }}
+        >
+          {/* The shape and its roster bubble move as one: the bubble rides the
+              shape's side, so the shape itself never moves for it. */}
+          <div className="relative shrink-0">
+            <IslandShell
+              size={shape}
+              layerKey={layerKey}
+              layer={layer}
+              layerStyle={layerStyle}
+              reducedMotion={reducedMotion}
+              flame={flame}
+              onClick={idle ? onShapeClick : undefined}
+            >
+              {composerNode}
+            </IslandShell>
+            {rosterNode}
           </div>
-        )}
+          {suggestionsH > 0 && (
+            <div style={{ width: ISLAND_WIDTH - 24 }} className="z-20">
+              <SkillSuggestionList
+                variant="bar"
+                suggestions={skill.suggestions}
+                selectedIndex={skill.selectedIndex}
+                onSelect={skill.accept}
+                onHighlight={skill.setSelectedIndex}
+              />
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   );
 }

@@ -1,6 +1,8 @@
 import { UI } from "@/lib/constants.generated";
 import type { ChatMessage } from "@/types/chat";
-import type { SteadySpec } from "@/lib/steadyFrame";
+import type { Size, SteadySpec } from "@/lib/steadyFrame";
+import { screenInsets, type MonitorRect } from "@/lib/snapWells";
+import { dotTone, type Connectivity } from "@/lib/pillStatus";
 
 /**
  * The Island's model: pure functions from what Rust says (the bar state) and
@@ -13,8 +15,11 @@ import type { SteadySpec } from "@/lib/steadyFrame";
  * unmounted.
  */
 
-/** The four faces. */
-export type Face = "idle" | "compose" | "answer" | "component";
+/**
+ * The five faces. Chat is the whole conversation, grown out of the same
+ * shape: a share of the display rather than a card.
+ */
+export type Face = "idle" | "compose" | "answer" | "component" | "chat";
 
 /** Empty space around the shape so its shadow is not clipped by the window. */
 export const SHADOW_PAD = 24;
@@ -37,6 +42,19 @@ export const IDLE_SHAPE: ShapeSize = { width: 92, height: 28, radius: 14 };
 /** The capsule with its controls showing: barely bigger, so it reads as the same object. */
 export const HOVER_SHAPE: ShapeSize = { width: 132, height: 32, radius: 16 };
 
+/** One hover control and the gap after it. */
+const HOVER_BUTTON_PX = 26;
+/** The dot, its lead and the trailing pad around the hover controls. */
+const HOVER_FRAME_PX = 40;
+
+/**
+ * The hover capsule for a number of controls (Talk, Type, Show last answer,
+ * the wake phrase). Three fit the 132 capsule; a fourth widens it by one.
+ */
+export function hoverShapeFor(buttons: number): ShapeSize {
+  return { ...HOVER_SHAPE, width: Math.max(HOVER_SHAPE.width, HOVER_FRAME_PX + buttons * HOVER_BUTTON_PX) };
+}
+
 /** One line of the composer, in px. */
 export const COMPOSER_LINE_PX = 18;
 /** The composer grows with its text up to four lines, then scrolls. */
@@ -44,10 +62,25 @@ export const COMPOSER_MAX_TEXT_PX = 4 * COMPOSER_LINE_PX;
 /** Room above and below the composer's text. */
 export const COMPOSER_PAD_Y = 9;
 
-/** The composer's height for a measured text height. */
-export function composerHeightFor(textHeight: number): number {
+/** A pasted picture's thumbnail in the composer, and the gap under the row. */
+export const THUMB_PX = 32;
+export const THUMB_GAP = 6;
+
+/**
+ * The composer's height for a measured text height, plus the row of pasted
+ * pictures above the text when there are any.
+ */
+export function composerHeightFor(textHeight: number, images = 0): number {
   const text = Math.min(COMPOSER_MAX_TEXT_PX, Math.max(COMPOSER_LINE_PX, textHeight));
-  return text + 2 * COMPOSER_PAD_Y;
+  return text + 2 * COMPOSER_PAD_Y + (images > 0 ? THUMB_PX + THUMB_GAP : 0);
+}
+
+/**
+ * Whether the composer has something to send: words, or a picture on its own
+ * ("what is this?"), and no turn already on its way.
+ */
+export function canSend({ draft, images, working }: { draft: string; images: number; working: boolean }): boolean {
+  return !working && (draft.trim() !== "" || images > 0);
 }
 
 /** The tallest the shape gets. Taller answers scroll inside it. */
@@ -56,18 +89,105 @@ export const SHAPE_MAX_HEIGHT = 400;
 /** Room beyond the composer for the skill suggestions. */
 export const SUGGESTION_ROOM = 200;
 
+// === THE ROSTER ===
+
+/** The roster bubble: the same black as the island, the height of the capsule. */
+export const ROSTER_HEIGHT = IDLE_SHAPE.height;
+/** The gap between the island and its roster bubble. */
+export const ROSTER_GAP = 8;
+/** Dots the roster shows before a "+N" (AgentRosterStrip's palette size). */
+export const ROSTER_MAX_DOTS = 8;
+const ROSTER_DOT_PX = 14;
+const ROSTER_DOT_GAP = 8;
+const ROSTER_PAD_X = 10;
+const ROSTER_OVERFLOW_PX = 22;
+
+/** The roster appears for two or more agents, as the Pill's does. */
+export function rosterShown(agents: number): boolean {
+  return agents >= 2;
+}
+
+/** The roster bubble's width for a number of agents. */
+export function rosterWidthFor(agents: number): number {
+  const dots = Math.min(agents, ROSTER_MAX_DOTS);
+  if (dots <= 0) return 0;
+  const overflow = agents > ROSTER_MAX_DOTS ? ROSTER_DOT_GAP + ROSTER_OVERFLOW_PX : 0;
+  return 2 * ROSTER_PAD_X + dots * ROSTER_DOT_PX + (dots - 1) * ROSTER_DOT_GAP + overflow;
+}
+
+/** Room the window keeps beside the shape for the roster, on either side. */
+export const ROSTER_ROOM = ROSTER_GAP + rosterWidthFor(ROSTER_MAX_DOTS + 1);
+
+// === THE CHAT FACE ===
+
+/** The chat face's share of the display, both ways. */
+export const CHAT_SHARE = 0.6;
+/** Clamps for the chat face: readable on a small display, calm on a big one. */
+export const CHAT_MIN: Size = { width: 480, height: 400 };
+export const CHAT_MAX: Size = { width: 960, height: 820 };
+
+/** What a window around the chat face needs beyond the face itself. */
+const CHAT_EXTRA = { width: 2 * ROSTER_ROOM + 2 * SHADOW_PAD, height: 2 * SHADOW_PAD + SUGGESTION_ROOM };
+
+const clampTo = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
 /**
- * The Island's steady frame. The window holds the largest face (the full
- * answer, its shadow, and the skill suggestions) and never changes size.
- * Wells are computed for the resting capsule plus its shadow, so the capsule
- * sits exactly on the well. The preview frames the compose face.
+ * The chat face on a display: 60% of it both ways, clamped, and never more
+ * than the room the window can be given there (the display less its menu bar,
+ * Dock and margins, less the roster's room and the shadow).
+ */
+export function chatSizeFor(monitor: MonitorRect): Size {
+  const inset = screenInsets(monitor);
+  const room = {
+    width: monitor.size.width - inset.left - inset.right - CHAT_EXTRA.width,
+    height: monitor.size.height - inset.top - inset.bottom - CHAT_EXTRA.height,
+  };
+  const pick = (share: number, lo: number, hi: number, cap: number) =>
+    Math.floor(Math.min(cap, clampTo(share, lo, hi)));
+  return {
+    width: pick(monitor.size.width * CHAT_SHARE, CHAT_MIN.width, CHAT_MAX.width, Math.max(ISLAND_WIDTH, room.width)),
+    height: pick(monitor.size.height * CHAT_SHARE, CHAT_MIN.height, CHAT_MAX.height, Math.max(SHAPE_MAX_HEIGHT, room.height)),
+  };
+}
+
+/** The Island's window on a display: the chat face plus the roster's room, the shadow and the suggestions. */
+export function islandMaxFor(monitor: MonitorRect): Size {
+  const chat = chatSizeFor(monitor);
+  return {
+    width: Math.max(chat.width, ISLAND_WIDTH) + CHAT_EXTRA.width,
+    height: Math.max(chat.height, SHAPE_MAX_HEIGHT) + CHAT_EXTRA.height,
+  };
+}
+
+/**
+ * The chat face inside a placed window, read back from the window's size
+ * and capped to the room its well leaves to grow into
+ * (the inverse of `islandMaxFor`), so every placement path (launch, drop,
+ * display hop) agrees on it without passing the display around.
+ */
+export function chatSizeInWindow(window: Size, room?: number): Size {
+  const height = clampTo(window.height - CHAT_EXTRA.height, SHAPE_MAX_HEIGHT, CHAT_MAX.height);
+  return {
+    width: clampTo(window.width - CHAT_EXTRA.width, ISLAND_WIDTH, CHAT_MAX.width),
+    // A well in the middle of a side grows from the middle of the display:
+    // only the room between the well and the window's edge is there to grow
+    // into (`roomForContent`), shadow included.
+    height: room === undefined ? height : Math.min(height, Math.max(COMPOSER_LINE_PX * 4, room - 2 * SHADOW_PAD)),
+  };
+}
+
+/**
+ * The Island's steady frame. The window holds the largest face (now the chat
+ * face, a share of the display, with room beside it for the roster, its
+ * shadow and the skill suggestions) and never changes size per state. Wells
+ * are computed for the resting capsule plus its shadow, so the capsule sits
+ * exactly on the well. `max` is the window on a 1440 x 900 display; the
+ * placed window comes from `maxFor`. The preview frames the compose face.
  */
 export const ISLAND_STEADY_SPEC: SteadySpec = {
   rest: { width: IDLE_SHAPE.width + 2 * SHADOW_PAD, height: IDLE_SHAPE.height + 2 * SHADOW_PAD },
-  max: {
-    width: ISLAND_WIDTH + 2 * SHADOW_PAD,
-    height: SHAPE_MAX_HEIGHT + 2 * SHADOW_PAD + SUGGESTION_ROOM,
-  },
+  max: islandMaxFor({ position: { x: 0, y: 0 }, size: { width: 1440, height: 900 } }),
+  maxFor: islandMaxFor,
   stage: {
     width: ISLAND_WIDTH + 2 * SHADOW_PAD,
     height: COMPOSER_LINE_PX + 2 * COMPOSER_PAD_Y + 2 * SHADOW_PAD,
@@ -158,6 +278,8 @@ export interface FaceInput {
    * the moment Rust takes to shrink.
    */
   dismissed?: boolean;
+  /** The chat face was asked for (its expand control, the tray's Show Chat). */
+  chatOpen?: boolean;
 }
 
 /**
@@ -176,7 +298,11 @@ export function faceFor({
   composerActive,
   dictation,
   dismissed = false,
+  chatOpen = false,
 }: FaceInput): Face {
+  // The whole conversation stays up through every state: a new turn, spoken
+  // or typed, streams into it rather than taking it away.
+  if (chatOpen) return "chat";
   if (dismissed && isInputState(state) && !answerOpen) return "idle";
   const spokenTurn = isVoiceState(state) && !isRestingState(state) && !dictation;
   if (answerOpen && !spokenTurn) return componentShown ? "component" : "answer";
@@ -214,6 +340,10 @@ export function composeIsCompact({ face, state, provisional, composerActive, liv
 
 export interface ShapeInput {
   hovered: boolean;
+  /** Controls on the hover capsule (`hoverShapeFor`). */
+  hoverButtons?: number;
+  /** The chat face's size on this display (`chatSizeInWindow`). */
+  chat?: Size;
   /** The compose face is the small bar (`composeIsCompact`). */
   compact?: boolean;
   /** The composer's own height (`composerHeightFor`). */
@@ -225,9 +355,13 @@ export interface ShapeInput {
 /** The shape's size for a face. */
 export function shapeFor(
   face: Face,
-  { hovered, compact = false, composerHeight, contentHeight }: ShapeInput,
+  { hovered, hoverButtons = 2, chat, composerHeight, compact = false, contentHeight }: ShapeInput,
 ): ShapeSize {
-  if (face === "idle") return { ...(hovered ? HOVER_SHAPE : IDLE_SHAPE) };
+  if (face === "idle") return hovered ? hoverShapeFor(hoverButtons) : { ...IDLE_SHAPE };
+  if (face === "chat") {
+    const size = chat ?? CHAT_MIN;
+    return { width: size.width, height: Math.max(size.height, composerHeight), radius: 22 };
+  }
   if (face === "compose") {
     return { width: compact ? COMPACT_COMPOSE_WIDTH : ISLAND_WIDTH, height: composerHeight, radius: 18 };
   }
@@ -331,6 +465,23 @@ export function stopControl({
   return face === "compose" ? "close" : null;
 }
 
+/**
+ * One rung down the Island's own part of the Escape ladder (`barEscape.ts`
+ * owns the rest): chat to the answer it grew from (or the composer when
+ * there is none), a component to the composer, an answer or the composer to
+ * the capsule.
+ */
+export function islandEscapeStep(face: Face, { answerShown }: { answerShown: boolean }): Face {
+  switch (face) {
+    case "chat":
+      return answerShown ? "answer" : "compose";
+    case "component":
+      return "compose";
+    default:
+      return "idle";
+  }
+}
+
 export interface LingerInput {
   face: Face;
   /** The answer is still arriving. */
@@ -371,9 +522,14 @@ export const SYSTEM_GREEN = "#30D158";
 export const SYSTEM_RED = "#FF453A";
 const WHITE = "#FFFFFF";
 
-/** The dot for a bar state. */
-export function dotFor(state: string, driving = false): DotLook {
+/**
+ * The dot for a bar state. With Rust's connectivity it turns system red,
+ * still, when Juno cannot answer (`pillStatus.dotTone`, the Pill's rule): an
+ * open microphone still wins, and Juno driving the pointer wins over both.
+ */
+export function dotFor(state: string, driving = false, connectivity: Connectivity | null = null): DotLook {
   if (driving) return { color: SYSTEM_BLUE, opacity: 0.9, motion: "orbit" };
+  if (dotTone(state, connectivity) === "down") return { color: SYSTEM_RED, opacity: 1, motion: "still" };
   switch (state) {
     case UI.BAR_STATES_DEFAULT:
       return { color: WHITE, opacity: 0.45, motion: "slow" };

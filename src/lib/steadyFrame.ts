@@ -57,6 +57,12 @@ export interface SteadySpec {
   /** The largest footprint any state can reach. The window is this size. */
   max: Size;
   /**
+   * The largest footprint on one display, when it depends on the display
+   * (the Island's chat face is a share of the screen). Takes the display and
+   * wins over `max`; `max` stays as the size for a typical display.
+   */
+  maxFor?: (monitor: MonitorRect) => Size;
+  /**
    * The region the appearance preview frames: the shape's own extent at its
    * widest, without panes. Anchored at the same docked edges as `rest`.
    */
@@ -127,8 +133,9 @@ export function steadyLayout(
   // One pixel wider when the room either side of a centred footprint would
   // otherwise be uneven: a centre column then sits on a whole pixel, and so
   // does every edge that grows symmetrically around it.
-  const W = spec.max.width + ((spec.max.width - rw) % 2);
-  const H = spec.max.height + (centerY ? (spec.max.height - rh) % 2 : 0);
+  const max = spec.maxFor ? spec.maxFor(monitor) : spec.max;
+  const W = max.width + ((max.width - rw) % 2);
+  const H = max.height + (centerY ? (max.height - rh) % 2 : 0);
 
   // Ideal offset of the resting footprint inside the window.
   const idealX = anchorX === "start" ? 0 : anchorX === "end" ? W - rw : Math.floor((W - rw) / 2);

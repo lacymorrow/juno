@@ -122,6 +122,20 @@ describe("every bar appearance shares one Escape", () => {
   });
 });
 
+describe("the Island's own rungs", () => {
+  it("counts the chat face as a layer it opened, and steps down through one rule", () => {
+    // The chat face is the Island's floating chat: Escape takes it one rung
+    // down (to the answer, or the composer), never straight to the capsule,
+    // and the decision is the pure `islandEscapeStep`, not a branch in the view.
+    const call = escapeCall(read(COMPONENT_FOR_APPEARANCE.dynamic)) ?? "";
+    expect(call).toMatch(/overlayOpen:[^,]*face === "chat"/);
+    const source = read(COMPONENT_FOR_APPEARANCE.dynamic);
+    const collapse = source.slice(source.indexOf("const collapseOneRung"), source.indexOf("useEscapeToIdle({"));
+    expect(collapse).toContain("islandEscapeStep(");
+    expect(collapse).toContain("leaveChat(");
+  });
+});
+
 describe("Rust's half of the one Escape", () => {
   const rust = read("src-tauri/src/commands/ui_commands.rs");
 

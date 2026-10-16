@@ -24,7 +24,23 @@ import {
   stopControl,
   wordsFor,
   type FaceInput,
+  CHAT_MAX,
+  CHAT_MIN,
+  ROSTER_ROOM,
+  SYSTEM_RED,
+  THUMB_GAP,
+  THUMB_PX,
+  canSend,
+  chatSizeFor,
+  chatSizeInWindow,
+  hoverShapeFor,
+  islandEscapeStep,
+  islandMaxFor,
+  rosterShown,
+  rosterWidthFor,
 } from "../islandModel";
+import { steadyLayout, contentRect, dockedEdges, roomForContent } from "@/lib/steadyFrame";
+import { computeWells } from "@/lib/snapWells";
 
 const EVERY_STATE = Object.entries(UI)
   .filter(([k]) => k.startsWith("BAR_STATES_"))
@@ -106,8 +122,126 @@ describe("shape", () => {
       width: IDLE_SHAPE.width + 2 * SHADOW_PAD,
       height: IDLE_SHAPE.height + 2 * SHADOW_PAD,
     });
-    expect(ISLAND_STEADY_SPEC.max.width).toBe(ISLAND_WIDTH + 2 * SHADOW_PAD);
+    // The window now holds the chat face, with the roster's room beside it.
+    const display = { position: { x: 0, y: 0 }, size: { width: 1440, height: 900 } };
+    expect(ISLAND_STEADY_SPEC.max).toEqual(islandMaxFor(display));
+    expect(ISLAND_STEADY_SPEC.max.width).toBe(chatSizeFor(display).width + 2 * ROSTER_ROOM + 2 * SHADOW_PAD);
     expect(ISLAND_STEADY_SPEC.max.height).toBeGreaterThanOrEqual(SHAPE_MAX_HEIGHT + 2 * SHADOW_PAD);
+  });
+});
+
+describe("chat face", () => {
+  const base = { hovered: false, composerHeight: composerHeightFor(COMPOSER_LINE_PX), contentHeight: 0 };
+  const display = (width: number, height: number) => ({ position: { x: 0, y: 0 }, size: { width, height } });
+
+  it("is 60% of the display both ways, clamped", () => {
+    expect(chatSizeFor(display(1440, 900))).toEqual({ width: 864, height: 540 });
+    expect(chatSizeFor(display(5120, 2880))).toEqual(CHAT_MAX);
+    // A small display: the minimum, and never more than the window can be given there.
+    const small = chatSizeFor(display(1280, 720));
+    expect(small.width).toBeGreaterThanOrEqual(ISLAND_WIDTH);
+    expect(small.height).toBeGreaterThanOrEqual(CHAT_MIN.height);
+    const max = islandMaxFor(display(1280, 720));
+    expect(max.width).toBeLessThanOrEqual(1280);
+    expect(max.height).toBeLessThanOrEqual(720);
+  });
+
+  it("is read back from the placed window, whatever placed it", () => {
+    for (const [w, h] of [
+      [1440, 900],
+      [1920, 1080],
+      [2560, 1440],
+    ]) {
+      const max = islandMaxFor(display(w, h));
+      // steadyLayout may add a pixel so a centred column sits on a whole pixel.
+      const back = chatSizeInWindow({ width: max.width + 1, height: max.height });
+      const want = chatSizeFor(display(w, h));
+      expect(Math.abs(back.width - want.width)).toBeLessThanOrEqual(1);
+      expect(back.height).toBe(want.height);
+    }
+  });
+
+  it("the shape is the chat size, holding the composer", () => {
+    const chat = { width: 864, height: 540 };
+    expect(shapeFor("chat", { ...base, chat })).toEqual({ width: 864, height: 540, radius: 22 });
+  });
+
+  it("the whole conversation stays up through every state, and wins over an answer", () => {
+    for (const state of EVERY_STATE) {
+      expect(at(state, { chatOpen: true, answerOpen: true }), state).toBe("chat");
+    }
+  });
+
+  it("grows away from the docked edge in every well, inside the window", () => {
+    const mon = display(1440, 900);
+    const wells = computeWells([mon], {
+      windowWidth: ISLAND_STEADY_SPEC.rest.width,
+      windowHeight: ISLAND_STEADY_SPEC.rest.height,
+      includeCenter: true,
+    });
+    for (const well of wells) {
+      const layout = steadyLayout(well, mon, ISLAND_STEADY_SPEC);
+      const chat = chatSizeInWindow(layout.size, roomForContent(layout));
+      // Full size wherever the well leaves room; the middle of a side caps it.
+      if (well.fy !== 0.5) expect(chat.height).toBe(540);
+      const block = { width: chat.width + 2 * SHADOW_PAD, height: chat.height + 2 * SHADOW_PAD };
+      const rest = ISLAND_STEADY_SPEC.rest;
+      expect(dockedEdges(layout, block), `${well.fx},${well.fy}`).toEqual(dockedEdges(layout, rest));
+      const r = contentRect(layout, block);
+      expect(r.x).toBeGreaterThanOrEqual(0);
+      expect(r.y).toBeGreaterThanOrEqual(0);
+      expect(r.x + r.width).toBeLessThanOrEqual(layout.size.width);
+      expect(r.y + r.height).toBeLessThanOrEqual(layout.size.height);
+    }
+  });
+});
+
+describe("escape rungs", () => {
+  it("chat steps down to the answer it grew from, or the composer when there is none", () => {
+    expect(islandEscapeStep("chat", { answerShown: true })).toBe("answer");
+    expect(islandEscapeStep("chat", { answerShown: false })).toBe("compose");
+  });
+  it("a component steps back to the composer; an answer and the composer settle", () => {
+    expect(islandEscapeStep("component", { answerShown: true })).toBe("compose");
+    expect(islandEscapeStep("answer", { answerShown: true })).toBe("idle");
+    expect(islandEscapeStep("compose", { answerShown: false })).toBe("idle");
+  });
+});
+
+describe("pasted images", () => {
+  it("a picture on its own can be sent, and counts as a draft for the small bar", () => {
+    expect(canSend({ draft: "", images: 1, working: false })).toBe(true);
+    expect(canSend({ draft: "  ", images: 0, working: false })).toBe(false);
+    expect(canSend({ draft: "", images: 1, working: true })).toBe(false);
+    // The island passes a pasted picture as composerActive.
+    expect(composeIsCompact({ face: "compose", state: UI.BAR_STATES_DEFAULT, composerActive: true, livePartials: false })).toBe(false);
+    expect(at(UI.BAR_STATES_DEFAULT, { composerActive: true })).toBe("compose");
+  });
+  it("the thumbnails add one row above the text", () => {
+    expect(composerHeightFor(COMPOSER_LINE_PX, 2) - composerHeightFor(COMPOSER_LINE_PX)).toBe(THUMB_PX + THUMB_GAP);
+  });
+});
+
+describe("hover, dot and roster", () => {
+  it("a fourth hover control (the wake phrase) widens the capsule by one", () => {
+    expect(hoverShapeFor(3)).toEqual(HOVER_SHAPE);
+    expect(hoverShapeFor(4).width).toBeGreaterThan(HOVER_SHAPE.width);
+    expect(hoverShapeFor(4).height).toBe(HOVER_SHAPE.height);
+  });
+
+  it("the dot is system red when Juno cannot answer, except while a mic is open", () => {
+    const offline = { status: "offline" as const, label: "Network unavailable", provider: "Claude" };
+    expect(dotFor(UI.BAR_STATES_DEFAULT, false, offline)).toMatchObject({ color: SYSTEM_RED, motion: "still" });
+    expect(dotFor(UI.BAR_STATES_LISTENING, false, offline).color).not.toBe(SYSTEM_RED);
+    const fine = { status: "connected" as const, label: "Connected to Claude", provider: "Claude" };
+    expect(dotFor(UI.BAR_STATES_DEFAULT, false, fine).color).not.toBe(SYSTEM_RED);
+  });
+
+  it("the roster shows from two agents, sized for the dots it shows", () => {
+    expect(rosterShown(1)).toBe(false);
+    expect(rosterShown(2)).toBe(true);
+    expect(rosterWidthFor(3)).toBeGreaterThan(rosterWidthFor(2));
+    expect(rosterWidthFor(20)).toBeLessThanOrEqual(ROSTER_ROOM);
   });
 });
 
