@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
-import { splitMixedContent, hasMixedContent } from "@/components/ui/mixed-content-renderer";
+import { splitMixedContent, hasMixedContent, splitHeroContent } from "@/components/ui/mixed-content-renderer";
 
 describe("mixed-content JSX detection (no allowlist)", () => {
   it("segments the exact NowPlayingCard response the agent emits", () => {
@@ -81,5 +81,25 @@ The card above is live-bound.`;
     const content = "**Why it failed:** the folder is read-only.\n\nFix the permissions first.";
     expect(splitMixedContent(content).map((s) => s.type)).toEqual(["text"]);
     expect(hasMixedContent(content)).toBe(false);
+  });
+});
+
+describe("splitHeroContent (the Island's component face)", () => {
+  it("lifts the component out and folds the prose around it into one line", () => {
+    const content = 'Done. The draft is with Maya.\n\n<TaskSummaryCard title="Sent" />\n\nI will let you know.';
+    const hero = splitHeroContent(content);
+    expect(hero?.components).toBe('<TaskSummaryCard title="Sent" />');
+    expect(hero?.prose).toBe("Done. The draft is with Maya. I will let you know.");
+  });
+
+  it("is null for an answer with no component", () => {
+    expect(splitHeroContent("Sunny, 72.")).toBeNull();
+    expect(splitHeroContent("Use Vec<String> here.")).toBeNull();
+  });
+
+  it("keeps a component that is still arriving, so its skeleton shows", () => {
+    const hero = splitHeroContent('Here:\n<TaskSummaryCard title="Se', true);
+    expect(hero?.components.startsWith("<TaskSummaryCard")).toBe(true);
+    expect(hero?.prose).toBe("Here:");
   });
 });

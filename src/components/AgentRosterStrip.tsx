@@ -6,6 +6,8 @@ interface AgentRosterStripProps {
 	sessions: AgentSessionInfo[];
 	onFocus: (sessionId: string) => void;
 	className?: string;
+	/** Which side the dot tooltips open on. The Island docked at the top needs "bottom". */
+	tooltipSide?: "top" | "bottom";
 }
 
 /** Max dots shown before collapsing into a "+N" overflow label (palette size). */
@@ -55,7 +57,7 @@ function dotStateClass(session: AgentSessionInfo): string {
  * session — background sessions keep running. Renders nothing with fewer
  * than two sessions so the single-agent experience is unchanged.
  */
-export function AgentRosterStrip({ sessions, onFocus, className }: AgentRosterStripProps) {
+export function AgentRosterStrip({ sessions, onFocus, className, tooltipSide = "top" }: AgentRosterStripProps) {
 	const [hoveredId, setHoveredId] = useState<string | null>(null);
 
 	if (sessions.length < 2) return null;
@@ -82,7 +84,10 @@ export function AgentRosterStrip({ sessions, onFocus, className }: AgentRosterSt
 					<div key={session.id} className="relative">
 						{hoveredId === session.id && (
 							<div
-								className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-black/90 px-2 py-1 text-[11px] text-white"
+								className={cn(
+									"pointer-events-none absolute left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-md bg-black/90 px-2 py-1 text-[11px] text-white",
+									tooltipSide === "top" ? "bottom-full mb-1" : "top-full mt-1",
+								)}
 								role="tooltip"
 							>
 								{tooltip}

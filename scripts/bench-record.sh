@@ -11,6 +11,7 @@
 #   appearance  floating | app | voice_ai | dynamic | orb | react_orb | persona | notch
 #   mode        loop (default: the picker's resting/listening/dictating/done loop)
 #               card (one full turn: question, answer with a component, ring)
+#               demo=turn (the Island: rest, speak, a component answer, Escape down to rest)
 #               spoken (one spoken turn: your words, a tool step, the answer said sentence by sentence)
 #               state=<bar state> (hold one frame, for a still in motion)
 #               demo=<name> (any demo the preview route knows)
@@ -61,6 +62,14 @@ agent-browser open "$URL&start=manual&bg=${BENCH_BG:-%23E9E9EB}" >/dev/null
 agent-browser wait '[data-preview-ready="true"]' >/dev/null
 agent-browser wait 800 >/dev/null
 agent-browser record start "$WEBM" >/dev/null
+# `record start` opens a fresh context on the same URL: wait for that page to
+# paint and expose its start hook too, or a slow machine evaluates too early.
+agent-browser wait '[data-preview-ready="true"]' >/dev/null
+for _ in $(seq 1 40); do
+  agent-browser eval "typeof window.__junoBenchStart === 'function'" | grep -q true && break
+  agent-browser wait 250 >/dev/null
+done
+agent-browser wait 500 >/dev/null
 agent-browser eval "window.__junoBenchStart()" >/dev/null
 agent-browser wait "$((SECONDS_TO_RECORD * 1000))" >/dev/null
 agent-browser record stop >/dev/null

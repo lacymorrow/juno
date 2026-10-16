@@ -193,6 +193,31 @@ function isLogical(value: unknown): boolean {
  * frame writes go back into it (unless frozen); every other command resolves
  * to a harmless default so nothing the bar fires can throw.
  */
+/** A preview query parameter: `net=offline`, `wake=on`, `agents=3` set what Rust would report. */
+function previewParam(name: string): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get(name);
+}
+
+const PREVIEW_AGENT_COLORS = ["#0A84FF", "#FF9F0A", "#30D158", "#BF5AF2", "#FF375F", "#64D2FF", "#FFD60A", "#AC8E68"];
+
+/** `agents=N`: that many parallel sessions, the first focused and working. */
+function previewSessions(): unknown[] {
+  const n = Math.max(0, Math.min(12, Number(previewParam("agents") ?? 0) || 0));
+  const statuses = ["running", "running", "needs_input", "finished"];
+  return Array.from({ length: n }, (_, i) => ({
+    id: `preview-${i}`,
+    agent_name: ["Juno", "Research", "Mail", "Calendar"][i % 4],
+    color_slot: i % 8,
+    display_color: PREVIEW_AGENT_COLORS[i % 8],
+    status: statuses[i % statuses.length],
+    current_action: i === 0 ? "Drafting the reply" : null,
+    started_at_ms: 0,
+    last_activity_ms: 0,
+    focused: i === 0,
+  }));
+}
+
 function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown {
   switch (cmd) {
     // --- window geometry the bar reads ---
@@ -276,23 +301,28 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
     case COMMANDS.SETTINGS_GET_FLOATING_BAR_SETTINGS:
       return { follow_cursor_display: true, show_glow_border: true };
     // The preview dictates a sentence; showing it as it arrives is the point.
+    // `live=0` in the URL turns it off, to see the Island's small bar.
     case COMMANDS.STT_MODELS_GET_LIVE_PARTIAL_TRANSCRIPTION:
-      return true;
+      return new URLSearchParams(window.location.search).get("live") !== "0";
     case COMMANDS.BAR_GET_BAR_POSITION:
       return state.savedPosition;
+    // `wake=on` (or `wake=paused`): a wake phrase is set, its engine running (or not).
     case COMMANDS.TRIGGERS_GET_TRIGGERS:
-      return [];
+      return previewParam("wake") ? [{ gesture: "say", enabled: true, phrase: "hey juno" }] : [];
     case COMMANDS.TRIGGERS_GET_TRIGGER_HINTS:
       return {
         agent: { shortcut: "Control+Option", gesture: "Hold", sentence: "Hold to talk to Juno" },
         dictation: null,
       };
+    // `net=offline`: Juno cannot answer, as Rust's connectivity monitor says it.
     case COMMANDS.APP_GET_CONNECTIVITY:
-      return { status: "connected", label: "Connected to Claude", provider: "Claude" };
+      return previewParam("net") === "offline"
+        ? { status: "offline", label: "Network unavailable", provider: "Claude" }
+        : { status: "connected", label: "Connected to Claude", provider: "Claude" };
     case COMMANDS.AGENT_SESSIONS_LIST_AGENT_SESSIONS:
-      return [];
+      return previewSessions();
     case COMMANDS.ALWAYS_LISTENING_GET_ALWAYS_LISTENING_STATUS:
-      return false;
+      return previewParam("wake") === "on";
     // The island's card: approvals and the stop path answer as the backend
     // would once the work is done; the preview never runs anything.
     case COMMANDS.TOOLS_APPROVE_TOOL_EXECUTION:

@@ -16,7 +16,7 @@ import type { MonitorRect } from "../snapWells";
 import { contentRect, dockedEdges, steadyLayout } from "../steadyFrame";
 import { glideTarget } from "@/hooks/useBarSnapWells";
 import { NOTCH_STEADY_SPEC, notchShape, curlUnderClip, FOLD, SHOULDER } from "@/components/bar/notch/notchModel";
-import { ISLAND_SIZES } from "@/components/bar/island/islandModel";
+import { POSTURE_SIZES as ISLAND_SIZES } from "@/components/bar/notch/notchPosture";
 
 /** A 14" MacBook Pro: 1512x982 points, a 38 point menu bar under the notch. */
 const LAPTOP: MonitorRect = {

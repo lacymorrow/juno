@@ -13,6 +13,9 @@
  * Query: `appearance=<bar_appearance value>`, `motion=reduced` (optional),
  * `state=<bar state>` to hold one frame (the bench and the docs screenshots),
  * `demo=card` to play one full turn (question, answer with a component) once,
+ * `demo=turn` to play the Island's clip (rest, speak, an answer with a
+ * component, Escape down the ladder to rest), `demo=answer` to stream a
+ * words-only answer and hold it,
  * `demo=script` to play a turn with a tool and a spoken answer (the studio's
  * clip), `demo=approval` to hold a tool waiting on Allow or Don't,
  * `demo=spoken` to play a spoken turn (you speak, a tool runs, the answer is
@@ -32,6 +35,13 @@
  * upward when docked low can then be seen doing so). The Notch takes
  * `dock=corner` (bottom-right) or `dock=top-left` to show its page curl, and
  * `dock=bottom`, `dock=left` or `dock=right` for a notch on that edge.
+ *
+ * The Island also takes `demo=hover` (the pointer over the capsule; with
+ * `tip=<control>` the native forwarded hover rests on that control, e.g.
+ * `tip=dot` or `tip=listen`, so its tooltip opens), `demo=paste` (a picture
+ * pasted into the composer), `demo=chat` (two turns, the answer, then the
+ * chat face, then Escape back to the answer) and the backend facts
+ * `net=offline`, `wake=on|paused` and `agents=<n>` (see `barHarnessTauri`).
  *
  * A look on the steady frame (the Pill, see `lib/steadyFrame.ts`) never
  * resizes its window, so the preview frames the strip the look grows within
@@ -255,6 +265,197 @@ function playCardDemo(later: (fn: () => void, ms: number) => void): void {
     frame(UI.BAR_STATES_FINISHING);
   }, end);
   later(() => frame(UI.BAR_STATES_DEFAULT), end + 300);
+}
+
+/** The prose-only answer `demo=answer` streams. */
+const DEMO_PROSE =
+  "Done. The draft is with Maya and I asked her for Friday. " +
+  "She usually replies within the hour, so I will tell you as soon as she does.";
+
+/**
+ * Play one full turn for the Island's clip: resting, then you speak (a level
+ * and your words), the answer streams with a component in it, it holds, and
+ * two Escapes walk it back down the ladder (component, composer, rest). With
+ * `prose`, the answer is words only and it holds there (`demo=answer`).
+ */
+function playTurnDemo(later: (fn: () => void, ms: number) => void, prose = false): void {
+  const messageId = prose ? "preview-answer" : "preview-turn";
+  const answer = prose ? DEMO_PROSE : DEMO_ANSWER;
+  const frame = (barState: string, audioLevel = 0, transcriptionText = "", provisional = false) =>
+    void emit(EVENTS.BAR_STATE_UPDATE, {
+      barState,
+      inputValue: "",
+      lastSubmittedValue: DEMO_SENTENCE,
+      currentError: null,
+      transcriptionText,
+      transcriptionProvisional: provisional,
+      spokenText: "",
+      voiceMode: UI.VOICE_MODES_IDLE,
+      audioLevel,
+      isAgentWorking: false,
+      isDictationMode: false,
+      isAlwaysListening: false,
+      agentState: null,
+    });
+  const rest = prose ? 0 : 900;
+  later(() => frame(UI.BAR_STATES_DEFAULT), 0);
+  const words = DEMO_SENTENCE.split(" ");
+  const hearing = prose ? 0 : 2200;
+  for (let t = 0; t < hearing; t += 80) {
+    later(() => {
+      const level = 0.4 + 0.3 * Math.sin(t / 160) + 0.15 * Math.sin(t / 55);
+      const said = Math.min(words.length, Math.floor((t / hearing) * (words.length + 1)));
+      frame(UI.BAR_STATES_LISTENING, level, words.slice(0, said).join(" "), true);
+    }, rest + t);
+  }
+  const ask = rest + hearing + (prose ? 0 : 300);
+  if (!prose) later(() => frame(UI.BAR_STATES_TRANSCRIBING, 0, DEMO_SENTENCE), rest + hearing);
+  later(() => {
+    void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: DEMO_SENTENCE, timestamp: Date.now() });
+    frame(UI.BAR_STATES_SUBMITTING);
+  }, ask);
+  later(() => frame(UI.BAR_STATES_LOADING), ask + 400);
+  const start = ask + 1000;
+  later(() => {
+    frame(UI.BAR_STATES_AGENT_RESPONDING);
+    void emit(EVENTS.STREAMING_STREAM_START, { message_id: messageId });
+  }, start);
+  const chunks = answer.split(" ");
+  chunks.forEach((word, i) => {
+    later(() => {
+      void emit(EVENTS.STREAMING_TEXT_STREAM, { message_id: messageId, chunk: (i === 0 ? "" : " ") + word });
+    }, start + 100 + i * 45);
+  });
+  const end = start + 100 + chunks.length * 45 + 200;
+  // Everything after the stream is timed from its end, not from the start,
+  // so a slow machine still holds each face for as long as it should.
+  later(() => {
+    void emit(EVENTS.STREAMING_STREAM_END, { message_id: messageId, complete_text: answer });
+    void emit(EVENTS.AGENT_ACTIVE, false);
+    frame(UI.BAR_STATES_FINISHING);
+    later(() => frame(UI.BAR_STATES_DEFAULT), 300);
+    if (prose) return;
+    // Escape, as Rust's stop-key monitor reports it when nothing is running:
+    // the component steps back to the composer, then the composer to rest.
+    later(() => {
+      void emit(EVENTS.BAR_DISMISS_PANE, {});
+      later(() => void emit(EVENTS.BAR_DISMISS_PANE, {}), 1500);
+    }, 2800);
+  }, end);
+}
+
+/** The pointer over the island, as the native tracking area reports it, resting on `tip`. */
+function playHoverDemo(later: (fn: () => void, ms: number) => void, tip: string | null): void {
+  // Re-sent: the bar subscribes a moment after its first paint.
+  for (const t of [300, 700, 1100]) later(() => void emit(EVENTS.SYSTEM_MOUSE_ENTERED_WINDOW, {}), t);
+  if (!tip) return;
+  const rest = () => {
+    const el = document.querySelector(`[data-island-button="${tip}"]`);
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    void emit(EVENTS.SYSTEM_MOUSE_MOVED_WINDOW, { x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  };
+  later(rest, 1500);
+  later(rest, 1900);
+}
+
+/** A picture pasted into the composer, the way WebKit hands one over. */
+function playPasteDemo(later: (fn: () => void, ms: number) => void): void {
+  later(() => emitFrame({ barState: UI.BAR_STATES_INPUT, audioLevel: 0, transcriptionText: "" }), 200);
+  later(() => {
+    const box = document.querySelector<HTMLTextAreaElement>('[data-testid="island-composer"] textarea');
+    if (!box) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = 96;
+    canvas.height = 96;
+    const g = canvas.getContext("2d");
+    if (g) {
+      const grad = g.createLinearGradient(0, 0, 96, 96);
+      grad.addColorStop(0, "#0A84FF");
+      grad.addColorStop(1, "#BF5AF2");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 96, 96);
+      g.fillStyle = "rgba(255,255,255,0.85)";
+      g.fillRect(18, 22, 60, 8);
+      g.fillRect(18, 40, 44, 8);
+      g.fillRect(18, 58, 52, 8);
+    }
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const data = new DataTransfer();
+      data.items.add(new File([blob], "screenshot.png", { type: "image/png" }));
+      box.focus();
+      box.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    }, "image/png");
+  }, 800);
+  later(() => {
+    const box = document.querySelector<HTMLTextAreaElement>('[data-testid="island-composer"] textarea');
+    if (!box) return;
+    // Type through React's own setter so the draft lands in state.
+    const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    set?.call(box, "What is this chart saying?");
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  }, 1300);
+}
+
+/** One earlier turn, streamed through the same events Rust would send. */
+function playPastTurn(
+  later: (fn: () => void, ms: number) => void,
+  at: number,
+  id: string,
+  question: string,
+  answer: string,
+): number {
+  later(() => void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: question, timestamp: Date.now() }), at);
+  later(() => void emit(EVENTS.STREAMING_STREAM_START, { message_id: id }), at + 60);
+  later(() => void emit(EVENTS.STREAMING_TEXT_STREAM, { message_id: id, chunk: answer }), at + 120);
+  later(() => {
+    void emit(EVENTS.STREAMING_STREAM_END, { message_id: id, complete_text: answer });
+    void emit(EVENTS.AGENT_ACTIVE, false);
+  }, at + 180);
+  return at + 240;
+}
+
+/**
+ * The chat face: two earlier turns, then the answer to a third, then the
+ * tray's Show Chat grows it into the whole conversation, which holds; then
+ * Escape steps back down to the answer.
+ */
+function playChatDemo(later: (fn: () => void, ms: number) => void): void {
+  const frame = (barState: string) =>
+    emitFrame({ barState, audioLevel: 0, transcriptionText: "" }, { lastSubmittedValue: DEMO_SENTENCE });
+  let t = playPastTurn(later, 1200, "chat-1", "What's on my calendar this afternoon?", "Two things: design review at 2 and a call with Maya at 4.");
+  t = playPastTurn(later, t, "chat-2", "Move the call with Maya to Friday.", "Done. The call with Maya is now Friday at 4, and she has the new invite.");
+  later(() => frame(UI.BAR_STATES_DEFAULT), t + 100);
+  // The answer the clip starts on.
+  const start = t + 400;
+  later(() => {
+    void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: DEMO_SENTENCE, timestamp: Date.now() });
+    frame(UI.BAR_STATES_SUBMITTING);
+  }, start);
+  later(() => {
+    frame(UI.BAR_STATES_AGENT_RESPONDING);
+    void emit(EVENTS.STREAMING_STREAM_START, { message_id: "chat-3" });
+  }, start + 300);
+  const words = DEMO_PROSE.split(" ");
+  words.forEach((word, i) => {
+    later(
+      () => void emit(EVENTS.STREAMING_TEXT_STREAM, { message_id: "chat-3", chunk: (i === 0 ? "" : " ") + word }),
+      start + 400 + i * 40,
+    );
+  });
+  const end = start + 400 + words.length * 40 + 150;
+  later(() => {
+    void emit(EVENTS.STREAMING_STREAM_END, { message_id: "chat-3", complete_text: DEMO_PROSE });
+    void emit(EVENTS.AGENT_ACTIVE, false);
+    frame(UI.BAR_STATES_FINISHING);
+  }, end);
+  later(() => frame(UI.BAR_STATES_DEFAULT), end + 300);
+  const hold = new URLSearchParams(window.location.search).get("hold") === "chat";
+  // The tray's Show Chat, then (unless held) Escape as the stop-key monitor reports it.
+  later(() => void emit(EVENTS.BAR_TOGGLE_PANE, {}), end + 1800);
+  if (!hold) later(() => void emit(EVENTS.BAR_DISMISS_PANE, {}), end + 5200);
 }
 
 /** What `demo=script` and `demo=approval` ask. */
@@ -682,10 +883,10 @@ export default function AppearancePreview() {
       const { monitor, frame } = harness.snapshot();
       harness.setFrame({ y: Math.round(monitor.height * 0.8) - frame.height });
     }
-    // The Pill places itself from the well it was left in; leave it in a
-    // centre one (top, or bottom with `dock=low`) so the tile shows it growing
+    // The Pill and the Island place themselves from the well they were left
+    // in; leave them in a centre one (top, or bottom with `dock=low`) so the tile shows it growing
     // evenly from the middle.
-    if (appearance === UI.BAR_APPEARANCES_FLOATING) {
+    if (appearance === UI.BAR_APPEARANCES_FLOATING || appearance === UI.BAR_APPEARANCES_DYNAMIC) {
       const { monitor } = harness.snapshot();
       harness.setSavedPosition({
         x: Math.round(monitor.width / 2),
@@ -735,7 +936,23 @@ export default function AppearancePreview() {
       playCardDemo(later);
       return stop;
     }
+    if (demo === "hover") {
+      playHoverDemo(later, new URLSearchParams(window.location.search).get("tip"));
+      return stop;
+    }
+    if (demo === "paste") {
+      playPasteDemo(later);
+      return stop;
+    }
+    if (demo === "chat") {
+      playChatDemo(later);
+      return stop;
+    }
 
+    if (demo === "turn" || demo === "answer") {
+      playTurnDemo(later, demo === "answer");
+      return stop;
+    }
     if (demo === "spoken") {
       playSpokenDemo(later);
       return stop;
@@ -891,6 +1108,12 @@ export default function AppearancePreview() {
       if (!steady.layout.centerY) {
         top = growUp ? viewport.h - (stage.y + stage.height) * fit : -stage.y * fit;
       }
+    } else if (pinFrame && steady?.layout) {
+      // `pin=frame` on a steady look: seat the strip by the edge it grows
+      // from, so a look that opens into an answer has the stage to grow into.
+      top = steady.layout.growUp
+        ? viewport.h * 0.96 - (stage.y + stage.height) * fit
+        : viewport.h * 0.04 - stage.y * fit;
     }
   } else if (pinFrame && driven) {
     if (!originRef.current) {

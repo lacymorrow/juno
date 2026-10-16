@@ -1,14 +1,17 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { cn } from "@/lib/utils";
-import type { DotLook, IslandSize, Words } from "./islandModel";
+import type { DotLook, ShapeSize, Words } from "./islandModel";
 import { VOICE_TRANSITION, voiceScale } from "../voiceLevel";
+import { BarFlameBorder } from "../BarFlameBorder";
+import type { flameForState } from "../barFlame";
 
 /**
  * The island's body: one black shape whose width, height and corner radius
- * move on a single spring, with the content layer inside crossfading (and
- * blurring, the way iOS does it) whenever the posture changes. Nothing
- * reflows: every layer fills the shell absolutely.
+ * move on a single critically damped spring. Inside it the face's content
+ * crossfades (opacity, a little blur, a few pixels of travel), and the
+ * composer, which belongs to no face, stays mounted the whole time. Nothing
+ * reflows: every layer is absolutely positioned.
  */
 
 /**
@@ -19,16 +22,48 @@ import { VOICE_TRANSITION, voiceScale } from "../voiceLevel";
 export const ISLAND_GLOW =
   "0 0 0 0.5px rgba(255,255,255,0.22), 0 1px 2px rgba(0,0,0,0.5), 0 4px 12px rgba(0,0,0,0.35)";
 
-/** One spring for the shape. Settles in about 320ms with no corner overshoot. */
-const SPRING = { type: "spring" as const, stiffness: 380, damping: 34, mass: 1 };
-const EASE = { duration: 0.15, ease: "easeOut" as const };
+/**
+ * One spring for the shape: critically damped (damping = 2 * sqrt(stiffness *
+ * mass)), so it never overshoots, settled in about 300ms.
+ */
+export const ISLAND_SPRING = { type: "spring" as const, stiffness: 440, damping: 42, mass: 1 };
+/** Reduce Motion: a short ease for size and fades, no spring and no blur. */
+export const ISLAND_EASE = { duration: 0.15, ease: "easeOut" as const };
+
+/** A face's content: in over 180ms starting 60ms into the spring, out over 120ms. */
+export function layerMotion(reducedMotion: boolean) {
+  if (reducedMotion) {
+    return {
+      initial: { opacity: 0 },
+      animate: { opacity: 1, transition: ISLAND_EASE },
+      exit: { opacity: 0, transition: ISLAND_EASE },
+    };
+  }
+  return {
+    initial: { opacity: 0, filter: "blur(4px)", y: 4 },
+    animate: {
+      opacity: 1,
+      filter: "blur(0px)",
+      y: 0,
+      transition: { duration: 0.18, delay: 0.06, ease: "easeOut" as const },
+    },
+    exit: { opacity: 0, filter: "blur(4px)", transition: { duration: 0.12, ease: "easeIn" as const } },
+  };
+}
 
 interface IslandShellProps {
-  size: IslandSize;
-  /** Which content layer is on stage; a change crossfades. */
+  size: ShapeSize;
+  /** Which face is on stage; a change crossfades `layer`. */
   layerKey: string;
+  /** The face's own content, crossfaded when `layerKey` changes. */
+  layer: ReactNode;
+  /** Where the face's content sits inside the shape. */
+  layerStyle?: CSSProperties;
+  /** Mounted for the life of the island and never keyed: the composer. */
+  children?: ReactNode;
   reducedMotion: boolean;
-  children: ReactNode;
+  /** The Pill's activity flame around the shape's border; null when idle. */
+  flame?: ReturnType<typeof flameForState>;
   onClick?: () => void;
   className?: string;
 }
@@ -36,41 +71,52 @@ interface IslandShellProps {
 export function IslandShell({
   size,
   layerKey,
-  reducedMotion,
+  layer,
+  layerStyle,
   children,
+  reducedMotion,
+  flame = null,
   onClick,
   className,
 }: IslandShellProps) {
-  const layerIn = reducedMotion
-    ? { opacity: 1, transition: EASE }
-    : { opacity: 1, filter: "blur(0px)", scale: 1, transition: { duration: 0.18, delay: 0.06 } };
-  const layerStart = reducedMotion ? { opacity: 0 } : { opacity: 0, filter: "blur(6px)", scale: 0.98 };
-  const layerOut = reducedMotion
-    ? { opacity: 0, transition: EASE }
-    : { opacity: 0, filter: "blur(6px)", transition: { duration: 0.12 } };
-
+  const m = layerMotion(reducedMotion);
   return (
     <motion.div
       data-testid="island-shell"
-      data-posture={layerKey}
+      data-face={layerKey}
       onClick={onClick}
       initial={false}
       animate={{ width: size.width, height: size.height, borderRadius: size.radius }}
-      transition={reducedMotion ? EASE : SPRING}
-      className={cn("relative overflow-hidden bg-black text-white", className)}
+      transition={reducedMotion ? ISLAND_EASE : ISLAND_SPRING}
+      // Isolated, and not clipped: the flame sits at z-index -1, above the
+      // black face but behind the content, and licks outward past the edge.
+      // The content clips in the inner layer, which follows the radius.
+      className={cn("relative isolate shrink-0 bg-black text-white", className)}
       style={{ boxShadow: ISLAND_GLOW, willChange: "width, height, border-radius" }}
     >
-      <AnimatePresence initial={false}>
-        <motion.div
-          key={layerKey}
-          className="absolute inset-0"
-          initial={layerStart}
-          animate={layerIn}
-          exit={layerOut}
-        >
-          {children}
-        </motion.div>
-      </AnimatePresence>
+      {flame && (
+        <BarFlameBorder
+          color={flame.color}
+          intensity={flame.intensity}
+          pulse={flame.pulse}
+          radius={size.radius}
+        />
+      )}
+      <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: "inherit" }}>
+        <AnimatePresence initial={false}>
+          <motion.div
+            key={layerKey}
+            className="absolute inset-x-0"
+            style={layerStyle ?? { top: 0, bottom: 0 }}
+            initial={m.initial}
+            animate={m.animate}
+            exit={m.exit}
+          >
+            {layer}
+          </motion.div>
+        </AnimatePresence>
+        {children}
+      </div>
     </motion.div>
   );
 }
@@ -202,7 +248,7 @@ const TONE_CLASS: Record<Words["tone"], string> = {
  * fade appears on the left edge only once there is more than fits. No motion,
  * so a long dictation reads like a ticker without scrolling.
  */
-export function IslandWords({ words }: { words: Words }) {
+export function IslandWords({ words, className }: { words: Words; className?: string }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [overflowing, setOverflowing] = useState(false);
   // Measured again whenever the box changes size: the shell is still
@@ -227,6 +273,7 @@ export function IslandWords({ words }: { words: Words }) {
       className={cn(
         "min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left text-[13px] leading-none tracking-[-0.01em]",
         TONE_CLASS[words.tone],
+        className,
       )}
       style={{ direction: "rtl", maskImage: mask, WebkitMaskImage: mask }}
     >

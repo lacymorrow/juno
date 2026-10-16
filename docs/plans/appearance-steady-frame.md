@@ -99,7 +99,7 @@ A drop into a well on the other side, or a display hop, cannot move the frame an
 
 One PR per look. For each:
 
-1. **Find its largest footprint.** List every state the look draws and the size of each, including panes, cards, captions and subtitles. `max` is the largest width and the largest height. Keep `max.width - rest.width` even.
+1. **Find its largest footprint.** List every state the look draws and the size of each, including panes, cards, captions and subtitles. `max` is the largest width and the largest height. Keep `max.width - rest.width` even. If the largest state depends on the display (the Island's chat face is 60% of it), give the spec `maxFor(monitor)` as well; `steadyLayout` prefers it, so every placement path sizes the window for the display it lands on.
 2. **Pick `rest`.** The footprint at idle, padding included. Wells are computed for it. Check that the idle look lands where it does today: the test `anchorScreenOrigin(layout) == well` is the guard.
 3. **Register the spec** in a `useLayoutEffect` (`registerSteady(label, SPEC)`). On cleanup, unregister and `invoke(BAR_SET_BAR_HIT_REGIONS, { regions: null })`.
 4. **Place once.** In the look's launch placement, use `steadyWells` + `steadyLayout` + `applySteadyFrame` + `setSteadyLayout` + `setDockSlot`, as `FloatingBar` does. Remove every `useWindowSize` / `resizeWindowIfChanged` call from the look.
@@ -115,7 +115,7 @@ One PR per look. For each:
 
 | Look | Setting value | Component | Resizes via | Notes |
 |---|---|---|---|---|
-| Island | `dynamic` | `src/components/bar/island/IslandBar.tsx` | `useWindowSize` | Grows to hold the answer card; `max` is the card's expanded size. Closest to the Pill, so do it next. |
+| Island | `dynamic` | `src/components/bar/island/IslandBar.tsx` | steady frame (done) | On the steady frame since #818. Its largest face is the chat face, a share of the display, so its spec uses `maxFor(monitor)`: the window is sized per display, and a drop or hop onto a display of another size swaps it behind the hide. |
 | Avatar | `persona` | `src/components/bar/persona-bar.tsx` | `useWindowSize` | Decides its own growth direction from where the head faces (passes `anchorX`/`growUp`). Map that to the slot, or give it its own `anchorX` in the layout. |
 | Orb | `shader_orb` | `src/components/bar/shader-orb-bar.tsx` | `useWindowSize` | WebGL canvas: keep the canvas a fixed size inside the frame. Words appear only when Juno needs you, which may be a separate rect. |
 | Presence | `orb` | `src/components/bar/elevenlabs-orb-bar.tsx` | `useWindowSize` | Subtitles beneath the orb. Two rects, orb and subtitles. |

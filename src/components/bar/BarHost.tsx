@@ -14,6 +14,9 @@ const AppBar = lazy(() => import("@/components/bar/app-bar").then((m) => ({ defa
 const IslandBar = lazy(() =>
   import("@/components/bar/island/IslandBar").then((m) => ({ default: m.IslandBar })),
 );
+const NotchBar = lazy(() =>
+  import("@/components/bar/notch/NotchBar").then((m) => ({ default: m.NotchBar })),
+);
 const VoiceAIBar = lazy(() =>
   import("@/components/bar/voice-ai-bar").then((m) => ({ default: m.VoiceAIBar })),
 );
@@ -112,7 +115,7 @@ export function BarHost() {
       case UI.BAR_APPEARANCES_NOTCH:
         return () => (
           <Suspense fallback={null}>
-            <IslandBar frame="notch" />
+            <NotchBar />
           </Suspense>
         );
       case UI.BAR_APPEARANCES_ORB:
