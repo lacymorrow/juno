@@ -115,7 +115,7 @@ describe("NowPlayingCard", () => {
     mockBackend(notRunning);
     render(<NowPlayingCard app="Spotify" />);
 
-    await screen.findByText(/isn't running/i);
+    await screen.findByText(/isn\u2019t open/i);
     expect(screen.getByText("Not running")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /pause/i })).toBeNull();
 
@@ -136,7 +136,9 @@ describe("NowPlayingCard", () => {
     });
     fireEvent.click(nextButton);
 
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/not running/i));
+    // The person sees a plain sentence; the raw error went to the log.
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/couldn\u2019t reach spotify/i));
+    expect(screen.queryByText(/not running/i)).toBeNull();
     await waitFor(() => expect(nextButton).not.toBeDisabled());
   });
 
@@ -157,8 +159,8 @@ describe("NowPlayingCard", () => {
     mockBackend({ ...notRunning, app: "Music" });
     render(<NowPlayingCard app="Music" />);
 
-    await screen.findByText("Apple Music isn't running.");
-    expect(screen.getByText(/now playing · apple music/i)).toBeInTheDocument();
+    await screen.findByText("Apple Music isn\u2019t open.");
+    expect(screen.getByText("Apple Music")).toBeInTheDocument();
     expect(mockedInvoke).toHaveBeenCalledWith("media_get_state", { app: "Music" });
 
     fireEvent.click(screen.getByRole("button", { name: /open apple music/i }));
@@ -184,7 +186,7 @@ describe("NowPlayingCard", () => {
     const img = container.querySelector("img");
     expect(img).not.toBeNull();
     expect(img?.getAttribute("src")).toBe(assetUrl);
-    expect(screen.getByText(/now playing · apple music/i)).toBeInTheDocument();
+    expect(screen.getByText("Apple Music")).toBeInTheDocument();
   });
 
   it("stops polling on unmount", async () => {

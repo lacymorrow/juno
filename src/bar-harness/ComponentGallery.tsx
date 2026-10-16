@@ -143,7 +143,9 @@ const CATALOGUE: GalleryEntry[] = [
       { key: "sunny-forecast", jsx: `<WeatherCard location="Charlotte" temperature={78} unit="F" condition="sunny" high={84} low={61} humidity={40} wind="4 mph" forecast={[{day: "Mon", high: 84, low: 61, condition: "sunny"}, {day: "Tue", high: 80, low: 60, condition: "cloudy"}, {day: "Wed", high: 71, low: 58, condition: "rain"}, {day: "Thu", high: 69, low: 55, condition: "storm"}, {day: "Fri", high: 73, low: 57, condition: "clear"}]} />` },
       { key: "snow", jsx: `<WeatherCard location="Denver" temperature={28} unit="F" condition="snow" high={31} low={18} />` },
       { key: "empty", note: "no props at all", jsx: `<WeatherCard />` },
-      { key: "composed", note: "the prompt's preferred composed version", jsx: `<AnimatedCard animation="fade-up">\n  <div className="space-y-3">\n    <div className="flex items-center justify-between">\n      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">San Francisco</div>\n      <Badge variant="outline">Rain</Badge>\n    </div>\n    <div className="flex items-center gap-4">\n      <AnimatedNumber value={54} suffix="°F" className="text-3xl font-bold" />\n      <div className="text-xs text-muted-foreground">\n        <div>H: 62° L: 49°</div>\n        <div>Humidity: 82%</div>\n      </div>\n    </div>\n    <AnimatedProgress value={82} label="Humidity" color="auto" />\n  </div>\n</AnimatedCard>` },
+      { key: "forecast-and-time", note: "forecast at any width, with an update time", jsx: `<WeatherCard location="Charlotte" temperature={78} unit="F" condition="partly cloudy" high={84} low={61} humidity={40} wind="4 mph" updated="3:41 PM" forecast={[{day: "Mon", high: 84, low: 61, condition: "sunny"}, {day: "Tue", high: 80, low: 60, condition: "cloudy"}, {day: "Wed", high: 71, low: 58, condition: "rain"}, {day: "Thu", high: 69, low: 55, condition: "storm"}, {day: "Fri", high: 73, low: 57, condition: "clear"}]} />` },
+      { key: "no-temperature", note: "only the location and the condition: no invented numbers", jsx: `<WeatherCard location="Boone" condition="snow" />` },
+      { key: "streaming-tag", note: "open tag still arriving: skeleton", streaming: true, jsx: `<WeatherCard location="San Francisco" temperature={54} condition="ra` },
     ],
   },
   {
@@ -156,12 +158,13 @@ const CATALOGUE: GalleryEntry[] = [
     ],
   },
   {
-    name: "SystemStatusCard",
+    name: "MetricList",
     group: "Domain cards",
     states: [
-      { key: "populated", jsx: `<SystemStatusCard hostname="MacBook Pro" uptime="3d 12h" metrics={[{label: "CPU", value: 23}, {label: "Memory", value: 82, detail: "13.1 / 16 GB"}, {label: "Disk", value: 94}]} />` },
-      { key: "empty", jsx: `<SystemStatusCard />` },
-      { key: "composed", note: "the prompt's System Status example", jsx: `<AnimatedCard animation="fade-up">\n  <div className="space-y-3">\n    <div className="flex items-center justify-between">\n      <span className="font-medium text-sm">MacBook Pro</span>\n      <span className="text-xs text-muted-foreground">Up: 3d 12h</span>\n    </div>\n    <AnimatedProgress value={23} label="CPU" color="auto" />\n    <AnimatedProgress value={82} label="Memory" color="auto" />\n    <AnimatedProgress value={45} label="Disk" color="auto" />\n    <div className="flex justify-around pt-2">\n      <Stat value="23%" label="CPU" />\n      <Stat value="82%" label="RAM" />\n      <Stat value="45%" label="Disk" />\n    </div>\n  </div>\n</AnimatedCard>` },
+      { key: "populated", note: "tone is set by the agent, never by the number", jsx: `<MetricList title="MacBook Pro" meta="Up 3d 12h" metrics={[{label: "CPU", value: 23}, {label: "Memory", value: 82, detail: "13.1 of 16 GB"}, {label: "Disk", value: 94, detail: "94%, almost full", tone: "warning"}]} />` },
+      { key: "alias", note: "SystemStatusCard, the earlier tag, still renders", jsx: `<SystemStatusCard hostname="MacBook Pro" uptime="3d 12h" metrics={[{label: "CPU", value: 23}, {label: "Memory", value: 82}, {label: "Disk", value: 94}]} />` },
+      { key: "empty", jsx: `<MetricList />` },
+      { key: "streaming-tag", note: "open tag still arriving: skeleton", streaming: true, jsx: `<MetricList title="MacBook Pro" metrics={[{label: "CPU", val` },
     ],
   },
   {
@@ -171,7 +174,8 @@ const CATALOGUE: GalleryEntry[] = [
       { key: "two", jsx: `<ComparisonCard title="React vs Vue" options={[{name: "React", pros: ["Large ecosystem", "Hiring pool"], cons: ["Steep curve"], rating: 4, recommended: true}, {name: "Vue", pros: ["Gentle learning curve"], cons: ["Smaller ecosystem", "Fewer jobs"], rating: 3}]} />` },
       { key: "three", jsx: `<ComparisonCard title="Laptops under $1,500" options={[{name: "MacBook Air 15", pros: ["Battery", "Quiet"], cons: ["Two ports"], rating: 5, recommended: true}, {name: "ThinkPad X1", pros: ["Keyboard"], cons: ["Battery", "Price"], rating: 3}, {name: "Framework 13", pros: ["Repairable", "Upgradable"], cons: ["Fan noise"], rating: 4}]} />` },
       { key: "empty", jsx: `<ComparisonCard title="Nothing to compare" options={[]} />` },
-      { key: "error", note: "bad prop type: the boundary's fallback", jsx: `<ComparisonCard title="Oops" options="not an array" />` },
+      { key: "bad-options", note: "bad prop type: designed empty state, title kept", jsx: `<ComparisonCard title="Oops" options="not an array" />` },
+      { key: "narrow", note: "side by side from 480px; the Island and Pill stay one column (use ?surface=island)", jsx: `<ComparisonCard title="Laptops under $1,500" options={[{name: "MacBook Air 15", pros: ["Battery"], cons: ["Two ports"], rating: 5, recommended: true}, {name: "ThinkPad X1", pros: ["Keyboard"], cons: ["Price"], rating: 3}]} />` },
     ],
   },
   {
@@ -237,7 +241,7 @@ const CATALOGUE: GalleryEntry[] = [
     name: "Stat",
     group: "Animated primitives",
     states: [
-      { key: "row", jsx: `<div className="flex justify-around"><Stat value="23%" label="CPU" /><Stat value={82} suffix="%" label="RAM" trend="up" /><Stat value="$1,751" label="Portfolio" trend="down" /><Stat value={405} label="Total" trend="neutral" /></div>` },
+      { key: "row", jsx: `<Stats><Stat value="23%" label="CPU" /><Stat value={82} suffix="%" label="RAM" trend="up" /><Stat value="$1,751" label="Portfolio" trend="down" /><Stat value={405} label="Total" trend="neutral" /></Stats>` },
       { key: "long", jsx: `<Stat value="1,234,567,890" label="${LONG}" trend="up" />` },
     ],
   },
@@ -245,18 +249,19 @@ const CATALOGUE: GalleryEntry[] = [
     name: "MiniChart",
     group: "Animated primitives",
     states: [
-      { key: "week", jsx: `<MiniChart data={[30, 45, 80, 65, 90, 40, 55]} labels={["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]} color="blue" />` },
+      { key: "week", jsx: `<MiniChart data={[30, 45, 80, 65, 90, 40, 55]} labels={["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]} />` },
+      { key: "highlight", jsx: `<MiniChart data={[30, 45, 80, 65, 90, 40, 55]} labels={["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]} highlight={4} />` },
       { key: "many", note: "30 bars", jsx: `<MiniChart data={[3,5,8,6,9,4,5,7,2,8,9,10,4,3,6,7,8,5,4,9,10,2,3,5,6,7,8,9,4,5]} labels={["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","23","24","25","26","27","28","29","30"]} />` },
       { key: "empty", jsx: `<MiniChart data={[]} />` },
       { key: "zero", note: "all zeros", jsx: `<MiniChart data={[0,0,0]} labels={["a","b","c"]} />` },
     ],
   },
   {
-    name: "AnimatedProgress",
+    name: "Meter",
     group: "Animated primitives",
     states: [
-      { key: "auto", jsx: `<div className="space-y-3"><AnimatedProgress value={23} label="CPU" color="auto" /><AnimatedProgress value={82} label="Memory" color="auto" /><AnimatedProgress value={94} label="Disk" color="auto" /><AnimatedProgress value={50} label="Warning" tone="warning" /><AnimatedProgress value={140} label="Over 100" /></div>` },
-      { key: "bare", jsx: `<AnimatedProgress value={40} showValue={false} />` },
+      { key: "tones", note: "blue unless the agent says warning; the old color prop folds in", jsx: `<div className="space-y-3"><Meter value={23} label="CPU" /><Meter value={82} label="Memory" detail="13.1 of 16 GB" /><Meter value={94} label="Disk" detail="94%, almost full" tone="warning" /><AnimatedProgress value={50} label="Old color prop" color="auto" /><Meter value={140} label="Over 100" /></div>` },
+      { key: "bare", jsx: `<Meter value={40} showValue={false} />` },
     ],
   },
   {
@@ -309,7 +314,18 @@ const CATALOGUE: GalleryEntry[] = [
       { key: "alert-badge", jsx: `<div className="space-y-3"><Alert><AlertTitle>Heads up</AlertTitle><AlertDescription>An alert with a title and a description.</AlertDescription></Alert><div className="flex gap-2"><Badge>Default</Badge><Badge variant="outline">Outline</Badge><Badge variant="secondary">Secondary</Badge><Badge variant="destructive">Destructive</Badge></div></div>` },
       { key: "table", jsx: `<Table><TableHeader><TableRow><TableHead>Folder</TableHead><TableHead className="text-right">Files</TableHead></TableRow></TableHeader><TableBody><TableRow><TableCell>Images</TableCell><TableCell className="text-right">23</TableCell></TableRow><TableRow><TableCell>Documents</TableCell><TableCell className="text-right">45</TableCell></TableRow></TableBody></Table>` },
       { key: "accordion-avatar", jsx: `<div className="space-y-3"><div className="flex items-center gap-2"><Avatar><AvatarFallback>LM</AvatarFallback></Avatar><span className="text-sm">Lacy Morrow</span></div><Accordion type="single" collapsible><AccordionItem value="a"><AccordionTrigger>What moved?</AccordionTrigger><AccordionContent>Images, documents and videos.</AccordionContent></AccordionItem></Accordion><Progress value={40} /></div>` },
-      { key: "controls", note: "Input, Switch, Tabs the agent may emit", jsx: `<div className="space-y-3"><Input placeholder="An input the agent put here" /><div className="flex items-center gap-2"><Switch /><Label>A switch that is bound to nothing</Label></div><Tabs defaultValue="a"><TabsList><TabsTrigger value="a">One</TabsTrigger><TabsTrigger value="b">Two</TabsTrigger></TabsList><TabsContent value="a"><p className="text-sm">Tab one.</p></TabsContent><TabsContent value="b"><p className="text-sm">Tab two.</p></TabsContent></Tabs></div>` },
+      { key: "tabs", jsx: `<Tabs defaultValue="a"><TabsList><TabsTrigger value="a">One</TabsTrigger><TabsTrigger value="b">Two</TabsTrigger></TabsList><TabsContent value="a"><p className="text-sm">Tab one.</p></TabsContent><TabsContent value="b"><p className="text-sm">Tab two.</p></TabsContent></Tabs>` },
+    ],
+  },
+  {
+    name: "Form",
+    group: "Forms",
+    states: [
+      { key: "reminder", note: "values go back as the person's next message (dispatch_query)", jsx: `<Form title="New reminder" submit="Create reminder" intro="Create this reminder:">\n  <Field label="What"><Input name="what" placeholder="Call Maya" /></Field>\n  <Field label="When" hint="Words are fine"><Input name="when" placeholder="Tomorrow 9 AM" /></Field>\n  <Field label="List">\n    <Select name="list" defaultValue="Reminders">\n      <SelectTrigger><SelectValue /></SelectTrigger>\n      <SelectContent>\n        <SelectItem value="Reminders">Reminders</SelectItem>\n        <SelectItem value="Work">Work</SelectItem>\n      </SelectContent>\n    </Select>\n  </Field>\n  <Field label="Alert me"><Switch name="alert" defaultChecked /></Field>\n</Form>` },
+      { key: "all-controls", jsx: `<Form title="Trip details" submit="Plan the trip">\n  <Field label="Where"><Input name="where" /></Field>\n  <Field label="Notes"><Textarea name="notes" placeholder="Anything I should know" /></Field>\n  <Field label="Budget"><Slider name="budget" min={0} max={5000} step={100} defaultValue={[1500]} /></Field>\n  <Field label="Book flights too"><Checkbox name="flights" /></Field>\n</Form>` },
+      { key: "streaming", note: "shell open, fields still arriving", streaming: true, jsx: `<Form title="New reminder" submit="Create reminder">\n  <Field label="What"><Input name="what" /></Field>\n  <Field label="When"><Inp` },
+      { key: "alone", note: "a control outside a Form draws nothing (the dead-control defect)", jsx: `Here is an input:\n\n<Input name="x" placeholder="Should not appear" />\n\n<Switch name="y" />` },
+      { key: "empty", note: "no fields: nothing", jsx: `<Form title="Nothing to ask" submit="Send"></Form>` },
     ],
   },
   {
@@ -317,7 +333,10 @@ const CATALOGUE: GalleryEntry[] = [
     group: "Pipeline",
     states: [
       { key: "pending-unknown", note: "unknown tag still arriving", streaming: true, jsx: `<SwatchPicker colors={[{hex: "#7A9E7E", name: "Sag` },
-      { key: "unknown-closed", note: "SwatchPicker is in the prompt, not the registry", jsx: `<SwatchPicker colors={[{hex: "#7A9E7E", name: "Sage"}, {hex: "#C9A47E", name: "Clay"}]} />` },
+      { key: "unknown-closed", note: "an unregistered tag that closes becomes its words as prose", jsx: `Pick one:\n\n<SwatchPicker colors={[{hex: "#7A9E7E", name: "Sage"}, {hex: "#C9A47E", name: "Clay"}]} />` },
+      { key: "colour-classes", note: "hand-rolled colour, gradient and uppercase classes are dropped", jsx: `<div className="rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 p-3 text-green-700"><div className="text-xs font-medium uppercase tracking-wide text-purple-500">San Francisco</div><div className="text-4xl font-bold text-red-600">54°</div><CheckCircle className="text-green-500" /> Rain</div>` },
+      { key: "fallback-keeps-words", note: "malformed close: the card's name and labels survive", jsx: `<TaskSummaryCard title="Organized Downloads" tasks={[{label: "23 images moved", done: true}, {label: "45 documents sorted", done: true}` },
+      { key: "skeleton-compact", note: "short cards get one line", streaming: true, jsx: `<LinkCard url="https://developer.apple.com/design/human-interface-guidelines/wid` },
       { key: "mixed", note: "prose, card, prose, streaming cursor", streaming: true, jsx: `Here is what I found.\n\n<TaskSummaryCard title="Checks" tasks={[{label: "Build", done: true}, {label: "Tests", done: false}]} />\n\nTwo of three passed and the` },
     ],
   },

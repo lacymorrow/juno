@@ -26,7 +26,7 @@ import { Children, cloneElement, isValidElement, useState, useCallback, useEffec
  * submitting state, and the promise resolves once the query is accepted
  * rather than after the entire agent run.
  */
-async function dispatchQuery(query: string): Promise<void> {
+export async function dispatchQuery(query: string): Promise<void> {
   await invoke(COMMANDS.AGENT_DISPATCH_QUERY, { query });
 }
 

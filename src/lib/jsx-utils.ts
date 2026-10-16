@@ -178,3 +178,37 @@ export function stripJsxMarkup(code: string): string {
 		.filter(Boolean)
 		.join("\n");
 }
+
+/** Attributes that name a card: `title="Organized Downloads"`. */
+const HEADING_ATTR = /\b(?:title|location|hostname|caption|line)\s*=\s*(?:"([^"]*)"|'([^']*)')/;
+
+/** Words inside an object prop: `{label: "23 images moved", done: true}`. */
+const ITEM_KEY = /\b(?:label|name|detail)\s*:\s*(?:"([^"]*)"|'([^']*)')/g;
+
+/**
+ * What a card that could not render becomes: its words, with its name in
+ * front. `stripJsxMarkup` alone loses a task card whose labels live inside a
+ * prop, so the title and the item labels are read out of the markup too:
+ * "Organized Downloads: 23 images moved, 45 documents sorted". Empty when
+ * there is nothing to recover.
+ */
+export function describeFallback(code: string): string {
+	const prose = stripJsxMarkup(code);
+	const heading = (() => {
+		const m = HEADING_ATTR.exec(code);
+		return (m?.[1] ?? m?.[2] ?? "").trim();
+	})();
+
+	if (prose) {
+		return heading && !prose.includes(heading) ? `${heading}: ${prose}` : prose;
+	}
+
+	const items: string[] = [];
+	for (const m of code.matchAll(ITEM_KEY)) {
+		const text = (m[1] ?? m[2] ?? "").trim();
+		if (text && !items.includes(text)) items.push(text);
+	}
+	const body = items.slice(0, 6).join(", ");
+	if (heading && body) return `${heading}: ${body}`;
+	return heading || body;
+}

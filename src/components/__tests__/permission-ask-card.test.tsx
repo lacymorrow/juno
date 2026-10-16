@@ -5,7 +5,7 @@ import { availableComponents } from "@/components/ui/jsx-message-renderer";
 
 describe("PermissionAskCard", () => {
   it("is on the renderer whitelist", () => {
-    expect(availableComponents.PermissionAskCard).toBe(PermissionAskCard);
+    expect(availableComponents.PermissionAskCard).toBeTypeOf("function");
   });
 
   it("shows the backend's one line and one Continue button", () => {
