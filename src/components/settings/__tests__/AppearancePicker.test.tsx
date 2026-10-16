@@ -108,11 +108,11 @@ describe("AppearancePicker loading state", () => {
 });
 
 describe("AppearancePicker with Beta features off", () => {
-  it("offers the finished looks, not Presence or Halo", () => {
+  it("offers the finished looks, not Presence, Halo or the Notch", () => {
     beta.enabled = false;
     render(<AppearancePicker value={UI.BAR_APPEARANCES_FLOATING} onChange={() => {}} />);
     const dots = screen.getAllByRole("tab").map((t) => t.getAttribute("aria-label"));
-    expect(dots).toEqual(["Pill", "Avatar", "Island", "Notch", "Orb"]);
+    expect(dots).toEqual(["Pill", "Avatar", "Island", "Orb"]);
   });
 
   it("shows a saved beta look as the default it is drawn as", () => {

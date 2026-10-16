@@ -389,7 +389,6 @@ impl TimerEventHandler {
             AgentSystemState::ProcessingQuery => {
                 // Determine priority based on timer type
                 match timer_data.timer_type {
-                    TimerType::Simple => Ok(TimerHandlingStrategy::QueueForLater),
                     TimerType::ScreenMonitor { .. } => Ok(TimerHandlingStrategy::InterruptCurrent),
                     TimerType::FileMonitor { .. } => Ok(TimerHandlingStrategy::QueueWithPriority),
                     TimerType::ApplicationMonitor { .. } => {

@@ -719,15 +719,22 @@ impl ToolConfigManager {
         }
     }
 
-    /// Initializes default timer and scheduling tools
+    /// Initializes default monitor tools
+    ///
+    /// This list is the set `register_timer_tools` actually registers. It used
+    /// to also name `create_timer` and `timer_status`, which were never
+    /// registered as tools and went with Juno's own timers.
     ///
     /// Used by: Default configuration creation
     fn add_default_timer_tools(tools: &mut HashMap<String, ToolConfig>) {
         let timer_tools = vec![
-            (tool_names::CREATE_TIMER, "Create a scheduled timer"),
-            (tool_names::LIST_TIMERS, "List active timers"),
-            (tool_names::CANCEL_TIMER, "Cancel a timer"),
-            (tool_names::TIMER_STATUS, "Check timer status"),
+            (
+                tool_names::SET_SCREEN_MONITOR,
+                "Watch a screen region for changes",
+            ),
+            (tool_names::SET_FILE_MONITOR, "Watch a file for changes"),
+            (tool_names::LIST_TIMERS, "List armed monitors"),
+            (tool_names::CANCEL_TIMER, "Cancel an armed monitor"),
         ];
 
         for (name, description) in timer_tools {

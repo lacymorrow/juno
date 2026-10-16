@@ -29,11 +29,8 @@ import {
   HardDrive,
   ExternalLink,
   Globe,
-  Clock,
   CheckCircle2,
   Circle,
-  ListTodo,
-  ArrowRight,
   type LucideIcon,
 } from "lucide-react";
 
@@ -516,64 +513,6 @@ export function ComparisonCard({
 }
 
 // ============================================================
-// TimerCard — with animated clock
-// ============================================================
-
-interface TimerCardProps {
-  label?: string;
-  duration?: string; // e.g. "5:00", "1:30:00"
-  status?: "running" | "paused" | "finished";
-}
-
-export function TimerCard({
-  label = "Timer",
-  duration = "0:00",
-  status = "running",
-}: TimerCardProps) {
-  return (
-    <div className="rounded-xl border bg-card p-4 flex items-center gap-4 juno-animate-in shadow-sm">
-      <div className="relative">
-        <Clock
-          className={cn(
-            "h-7 w-7 transition-colors",
-            status === "running"
-              ? "text-blue-500"
-              : status === "finished"
-                ? "text-green-500"
-                : "text-muted-foreground",
-          )}
-        />
-        {status === "running" && (
-          <div
-            className="absolute inset-0 rounded-full border-2 border-blue-500/40"
-            style={{ animation: "juno-pulse-ring 2s ease-out infinite" }}
-          />
-        )}
-      </div>
-      <div>
-        <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="text-2xl font-mono font-bold tabular-nums">
-          {duration}
-        </div>
-      </div>
-      <div
-        className={cn(
-          "text-xs px-2.5 py-1 rounded-full ml-auto font-medium",
-          status === "running" &&
-            "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
-          status === "paused" &&
-            "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300",
-          status === "finished" &&
-            "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
-        )}
-      >
-        {status}
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
 // LinkCard — with hover lift effect
 // ============================================================
 
@@ -624,91 +563,6 @@ export function LinkCard({
           <span className="truncate">{domain}</span>
         </div>
       </div>
-    </div>
-  );
-}
-
-// ============================================================
-// TaskSummaryCard — with staggered task animations + progress
-// ============================================================
-
-interface TaskItem {
-  label: string;
-  done?: boolean;
-  detail?: string;
-}
-
-interface TaskSummaryCardProps {
-  title?: string;
-  tasks?: TaskItem[];
-}
-
-export function TaskSummaryCard({
-  title = "Tasks",
-  tasks = [],
-}: TaskSummaryCardProps) {
-  const doneCount = tasks.filter((t) => t.done).length;
-  const progress = tasks.length > 0 ? (doneCount / tasks.length) * 100 : 0;
-
-  return (
-    <div className="rounded-xl border bg-card p-4 space-y-3 juno-animate-in shadow-sm">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <ListTodo className="h-4 w-4 text-purple-500" />
-          <span className="font-medium text-sm">{title}</span>
-        </div>
-        <span className="text-xs text-muted-foreground tabular-nums">
-          {doneCount}/{tasks.length} done
-        </span>
-      </div>
-
-      {/* Progress bar */}
-      {tasks.length > 0 && (
-        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-          <div
-            className={cn(
-              "h-full rounded-full",
-              progress === 100 ? "bg-green-500" : "bg-purple-500",
-            )}
-            style={{
-              width: `${progress}%`,
-              animation:
-                "juno-fill-width 1s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both",
-            }}
-          />
-        </div>
-      )}
-
-      {tasks.length > 0 && (
-        <div className="space-y-0.5">
-          {tasks.map((task, i) => (
-            <div
-              key={task.label}
-              className={cn(
-                "flex items-start gap-2 text-sm py-1.5 px-1 rounded-lg juno-animate-in",
-                task.done && "text-muted-foreground",
-              )}
-              style={{ animationDelay: `${0.1 + i * 0.06}s` }}
-            >
-              {task.done ? (
-                <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
-              ) : (
-                <ArrowRight className="h-4 w-4 text-purple-500 shrink-0 mt-0.5" />
-              )}
-              <div>
-                <span className={cn(task.done && "line-through")}>
-                  {task.label}
-                </span>
-                {task.detail && (
-                  <div className="text-xs text-muted-foreground">
-                    {task.detail}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -770,6 +624,8 @@ export function ImageCard({ path, caption, before }: ImageCardProps) {
   );
 }
 
+export { TaskSummaryCard } from "./task-summary-card";
+export type { TaskSummaryCardProps, TaskItem, TaskAction } from "./task-summary-card";
 // Live components (bound to real state) live in their own files.
 export { AgendaCard } from "./agenda-card";
 export { MessageCard } from "./message-card";

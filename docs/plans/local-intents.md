@@ -31,14 +31,14 @@ Nothing the person said is spliced into a script. AppleScript is either constant
 | Power | Mac sleep | "put my Mac to sleep" | `pmset sleepnow` after 1.2 s | "Going to sleep." |
 | Facts | battery | "battery", "how much battery do I have left", "is my laptop charging" | `pmset -g batt` | "Battery is at 82% and charging." |
 | Facts | time / date | "what time is it?", "what's today's date?", "what day is it" | `chrono::Local` | "It's 3:05 PM." |
-| Timers | start | "set a timer for 5 minutes", "5 minute timer", "timer for 1 hour 30 minutes" | backend task | `<TimerCard>` + "Timer set for 5 minutes." |
-| Timers | time left | "how much time is left on the timer?", "check my timer" | in-memory | `<TimerCard>` + "3 minutes and 12 seconds left." |
-| Timers | cancel | "cancel the timer", "stop the timer", "cancel all timers" | aborts the task | "Timer cancelled." |
+| Timers | open Clock on Timers | "set a timer", "set a timer for 5 minutes", "5 minute timer", "cancel the timer", "check my timer" | `open clock-timer:` | "Clock is open on Timers." |
 | Apps | open / switch to | "open Safari", "launch Chrome", "switch to Slack", "open settings" | `open -a <bundle path>` | "Opening Safari." |
 | Apps | quit | "quit Slack", "exit out of Zoom" | AppleScript with the name as `argv`, only if running | "Quitting Slack." |
 | Web | open a site | "open github.com", "go to github dot com" | `open https://<domain>` | `<LinkCard>` + "Opening github.com." |
 
-Timers are owned by the backend: one task per timer on the Tauri runtime, kept in a process-wide list so they can be read and cancelled. When one finishes, Juno speaks "Your 5 minute timer is done." and posts a notification (through the one `notify` door, which honours the notifications setting). Timers do not survive quitting Juno. "How much time is left?" without the word timer is only answered when a timer is running; otherwise it goes to the agent.
+Timers are Clock's (LAC-4305). Juno used to run its own on the Tauri runtime, speak and notify on expiry, and lose them all on quit; that is gone, because Juno drives the Mac's own apps and features and never rebuilds one (Lacy, 2026-10-12). Clock.app ships no scripting dictionary, so a Clock timer cannot be started or read back; its only automation surface is an open-tab action, and LaunchServices shows the URL behind it. `open clock-timer:` selects the Timers tab, verified on macOS 26 on 2026-10-14 by reading the toolbar back over the accessibility API.
+
+Every timer phrasing lands there, because opening that tab is the whole of what Juno can do. No duration is parsed: `clock-timer://300`, `clock-timer:300` and `clock-timer://?duration=300` all open the tab and ignore the rest, so a number the person said cannot reach Clock. Bare "how much time is left?" is no longer a timer command at all. It used to be answered when one of Juno's own timers happened to be running, and with no timer state to key on it is as likely to be about a game or a meeting, so it goes to the agent.
 
 "Open" and "quit" never act on Juno itself. Two different apps answering to the same spoken name (for example "Docs") is ambiguous and goes to the agent.
 
@@ -60,8 +60,9 @@ Timers are owned by the backend: one task per timer on the Tauri runtime, kept i
 | Bare "mute" / "unmute" / "louder" / "turn it up" | In a call, "mute" usually means the microphone in Zoom or Meet, and "it" can mean anything. The phrase must name the sound or the Mac. |
 | Bare "time", bare "lock", bare "dark mode", "go to sleep" | Too easy to hit in passing, or ambiguous ("go to sleep" can be addressed to Juno). |
 | Shuffle, like, repeat | Spotify's AppleScript has no "like", and shuffle state is unreliable across players. Next and previous already exist. |
-| Timer labels, pause and resume, "5 and a half minutes" | Labels capture free text; pause and resume add state with little use. Durations with "and" hit the clause rule and go to the agent, which handles them fine. |
-| System sounds on timer finish | The notification already plays one; adding another doubles it. |
+| Juno's own timers | Clock owns timers. See the Timers row above and LAC-4305. |
+| Passing the duration to Clock | No URL carries it; all three forms were tried. Reading a number only to discard it would be pretending. |
+| "set a timer for 5 minutes to check the oven" | Clock takes no label through the URL, so a blank Timers tab would lose the part the person cared about. It goes to the agent. |
 
 ## Adding an intent
 

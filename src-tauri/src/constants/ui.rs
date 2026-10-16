@@ -154,10 +154,10 @@ pub mod bar_appearances {
     pub const HIDDEN: &[&str] = &[APP, VOICE_AI];
 
     /// Looks offered only while Settings → Advanced → Beta features is on.
-    /// Presence and Halo are still being finished; every other offered look
+    /// Presence, Halo and the Notch are still being finished; every other offered look
     /// is shown by default. With beta off, a saved beta look is shown as `DEFAULT` but
     /// kept, so turning beta back on brings it back (`effective`).
-    pub const BETA: &[&str] = &[ORB, REACT_ORB];
+    pub const BETA: &[&str] = &[ORB, REACT_ORB, NOTCH];
 
     /// True when this look is not offered to a person.
     pub fn is_hidden(id: &str) -> bool {
@@ -211,12 +211,12 @@ pub mod bar_appearances {
         }
 
         #[test]
-        fn only_presence_and_halo_are_beta() {
-            for id in [FLOATING, DYNAMIC, PERSONA, SHADER_ORB, NOTCH] {
+        fn presence_halo_and_notch_are_beta() {
+            for id in [FLOATING, DYNAMIC, PERSONA, SHADER_ORB] {
                 assert!(!is_beta(id), "{id} should be out of beta");
                 assert_eq!(effective(id, false), id);
             }
-            for id in [ORB, REACT_ORB] {
+            for id in [ORB, REACT_ORB, NOTCH] {
                 assert!(is_beta(id), "{id} should be beta");
                 assert_eq!(effective(id, false), DEFAULT);
                 assert_eq!(effective(id, true), id);

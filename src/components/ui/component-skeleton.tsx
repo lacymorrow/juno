@@ -20,15 +20,14 @@ const CARD_HEIGHTS: Record<string, string> = {
   FileListCard: "h-44",
   SystemStatusCard: "h-40",
   ComparisonCard: "h-48",
-  TimerCard: "h-24",
   LinkCard: "h-20",
   TaskSummaryCard: "h-40",
   AnimatedCard: "h-32",
   Card: "h-32",
   Alert: "h-16",
-  StatusCard: "h-14",
-  ProgressBar: "h-12",
   AnimatedProgress: "h-10",
+  Meter: "h-10",
+  Table: "h-32",
   MiniChart: "h-28",
   Tabs: "h-32",
 };
@@ -46,7 +45,7 @@ const INLINE_COMPONENTS = new Set([
   "OpenButton",
   "QueryButton",
   "CopyButton",
-  "ActionButton",
+  "Actions",
 ]);
 
 interface ComponentSkeletonProps {

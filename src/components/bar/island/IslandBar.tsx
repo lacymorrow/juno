@@ -883,7 +883,7 @@ export function IslandBar() {
     const isComponent = layerKey === "component" && hero;
     const caption = (isComponent ? hero.prose : "") || question;
     layer = (
-      <div className="dark flex h-full w-full flex-col" data-testid={`island-${layerKey}`}>
+      <div className="dark flex h-full w-full flex-col" data-testid={`island-${layerKey}`} data-surface="island">
         <header className="flex shrink-0 items-center gap-2.5 pl-2.5 pr-3" style={{ height: HEADER_H }}>
           {dotTarget}
           {isComponent && caption ? (
