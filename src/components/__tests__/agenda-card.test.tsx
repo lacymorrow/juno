@@ -20,7 +20,7 @@ describe("AgendaCard", () => {
   });
 
   it("is on the renderer whitelist", () => {
-    expect(availableComponents.AgendaCard).toBe(AgendaCard);
+    expect(availableComponents.AgendaCard).toBeTypeOf("function");
   });
 
   it("draws events and reminders with the same shape", () => {

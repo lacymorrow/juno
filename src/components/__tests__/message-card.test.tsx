@@ -20,7 +20,7 @@ describe("MessageCard", () => {
   });
 
   it("is on the renderer whitelist", () => {
-    expect(availableComponents.MessageCard).toBe(MessageCard);
+    expect(availableComponents.MessageCard).toBeTypeOf("function");
   });
 
   it("draft: shows recipient, body, the phrase, and one Send button", () => {

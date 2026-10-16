@@ -20,11 +20,11 @@ The card above is live-bound to the player.`;
     expect(jsx[0].content.trim()).toBe('<NowPlayingCard app="Spotify" />');
   });
 
-  it("hands a well-formed tag it has never heard of to the renderer instead of stripping it", () => {
+  it("turns a well-formed tag nothing registers into its words, never a blank line", () => {
     const content = "Here you go:\n<BrandNewThing tone=\"warm\">hello</BrandNewThing>\nDone.";
     const segments = splitMixedContent(content);
-    expect(segments.map((s) => s.type)).toEqual(["text", "jsx", "text"]);
-    expect(segments[1].content).toBe('<BrandNewThing tone="warm">hello</BrandNewThing>');
+    expect(segments.map((s) => s.type)).toEqual(["text", "text", "text"]);
+    expect(segments[1].content).toBe("hello");
   });
 
   it("never treats the spoken channel as a component", () => {

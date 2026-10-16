@@ -128,9 +128,55 @@
   animation: agent-card-in 180ms ease-out;
 }
 
+/* Skeleton: a quiet opacity pulse, 1 to 0.6. It ends when the card arrives. */
+@keyframes agent-skeleton-pulse {
+  50% {
+    opacity: 0.6;
+  }
+}
+.agent-content [data-slot="skeleton"] {
+  animation: agent-skeleton-pulse var(--skeleton-pulse, 1.2s) ease-in-out infinite;
+}
+/* The skeleton is a card that is not there yet: no entry rise of its own. */
+.agent-content[data-testid="component-skeleton"] [data-slot="card"] {
+  animation: none;
+}
+
+/*
+ * Form controls under the Mac tokens: 28px, 13px type, a fill instead of a
+ * border and shadow, system blue on focus.
+ */
+.agent-content [data-slot="input"],
+.agent-content [data-slot="textarea"],
+.agent-content [data-slot="select-trigger"] {
+  font-size: 13px;
+  border-radius: 6px;
+  border-color: var(--hair);
+  background: var(--fill-4);
+  box-shadow: none;
+  padding-inline: 8px;
+}
+.agent-content [data-slot="input"],
+.agent-content [data-slot="select-trigger"] {
+  height: 28px;
+}
+.agent-content [data-slot="textarea"] {
+  min-height: 56px;
+  padding-block: 5px;
+}
+.agent-content [data-slot="select-trigger"] {
+  width: 100%;
+}
+
+/* The scope's --background is transparent, so the switch thumb needs its own white. */
+.agent-content [data-slot="switch-thumb"] {
+  background: #ffffff;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .agent-content [data-slot="progress-indicator"],
-  .agent-content [data-slot="card"] {
+  .agent-content [data-slot="card"],
+  .agent-content [data-slot="skeleton"] {
     animation: none;
   }
 }

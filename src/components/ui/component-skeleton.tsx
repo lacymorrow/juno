@@ -1,42 +1,53 @@
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 /**
  * Stand-in for an agent component whose markup is still streaming in.
  *
- * Sized to roughly match the component it will become, so the card swapping in
- * does not shove the conversation around. Small inline pieces (badges, stats,
- * buttons) get a pill; anything unknown gets a medium card.
+ * It is a card: the same hairline, radius and header row as the real thing, a
+ * title line, a meta line and three body lines on a 1.2s opacity pulse, held
+ * to roughly the height of the component it will become so the swap does not
+ * shove the conversation around. Small inline pieces (badges, stats, buttons)
+ * get a pill; anything unknown gets a medium card.
  */
 
-/** Approximate rendered height of each block-level component. */
-const CARD_HEIGHTS: Record<string, string> = {
-  WeatherCard: "h-36",
-  NowPlayingCard: "h-24",
-  AgendaCard: "h-24",
-  MessageCard: "h-32",
-  PermissionAskCard: "h-16",
-  ImageCard: "h-64",
-  FileListCard: "h-44",
-  SystemStatusCard: "h-40",
-  ComparisonCard: "h-48",
-  LinkCard: "h-20",
-  TaskSummaryCard: "h-40",
-  AnimatedCard: "h-32",
-  Card: "h-32",
-  Alert: "h-16",
-  AnimatedProgress: "h-10",
-  Meter: "h-10",
-  Table: "h-32",
-  MiniChart: "h-28",
-  Tabs: "h-32",
+/** Approximate rendered height of each block-level component, in px. */
+const CARD_HEIGHTS: Record<string, number> = {
+  WeatherCard: 150,
+  NowPlayingCard: 108,
+  AgendaCard: 96,
+  MessageCard: 128,
+  PermissionAskCard: 56,
+  ImageCard: 260,
+  FileListCard: 190,
+  MetricList: 150,
+  SystemStatusCard: 150,
+  ComparisonCard: 200,
+  LinkCard: 56,
+  TaskSummaryCard: 160,
+  AnimatedCard: 120,
+  Card: 120,
+  Form: 200,
+  Alert: 56,
+  AnimatedProgress: 40,
+  Meter: 40,
+  Table: 128,
+  MiniChart: 96,
+  Tabs: 128,
 };
+
+const DEFAULT_HEIGHT = 96;
+
+/** Cards this short get one line, not a header and three. */
+const COMPACT_BELOW = 64;
 
 /** Components that render inline and small. */
 const INLINE_COMPONENTS = new Set([
   "Badge",
   "GlowBadge",
   "Stat",
+  "Stats",
   "AnimatedNumber",
   "ShimmerText",
   "Confetti",
@@ -54,22 +65,47 @@ interface ComponentSkeletonProps {
   className?: string;
 }
 
+const Line = ({ width, className }: { width: string; className?: string }) => (
+  <Skeleton className={cn("h-2.5 rounded-full", className)} style={{ width }} />
+);
+
 export const ComponentSkeleton = ({ name, className }: ComponentSkeletonProps) => {
   const inline = name ? INLINE_COMPONENTS.has(name) : false;
-  const size = inline
-    ? "h-8 w-32 rounded-full"
-    : cn("w-full rounded-xl", (name && CARD_HEIGHTS[name]) || "h-24");
+  const height = (name && CARD_HEIGHTS[name]) || DEFAULT_HEIGHT;
 
   return (
+    // `agent-content` carries the tokens: the skeleton is drawn before any card is.
     <div
       role="status"
       aria-busy="true"
       aria-label="Loading card"
       data-testid="component-skeleton"
       data-component={name}
-      className={className}
+      className={cn("agent-content", className)}
     >
-      <Skeleton className={size} />
+      {inline ? (
+        <Skeleton className="h-6 w-32 rounded-full" />
+      ) : height < COMPACT_BELOW ? (
+        <Card style={{ minHeight: height }}>
+          <CardContent className="flex items-center py-3">
+            <Line width="60%" />
+          </CardContent>
+        </Card>
+      ) : (
+        <Card style={{ minHeight: height }}>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-6">
+              <Line width="38%" />
+              <Line width="12%" />
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-2.5 pt-2">
+            <Line width="72%" />
+            <Line width="58%" />
+            <Line width="64%" />
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 };
@@ -90,7 +126,7 @@ export const ComponentFallback = ({ text, className }: ComponentFallbackProps) =
     return (
       <p
         data-testid="component-fallback"
-        className={cn("text-xs text-muted-foreground", className)}
+        className={cn("text-[11px] text-muted-foreground", className)}
       >
         This card couldn't be shown.
       </p>
@@ -99,7 +135,7 @@ export const ComponentFallback = ({ text, className }: ComponentFallbackProps) =
   return (
     <p
       data-testid="component-fallback"
-      className={cn("whitespace-pre-wrap text-sm", className)}
+      className={cn("whitespace-pre-wrap text-[13px]", className)}
     >
       {text}
     </p>

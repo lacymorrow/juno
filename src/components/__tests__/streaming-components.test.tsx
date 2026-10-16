@@ -134,7 +134,7 @@ describe("streaming renderer", () => {
 
   it("says the card couldn't be shown when a broken tag carried no words", () => {
     const { container } = render(
-      <MixedContentRenderer content={'Here.\n<WeatherCard location="SF" temp'} />,
+      <MixedContentRenderer content={'Here.\n<WeatherCard temp'} />,
     );
     expect(screen.getByText("This card couldn't be shown.")).toBeInTheDocument();
     expectNoRawMarkup(container);

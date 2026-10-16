@@ -11,9 +11,11 @@
  */
 
 import { Card, CardContent } from "@/components/ui/card";
+import { ChartContainer, type ChartConfig } from "@/components/ui/chart";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Bar, BarChart, Cell, XAxis, YAxis } from "recharts";
 
 function prefersReducedMotion(): boolean {
   return (
@@ -53,7 +55,7 @@ export function AnimatedCard({ children, className, delay = 0, glow }: AnimatedC
 }
 
 // ============================================================
-// AnimatedNumber — counts up to target value
+// AnimatedNumber: counts up to target value
 // ============================================================
 
 interface AnimatedNumberProps {
@@ -153,38 +155,26 @@ export function AnimatedList({ children, className, gap = 2 }: AnimatedListProps
 }
 
 // ============================================================
-// AnimatedProgress: a shadcn Progress with a label row
+// Meter: a shadcn Progress with a label row (AnimatedProgress is the old name)
 // ============================================================
 
-interface AnimatedProgressProps {
+interface MeterProps {
   /** Value 0-100 */
   value: number;
   /** Label text */
   label?: string;
   /** `warning` is the one other fill, for a number that is a problem for this person. */
   tone?: "warning";
-  /**
-   * Older answers pass a colour. System blue is the default; yellow, orange
-   * and red read as `warning`, everything else (including "auto") as blue.
-   */
-  color?: string;
-  /** Show value label */
+  /** Show the value on the right */
   showValue?: boolean;
+  /** Replaces the percentage on the right: "13.1 of 16 GB". */
+  detail?: string;
   /** Additional CSS classes */
   className?: string;
 }
 
-export function AnimatedProgress({
-  value,
-  label,
-  tone,
-  color,
-  showValue = true,
-  className,
-}: AnimatedProgressProps) {
+export function Meter({ value, label, tone, showValue = true, detail, className }: MeterProps) {
   const clamped = Math.round(Math.min(100, Math.max(0, Number(value) || 0)));
-  const resolvedTone =
-    tone ?? (color && ["yellow", "orange", "red"].includes(color) ? "warning" : undefined);
 
   return (
     <div className={cn("space-y-1.5", className)}>
@@ -192,17 +182,35 @@ export function AnimatedProgress({
         <div className="flex items-baseline justify-between gap-3">
           {label && <span className="min-w-0 truncate text-[13px] text-[var(--label,inherit)]">{label}</span>}
           {showValue && (
-            <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">{clamped}%</span>
+            <span
+              className={cn(
+                "ml-auto text-[11px] tabular-nums text-muted-foreground",
+                tone === "warning" && "text-[var(--system-orange,#ff9500)]",
+              )}
+            >
+              {detail || `${clamped}%`}
+            </span>
           )}
         </div>
       )}
-      <Progress value={clamped} tone={resolvedTone} aria-label={label} />
+      <Progress value={clamped} tone={tone} aria-label={label} />
     </div>
   );
 }
 
-/** The tag the audit names for it. */
-export const Meter = AnimatedProgress;
+interface AnimatedProgressProps extends MeterProps {
+  /**
+   * Older answers pass a colour. System blue is the default; yellow, orange
+   * and red read as `warning`, everything else (including "auto") as blue.
+   */
+  color?: string;
+}
+
+/** The earlier tag for Meter. Same bar; the `color` prop folds into `tone`. */
+export function AnimatedProgress({ color, tone, ...rest }: AnimatedProgressProps) {
+  const resolved = tone ?? (color && ["yellow", "orange", "red"].includes(color) ? "warning" : undefined);
+  return <Meter {...rest} tone={resolved} />;
+}
 
 // ============================================================
 // GlowBadge: badge with a soft glow
@@ -256,7 +264,7 @@ export function ShimmerText({ children, className }: ShimmerTextProps) {
 }
 
 // ============================================================
-// Confetti — CSS-only celebration burst
+// Confetti: CSS-only celebration burst
 // ============================================================
 
 interface ConfettiProps {
@@ -310,7 +318,7 @@ export function Confetti({ count = 12, className }: ConfettiProps) {
 }
 
 // ============================================================
-// PulseRing — expanding concentric rings
+// PulseRing: expanding concentric rings
 // ============================================================
 
 interface PulseRingProps {
@@ -416,53 +424,75 @@ export function Stats({ children, className }: { children?: React.ReactNode; cla
 }
 
 // ============================================================
-// MiniChart — simple bar chart visualization
+// MiniChart: a shadcn chart (recharts) with one bar series
 // ============================================================
 
 interface MiniChartProps {
-  /** Array of values (0-100 scale) */
+  /** Array of values */
   data?: number[];
   /** Labels for each bar */
   labels?: string[];
+  /** Index of the bar the answer is about; the others go quiet. */
+  highlight?: number;
   /** Older answers pass a colour; bars are system blue, `orange` is the warning tone. */
   color?: string;
-  /** Height in pixels */
+  /** Bar area height in pixels */
   height?: number;
   className?: string;
 }
 
-export function MiniChart({ data = [], labels = [], color = "blue", height = 56, className }: MiniChartProps) {
-  const maxVal = Math.max(...data, 1);
-  const bar = color === "orange" ? "bg-[var(--system-orange,#ff9500)]" : "bg-primary";
+const AXIS_HEIGHT = 16;
+
+export function MiniChart({ data, labels, highlight, color = "blue", height = 56, className }: MiniChartProps) {
+  const values = (Array.isArray(data) ? data : []).map((v) => (Number.isFinite(Number(v)) ? Number(v) : 0));
+  const names = Array.isArray(labels) ? labels : [];
+
+  if (values.length === 0) {
+    return <div className={cn("text-[11px] text-muted-foreground", className)}>No data.</div>;
+  }
+
+  const rows = values.map((value, i) => ({ label: String(names[i] ?? ""), value }));
+  const hasLabels = names.length > 0;
+  const config = {
+    value: { label: "Value", color: color === "orange" ? "var(--system-orange, #ff9500)" : "var(--chart-1)" },
+  } satisfies ChartConfig;
+  const summary = rows.map((r) => (r.label ? `${r.label} ${r.value}` : String(r.value))).join(", ");
 
   return (
-    <div className={className}>
-      <div className="flex items-end gap-[3px]" style={{ height: `${height}px` }}>
-        {data.map((val, i) => (
-          <div key={i} className="flex h-full flex-1 items-end">
-            <div
-              className={cn("w-full rounded-t-[2px] min-h-[2px]", bar)}
-              style={{
-                height: `${(val / maxVal) * 100}%`,
-                transformOrigin: "bottom",
-                animation: `juno-grow-up 300ms ease-out both`,
-              }}
-            />
-          </div>
-        ))}
-      </div>
-      {labels.length > 0 && (
-        <div className="mt-1 flex gap-[3px]">
-          {labels.map((label, i) => (
-            <div
+    <ChartContainer
+      config={config}
+      role="img"
+      aria-label={`Bar chart: ${summary}`}
+      className={cn("aspect-auto w-full justify-stretch", className)}
+      style={{ height: height + (hasLabels ? AXIS_HEIGHT : 0) }}
+    >
+      <BarChart data={rows} margin={{ top: 0, right: 0, bottom: 0, left: 0 }} barCategoryGap={3}>
+        <XAxis
+          dataKey="label"
+          hide={!hasLabels}
+          tickLine={false}
+          axisLine={false}
+          interval={rows.length > 8 ? 1 : 0}
+          height={AXIS_HEIGHT}
+          tick={{ fontSize: 10 }}
+        />
+        <YAxis hide domain={[0, "dataMax"]} />
+        <Bar
+          dataKey="value"
+          fill="var(--color-value)"
+          radius={[2, 2, 0, 0]}
+          isAnimationActive={!prefersReducedMotion()}
+          animationDuration={300}
+          animationEasing="ease-out"
+        >
+          {rows.map((_, i) => (
+            <Cell
               key={i}
-              className="flex-1 whitespace-nowrap text-center text-[10px] text-muted-foreground"
-            >
-              {labels.length > 8 && i % 2 === 1 ? "" : label}
-            </div>
+              fill={highlight === undefined || i === highlight ? "var(--color-value)" : "var(--fill-2, var(--muted))"}
+            />
           ))}
-        </div>
-      )}
-    </div>
+        </Bar>
+      </BarChart>
+    </ChartContainer>
   );
 }

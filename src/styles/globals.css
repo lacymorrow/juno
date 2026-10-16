@@ -818,15 +818,35 @@
     animation-delay: 1.2s;
 }
 
-/* Agent JSX entry wrapper */
+/*
+ * Agent JSX entry wrapper: one 180ms rise, the first three segments 40ms
+ * apart. The card inside does not repeat it (see agent-content.css).
+ */
 .jsx-segment-enter {
-    animation: juno-fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: agent-card-in 180ms ease-out both;
 }
 
-.jsx-segment-enter:nth-child(2) { animation-delay: 0.08s; }
-.jsx-segment-enter:nth-child(3) { animation-delay: 0.16s; }
-.jsx-segment-enter:nth-child(4) { animation-delay: 0.24s; }
-.jsx-segment-enter:nth-child(5) { animation-delay: 0.32s; }
+.jsx-segment-enter:nth-child(2) { animation-delay: 40ms; }
+.jsx-segment-enter:nth-child(3) { animation-delay: 80ms; }
+
+.jsx-segment-enter .agent-content [data-slot="card"] {
+    animation: none;
+}
+
+/* The streaming cursor: one 2px bar at the end of the words being written. */
+.streaming-tail :is(p, li, h1, h2, h3, h4, h5, h6):last-of-type::after {
+    content: "";
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    background: rgba(60, 60, 67, 0.6);
+}
+
+.dark .streaming-tail :is(p, li, h1, h2, h3, h4, h5, h6):last-of-type::after {
+    background: rgba(235, 235, 245, 0.6);
+}
 
 /*
  * Reduced-motion global override (Phase D / LAC-1882).

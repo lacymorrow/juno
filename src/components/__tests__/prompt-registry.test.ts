@@ -16,18 +16,15 @@ const prompt = readFileSync(
 /** Not components: the spoken channel and the collapsed rationale (lifted out before parsing). */
 const NOT_COMPONENTS = new Set(["TTS", "Why"]);
 
-/** Taught but never registered. Prompt change 6 in the audit (remove or register); tracked there. */
-const KNOWN_GAPS = new Set(["SwatchPicker"]);
-
 /** Cut from the registry: the demo kit and ActionButton. */
-const CUT = ["Circle", "Rectangle", "Triangle", "ColorShowcase", "VisualDemo", "StatusCard", "ProgressBar", "ActionButton"];
+const CUT = ["SwatchPicker", "Circle", "Rectangle", "Triangle", "ColorShowcase", "VisualDemo", "StatusCard", "ProgressBar", "ActionButton"];
 
 function taughtTags(): Set<string> {
   const tags = new Set<string>();
   for (const m of prompt.matchAll(/<([A-Z][A-Za-z0-9]*)[\s/>]/g)) tags.add(m[1]);
   // The "AVAILABLE JSX COMPONENTS" lists name tags without angle brackets.
   for (const line of prompt.split("\n")) {
-    const list = /^\*\*(Layout|Data Display|Actions|Icons)\*\*: (.+)$/.exec(line);
+    const list = /^\*\*(Layout|Data Display|Actions|Forms|Icons)\*\*: (.+)$/.exec(line);
     if (!list) continue;
     for (const part of list[2].split(/,(?![^(]*\))/)) {
       const name = /^\s*([A-Z][A-Za-z0-9]*)/.exec(part)?.[1];
@@ -40,7 +37,7 @@ function taughtTags(): Set<string> {
 describe("agent prompt and component registry", () => {
   it("registers every tag the prompt teaches", () => {
     const missing = [...taughtTags()].filter(
-      (tag) => !NOT_COMPONENTS.has(tag) && !KNOWN_GAPS.has(tag) && !(tag in availableComponents),
+      (tag) => !NOT_COMPONENTS.has(tag) && !(tag in availableComponents),
     );
     expect(missing).toEqual([]);
   });
@@ -59,7 +56,7 @@ describe("agent prompt and component registry", () => {
       "Table", "Accordion", "Progress", "Avatar",
       "GlowBadge", "ShimmerText", "PulseRing", "Confetti", "AnimatedDivider",
       "AnimatedCard", "AnimatedList", "AnimatedNumber", "AnimatedProgress",
-      "Actions", "Stats", "Meter",
+      "Actions", "Stats", "Meter", "MetricList", "SystemStatusCard", "Form", "Field",
     ]) {
       expect(tag in availableComponents, `${tag} is missing`).toBe(true);
     }
