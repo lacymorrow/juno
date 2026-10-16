@@ -24,6 +24,7 @@ import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { useMemo } from "react";
 import { COMMANDS } from "@/lib/constants.generated";
 import { cn } from "@/lib/utils";
+import { Message, MessageContent } from "@/components/ai-elements/message";
 import { MixedContentRenderer } from "@/components/ui/mixed-content-renderer";
 
 // ── The Tauri stand-in ───────────────────────────────────────────────
@@ -129,7 +130,9 @@ const CATALOGUE: GalleryEntry[] = [
       { key: "overflow", jsx: `<TaskSummaryCard title="${LONG}" tasks={[{label: "${LONG}", done: true}, {label: "Short one", done: false, detail: "${LONG}"}]} />` },
       { key: "streaming-tag", note: "open tag still arriving: skeleton", streaming: true, jsx: `<TaskSummaryCard title="Organized Downloads" tasks={[{label: "23 images moved", done: true}, {label: "45 docu` },
       { key: "fallback", note: "known component, never closed, stream ended", jsx: `<TaskSummaryCard title="Organized Downloads" tasks={[{label: "23 images moved", done: true}` },
-      { key: "with-actions", note: "the prompt's Task Completion example", jsx: `<TaskSummaryCard title="Organized Downloads" tasks={[{label: "23 images moved to Images/", done: true}, {label: "45 documents sorted", done: true}, {label: "15 videos categorized", done: true}]} />\n\n<div className="flex gap-2 mt-2">\n  <OpenButton path="~/Downloads" label="Open Downloads" />\n  <QueryButton query="Delete duplicate files in Downloads" label="Clean Duplicates" />\n</div>` },
+      { key: "with-actions", note: "footer actions; the prompt's Task Completion example", jsx: `<TaskSummaryCard title="Organized Downloads" tasks={[{label: "23 images moved to Images/", done: true}, {label: "45 documents sorted", done: true, detail: "PDF, DOCX, TXT"}, {label: "15 videos categorized", done: false}]} actions={[{open: "~/Downloads", label: "Open Downloads", primary: true}, {query: "Delete duplicate files in Downloads", label: "Clean duplicates"}]} />` },
+      { key: "actions-row", note: "buttons in a lowercase div under prose: one block, one row", jsx: `Done. I sorted everything into five folders.\n\n<div className="flex gap-2 mt-2">\n  <OpenButton path="~/Downloads" label="Open Downloads" primary />\n  <QueryButton query="Delete duplicate files in Downloads" label="Clean duplicates" />\n</div>` },
+      { key: "composed-card", note: "a composed shadcn Card", jsx: `<Card><CardHeader><CardTitle>Storage</CardTitle><CardAction className="text-[11px] text-muted-foreground">Macintosh HD</CardAction></CardHeader><CardContent><AnimatedProgress value={62} label="Used" /><Stats className="mt-3"><Stat value="312 GB" label="Used" /><Stat value="188 GB" label="Free" /></Stats></CardContent><CardFooter><Actions><QueryButton query="Find large files" label="Find large files" primary /></Actions></CardFooter></Card>` },
     ],
   },
   {
@@ -243,7 +246,7 @@ const CATALOGUE: GalleryEntry[] = [
     group: "Animated primitives",
     states: [
       { key: "week", jsx: `<MiniChart data={[30, 45, 80, 65, 90, 40, 55]} labels={["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]} color="blue" />` },
-      { key: "many", note: "30 bars, purple", jsx: `<MiniChart data={[3,5,8,6,9,4,5,7,2,8,9,10,4,3,6,7,8,5,4,9,10,2,3,5,6,7,8,9,4,5]} labels={["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","23","24","25","26","27","28","29","30"]} color="purple" />` },
+      { key: "many", note: "30 bars", jsx: `<MiniChart data={[3,5,8,6,9,4,5,7,2,8,9,10,4,3,6,7,8,5,4,9,10,2,3,5,6,7,8,9,4,5]} labels={["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","23","24","25","26","27","28","29","30"]} />` },
       { key: "empty", jsx: `<MiniChart data={[]} />` },
       { key: "zero", note: "all zeros", jsx: `<MiniChart data={[0,0,0]} labels={["a","b","c"]} />` },
     ],
@@ -252,7 +255,7 @@ const CATALOGUE: GalleryEntry[] = [
     name: "AnimatedProgress",
     group: "Animated primitives",
     states: [
-      { key: "auto", jsx: `<div className="space-y-3"><AnimatedProgress value={23} label="CPU" color="auto" /><AnimatedProgress value={82} label="Memory" color="auto" /><AnimatedProgress value={94} label="Disk" color="auto" /><AnimatedProgress value={50} label="Purple" color="purple" /><AnimatedProgress value={140} label="Over 100" /></div>` },
+      { key: "auto", jsx: `<div className="space-y-3"><AnimatedProgress value={23} label="CPU" color="auto" /><AnimatedProgress value={82} label="Memory" color="auto" /><AnimatedProgress value={94} label="Disk" color="auto" /><AnimatedProgress value={50} label="Warning" tone="warning" /><AnimatedProgress value={140} label="Over 100" /></div>` },
       { key: "bare", jsx: `<AnimatedProgress value={40} showValue={false} />` },
     ],
   },
@@ -285,7 +288,7 @@ const CATALOGUE: GalleryEntry[] = [
     name: "Effects",
     group: "Effects",
     states: [
-      { key: "all", jsx: `<div className="flex flex-wrap items-center gap-4"><GlowBadge color="green">Online</GlowBadge><GlowBadge color="purple">Purple</GlowBadge><GlowBadge color="red">Down</GlowBadge><ShimmerText className="text-lg font-semibold">Headline value</ShimmerText><PulseRing color="rgba(59,130,246,0.4)" size={40} /><Confetti count={12} /></div>` },
+      { key: "all", jsx: `<div className="flex flex-wrap items-center gap-4"><GlowBadge color="green">Online</GlowBadge><GlowBadge color="yellow">Check</GlowBadge><GlowBadge color="red">Down</GlowBadge><ShimmerText className="text-lg font-semibold">Headline value</ShimmerText><PulseRing color="rgba(59,130,246,0.4)" size={40} /><Confetti count={12} /></div>` },
       { key: "dividers", jsx: `<div className="space-y-4"><AnimatedDivider /><AnimatedDivider variant="rainbow" /><AnimatedDivider variant="blue" /><AnimatedDivider variant="green" /></div>` },
     ],
   },
@@ -293,19 +296,9 @@ const CATALOGUE: GalleryEntry[] = [
     name: "Buttons",
     group: "Actions",
     states: [
-      { key: "row", jsx: `<div className="flex flex-wrap gap-2"><OpenButton path="~/Downloads" label="Open Downloads" /><OpenButton url="https://junebug.ai" label="Open website" /><OpenButton app="Safari" /><QueryButton query="Delete duplicate files in Downloads" label="Clean duplicates" /><CopyButton text="npm install juno" label="Copy command" /><ActionButton command="capture_screenshot_command" label="Take screenshot" icon="terminal" /></div>` },
-      { key: "variants", jsx: `<div className="flex flex-wrap gap-2"><QueryButton query="x" label="Default" variant="default" /><QueryButton query="x" label="Outline" /><QueryButton query="x" label="Ghost" variant="ghost" /><ActionButton command="x" label="Destructive" variant="destructive" /><OpenButton url="https://x" label="Large" size="lg" /></div>` },
+      { key: "row", jsx: `<div className="flex flex-wrap gap-2"><OpenButton path="~/Downloads" label="Open Downloads" /><OpenButton url="https://junebug.ai" label="Open website" /><OpenButton app="Safari" /><QueryButton query="Delete duplicate files in Downloads" label="Clean duplicates" /><CopyButton text="npm install juno" label="Copy command" /></div>` },
+      { key: "variants", jsx: `<div className="flex flex-wrap gap-2"><QueryButton query="x" label="Primary" primary /><QueryButton query="x" label="Secondary" /><CopyButton text="x" label="Copy" /></div>` },
       { key: "no-label", note: "QueryButton without a label shows the query", jsx: `<QueryButton query="Show me more details about the files you moved and why" />` },
-    ],
-  },
-  {
-    name: "Showcase",
-    group: "Showcase (legacy)",
-    states: [
-      { key: "status-cards", jsx: `<div className="space-y-2"><StatusCard status="success" message="Task completed successfully!" /><StatusCard status="warning" message="Low disk space" /><StatusCard status="error" message="Could not reach the server" /><StatusCard status="info" message="Processing your request..." /></div>` },
-      { key: "progress-bar", jsx: `<ProgressBar progress={75} label="Progress Example" />` },
-      { key: "shapes", jsx: `<div className="flex flex-wrap gap-4 items-end"><Circle size={60} color="lightblue" borderColor="navy" /><Rectangle width={80} height={60} color="lightgreen" borderColor="darkgreen" /><Triangle size={60} color="orange" direction="up" /><ColorShowcase color="bg-red-500" name="Red" /></div>` },
-      { key: "visual-demo", jsx: `<VisualDemo />` },
     ],
   },
   {
@@ -314,6 +307,8 @@ const CATALOGUE: GalleryEntry[] = [
     states: [
       { key: "card", jsx: `<Card><CardHeader><CardTitle>Card title</CardTitle><CardDescription>A shadcn card the agent can use directly.</CardDescription></CardHeader><CardContent><p className="text-sm">Body text.</p></CardContent><CardFooter><Button size="sm">Action</Button></CardFooter></Card>` },
       { key: "alert-badge", jsx: `<div className="space-y-3"><Alert><AlertTitle>Heads up</AlertTitle><AlertDescription>An alert with a title and a description.</AlertDescription></Alert><div className="flex gap-2"><Badge>Default</Badge><Badge variant="outline">Outline</Badge><Badge variant="secondary">Secondary</Badge><Badge variant="destructive">Destructive</Badge></div></div>` },
+      { key: "table", jsx: `<Table><TableHeader><TableRow><TableHead>Folder</TableHead><TableHead className="text-right">Files</TableHead></TableRow></TableHeader><TableBody><TableRow><TableCell>Images</TableCell><TableCell className="text-right">23</TableCell></TableRow><TableRow><TableCell>Documents</TableCell><TableCell className="text-right">45</TableCell></TableRow></TableBody></Table>` },
+      { key: "accordion-avatar", jsx: `<div className="space-y-3"><div className="flex items-center gap-2"><Avatar><AvatarFallback>LM</AvatarFallback></Avatar><span className="text-sm">Lacy Morrow</span></div><Accordion type="single" collapsible><AccordionItem value="a"><AccordionTrigger>What moved?</AccordionTrigger><AccordionContent>Images, documents and videos.</AccordionContent></AccordionItem></Accordion><Progress value={40} /></div>` },
       { key: "controls", note: "Input, Switch, Tabs the agent may emit", jsx: `<div className="space-y-3"><Input placeholder="An input the agent put here" /><div className="flex items-center gap-2"><Switch /><Label>A switch that is bound to nothing</Label></div><Tabs defaultValue="a"><TabsList><TabsTrigger value="a">One</TabsTrigger><TabsTrigger value="b">Two</TabsTrigger></TabsList><TabsContent value="a"><p className="text-sm">Tab one.</p></TabsContent><TabsContent value="b"><p className="text-sm">Tab two.</p></TabsContent></Tabs></div>` },
     ],
   },
@@ -337,6 +332,7 @@ function Frame({ surface, theme, children }: { surface: Surface; theme: "light" 
     return (
       <div
         className="dark flex flex-col overflow-hidden bg-black text-white"
+        data-surface="island"
         style={{
           width: 360,
           borderRadius: 20,
@@ -348,7 +344,7 @@ function Frame({ surface, theme, children }: { surface: Surface; theme: "light" 
           <span className="min-w-0 flex-1 truncate text-[13px] tracking-[-0.01em] text-white/55">Organize my downloads</span>
           <span className="size-[22px] rounded-full border border-white/35" />
         </header>
-        <div className="px-2" style={{ paddingBottom: 12 }}>
+        <div className="px-4" style={{ paddingBottom: 12 }}>
           <div className="text-[13px] leading-[1.55] text-white/85">{children}</div>
         </div>
       </div>
@@ -370,8 +366,10 @@ function Frame({ surface, theme, children }: { surface: Surface; theme: "light" 
   return (
     <div className={cn(theme === "dark" && "dark", "bg-background text-foreground")} style={{ width: 720 }}>
       <div className="px-6 py-4 text-sm">
-        {/* Same wrapper as an assistant MessageContent: w-fit, max-w-full. */}
-        <div className="flex w-fit min-w-0 max-w-full flex-col gap-2 overflow-hidden">{children}</div>
+        {/* The real assistant wrapper, so card width behaves as in a conversation. */}
+        <Message from="assistant">
+          <MessageContent>{children}</MessageContent>
+        </Message>
       </div>
     </div>
   );

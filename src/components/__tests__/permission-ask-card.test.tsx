@@ -34,7 +34,7 @@ describe("PermissionAskCard", () => {
   it("uses system blue and no gradient or glow", () => {
     render(<PermissionAskCard line="x" onContinue={() => {}} />);
     const cls = screen.getByRole("button").className;
-    expect(cls).toContain("#0a84ff");
+    expect(cls).toContain("bg-primary");
     expect(cls).not.toMatch(/gradient|shadow|glow|purple/);
   });
 });

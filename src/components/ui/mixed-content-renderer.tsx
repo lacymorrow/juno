@@ -136,6 +136,25 @@ export function splitMixedContent(content: string, isStreaming = false): Content
       break;
     }
 
+    // A lowercase wrapper that holds a component (`<div className="flex gap-2">`
+    // around two buttons) is one block, so its layout survives.
+    const wrapper = findLowercaseWrapper(remaining, match.index, isStreaming);
+    if (wrapper) {
+      if (wrapper.start > 0) pushText(segments, remaining.slice(0, wrapper.start));
+      if (wrapper.end === -1) {
+        segments.push({
+          type: "jsx",
+          content: trimPartialTrailingTag(remaining.slice(wrapper.start)),
+          partial: true,
+          name: wrapper.name,
+        });
+        break;
+      }
+      segments.push({ type: "jsx", content: remaining.slice(wrapper.start, wrapper.end) });
+      remaining = remaining.slice(wrapper.end);
+      continue;
+    }
+
     // Text before the JSX block
     if (match.index > 0) {
       pushText(segments, remaining.slice(0, match.index));
@@ -210,6 +229,35 @@ export function splitMixedContent(content: string, isStreaming = false): Content
   }
 
   return segments;
+}
+
+/** A lowercase opening tag that starts its own line: `<div className="...">`. */
+const LINE_START_LOWERCASE_TAG = /(?:^|\n)[ \t]*<([a-z][a-z0-9]*)(?=[\s>])/g;
+
+/**
+ * Is the capitalised tag at `componentIndex` inside a lowercase wrapper that
+ * opens at the start of a line? Returns the wrapper's span (`end` is -1 while
+ * it is still streaming), or null. Only the outermost wrapper counts, and only
+ * one that closes after the component, so prose with a stray `<div>` is safe.
+ */
+function findLowercaseWrapper(
+  content: string,
+  componentIndex: number,
+  isStreaming: boolean,
+): { start: number; end: number; name: string } | null {
+  const before = content.slice(0, componentIndex);
+  LINE_START_LOWERCASE_TAG.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = LINE_START_LOWERCASE_TAG.exec(before)) !== null) {
+    const name = m[1];
+    const start = m.index + m[0].indexOf("<");
+    const end = findJsxBlockEnd(content, start, name);
+    if (end > componentIndex) return { start, end, name };
+    if (end === -1 && isStreaming && findOpenTagEnd(content, start) !== -1) {
+      return { start, end: -1, name };
+    }
+  }
+  return null;
 }
 
 /**
