@@ -1,0 +1,46 @@
+{
+  "_comment": "Price table for LAC-4124 pricing measurement. USD per million tokens.",
+  "_verified": "2026-10-16, fetched from live provider docs, not from a cached model catalog (LAC-3106).",
+  "_sources": {
+    "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "openai": "https://developers.openai.com/api/docs/pricing"
+  },
+  "_schema": {
+    "input": "base input tokens, per MTok",
+    "output": "output tokens, per MTok",
+    "cache_read": "cache hits and refreshes, per MTok",
+    "cache_write": "5-minute cache writes, per MTok",
+    "long_context_threshold": "optional; prompt tokens above this switch to the long_* rates",
+    "billing": "metered = per-token API billing; subscription = flat-rate seat, no marginal token cost"
+  },
+
+  "models": {
+    "claude-opus-5-5":  {"billing": "metered", "input": 4.00,  "output": 20.00, "cache_read": 0.20,  "cache_write": 5.00},
+    "claude-opus-5":    {"billing": "metered", "input": 5.00,  "output": 25.00, "cache_read": 0.50,  "cache_write": 6.25},
+    "claude-sonnet-5-5":{"billing": "metered", "input": 2.00,  "output": 10.00, "cache_read": 0.10,  "cache_write": 2.50},
+    "claude-sonnet-5":  {"billing": "metered", "input": 2.00,  "output": 10.00, "cache_read": 0.20,  "cache_write": 2.50},
+    "claude-fable-5-1": {"billing": "metered", "input": 10.00, "output": 50.00, "cache_read": 0.25,  "cache_write": 12.50},
+    "claude-haiku-5-5": {"billing": "metered", "input": 0.10,  "output": 0.50,  "cache_read": 0.01,  "cache_write": 0.125,
+                         "long_context_threshold": 100000,
+                         "long_input": 0.50, "long_output": 2.50, "long_cache_read": 0.05, "long_cache_write": 0.625},
+    "claude-opus-4-8":  {"billing": "metered", "input": 5.00,  "output": 25.00, "cache_read": 0.50,  "cache_write": 6.25},
+
+    "gpt-5.5":   {"billing": "metered", "input": 5.00, "output": 30.00, "cache_read": 0.50,  "cache_write": 0.00,
+                  "long_context_threshold": 272000},
+    "gpt-5.2":   {"billing": "metered", "input": 1.75, "output": 14.00, "cache_read": 0.175, "cache_write": 0.00},
+    "gpt-5.1":   {"billing": "metered", "input": 1.25, "output": 10.00, "cache_read": 0.125, "cache_write": 0.00},
+    "gpt-5":     {"billing": "metered", "input": 1.25, "output": 10.00, "cache_read": 0.125, "cache_write": 0.00},
+
+    "claude-cli:opus":   {"billing": "subscription", "input": 0, "output": 0, "cache_read": 0, "cache_write": 0},
+    "claude-cli:sonnet": {"billing": "subscription", "input": 0, "output": 0, "cache_read": 0, "cache_write": 0},
+    "claude-cli:haiku":  {"billing": "subscription", "input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
+  },
+
+  "_notes": [
+    "Anthropic usage reports input_tokens EXCLUDING cache_read_input_tokens and cache_creation_input_tokens, so summing all four categories does not double-count.",
+    "OpenAI reports no separate cache-write charge; cache_write is 0 and cached_tokens bill at the cache_read rate.",
+    "gpt-5.5 above 272K input tokens moves to a long-context tier not published in the short-context table; long_* rates are intentionally absent so the analyzer fails loudly rather than guessing.",
+    "Claude CLI models are billed as a Claude Max/Pro seat, not per token. Marginal cost to Juno is zero; the analyzer reports them separately instead of as $0.00 alongside metered models.",
+    "Opus 5.5 computer use requires computer_toolset_20260801, which roughly doubles per-request input overhead (4,530 vs 2,152 tokens, measured 2026-09-22). That overhead is already inside the reported input_tokens; do not add it again."
+  ]
+}
