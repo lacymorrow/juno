@@ -1,65 +1,54 @@
 /**
  * Animated components for agent JSX responses.
  *
- * These provide delightful entry animations, micro-interactions,
- * and visual effects that the agent can compose into rich responses.
- * All animations are CSS-based for performance.
+ * Built on the shadcn parts (`ui/card`, `ui/progress`) and drawn with the Mac
+ * tokens from `styles/agent-content.css`: system blue, label and fill scale,
+ * no purple. Motion is short and explains the data; the effects (glow, shimmer,
+ * pulse ring, confetti) stay available and stay quiet. `prefers-reduced-motion`
+ * collapses every animation here to its end state (see `globals.css`).
  *
  * Registered in availableComponents in jsx-message-renderer.tsx.
  */
 
+import { Card, CardContent } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
 // ============================================================
-// AnimatedCard — card with smooth entry animation
+// AnimatedCard: a shadcn Card with its content padded
 // ============================================================
 
 interface AnimatedCardProps {
   children?: React.ReactNode;
   className?: string;
-  /** Entry animation variant */
+  /** Kept for older answers; every card enters the same way now. */
   animation?: "fade-up" | "scale" | "slide-left" | "slide-right" | "none";
   /** Delay before animation starts (ms) */
   delay?: number;
-  /** Ambient glow color (tailwind color or hex) */
+  /** Optional soft edge tint (any CSS color). Leave it off unless it means something. */
   glow?: string;
 }
 
-export function AnimatedCard({
-  children,
-  className,
-  animation = "fade-up",
-  delay = 0,
-  glow,
-}: AnimatedCardProps) {
-  const animClass = {
-    "fade-up": "juno-animate-in",
-    scale: "juno-animate-scale",
-    "slide-left": "juno-animate-slide-left",
-    "slide-right": "juno-animate-slide-right",
-    none: "",
-  }[animation];
-
+export function AnimatedCard({ children, className, delay = 0, glow }: AnimatedCardProps) {
   return (
-    <div
-      className={cn(
-        "rounded-xl border bg-card p-4 shadow-sm transition-shadow hover:shadow-md",
-        animClass,
-        className,
-      )}
+    <Card
+      className={className}
       style={{
         animationDelay: delay ? `${delay}ms` : undefined,
-        ...(glow
-          ? {
-              boxShadow: `0 0 20px -4px ${glow}`,
-              borderColor: glow,
-            }
-          : {}),
+        ...(glow ? { boxShadow: `0 0 12px -4px ${glow}`, borderColor: glow } : {}),
       }}
     >
-      {children}
-    </div>
+      <CardContent className="py-3">{children}</CardContent>
+    </Card>
   );
 }
 
@@ -70,7 +59,7 @@ export function AnimatedCard({
 interface AnimatedNumberProps {
   /** Target value to count to */
   value: number;
-  /** Duration of animation in ms */
+  /** Duration of the count in ms. Values under 20 are read as seconds. */
   duration?: number;
   /** Prefix (e.g., "$", "~") */
   prefix?: string;
@@ -84,40 +73,41 @@ interface AnimatedNumberProps {
 
 export function AnimatedNumber({
   value,
-  duration = 1200,
+  duration = 600,
   prefix = "",
   suffix = "",
   decimals = 0,
   className,
 }: AnimatedNumberProps) {
-  const [displayed, setDisplayed] = useState(0);
+  const [displayed, setDisplayed] = useState(() => (prefersReducedMotion() ? value : 0));
   const startRef = useRef<number | null>(null);
   const frameRef = useRef<number>(0);
+  // `duration={2}` means two seconds, not two milliseconds.
+  const ms = duration < 20 ? duration * 1000 : duration;
 
   useEffect(() => {
+    if (prefersReducedMotion()) {
+      setDisplayed(value);
+      return;
+    }
     startRef.current = null;
 
     const animate = (timestamp: number) => {
       if (startRef.current === null) startRef.current = timestamp;
-      const elapsed = timestamp - startRef.current;
-      const progress = Math.min(elapsed / duration, 1);
-
+      const progress = Math.min((timestamp - startRef.current) / ms, 1);
       // ease-out cubic
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplayed(eased * value);
-
+      setDisplayed((1 - Math.pow(1 - progress, 3)) * value);
       if (progress < 1) {
         frameRef.current = requestAnimationFrame(animate);
       }
     };
 
     frameRef.current = requestAnimationFrame(animate);
-
     return () => cancelAnimationFrame(frameRef.current);
-  }, [value, duration]);
+  }, [value, ms]);
 
   return (
-    <span className={cn("tabular-nums juno-animate-in", className)}>
+    <span className={cn("tabular-nums", className)}>
       {prefix}
       {displayed.toFixed(decimals)}
       {suffix}
@@ -126,7 +116,7 @@ export function AnimatedNumber({
 }
 
 // ============================================================
-// AnimatedList — stagger-animated list items
+// AnimatedList: rows enter one after another (first three only)
 // ============================================================
 
 interface AnimatedListProps {
@@ -144,11 +134,7 @@ const GAP_CLASSES: Record<number, string> = {
   4: "space-y-4",
 };
 
-export function AnimatedList({
-  children,
-  className,
-  gap = 2,
-}: AnimatedListProps) {
+export function AnimatedList({ children, className, gap = 2 }: AnimatedListProps) {
   const items = Array.isArray(children) ? children : children ? [children] : [];
 
   return (
@@ -157,7 +143,7 @@ export function AnimatedList({
         <div
           key={i}
           className="juno-animate-in"
-          style={{ animationDelay: `${i * 60}ms` }}
+          style={{ animationDelay: `${Math.min(i, 3) * 40}ms` }}
         >
           {child}
         </div>
@@ -167,7 +153,7 @@ export function AnimatedList({
 }
 
 // ============================================================
-// AnimatedProgress — progress bar with animated fill
+// AnimatedProgress: a shadcn Progress with a label row
 // ============================================================
 
 interface AnimatedProgressProps {
@@ -175,8 +161,13 @@ interface AnimatedProgressProps {
   value: number;
   /** Label text */
   label?: string;
-  /** Color variant */
-  color?: "blue" | "green" | "yellow" | "red" | "purple" | "auto";
+  /** `warning` is the one other fill, for a number that is a problem for this person. */
+  tone?: "warning";
+  /**
+   * Older answers pass a colour. System blue is the default; yellow, orange
+   * and red read as `warning`, everything else (including "auto") as blue.
+   */
+  color?: string;
   /** Show value label */
   showValue?: boolean;
   /** Additional CSS classes */
@@ -186,83 +177,57 @@ interface AnimatedProgressProps {
 export function AnimatedProgress({
   value,
   label,
-  color = "auto",
+  tone,
+  color,
   showValue = true,
   className,
 }: AnimatedProgressProps) {
-  const clamped = Math.min(100, Math.max(0, value));
-
-  const resolvedColor =
-    color === "auto"
-      ? clamped > 90
-        ? "red"
-        : clamped > 70
-          ? "yellow"
-          : "green"
-      : color;
-
-  const colorClasses = {
-    blue: "bg-blue-500",
-    green: "bg-green-500",
-    yellow: "bg-yellow-500",
-    red: "bg-red-500",
-    purple: "bg-purple-500",
-  }[resolvedColor];
+  const clamped = Math.round(Math.min(100, Math.max(0, Number(value) || 0)));
+  const resolvedTone =
+    tone ?? (color && ["yellow", "orange", "red"].includes(color) ? "warning" : undefined);
 
   return (
-    <div className={cn("space-y-1.5 juno-animate-in", className)}>
+    <div className={cn("space-y-1.5", className)}>
       {(label || showValue) && (
-        <div className="flex justify-between text-xs">
-          {label && <span className="font-medium">{label}</span>}
+        <div className="flex items-baseline justify-between gap-3">
+          {label && <span className="min-w-0 truncate text-[13px] text-[var(--label,inherit)]">{label}</span>}
           {showValue && (
-            <span className="text-muted-foreground tabular-nums">
-              {clamped}%
-            </span>
+            <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">{clamped}%</span>
           )}
         </div>
       )}
-      <div className="h-2 bg-muted rounded-full overflow-hidden">
-        <div
-          className={cn("h-full rounded-full", colorClasses)}
-          style={{
-            width: `${clamped}%`,
-            animation: "juno-fill-width 1s cubic-bezier(0.16, 1, 0.3, 1) both",
-          }}
-        />
-      </div>
+      <Progress value={clamped} tone={resolvedTone} aria-label={label} />
     </div>
   );
 }
 
+/** The tag the audit names for it. */
+export const Meter = AnimatedProgress;
+
 // ============================================================
-// GlowBadge — badge with animated glow effect
+// GlowBadge: badge with a soft glow
 // ============================================================
 
 interface GlowBadgeProps {
   children?: React.ReactNode;
   className?: string;
-  /** Glow color variant */
-  color?: "blue" | "green" | "yellow" | "red" | "purple";
+  /** Tint. System blue by default; there is no purple. */
+  color?: "blue" | "green" | "yellow" | "red" | "purple" | string;
 }
 
-export function GlowBadge({
-  children,
-  className,
-  color = "blue",
-}: GlowBadgeProps) {
-  const styles = {
-    blue: "bg-blue-500/10 text-blue-500 border-blue-500/30",
-    green: "bg-green-500/10 text-green-500 border-green-500/30",
-    yellow: "bg-yellow-500/10 text-yellow-500 border-yellow-500/30",
-    red: "bg-red-500/10 text-red-500 border-red-500/30",
-    purple: "bg-purple-500/10 text-purple-500 border-purple-500/30",
-  }[color];
+export function GlowBadge({ children, className, color = "blue" }: GlowBadgeProps) {
+  const styles =
+    {
+      green: "bg-[#34c759]/10 text-[#248a3d] border-[#34c759]/30 dark:text-[#30d158]",
+      yellow: "bg-[#ff9500]/10 text-[#c93400] border-[#ff9500]/30 dark:text-[#ff9f0a]",
+      red: "bg-[#ff3b30]/10 text-[#d70015] border-[#ff3b30]/30 dark:text-[#ff453a]",
+    }[color] ?? "bg-primary/10 text-primary border-primary/30";
 
   return (
     <span
       className={cn(
         "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border",
-        "juno-glow juno-animate-scale",
+        "juno-glow",
         styles,
         className,
       )}
@@ -273,7 +238,7 @@ export function GlowBadge({
 }
 
 // ============================================================
-// ShimmerText — text with traveling shimmer highlight
+// ShimmerText: text with a traveling highlight
 // ============================================================
 
 interface ShimmerTextProps {
@@ -283,17 +248,9 @@ interface ShimmerTextProps {
 
 export function ShimmerText({ children, className }: ShimmerTextProps) {
   return (
-    <span
-      className={cn(
-        "relative inline-block",
-        className,
-      )}
-    >
+    <span className={cn("relative inline-block", className)}>
       <span className="relative z-10">{children}</span>
-      <span
-        className="absolute inset-0 juno-shimmer rounded"
-        aria-hidden="true"
-      />
+      <span className="absolute inset-0 juno-shimmer rounded" aria-hidden="true" />
     </span>
   );
 }
@@ -309,14 +266,14 @@ interface ConfettiProps {
 }
 
 const CONFETTI_COLORS = [
-  "#FF6B6B",
-  "#4ECDC4",
-  "#45B7D1",
-  "#96CEB4",
-  "#FFEAA7",
-  "#DDA0DD",
-  "#FF9A9E",
-  "#A8E6CF",
+  "#FF3B30",
+  "#FF9500",
+  "#FFCC00",
+  "#34C759",
+  "#5AC8FA",
+  "#007AFF",
+  "#FF2D55",
+  "#30B0C7",
 ];
 
 export function Confetti({ count = 12, className }: ConfettiProps) {
@@ -343,7 +300,7 @@ export function Confetti({ count = 12, className }: ConfettiProps) {
             width: `${piece.size}px`,
             height: `${piece.size}px`,
             backgroundColor: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-            animation: `juno-confetti 0.8s cubic-bezier(0.16, 1, 0.3, 1) ${i * 0.03}s both`,
+            animation: `juno-confetti 0.8s ease-out ${i * 0.03}s both`,
             transform: `rotate(${piece.angle}deg) translateY(-${piece.distance}px)`,
           }}
         />
@@ -365,7 +322,7 @@ interface PulseRingProps {
 }
 
 export function PulseRing({
-  color = "rgba(59, 130, 246, 0.4)",
+  color = "color-mix(in srgb, var(--primary) 45%, transparent)",
   size = 40,
   className,
 }: PulseRingProps) {
@@ -385,49 +342,36 @@ export function PulseRing({
           }}
         />
       ))}
-      <div
-        className="w-2 h-2 rounded-full"
-        style={{ backgroundColor: color }}
-      />
+      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
     </div>
   );
 }
 
 // ============================================================
-// Divider — animated divider line
+// AnimatedDivider: a hairline that fades in
 // ============================================================
 
 interface AnimatedDividerProps {
   className?: string;
-  /** Gradient color scheme */
-  variant?: "default" | "rainbow" | "blue" | "green";
+  /** Older answers pass "rainbow" or "green"; every variant is a quiet line now. */
+  variant?: "default" | "rainbow" | "blue" | "green" | string;
 }
 
-export function AnimatedDivider({
-  className,
-  variant = "default",
-}: AnimatedDividerProps) {
-  const gradients = {
-    default: "from-transparent via-border to-transparent",
-    rainbow:
-      "from-red-500/30 via-yellow-500/30 to-blue-500/30",
-    blue: "from-transparent via-blue-500/40 to-transparent",
-    green: "from-transparent via-green-500/40 to-transparent",
-  }[variant];
+export function AnimatedDivider({ className, variant = "default" }: AnimatedDividerProps) {
+  const gradient =
+    variant === "default"
+      ? "from-transparent via-border to-transparent"
+      : "from-transparent via-primary/40 to-transparent";
 
   return (
     <div
-      className={cn(
-        "h-px w-full bg-gradient-to-r juno-animate-in",
-        gradients,
-        className,
-      )}
+      className={cn("h-px w-full bg-gradient-to-r juno-animate-in", gradient, className)}
     />
   );
 }
 
 // ============================================================
-// Stat — large stat display with label
+// Stat: a number and its label; Stats lays a row of them out
 // ============================================================
 
 interface StatProps {
@@ -439,48 +383,36 @@ interface StatProps {
   prefix?: string;
   /** Suffix */
   suffix?: string;
-  /** Trend indicator */
+  /** Trend indicator, in the label colour (no red or green) */
   trend?: "up" | "down" | "neutral";
+  /** One big number per card (temperature) */
+  hero?: boolean;
   className?: string;
 }
 
-export function Stat({
-  value,
-  label,
-  prefix,
-  suffix,
-  trend,
-  className,
-}: StatProps) {
-  const trendColors = {
-    up: "text-green-500",
-    down: "text-red-500",
-    neutral: "text-muted-foreground",
-  };
+const TREND_ARROWS = { up: "↑", down: "↓", neutral: "→" };
 
-  const trendArrows = {
-    up: "\u2191",
-    down: "\u2193",
-    neutral: "\u2192",
-  };
-
+export function Stat({ value, label, prefix, suffix, trend, hero, className }: StatProps) {
   return (
-    <div className={cn("text-center juno-animate-in", className)}>
-      <div className="text-2xl font-bold tabular-nums">
+    <div className={cn("min-w-0", className)}>
+      <div
+        className={cn(
+          "tabular-nums font-semibold",
+          hero ? "text-[28px] leading-none tracking-[-0.02em]" : "text-[17px] leading-tight tracking-[-0.01em]",
+        )}
+      >
         {prefix}
         {value}
         {suffix}
-        {trend && (
-          <span className={cn("text-sm ml-1", trendColors[trend])}>
-            {trendArrows[trend]}
-          </span>
-        )}
+        {trend && <span className="ml-1 text-[11px] font-normal text-muted-foreground">{TREND_ARROWS[trend]}</span>}
       </div>
-      {label && (
-        <div className="text-xs text-muted-foreground mt-0.5">{label}</div>
-      )}
+      {label && <div className="text-[11px] text-muted-foreground">{label}</div>}
     </div>
   );
+}
+
+export function Stats({ children, className }: { children?: React.ReactNode; className?: string }) {
+  return <div className={cn("flex flex-wrap gap-x-6 gap-y-2", className)}>{children}</div>;
 }
 
 // ============================================================
@@ -492,59 +424,41 @@ interface MiniChartProps {
   data?: number[];
   /** Labels for each bar */
   labels?: string[];
-  /** Bar color */
-  color?: "blue" | "green" | "purple" | "orange";
+  /** Older answers pass a colour; bars are system blue, `orange` is the warning tone. */
+  color?: string;
   /** Height in pixels */
   height?: number;
   className?: string;
 }
 
-export function MiniChart({
-  data = [],
-  labels = [],
-  color = "blue",
-  height = 60,
-  className,
-}: MiniChartProps) {
+export function MiniChart({ data = [], labels = [], color = "blue", height = 56, className }: MiniChartProps) {
   const maxVal = Math.max(...data, 1);
-  const colorClasses = {
-    blue: "bg-blue-500",
-    green: "bg-green-500",
-    purple: "bg-purple-500",
-    orange: "bg-orange-500",
-  }[color];
+  const bar = color === "orange" ? "bg-[var(--system-orange,#ff9500)]" : "bg-primary";
 
   return (
-    <div className={cn("juno-animate-in", className)}>
-      <div
-        className="flex items-end gap-1"
-        style={{ height: `${height}px` }}
-      >
-        {data.map((val, i) => {
-          const barHeight = (val / maxVal) * 100;
-          return (
-            <div key={i} className="flex-1 flex flex-col items-center gap-1">
-              <div
-                className={cn("w-full rounded-t-sm min-h-[2px]", colorClasses)}
-                style={{
-                  height: `${barHeight}%`,
-                  transformOrigin: "bottom",
-                  animation: `juno-grow-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) ${i * 0.08}s both`,
-                  opacity: 0.7 + (val / maxVal) * 0.3,
-                }}
-              />
-            </div>
-          );
-        })}
+    <div className={className}>
+      <div className="flex items-end gap-[3px]" style={{ height: `${height}px` }}>
+        {data.map((val, i) => (
+          <div key={i} className="flex h-full flex-1 items-end">
+            <div
+              className={cn("w-full rounded-t-[2px] min-h-[2px]", bar)}
+              style={{
+                height: `${(val / maxVal) * 100}%`,
+                transformOrigin: "bottom",
+                animation: `juno-grow-up 300ms ease-out both`,
+              }}
+            />
+          </div>
+        ))}
       </div>
       {labels.length > 0 && (
-        <div className="flex gap-1 mt-1">
+        <div className="mt-1 flex gap-[3px]">
           {labels.map((label, i) => (
             <div
               key={i}
-              className="flex-1 text-center text-[10px] text-muted-foreground truncate"
+              className="flex-1 whitespace-nowrap text-center text-[10px] text-muted-foreground"
             >
-              {label}
+              {labels.length > 8 && i % 2 === 1 ? "" : label}
             </div>
           ))}
         </div>

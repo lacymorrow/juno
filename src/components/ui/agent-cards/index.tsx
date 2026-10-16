@@ -31,8 +31,6 @@ import {
   Globe,
   CheckCircle2,
   Circle,
-  ListTodo,
-  ArrowRight,
   type LucideIcon,
 } from "lucide-react";
 
@@ -570,91 +568,6 @@ export function LinkCard({
 }
 
 // ============================================================
-// TaskSummaryCard — with staggered task animations + progress
-// ============================================================
-
-interface TaskItem {
-  label: string;
-  done?: boolean;
-  detail?: string;
-}
-
-interface TaskSummaryCardProps {
-  title?: string;
-  tasks?: TaskItem[];
-}
-
-export function TaskSummaryCard({
-  title = "Tasks",
-  tasks = [],
-}: TaskSummaryCardProps) {
-  const doneCount = tasks.filter((t) => t.done).length;
-  const progress = tasks.length > 0 ? (doneCount / tasks.length) * 100 : 0;
-
-  return (
-    <div className="rounded-xl border bg-card p-4 space-y-3 juno-animate-in shadow-sm">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <ListTodo className="h-4 w-4 text-purple-500" />
-          <span className="font-medium text-sm">{title}</span>
-        </div>
-        <span className="text-xs text-muted-foreground tabular-nums">
-          {doneCount}/{tasks.length} done
-        </span>
-      </div>
-
-      {/* Progress bar */}
-      {tasks.length > 0 && (
-        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-          <div
-            className={cn(
-              "h-full rounded-full",
-              progress === 100 ? "bg-green-500" : "bg-purple-500",
-            )}
-            style={{
-              width: `${progress}%`,
-              animation:
-                "juno-fill-width 1s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both",
-            }}
-          />
-        </div>
-      )}
-
-      {tasks.length > 0 && (
-        <div className="space-y-0.5">
-          {tasks.map((task, i) => (
-            <div
-              key={task.label}
-              className={cn(
-                "flex items-start gap-2 text-sm py-1.5 px-1 rounded-lg juno-animate-in",
-                task.done && "text-muted-foreground",
-              )}
-              style={{ animationDelay: `${0.1 + i * 0.06}s` }}
-            >
-              {task.done ? (
-                <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
-              ) : (
-                <ArrowRight className="h-4 w-4 text-purple-500 shrink-0 mt-0.5" />
-              )}
-              <div>
-                <span className={cn(task.done && "line-through")}>
-                  {task.label}
-                </span>
-                {task.detail && (
-                  <div className="text-xs text-muted-foreground">
-                    {task.detail}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ============================================================
 // ImageCard — a saved PNG on disk, loaded through the asset
 // protocol so no base64 crosses the IPC boundary. One primary
 // action: Open in Preview. LAC-4204 extends this with Save-to-
@@ -711,6 +624,8 @@ export function ImageCard({ path, caption, before }: ImageCardProps) {
   );
 }
 
+export { TaskSummaryCard } from "./task-summary-card";
+export type { TaskSummaryCardProps, TaskItem, TaskAction } from "./task-summary-card";
 // Live components (bound to real state) live in their own files.
 export { AgendaCard } from "./agenda-card";
 export { MessageCard } from "./message-card";
