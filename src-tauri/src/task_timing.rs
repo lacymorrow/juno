@@ -7,7 +7,7 @@
 //!
 //! ```text
 //! [StepTiming] task=3 step=7 model=1840 tools=320 tool_calls=2 screenshots=1
-//! [TaskTiming] task=3 outcome=finished steps=7 wall=18240 model=12900 tools=4100 overhead=1240 tool_calls=11 screenshots=4 first_step=980 last_step=2840 concurrent=0
+//! [TaskTiming] task=3 outcome=finished steps=7 wall=18240 model=12900 tools=4100 overhead=1240 tool_calls=11 screenshots=4 first_step=980 last_step=2840 delegated=0 concurrent=0
 //! ```
 //!
 //! Grep `[TaskTiming]` for the summary, `[StepTiming]` for the curve.
@@ -48,9 +48,24 @@
 //! # Nesting, and concurrent sessions
 //!
 //! A task is what the person waited for, so a specialist the orchestrator
-//! delegated to does not open a task of its own: its steps fold into the task
-//! that opened it. [`Tracker::begin`] returns the open task's id and counts
-//! depth, and the line goes out when the outermost run ends.
+//! delegated to does not open a task of its own. [`Tracker::begin`] returns the
+//! open task's id and counts depth, and the line goes out when the outermost
+//! run ends.
+//!
+//! The outermost run owns the clock. A delegated specialist runs *inside* the
+//! orchestrator's tool execution, so its time is already inside the duration
+//! the orchestrator reports, and recording both would count it twice and could
+//! push `model + tools` past the wall clock. So a nested run's steps and
+//! durations are dropped, and its whole cost reaches the line as the
+//! orchestrator's tool time, which is what delegation is from the task's point
+//! of view. Its screenshots still count: a count cannot double up.
+//!
+//! The consequence, and it is on the line as `delegated=N`: in multi-agent mode
+//! `steps` is the orchestrator's delegation round-trips, not every model call
+//! the task made, so a `delegated=2` line is not comparable with a
+//! `delegated=0` one. Computer-use tasks, which are what this was built to
+//! measure, are forced single-agent (`forces_single_agent` in `anthropic.rs`)
+//! and so always report `delegated=0`.
 //!
 //! Parallel background sessions (LAC-1432) are genuinely two tasks, and this
 //! tracker holds one. Rather than silently sum them into a meaningless line, a
@@ -86,6 +101,11 @@ pub struct TaskTimer {
     /// Whether a second session ran while this task was open, which makes every
     /// total on the line a sum of two tasks.
     concurrent: bool,
+    /// How many runs were delegated inside this task. Non-zero means `steps`
+    /// counts the orchestrator's delegation round-trips and the specialists'
+    /// own steps are inside `tools`, so it is not comparable with a
+    /// single-agent task's step count.
+    delegated: u32,
     steps: u32,
     model: Duration,
     tools: Duration,
@@ -113,6 +133,7 @@ impl TaskTimer {
             depth: 1,
             owner,
             concurrent: false,
+            delegated: 0,
             steps: 0,
             model: Duration::ZERO,
             tools: Duration::ZERO,
@@ -136,7 +157,14 @@ impl TaskTimer {
     /// Open a step, folding the one before it into the totals. Returns that
     /// step's line, so stepping is the only hook the agent loop needs: the last
     /// step is folded by [`Self::close_step`] when the task ends.
+    ///
+    /// A nested run's steps are ignored. They would otherwise close the
+    /// orchestrator's step half-way through and leave its tool time landing on
+    /// a step it does not belong to. See [`Self::owns_clock`].
     pub fn begin_step(&mut self) -> Option<String> {
+        if !self.owns_clock() {
+            return None;
+        }
         let previous = self.close_step();
         self.steps = self.steps.saturating_add(1);
         self.step_open = true;
@@ -179,14 +207,36 @@ impl TaskTimer {
         Some(line)
     }
 
+    /// Whether this run is the one that owns the clock.
+    ///
+    /// A delegated specialist runs *inside* the orchestrator's tool execution,
+    /// so its model and tool time is already inside the duration the
+    /// orchestrator is about to report. Recording both would count it twice and
+    /// could push `model + tools` past the wall clock. The outermost run owns
+    /// the clock; a nested one contributes only its screenshots, which are a
+    /// count rather than a duration and so cannot double up.
+    fn owns_clock(&self) -> bool {
+        self.depth <= 1
+    }
+
     /// Time spent waiting on the model: planning and reflection, the 75-94% of
     /// latency OSWorld-Human measured.
     pub fn add_model(&mut self, elapsed: Duration) {
+        if !self.owns_clock() {
+            return;
+        }
         self.step_model = self.step_model.saturating_add(elapsed);
     }
 
     /// Time spent actually driving the desktop, and how many calls it took.
+    ///
+    /// In multi-agent mode this is where a delegated specialist's whole cost
+    /// lands, because from the task's point of view delegation is one tool call
+    /// that took a long time.
     pub fn add_tools(&mut self, elapsed: Duration, calls: u32) {
+        if !self.owns_clock() {
+            return;
+        }
         self.step_tools = self.step_tools.saturating_add(elapsed);
         self.step_tool_calls = self.step_tool_calls.saturating_add(calls);
     }
@@ -216,7 +266,7 @@ impl TaskTimer {
             None => "-".to_string(),
         };
         format!(
-            "task={} outcome={} steps={} wall={} model={} tools={} overhead={} tool_calls={} screenshots={} first_step={} last_step={} concurrent={}",
+            "task={} outcome={} steps={} wall={} model={} tools={} overhead={} tool_calls={} screenshots={} first_step={} last_step={} delegated={} concurrent={}",
             self.id,
             self.outcome.as_deref().unwrap_or("-"),
             self.steps,
@@ -228,6 +278,7 @@ impl TaskTimer {
             self.screenshots,
             ms(self.first_step),
             ms(self.last_step),
+            self.delegated,
             u8::from(self.concurrent),
         )
     }
@@ -243,11 +294,15 @@ pub struct Tracker {
 impl Tracker {
     /// Open a task, or join the one already open.
     ///
-    /// A specialist the orchestrator delegated to joins: same id, depth one
-    /// deeper, its steps counted against the task the person is waiting for. A
-    /// run from a *different* session is a concurrent task rather than a nested
-    /// run, so it joins but marks the task `concurrent`. `next_id` is only
-    /// called when a task actually opens.
+    /// A specialist the orchestrator delegated to joins, one depth deeper and
+    /// counted on `delegated`. Its whole cost reaches the line as the
+    /// orchestrator's tool time rather than as steps of its own, because that
+    /// is what delegation is from the task's point of view, and because
+    /// counting it twice is the alternative.
+    ///
+    /// A run from a *different* session is a concurrent task rather than a
+    /// nested run, so it joins but marks the task `concurrent`. `next_id` is
+    /// only called when a task actually opens.
     pub fn begin(
         &mut self,
         next_id: impl FnOnce() -> u64,
@@ -261,6 +316,7 @@ impl Tracker {
                 }
             }
             open.depth = open.depth.saturating_add(1);
+            open.delegated = open.delegated.saturating_add(1);
             return open.id();
         }
         let id = next_id();
@@ -535,8 +591,7 @@ mod tests {
     }
 
     /// A specialist is part of the task the person is waiting for, not a task of
-    /// its own, so its steps count against the same line and only the outermost
-    /// run logs it.
+    /// its own, so only the outermost run logs it.
     #[test]
     fn a_delegated_run_folds_into_the_task_that_opened_it() {
         let base = Instant::now();
@@ -549,17 +604,61 @@ mod tests {
         let inner = t.begin(|| 99, at(base, 400), None);
         assert_eq!(inner, outer, "a nested run joins the open task");
 
-        t.begin_step();
-        t.add_model(Duration::from_millis(500));
-
         let (_, task) = t.finish(inner, at(base, 1000));
         assert!(task.is_none(), "the nested run must not log the task");
 
         let (_, task) = t.finish(outer, at(base, 1200));
         let line = task.unwrap_or_default();
-        assert!(line.contains("steps=2"), "{line}");
-        assert!(line.contains("model=800"), "{line}");
+        assert!(line.contains("delegated=1"), "{line}");
         assert!(line.contains("concurrent=0"), "{line}");
+    }
+
+    /// The bug this guards: a specialist runs *inside* the orchestrator's tool
+    /// execution, so the orchestrator is about to report a duration that
+    /// already contains the specialist's. Recording both counts it twice and
+    /// can push `model + tools` past the wall clock, which would make
+    /// `overhead` meaningless.
+    #[test]
+    fn a_delegated_runs_time_is_counted_once_not_twice() {
+        let base = Instant::now();
+        let mut t = Tracker::default();
+        let outer = t.begin(|| 1, base, Some("session-a".to_string()));
+
+        // The orchestrator decides to delegate.
+        t.begin_step();
+        t.add_model(Duration::from_millis(200));
+
+        // The specialist runs inside the orchestrator's tool call, spending
+        // 1500ms of its own. None of it may land on the line directly.
+        let inner = t.begin(|| 99, at(base, 200), None);
+        t.begin_step();
+        t.add_model(Duration::from_millis(1200));
+        t.add_tools(Duration::from_millis(300), 4);
+        t.add_screenshot();
+        t.finish(inner, at(base, 1700));
+
+        // The orchestrator's tool call returns, having taken the 1500ms the
+        // specialist spent. This is the one place that time is recorded.
+        t.add_tools(Duration::from_millis(1500), 1);
+
+        let (_, task) = t.finish(outer, at(base, 1800));
+        let line = task.unwrap_or_default();
+        assert!(
+            line.contains("steps=1"),
+            "only the orchestrator steps: {line}"
+        );
+        assert!(line.contains("model=200"), "{line}");
+        assert!(
+            line.contains("tools=1500"),
+            "the delegation, counted once: {line}"
+        );
+        assert!(line.contains("tool_calls=1"), "{line}");
+        // model + tools = 1700 <= wall 1800, so overhead stays real rather
+        // than flooring at zero to hide a double count.
+        assert!(line.contains("overhead=100"), "{line}");
+        // Screenshots are a count, not a duration, so a nested run's still
+        // count: they are real cost and cannot double up.
+        assert!(line.contains("screenshots=1"), "{line}");
     }
 
     /// Two parallel sessions are two tasks, and this tracker holds one. The
