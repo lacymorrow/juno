@@ -1,0 +1,136 @@
+/*
+ * Mac tokens for agent content.
+ *
+ * Scoped on purpose: `.agent-content` wraps every agent-rendered component
+ * (main window messages, the Pill pane, the Island face), so shadcn parts drawn
+ * there inherit SF, system blue, the label and fill scale and a hairline,
+ * without re-theming the rest of the app. Light values here, dark under any
+ * `.dark` ancestor. Spec: docs/plans/component-redesign-audit.md (S7).
+ *
+ * `--system-blue` is the accent. shadcn's own `--accent` stays what it is in
+ * shadcn (a hover fill), so it is remapped to a fill below.
+ */
+.agent-content {
+  --font-sans: -apple-system, "SF Pro Text", system-ui, sans-serif;
+
+  --system-blue: #007aff;
+  --system-orange: #ff9500;
+  --system-red: #ff3b30;
+  --label: #1d1d1f;
+  --label-2: rgba(60, 60, 67, 0.6);
+  --label-3: rgba(60, 60, 67, 0.3);
+  --sep: rgba(60, 60, 67, 0.18);
+  --hair: rgba(0, 0, 0, 0.12);
+  --fill-2: rgba(120, 120, 128, 0.16);
+  --fill-3: rgba(120, 120, 128, 0.12);
+  --fill-4: rgba(120, 120, 128, 0.08);
+
+  --background: transparent;
+  --foreground: var(--label);
+  --card: #ffffff;
+  --card-foreground: var(--label);
+  --popover: #ffffff;
+  --popover-foreground: var(--label);
+  --primary: var(--system-blue);
+  --primary-foreground: #ffffff;
+  --secondary: var(--fill-2);
+  --secondary-foreground: var(--label);
+  --muted: var(--fill-4);
+  --muted-foreground: var(--label-2);
+  --accent: var(--fill-3);
+  --accent-foreground: var(--label);
+  --destructive: var(--system-red);
+  --border: var(--hair);
+  --input: var(--hair);
+  --ring: var(--system-blue);
+  --chart-1: var(--system-blue);
+  --chart-2: rgba(0, 122, 255, 0.7);
+  --chart-3: rgba(0, 122, 255, 0.5);
+  --chart-4: rgba(0, 122, 255, 0.35);
+  --chart-5: var(--fill-2);
+
+  /* shadcn Card, Progress, Skeleton and Button read these (see ui/*.tsx). */
+  --card-radius: 12px;
+  --card-border: 0.5px;
+  --card-shadow: none;
+  --card-gap: 0px;
+  --card-py: 0px;
+  --card-px: 14px;
+  --card-hdr-h: 36px;
+  --card-hdr-pt: 6px;
+  --card-body-pt: 6px;
+  --card-body-pb: 8px;
+  --card-body-pb-last: 12px;
+  --card-foot-pt: 2px;
+  --card-foot-pb: 12px;
+  --card-foot-justify: flex-end;
+  --card-foot-gap: 8px;
+  --card-title-size: 13px;
+  --card-meta-size: 11px;
+  --progress-h: 4px;
+  --progress-track: var(--fill-3);
+  --skeleton: var(--fill-4);
+  --skeleton-pulse: 1.2s;
+
+  font-family: var(--font-sans);
+  color: var(--label);
+}
+
+.dark .agent-content {
+  --system-blue: #0a84ff;
+  --system-orange: #ff9f0a;
+  --system-red: #ff453a;
+  --label: #f5f5f7;
+  --label-2: rgba(235, 235, 245, 0.6);
+  --label-3: rgba(235, 235, 245, 0.3);
+  --sep: rgba(84, 84, 88, 0.65);
+  --hair: rgba(255, 255, 255, 0.1);
+  --fill-2: rgba(120, 120, 128, 0.32);
+  --fill-3: rgba(120, 120, 128, 0.24);
+  --fill-4: rgba(120, 120, 128, 0.18);
+
+  --card: #1c1c1e;
+  --popover: #1c1c1e;
+  --chart-2: rgba(10, 132, 255, 0.7);
+  --chart-3: rgba(10, 132, 255, 0.5);
+  --chart-4: rgba(10, 132, 255, 0.35);
+}
+
+/*
+ * The Island face is black and edge to edge: the card is the face itself, so it
+ * drops its fill, border and radius and its rows run to the face's inset.
+ */
+[data-surface="island"] .agent-content {
+  --card: transparent;
+  --card-radius: 0px;
+  --card-border: 0px;
+  --card-px: 0px;
+}
+
+/* Meter fill: one 300ms ease-out on mount, nothing infinite. */
+@keyframes agent-meter-fill {
+  from {
+    transform: translateX(-100%);
+  }
+}
+.agent-content [data-slot="progress-indicator"] {
+  animation: agent-meter-fill 300ms ease-out;
+}
+
+/* Card entry: 180ms opacity and a 4px rise. */
+@keyframes agent-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.agent-content [data-slot="card"] {
+  animation: agent-card-in 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-content [data-slot="progress-indicator"],
+  .agent-content [data-slot="card"] {
+    animation: none;
+  }
+}

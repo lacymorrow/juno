@@ -695,7 +695,7 @@ export function IslandBar({ frame = "island" }: { frame?: "island" | "notch" } =
   } else if (posture === "card") {
     const headerWords = words ?? (question ? { text: question, tone: "dim" as const } : null);
     layer = (
-      <div className="dark flex h-full w-full flex-col" data-testid="island-card">
+      <div className="dark flex h-full w-full flex-col" data-testid="island-card" data-surface="island">
         <header
           className="flex shrink-0 items-center gap-2.5 pl-4 pr-2"
           style={{ height: CARD_HEADER_H }}

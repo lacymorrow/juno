@@ -12,7 +12,7 @@
  */
 
 import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { AccessRow } from "./access-row";
 
 export interface PermissionAskCardProps {
   /** The one line, written by the backend: "I need Reminders for that." */
@@ -32,28 +32,16 @@ export function PermissionAskCard({ line, onContinue, className }: PermissionAsk
   };
 
   return (
-    <div
-      className={cn("flex items-center justify-between gap-3 rounded-xl border bg-card p-4", className)}
+    <AccessRow
+      className={className}
       data-testid="permission-ask-card"
       data-state={pressed ? "continuing" : "waiting"}
       role="group"
       aria-label="Permission needed"
-    >
-      <p className="text-sm">{line || "I need your OK for that."}</p>
-      {onContinue ? (
-        <button
-          type="button"
-          onClick={press}
-          disabled={pressed}
-          className={cn(
-            "h-7 shrink-0 rounded-md bg-[#0a84ff] px-4 text-xs font-medium text-white",
-            "hover:bg-[#0a84ff]/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            "disabled:opacity-50",
-          )}
-        >
-          Continue
-        </button>
-      ) : null}
-    </div>
+      line={line || "I need your OK for that."}
+      action="Continue"
+      onAction={onContinue ? press : undefined}
+      disabled={pressed}
+    />
   );
 }

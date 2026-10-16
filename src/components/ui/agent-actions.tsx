@@ -1,51 +1,22 @@
 /**
  * Interactive components for agent JSX responses.
  *
- * These components allow agent-rendered UI to trigger actions:
- * - ActionButton: Invoke a whitelisted Tauri command
  * - QueryButton: Submit a new query to the agent
- * - OpenButton: Open a URL or file path
+ * - OpenButton: Open a URL, file path or app
  * - CopyButton: Copy text to clipboard
+ * - Actions: the row they sit in, at most one primary
  *
- * Security: Only whitelisted commands can be invoked.
+ * All three are the shadcn `Button` at `size="card"` (24px, no icon), so they
+ * take their colours from the Mac tokens. `primary` is the blue one.
  * Components are registered in availableComponents for react-jsx-parser.
  */
 
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { COMMANDS } from "@/lib/constants.generated";
-import { useState, useCallback, useEffect, useRef } from "react";
-import {
-  ExternalLink,
-  Play,
-  Copy,
-  Check,
-  Loader2,
-  MessageSquare,
-  FolderOpen,
-  Terminal,
-} from "lucide-react";
-
-// ============================================================
-// Security: Command validation
-// ============================================================
-
-const ALLOWED_COMMANDS = new Set<string>([
-  COMMANDS.DESKTOP_OPEN_URL,
-  COMMANDS.DESKTOP_OPEN_APPLICATION,
-  COMMANDS.SCREENSHOTS_CAPTURE_SCREENSHOT,
-  COMMANDS.AGENT_SUBMIT_QUERY,
-  COMMANDS.AGENT_DISPATCH_QUERY,
-  COMMANDS.UTILS_GET_CLIPBOARD,
-  COMMANDS.UTILS_SET_CLIPBOARD,
-  COMMANDS.MEDIA_CONTROL,
-  COMMANDS.MEDIA_GET_STATE,
-]);
-
-function isCommandAllowed(command: string): boolean {
-  return ALLOWED_COMMANDS.has(command);
-}
+import { Children, cloneElement, isValidElement, useState, useCallback, useEffect, useRef } from "react";
 
 /**
  * Dispatch a query on behalf of an agent-rendered component.
@@ -82,112 +53,30 @@ function useStatusResetTimer(reset: () => void) {
 }
 
 // ============================================================
-// ActionButton — invoke a whitelisted Tauri command
+// Actions: the row the buttons sit in
 // ============================================================
 
-interface ActionButtonProps {
-  /** The Tauri command to invoke */
-  command: string;
-  /** Arguments to pass to the command (JSON-serializable) */
-  args?: Record<string, unknown>;
-  /** Button label */
-  label?: string;
-  /** Visual variant */
-  variant?: "default" | "outline" | "ghost" | "destructive";
-  /** Size */
-  size?: "sm" | "default" | "lg";
-  /** Optional icon name */
-  icon?: string;
-  /** Additional CSS classes */
-  className?: string;
-}
-
-const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
-  play: Play,
-  terminal: Terminal,
-  folder: FolderOpen,
-  link: ExternalLink,
-  copy: Copy,
-  message: MessageSquare,
-};
-
-export function ActionButton({
-  command,
-  args,
-  label = "Run",
-  variant = "outline",
-  size = "sm",
-  icon,
-  className,
-}: ActionButtonProps) {
-  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  const handleClick = useCallback(async () => {
-    setStatus("loading");
-    setErrorMsg(null);
-
-    try {
-      if (isCommandAllowed(command)) {
-        await invoke(command, args || {});
-      } else {
-        const query = args && Object.keys(args).length > 0
-          ? `${command} ${JSON.stringify(args)}`
-          : command.replace(/_/g, " ");
-        await dispatchQuery(query);
-      }
-      setStatus("success");
-      setTimeout(() => setStatus("idle"), 2000);
-    } catch (err) {
-      setStatus("error");
-      setErrorMsg(String(err));
-      setTimeout(() => setStatus("idle"), 3000);
+/**
+ * A row of buttons. Left-aligned under prose, right-aligned in a card footer.
+ * Only the first `primary` stays primary: a card has one main action.
+ */
+export function Actions({ children, className }: { children?: React.ReactNode; className?: string }) {
+  let seenPrimary = false;
+  const items = Children.map(children, (child) => {
+    if (!isValidElement<{ primary?: boolean }>(child) || !child.props.primary) return child;
+    if (!seenPrimary) {
+      seenPrimary = true;
+      return child;
     }
-  }, [command, args]);
-
-  const Icon = icon ? ICON_MAP[icon] : null;
-
-  const variantClasses = {
-    default: "bg-primary text-primary-foreground hover:bg-primary/90",
-    outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
-    ghost: "hover:bg-accent hover:text-accent-foreground",
-    destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
-  };
-
-  const sizeClasses = {
-    sm: "h-7 px-2.5 text-xs",
-    default: "h-8 px-3 text-sm",
-    lg: "h-9 px-4 text-sm",
-  };
+    return cloneElement(child, { primary: false });
+  });
 
   return (
-    <div className="inline-flex flex-col items-start">
-      <button
-        onClick={handleClick}
-        disabled={status === "loading"}
-        className={cn(
-          "inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          "disabled:pointer-events-none disabled:opacity-50",
-          variantClasses[variant],
-          sizeClasses[size],
-          className,
-        )}
-      >
-        {status === "loading" ? (
-          <Loader2 className="h-3 w-3 animate-spin" />
-        ) : status === "success" ? (
-          <Check className="h-3 w-3 text-green-500" />
-        ) : Icon ? (
-          <Icon className="h-3 w-3" />
-        ) : null}
-        {status === "success" ? "Done" : label}
-      </button>
-      {status === "error" && errorMsg && (
-        <span className="text-[10px] text-destructive mt-0.5 max-w-[200px] truncate">
-          {errorMsg}
-        </span>
-      )}
+    <div
+      data-slot="actions"
+      className={cn("flex flex-wrap items-center gap-2 [[data-slot=card-footer]_&]:justify-end", className)}
+    >
+      {items}
     </div>
   );
 }
@@ -196,26 +85,23 @@ export function ActionButton({
 // QueryButton — submit a new query to the agent
 // ============================================================
 
-interface QueryButtonProps {
+interface ButtonCommonProps {
+  /** The one main action of the card or row. */
+  primary?: boolean;
+  /** Older answers pass a variant or size; the card button has one of each. */
+  variant?: string;
+  size?: string;
+  className?: string;
+}
+
+interface QueryButtonProps extends ButtonCommonProps {
   /** The query to submit */
   query: string;
   /** Button label */
   label?: string;
-  /** Visual variant */
-  variant?: "default" | "outline" | "ghost";
-  /** Size */
-  size?: "sm" | "default" | "lg";
-  /** Additional CSS classes */
-  className?: string;
 }
 
-export function QueryButton({
-  query,
-  label,
-  variant = "outline",
-  size = "sm",
-  className,
-}: QueryButtonProps) {
+export function QueryButton({ query, label, primary, className }: QueryButtonProps) {
   const [status, setStatus] = useState<"idle" | "loading" | "sent" | "error">("idle");
   const resetToIdle = useCallback(() => setStatus("idle"), []);
   const scheduleReset = useStatusResetTimer(resetToIdle);
@@ -224,6 +110,7 @@ export function QueryButton({
     setStatus("loading");
     try {
       await dispatchQuery(query);
+      // The new user message appearing is the feedback; the button just comes back.
       setStatus("sent");
       scheduleReset(1500);
     } catch (err) {
@@ -233,40 +120,22 @@ export function QueryButton({
     }
   }, [query, scheduleReset]);
 
-  const variantClasses = {
-    default: "bg-primary text-primary-foreground hover:bg-primary/90",
-    outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
-    ghost: "hover:bg-accent hover:text-accent-foreground",
-  };
-
-  const sizeClasses = {
-    sm: "h-7 px-2.5 text-xs",
-    default: "h-8 px-3 text-sm",
-    lg: "h-9 px-4 text-sm",
-  };
-
   return (
-    <button
-      onClick={handleClick}
-      disabled={status === "loading"}
-      className={cn(
-        "inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        "disabled:pointer-events-none disabled:opacity-50",
-        variantClasses[variant],
-        sizeClasses[size],
-        className,
+    <span className="inline-flex flex-col items-end gap-1">
+      <Button
+        type="button"
+        size="card"
+        variant={primary ? "default" : "secondary"}
+        onClick={handleClick}
+        disabled={status === "loading"}
+        className={className}
+      >
+        {label || query}
+      </Button>
+      {status === "error" && (
+        <span className="text-[11px] text-muted-foreground">Could not send that. Try again.</span>
       )}
-    >
-      {status === "loading" ? (
-        <Loader2 className="h-3 w-3 animate-spin" />
-      ) : status === "sent" ? (
-        <Check className="h-3 w-3 text-green-500" />
-      ) : (
-        <MessageSquare className="h-3 w-3" />
-      )}
-      {label || query}
-    </button>
+    </span>
   );
 }
 
@@ -274,7 +143,7 @@ export function QueryButton({
 // OpenButton — open a URL or file path
 // ============================================================
 
-interface OpenButtonProps {
+interface OpenButtonProps extends ButtonCommonProps {
   /** URL to open in default browser */
   url?: string;
   /** File path to open — converted to file:// URL */
@@ -283,23 +152,9 @@ interface OpenButtonProps {
   app?: string;
   /** Button label */
   label?: string;
-  /** Visual variant */
-  variant?: "default" | "outline" | "ghost";
-  /** Size */
-  size?: "sm" | "default" | "lg";
-  /** Additional CSS classes */
-  className?: string;
 }
 
-export function OpenButton({
-  url,
-  path,
-  app,
-  label,
-  variant = "outline",
-  size = "sm",
-  className,
-}: OpenButtonProps) {
+export function OpenButton({ url, path, app, label, primary, className }: OpenButtonProps) {
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
 
   const handleClick = useCallback(async () => {
@@ -330,40 +185,22 @@ export function OpenButton({
   const target = app || path || url || "";
   const displayLabel = label || (app ? app : path ? path.split("/").pop() : target);
 
-  const variantClasses = {
-    default: "bg-primary text-primary-foreground hover:bg-primary/90",
-    outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
-    ghost: "hover:bg-accent hover:text-accent-foreground",
-  };
-
-  const sizeClasses = {
-    sm: "h-7 px-2.5 text-xs",
-    default: "h-8 px-3 text-sm",
-    lg: "h-9 px-4 text-sm",
-  };
-
   return (
-    <button
-      onClick={handleClick}
-      disabled={status === "loading"}
-      className={cn(
-        "inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        "disabled:pointer-events-none disabled:opacity-50",
-        variantClasses[variant],
-        sizeClasses[size],
-        className,
+    <span className="inline-flex flex-col items-end gap-1">
+      <Button
+        type="button"
+        size="card"
+        variant={primary ? "default" : "secondary"}
+        onClick={handleClick}
+        disabled={status === "loading"}
+        className={className}
+      >
+        {displayLabel}
+      </Button>
+      {status === "error" && (
+        <span className="text-[11px] text-muted-foreground">Could not open that.</span>
       )}
-    >
-      {status === "loading" ? (
-        <Loader2 className="h-3 w-3 animate-spin" />
-      ) : path ? (
-        <FolderOpen className="h-3 w-3" />
-      ) : (
-        <ExternalLink className="h-3 w-3" />
-      )}
-      {displayLabel}
-    </button>
+    </span>
   );
 }
 
@@ -371,67 +208,49 @@ export function OpenButton({
 // CopyButton — copy text to clipboard
 // ============================================================
 
-interface CopyButtonProps {
+interface CopyButtonProps extends ButtonCommonProps {
   /** Text to copy */
   text: string;
   /** Button label */
   label?: string;
-  /** Visual variant */
-  variant?: "default" | "outline" | "ghost";
-  /** Size */
-  size?: "sm" | "default" | "lg";
-  /** Additional CSS classes */
-  className?: string;
 }
 
-export function CopyButton({
-  text,
-  label = "Copy",
-  variant = "outline",
-  size = "sm",
-  className,
-}: CopyButtonProps) {
+export function CopyButton({ text, label = "Copy", primary, className }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   const handleClick = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 1500);
     } catch (err) {
       console.error("CopyButton: Failed to copy:", err);
     }
   }, [text]);
 
-  const variantClasses = {
-    default: "bg-primary text-primary-foreground hover:bg-primary/90",
-    outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
-    ghost: "hover:bg-accent hover:text-accent-foreground",
-  };
-
-  const sizeClasses = {
-    sm: "h-7 px-2.5 text-xs",
-    default: "h-8 px-3 text-sm",
-    lg: "h-9 px-4 text-sm",
-  };
-
+  // Both words are laid out in one cell, so the button keeps the wider width.
   return (
-    <button
+    <Button
+      type="button"
+      size="card"
+      variant={primary ? "default" : "secondary"}
       onClick={handleClick}
-      className={cn(
-        "inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        variantClasses[variant],
-        sizeClasses[size],
-        className,
-      )}
+      className={className}
     >
-      {copied ? (
-        <Check className="h-3 w-3 text-green-500" />
-      ) : (
-        <Copy className="h-3 w-3" />
-      )}
-      {copied ? "Copied!" : label}
-    </button>
+      <span className="grid">
+        <span className={cn("col-start-1 row-start-1", copied && "invisible")}>{label}</span>
+        <span className={cn("col-start-1 row-start-1", !copied && "invisible")} aria-hidden={!copied}>
+          Copied
+        </span>
+      </span>
+    </Button>
   );
 }

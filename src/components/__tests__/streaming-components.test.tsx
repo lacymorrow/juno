@@ -49,7 +49,7 @@ describe("streaming segmentation", () => {
 
   it("treats a finished component mid-stream as complete, not partial", () => {
     const segments = splitMixedContent(
-      'Saved.\n<StatusCard status="success" message="Saved" />\nMore on the',
+      'Saved.\n<PermissionAskCard line="Saved" />\nMore on the',
       true,
     );
     expect(segments.map((s) => s.type)).toEqual(["text", "jsx", "text"]);
@@ -57,9 +57,9 @@ describe("streaming segmentation", () => {
   });
 
   it("sees a self-closing tag close even with > inside an attribute", () => {
-    const segments = splitMixedContent('<StatusCard status="info" message="a > b" />', false);
+    const segments = splitMixedContent('<PermissionAskCard line="a > b" />', false);
     expect(segments).toEqual([
-      { type: "jsx", content: '<StatusCard status="info" message="a > b" />' },
+      { type: "jsx", content: '<PermissionAskCard line="a > b" />' },
     ]);
   });
 
@@ -96,7 +96,7 @@ describe("streaming renderer", () => {
   it("renders a complete component immediately, while the reply is still streaming", () => {
     const { container } = render(
       <MixedContentRenderer
-        content={'<StatusCard status="success" message="Spreadsheet saved" />\nAnd the'}
+        content={'<PermissionAskCard line="Spreadsheet saved" />\nAnd the'}
         isStreaming
       />,
     );
@@ -107,12 +107,12 @@ describe("streaming renderer", () => {
 
   it("swaps the skeleton for the card in place when the tag closes", () => {
     const { rerender, container } = render(
-      <MixedContentRenderer content={'Done.\n<StatusCard status="success" mess'} isStreaming />,
+      <MixedContentRenderer content={'Done.\n<PermissionAskCard line="Al'} isStreaming />,
     );
     expect(screen.getByTestId("component-skeleton")).toBeInTheDocument();
     rerender(
       <MixedContentRenderer
-        content={'Done.\n<StatusCard status="success" message="All set" />'}
+        content={'Done.\n<PermissionAskCard line="All set" />'}
         isStreaming
       />,
     );

@@ -21,6 +21,7 @@ import { Check, Loader2 } from "lucide-react";
 import { useCallback, useState } from "react";
 import { COMMANDS } from "@/lib/constants.generated";
 import { cn } from "@/lib/utils";
+import { AccessRow } from "./access-row";
 
 export type MessageCardState = "draft" | "sending" | "sent";
 
@@ -103,27 +104,15 @@ export function MessageCard({
   if (needsAccess) {
     const canOpen = !!settingsUrl && settingsUrl.startsWith(SETTINGS_PREFIX);
     return (
-      <div
-        className={cn("flex items-center justify-between gap-3 rounded-xl border bg-card p-4", className)}
+      <AccessRow
+        className={className}
         data-testid="message-card"
         data-state="needs-access"
-      >
-        <p className="text-sm">{reason || `Juno needs your OK to use ${needsAccess}.`}</p>
-        {canOpen ? (
-          <button
-            type="button"
-            onClick={() => void openSettings()}
-            disabled={opening}
-            className={cn(
-              "h-7 shrink-0 rounded-md bg-[#0a84ff] px-3 text-xs font-medium text-white",
-              "hover:bg-[#0a84ff]/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              "disabled:opacity-50",
-            )}
-          >
-            Turn on {needsAccess}
-          </button>
-        ) : null}
-      </div>
+        line={reason || `Juno needs your OK to use ${needsAccess}.`}
+        action={`Turn on ${needsAccess}`}
+        onAction={canOpen ? () => void openSettings() : undefined}
+        disabled={opening}
+      />
     );
   }
 

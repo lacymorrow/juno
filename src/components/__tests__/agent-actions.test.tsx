@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { QueryButton, ActionButton } from "@/components/ui/agent-actions";
+import { Actions, OpenButton, QueryButton } from "@/components/ui/agent-actions";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -74,33 +74,24 @@ describe("QueryButton", () => {
   });
 });
 
-describe("ActionButton", () => {
-  beforeEach(() => {
-    mockedInvoke.mockReset();
+describe("Actions", () => {
+  it("keeps only the first primary button primary", () => {
+    render(
+      <Actions>
+        <QueryButton query="a" label="First" primary />
+        <QueryButton query="b" label="Second" primary />
+        <OpenButton path="~/Downloads" label="Third" />
+      </Actions>,
+    );
+    expect(screen.getByRole("button", { name: "First" })).toHaveAttribute("data-variant", "default");
+    expect(screen.getByRole("button", { name: "Second" })).toHaveAttribute("data-variant", "secondary");
+    expect(screen.getByRole("button", { name: "Third" })).toHaveAttribute("data-variant", "secondary");
   });
 
-  it("invokes whitelisted commands directly", async () => {
-    mockedInvoke.mockResolvedValue(undefined);
-
-    render(<ActionButton command="open_url" args={{ url: "https://example.com" }} label="Open" />);
-    fireEvent.click(screen.getByRole("button", { name: /open/i }));
-
-    await waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith("open_url", { url: "https://example.com" });
-    });
-  });
-
-  it("turns non-whitelisted commands into a component query", async () => {
-    mockedInvoke.mockResolvedValue(undefined);
-
-    render(<ActionButton command="restart_spotify" label="Restart" />);
-    fireEvent.click(screen.getByRole("button", { name: /restart/i }));
-
-    await waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith("dispatch_query", {
-        query: "restart spotify",
-      });
-    });
-    expect(mockedInvoke).not.toHaveBeenCalledWith("restart_spotify", expect.anything());
+  it("draws buttons at the card size without an icon", () => {
+    render(<QueryButton query="a" label="Go" />);
+    const button = screen.getByRole("button", { name: "Go" });
+    expect(button).toHaveAttribute("data-size", "card");
+    expect(button.querySelector("svg")).toBeNull();
   });
 });

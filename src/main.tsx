@@ -30,6 +30,9 @@ const BarStateHarness = lazy(() => import("./bar-harness/BarStateHarness"));
 // Live preview of one bar appearance, framed by the settings window's picker.
 // Same stand-in layer as the harness, so it never touches a real window.
 const AppearancePreview = lazy(() => import("./bar-harness/AppearancePreview"));
+// Every agent-rendered component in every state, on each chat surface. Dev
+// only, unlinked; the bench behind docs/plans/component-redesign-audit.md.
+const ComponentGallery = lazy(() => import("./bar-harness/ComponentGallery"));
 
 import "./styles/globals.css";
 
@@ -86,6 +89,14 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
                 element={
                   <Suspense fallback={null}>
                     <AppearancePreview />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/__component-gallery"
+                element={
+                  <Suspense fallback={null}>
+                    <ComponentGallery />
                   </Suspense>
                 }
               />
