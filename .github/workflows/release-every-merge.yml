@@ -16,8 +16,33 @@
 # current version while the other bumped past it. One mechanism, not two.
 name: Release every merge
 
+# Fires off CI's verdict, not off the push.
+#
+# `push: branches: [main]` cut a version the moment a merge landed, before any
+# check had run, which is how v0.8.207 and v0.8.208 shipped from a red tree
+# (LAC-4623). Waiting for CI inside a push-triggered job is the obvious fix and
+# the wrong one: this workflow is a serial concurrency group, GitHub keeps only
+# one pending run per group, so a 45 minute wait would mean a third merge
+# silently cancelling the second merge's release. Keying off `workflow_run`
+# makes green a precondition of the event rather than something to sit and wait
+# for, so the job stays short and the queue stays honest.
+#
+# `main` now also carries a ruleset requiring CI's three jobs, so a pull request
+# cannot merge red (LAC-4625). This is the second line of defence that ruleset
+# cannot be: it grants repository admins and github-actions a bypass, the latter
+# because shipx pushes the `release:` bump straight to main, and a bypassed push
+# is exactly the hole those two releases fell through.
+#
+# Accepted trade: two merges landing inside one CI cycle now share one version
+# instead of getting one each, because the earlier merge's release is skipped
+# once main has moved past it (see the `gate` job). That costs bisect
+# granularity in the rare overlap. It is the same overlap that used to cancel
+# CI outright and then release twice from two unchecked trees, so every case
+# this degrades is a case that was previously unsafe.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
 
 # Serial, and never cancelled. Two releases racing would fight over the version
@@ -31,16 +56,104 @@ permissions:
   actions: write
 
 jobs:
+  # Decide, and say so out loud. A job skipped by a top-level `if:` leaves no
+  # trace anyone can read, and "why was there no release?" is the question this
+  # whole class of bug is made of. Every refusal below writes a notice naming
+  # the commit and the reason.
+  gate:
+    name: Should this merge cut a release?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+    steps:
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          CI_EVENT: ${{ github.event.workflow_run.event }}
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+          # Through the environment, never interpolated into the script body:
+          # a commit message is attacker-controlled text and `${{ }}` inside a
+          # `run:` block is shell injection.
+          CI_MESSAGE: ${{ github.event.workflow_run.head_commit.message }}
+        run: |
+          set -euo pipefail
+
+          no() {
+            echo "::notice title=No release::$1"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          # A fork can have a branch called `main` too, and its pull request
+          # runs satisfy the `branches:` filter above. Only a push is a merge.
+          [ "$CI_EVENT" = "push" ] \
+            || no "CI ran on a '$CI_EVENT', not a push to main."
+
+          # shipx's own bump lands on main and runs CI. Without this the loop
+          # never ends. `*` matches newlines, so this is startsWith.
+          case "$CI_MESSAGE" in
+            release:*) no "$CI_SHA is shipx's own version bump." ;;
+          esac
+
+          # The whole CI run, deliberately, rather than a list of job names
+          # mirroring the ruleset's required checks. A run is green only if
+          # every job is, so this can never be weaker than the merge gate, and
+          # adding a job to ci.yml cannot silently leave releases ungated on it.
+          [ "$CI_CONCLUSION" = "success" ] \
+            || no "CI concluded '$CI_CONCLUSION' on $CI_SHA. No version is cut from a tree that is not green."
+
+          # Tag main's head, so main's head is what has to be green. If another
+          # merge has landed since, its own CI run is the one that releases.
+          head=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          [ "$head" = "$CI_SHA" ] \
+            || no "main has moved to $head since CI verified $CI_SHA. That commit's own CI run cuts the release."
+
+          echo "::notice title=Releasing::CI is green on $CI_SHA."
+          echo "release=true" >> "$GITHUB_OUTPUT"
+
   release:
-    # shipx's own commit lands on main and would otherwise re-trigger this
-    # forever. The message it writes is the loop breaker.
-    if: ${{ !startsWith(github.event.head_commit.message, 'release:') }}
+    needs: gate
+    if: needs.gate.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
+          # A `workflow_run` checkout defaults to the default branch as it was
+          # at event time. Name the branch so the bump lands on main's real
+          # head, then re-assert below that the two are the same commit.
+          ref: main
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # A deploy key, not GITHUB_TOKEN, because shipx pushes the `release:`
+          # bump straight to main and main now requires status checks. Required
+          # checks gate pushes, not only merges (measured: a push of a commit
+          # with no checks is rejected with GH013, even for a repository
+          # admin), and on a user-owned repository GitHub Actions cannot be a
+          # ruleset bypass actor at all: the API rejects it with "Actor GitHub
+          # Actions integration must be part of the ruleset source or owner
+          # organization". A deploy key can, and is narrower than the
+          # alternative personal access token: one repository, git only, no API
+          # surface, revoked in a single call. Provisioned by
+          # scripts/apply-branch-protection.sh alongside the ruleset that
+          # names it. See docs/rules/branch-protection.md.
+          ssh-key: ${{ secrets.RELEASE_SSH_KEY }}
+
+      # The gate read main's head over the API seconds ago. Check it again
+      # against the tree actually checked out: if main moved in between, go red
+      # rather than tag a commit CI never saw.
+      - name: Re-assert the checkout is the commit CI verified
+        env:
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          if [ "$head" != "$CI_SHA" ]; then
+            echo "::error::Checked out $head but CI verified $CI_SHA. Refusing to release."
+            exit 1
+          fi
 
       - uses: oven-sh/setup-bun@v2
         with:
