@@ -34,6 +34,7 @@ pub mod commands;
 pub mod connectivity; // Can Juno answer right now: network and provider health, for the dot and submit_query
 pub mod constants;
 pub mod conversation_history; // Persist/list/load past conversations across restart
+pub mod cost_log; // What one turn cost, in tokens and dollars: NDJSON for pricing measurement
 pub mod cursor_overlay; // Juno's cursor on screen: glow behind the real one, or a ghost in the background
 pub mod cursor_scale_migration; // Undo a pointer an older build left enlarged
 pub mod deep_link; // juno:// links: navigation only, never a change
@@ -821,6 +822,9 @@ pub fn run() {
             agent::providers::cli_approval::set_cli_ask_before_send_enabled,
             agent::router::get_smart_routing_enabled,
             agent::router::set_smart_routing_enabled,
+            commands::cost_log::get_cost_logging_enabled,
+            commands::cost_log::set_cost_logging_enabled,
+            commands::cost_log::export_cost_log_csv,
             commands::bar_position::get_bar_position,
             commands::bar_position::set_bar_position,
             commands::bar_position::set_bar_frame,
@@ -1080,6 +1084,12 @@ pub fn run() {
             // next launch. Never relaunches by itself: an update installs in
             // the background and runs the next time Juno starts.
             crate::updater::spawn_schedule(app_handle.clone());
+
+            // --- Per-turn cost logging (off unless switched on) ---
+            // Read once here into an atomic, because it is consulted on every
+            // model request from code with no `AppHandle` to reach a store
+            // with — including the headless paths, which have no store at all.
+            crate::commands::cost_log::sync_from_store(&app_handle);
 
             // --- Initialize Rate Limiter Cleanup Task ---
             let rate_limiter_app_handle = app_handle.clone();

@@ -83,17 +83,50 @@ struct GeminiGenerationConfig {
 #[derive(Deserialize, Debug)]
 struct GeminiResponse {
     candidates: Vec<GeminiCandidate>,
-    // usage_metadata field removed - unused for performance
+    /// Token counts. Previously dropped as "unused"; the cost log reads it
+    /// (LAC-4127). Defaulted, so a response without it still parses.
+    #[serde(rename = "usageMetadata", default)]
+    usage_metadata: GeminiUsageMetadata,
 }
 
 #[derive(Deserialize, Debug)]
 struct GeminiCandidate {
     content: GeminiContent,
-    // finish_reason and safety_ratings fields removed - unused for performance
+    /// Why generation stopped (`STOP`, `MAX_TOKENS`, `SAFETY`). Recorded as
+    /// the turn's outcome in the cost log; nothing else reads it.
+    #[serde(rename = "finishReason", default)]
+    finish_reason: Option<String>,
+    // safety_ratings field removed - unused for performance
 }
 
-// Removed unused structs: GeminiUsageMetadata and GeminiSafetyRating
-// These were never accessed in the code, removing for performance
+/// Gemini's token counts.
+///
+/// `promptTokenCount` **includes** `cachedContentTokenCount`, as on OpenAI and
+/// unlike Anthropic, so the cached part is subtracted out rather than billed
+/// twice. Gemini bills cache *storage* by the hour rather than per written
+/// token, so there is no cache-write count to record.
+#[derive(Deserialize, Debug, Default)]
+struct GeminiUsageMetadata {
+    #[serde(rename = "promptTokenCount", default)]
+    prompt_token_count: u64,
+    #[serde(rename = "candidatesTokenCount", default)]
+    candidates_token_count: u64,
+    #[serde(rename = "cachedContentTokenCount", default)]
+    cached_content_token_count: u64,
+}
+
+impl From<&GeminiUsageMetadata> for crate::cost_log::TokenUsage {
+    fn from(usage: &GeminiUsageMetadata) -> Self {
+        crate::cost_log::TokenUsage {
+            input: usage
+                .prompt_token_count
+                .saturating_sub(usage.cached_content_token_count),
+            output: usage.candidates_token_count,
+            cache_read: usage.cached_content_token_count,
+            cache_write: 0,
+        }
+    }
+}
 
 const GEMINI_API_BASE: &str = crate::constants::api::endpoints::GEMINI_API_BASE;
 
@@ -330,6 +363,8 @@ impl AgentBrain for GeminiBrain {
         // The API key goes in the x-goog-api-key header, never in the URL:
         // query strings end up in HTTP client logs, proxy logs, and error
         // messages (audit 2026-02-08 item #21).
+        // Times the request for the cost log's `duration_ms`.
+        let request_started = std::time::Instant::now();
         let response = self
             .client
             .post(&url)
@@ -351,6 +386,18 @@ impl AgentBrain for GeminiBrain {
             .json()
             .await
             .map_err(|e| AgentError::LlmError(format!("Failed to parse response: {}", e)))?;
+
+        crate::cost_log::record_turn(
+            &crate::agent::providers::types::Provider::Gemini,
+            &self.model,
+            (&gemini_response.usage_metadata).into(),
+            request_started.elapsed().as_millis() as u64,
+            gemini_response
+                .candidates
+                .first()
+                .and_then(|c| c.finish_reason.as_deref())
+                .unwrap_or("unknown"),
+        );
 
         let candidate = gemini_response
             .candidates

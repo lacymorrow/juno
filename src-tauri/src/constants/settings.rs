@@ -47,6 +47,12 @@ pub mod store_keys {
     /// permission prompts into Juno's approval sheet instead of
     /// dangerously-skip-permissions; off restores the old behaviour.
     pub const CLI_ASK_BEFORE_SEND_ENABLED: &str = "cli_ask_before_send_enabled";
+    /// Advanced, off unless explicitly set, no UI. Append one line per model
+    /// request to `~/Library/Caches/Juno/cost-log.ndjson` with that turn's
+    /// tokens and dollars, which is what pricing is measured from (LAC-4124).
+    /// Off by default: it is a measurement instrument, not a feature.
+    /// See `cost_log.rs`; headless paths use the `JUNO_COST_LOG` env var.
+    pub const COST_LOGGING_ENABLED: &str = "cost_logging_enabled";
     /// Beta, off unless explicitly set. Smart routing: a quick classifier call
     /// picks the model for each request and whether it needs the computer.
     /// See agent/router.rs
@@ -175,6 +181,10 @@ pub mod defaults {
     /// of the gap between a key release and the first spoken word on this
     /// provider. An explicit `false` in the store still wins.
     pub const CLI_PERSISTENT_SESSION_ENABLED: bool = true;
+    /// Per-turn cost logging is off until somebody switches it on. It writes
+    /// what the person asked Juno to do, in token counts, to a file on disk;
+    /// that is a measurement someone opts into, not a default.
+    pub const COST_LOGGING_ENABLED: bool = false;
     pub const DICTATION_CLIPBOARD_ENABLED: bool = true;
     /// Dictation gets a grammar and punctuation pass from Apple's on-device
     /// model before it is typed. Off by default: it rewrites what the person
