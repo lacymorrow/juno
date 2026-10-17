@@ -64,6 +64,12 @@ impl Kind {
 /// Search the library and play the first match. Constant text: `argv` item 1
 /// is the query, item 2 the kind word. Answers `ok`, `none`, or `error` and
 /// the AppleScript error number, so nothing here reads an error's wording.
+///
+/// The areas `only` accepts are the whole of Music's search enumeration and
+/// nothing else: `albums`, `all`, `artists`, `composers`, `displayed`,
+/// `names` (`sdef /System/Applications/Music.app`, macOS 26.6.2). A song
+/// title is `names`; iTunes' old `songs` is gone, and asking for it does not
+/// fail at run time, it fails to compile, so every song-by-name play errored.
 const SEARCH_AND_PLAY: &str = r#"on run argv
   set theQuery to item 1 of argv
   set theKind to item 2 of argv
@@ -71,7 +77,7 @@ const SEARCH_AND_PLAY: &str = r#"on run argv
   try
     tell application "Music"
       if theKind is "song" then
-        set hits to (search library playlist 1 for theQuery only songs)
+        set hits to (search library playlist 1 for theQuery only names)
       else if theKind is "album" then
         set hits to (search library playlist 1 for theQuery only albums)
       else if theKind is "artist" then
@@ -275,6 +281,34 @@ mod tests {
         assert!(SEARCH_AND_PLAY.contains("only artists"));
         // Nothing from the person is formatted into script text.
         assert!(!SEARCH_AND_PLAY.contains("{}"));
+    }
+
+    /// An area Music does not have is a compile error, which no run-time
+    /// handling here can soften: the whole script dies before it searches.
+    #[test]
+    fn every_search_area_is_one_music_knows() {
+        // The whole enumeration, from `sdef /System/Applications/Music.app`.
+        const AREAS: [&str; 6] = [
+            "albums",
+            "all",
+            "artists",
+            "composers",
+            "displayed",
+            "names",
+        ];
+        let asked: Vec<&str> = SEARCH_AND_PLAY
+            .match_indices("only ")
+            .map(|(at, marker)| {
+                SEARCH_AND_PLAY[at + marker.len()..]
+                    .split(|c: char| !c.is_ascii_alphabetic())
+                    .next()
+                    .unwrap_or_default()
+            })
+            .collect();
+        assert_eq!(asked, ["names", "albums", "artists"]);
+        for area in asked {
+            assert!(AREAS.contains(&area), "Music has no search area {area:?}");
+        }
     }
 
     #[test]
