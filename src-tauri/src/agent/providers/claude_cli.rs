@@ -118,9 +118,24 @@ pub mod model_aliases {
     pub const HAIKU: &str = "haiku";
 }
 
-/// Maximum time to wait for the Claude CLI subprocess before killing it.
-/// Claude CLI may run multi-step agent loops, so this is generous.
-const CLI_TIMEOUT: Duration = Duration::from_secs(300);
+/// How long the CLI may go **silent** before Juno gives up on it.
+///
+/// Measured from the last line it printed, not from the start of the turn.
+/// This used to be a 300s ceiling on the whole turn, which killed work that
+/// was plainly still happening: a task walking many files or images runs past
+/// five minutes while streaming the entire time (LAC-4612). A turn making
+/// progress now never trips this, however long it takes, and a wedged process
+/// is still caught — sooner, in fact, than a turn-long ceiling catches it.
+///
+/// There is deliberately no absolute ceiling above this and no setting below
+/// it. Any fixed total is the same bug again, and Escape already cancels a
+/// running turn the instant the person wants it gone.
+///
+/// Generous because silence is legitimate while a single tool call runs: the
+/// CLI prints the `tool_use` frame, then nothing until the result, and a build
+/// or test run under Bash can own that gap for minutes. While the model is
+/// working, frames arrive sub-second (measured 2026-10-16 on 2.1.302).
+pub(super) const CLI_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// How many attached images to keep on disk for the one-shot CLI path.
 /// Generous next to the handful a single turn writes, small enough that the
@@ -134,6 +149,11 @@ const ATTACHMENT_CACHE_MAX_FILES: usize = 64;
 /// is why `run_streaming` retries once without it — Juno users install the
 /// CLI themselves, so there is no floor version to assume.
 pub(super) const PARTIAL_MESSAGES_FLAG: &str = "--include-partial-messages";
+
+/// Required by some `claude` builds alongside `--print` and
+/// `--output-format=stream-json`; harmless on the ones that do not require it.
+/// See the comment at its use site in `build_args` (LAC-4612).
+pub(super) const VERBOSE_FLAG: &str = "--verbose";
 
 /// Start building a `claude` invocation, rooted at the user's home directory.
 ///
@@ -786,6 +806,15 @@ impl ClaudeCliBrain {
             "-p".to_string(),
             "--output-format".to_string(),
             "stream-json".to_string(),
+            // Some `claude` builds refuse `--print` with
+            // `--output-format=stream-json` unless this is present, exiting 1
+            // having printed only "requires --verbose" to stderr — every query
+            // fails (LAC-4612, reported on 2.1.301). Builds that do not require
+            // it accept it anyway and stream exactly the same frames, verified
+            // on 2.1.302, so it is passed unconditionally rather than probed.
+            // It does not add non-JSON noise to stdout, and `process_stream`
+            // skips unparseable lines regardless.
+            VERBOSE_FLAG.to_string(),
             "--model".to_string(),
             self.model.clone(),
             // How hard to think per turn. Hidden advanced setting; see
@@ -1025,7 +1054,7 @@ impl ClaudeCliBrain {
         let mut resume_fallback_used = false;
         let mut resume = resume;
 
-        let (accumulated_text, final_result, status) = loop {
+        let (accumulated_text, final_result, status, stderr_buf) = loop {
             let mut args = self.build_args(
                 query,
                 resume.as_deref(),
@@ -1118,29 +1147,24 @@ impl ClaudeCliBrain {
                 })
             });
 
-            // Run the streaming loop with a timeout, cancellable via escape
-            // key. tokio::select! races the stream against the cancellation
+            // Run the streaming loop, cancellable via escape key.
+            // tokio::select! races the stream against the cancellation
             // signal — whichever completes first wins, and the other branch
             // is dropped.
-            let stream_future = tokio::time::timeout(CLI_TIMEOUT, async {
-                self.process_stream(stdout, &app_handle, &msg_id).await
-            });
+            //
+            // The turn is not raced against a clock here. `process_stream`
+            // owns the deadline, because only it can see each line arrive and
+            // so tell a working turn from a wedged one (LAC-4612).
+            let stream_future = async { self.process_stream(stdout, &app_handle, &msg_id).await };
 
             let (accumulated_text, final_result) = if let Some(mut rx) = cancel_rx.clone() {
                 tokio::select! {
                     result = stream_future => {
                         match result {
-                            Ok(Ok(r)) => r,
-                            Ok(Err(e)) => {
-                                stream.close(format!("Error: {}", e));
+                            Ok(r) => r,
+                            Err(e) => {
+                                stream.close(Self::stream_failure_text(&e));
                                 return Err(e);
-                            }
-                            Err(_elapsed) => {
-                                stream.close("Claude CLI timed out".to_string());
-                                return Err(AgentError::Timeout(format!(
-                                    "Claude CLI timed out after {} seconds",
-                                    CLI_TIMEOUT.as_secs()
-                                )));
                             }
                         }
                     }
@@ -1162,19 +1186,13 @@ impl ClaudeCliBrain {
                     }
                 }
             } else {
-                // No AppState available (headless/test) — fall back to timeout-only
+                // No AppState available (headless/test) — nothing to cancel
+                // against, so just run it. The idle deadline still applies.
                 match stream_future.await {
-                    Ok(Ok(r)) => r,
-                    Ok(Err(e)) => {
-                        stream.close(format!("Error: {}", e));
+                    Ok(r) => r,
+                    Err(e) => {
+                        stream.close(Self::stream_failure_text(&e));
                         return Err(e);
-                    }
-                    Err(_elapsed) => {
-                        stream.close("Claude CLI timed out".to_string());
-                        return Err(AgentError::Timeout(format!(
-                            "Claude CLI timed out after {} seconds",
-                            CLI_TIMEOUT.as_secs()
-                        )));
                     }
                 }
             };
@@ -1248,7 +1266,7 @@ impl ClaudeCliBrain {
                 continue;
             }
 
-            break (accumulated_text, final_result, status);
+            break (accumulated_text, final_result, status, stderr_buf);
         };
 
         // Remember the session this conversation is now in, so the next
@@ -1279,13 +1297,32 @@ impl ClaudeCliBrain {
         stream.close(complete_text.clone());
 
         if complete_text.is_empty() && !status.success() {
-            return Err(AgentError::LlmError(format!(
-                "Claude CLI exited with status {} and no output",
-                status
-            )));
+            // Pass on what the CLI actually said. This used to report the
+            // exit status alone, so a `claude` that refused an argument and
+            // explained itself perfectly well on stderr reached the person as
+            // "exited with status 1 and no output" — the one sentence telling
+            // them what to do was read, logged, and dropped (LAC-4612). The
+            // CLI's own wording is what survives a CLI change; Juno's guess
+            // about it does not.
+            return Err(AgentError::LlmError(match first_stderr_line(&stderr_buf) {
+                Some(detail) => format!("Claude CLI exited with status {}: {}", status, detail),
+                None => format!("Claude CLI exited with status {} and no output", status),
+            }));
         }
 
         Ok(complete_text)
+    }
+
+    /// What the bubble is left showing when the stream ends badly.
+    ///
+    /// A timeout is not an "Error:" as far as the person is concerned — the
+    /// CLI simply stopped talking — so it reads as what happened rather than
+    /// as a fault with a status code.
+    fn stream_failure_text(e: &AgentError) -> String {
+        match e {
+            AgentError::Timeout(_) => "Claude Code stopped responding".to_string(),
+            other => format!("Error: {}", other),
+        }
     }
 
     /// Process the stdout stream from the Claude CLI subprocess.
@@ -1335,7 +1372,20 @@ impl ClaudeCliBrain {
         let mut fallback_message_id: Option<String> = None;
 
         loop {
-            match lines.next_line().await {
+            // The deadline is per line, not per turn: every line the CLI
+            // prints buys it the full window again. A turn that is getting
+            // somewhere is never cut off for taking a while (LAC-4612).
+            let next_line = match tokio::time::timeout(CLI_IDLE_TIMEOUT, lines.next_line()).await {
+                Ok(next_line) => next_line,
+                Err(_elapsed) => {
+                    return Err(AgentError::Timeout(format!(
+                        "Claude Code sent nothing for {} minutes, so Juno stopped waiting for it",
+                        CLI_IDLE_TIMEOUT.as_secs() / 60
+                    )));
+                }
+            };
+
+            match next_line {
                 Ok(Some(line)) => {
                     if line.trim().is_empty() {
                         continue;
@@ -2184,6 +2234,21 @@ fn strip_partial_messages(args: &mut Vec<String>) {
 /// false positive costs one extra spawn on a query that was already failing.
 fn rejects_partial_messages(stderr: &str) -> bool {
     stderr.contains(PARTIAL_MESSAGES_FLAG)
+}
+
+/// The CLI's own explanation, ready to show someone.
+///
+/// The first non-blank line, because that is where the CLI puts the reason
+/// ("Error: When using --print, --output-format=stream-json requires
+/// --verbose") and everything after it tends to be a usage dump or a stack
+/// trace. Capped by characters rather than bytes: stderr is not guaranteed to
+/// break on a UTF-8 boundary at any particular offset.
+fn first_stderr_line(stderr: &str) -> Option<String> {
+    stderr
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| line.chars().take(300).collect())
 }
 
 /// The tool as a person would say it.
@@ -3085,6 +3150,104 @@ mod tests {
         // Only valid alongside --print and stream-json, both of which we pass.
         assert!(args.contains(&"-p".to_string()));
         assert!(args.contains(&"stream-json".to_string()));
+    }
+
+    /// Some `claude` builds refuse `--print` with stream-json output unless
+    /// `--verbose` is there too, and exit 1 having printed nothing to stdout.
+    /// Juno shipped without it and every query failed on those builds
+    /// (LAC-4612).
+    #[test]
+    fn verbose_is_requested() {
+        let brain = test_brain(PathBuf::from("/usr/bin/claude"));
+        let args = brain.build_args("what is on screen", None, None, false);
+        assert!(
+            args.contains(&"--verbose".to_string()),
+            "every spawn must carry --verbose, got {:?}",
+            args
+        );
+        // Only meaningful alongside --print and stream-json, both of which we pass.
+        assert!(args.contains(&"-p".to_string()));
+        assert!(args.contains(&"stream-json".to_string()));
+    }
+
+    /// `--verbose` must survive the retry that strips `--include-partial-messages`
+    /// for an older CLI. That retry exists to rescue a failing query, so handing
+    /// back a command that fails for the other reason would defeat it.
+    #[test]
+    fn stripping_partial_messages_keeps_verbose() {
+        let brain = test_brain(PathBuf::from("/usr/bin/claude"));
+        let mut args = brain.build_args("what is on screen", None, None, false);
+        strip_partial_messages(&mut args);
+        assert!(!args.contains(&PARTIAL_MESSAGES_FLAG.to_string()));
+        assert!(args.contains(&"--verbose".to_string()));
+    }
+
+    /// The CLI explains itself on stderr. Juno used to report the exit status
+    /// alone, so "requires --verbose" reached the person as "exited with
+    /// status 1 and no output" and there was nothing to act on (LAC-4612).
+    #[tokio::test]
+    async fn cli_failure_reports_what_the_cli_said() {
+        let script = write_fake_cli_script(
+            "echo 'Error: When using --print, --output-format=stream-json requires --verbose' >&2\nexit 1",
+        );
+        let brain = test_brain(script.clone());
+
+        let result = brain
+            .run_streaming("test query", &[], None, None, None)
+            .await;
+
+        match result {
+            Err(AgentError::LlmError(message)) => {
+                assert!(
+                    message.contains("requires --verbose"),
+                    "the CLI's own explanation must reach the person, got {:?}",
+                    message
+                );
+            }
+            other => panic!(
+                "expected LlmError carrying the CLI's stderr, got {:?}",
+                other
+            ),
+        }
+        let _ = std::fs::remove_file(&script);
+    }
+
+    /// Only the reason, not the usage dump the CLI prints under it.
+    #[test]
+    fn first_stderr_line_takes_the_reason() {
+        assert_eq!(
+            first_stderr_line("\n  Error: needs --verbose  \nUsage: claude [options]\n").as_deref(),
+            Some("Error: needs --verbose")
+        );
+        assert_eq!(first_stderr_line("   \n\n  \n"), None);
+        assert_eq!(first_stderr_line(""), None);
+        // Multi-byte input must be cut on a character boundary, never a byte one.
+        let long = "é".repeat(400);
+        let cut = first_stderr_line(&long).expect("a line");
+        assert_eq!(cut.chars().count(), 300);
+    }
+
+    /// The deadline bounds silence, not the length of the turn, so a CLI that
+    /// says nothing at all is still given up on (LAC-4612).
+    ///
+    /// Paused time: the runtime auto-advances to the next timer whenever it is
+    /// idle, which is exactly what it is while the fake CLI sleeps, so the
+    /// 10-minute window elapses without the test taking 10 minutes.
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_cli_eventually_times_out() {
+        let script = write_fake_cli_script("sleep 3600");
+        let brain = test_brain(script.clone());
+
+        let result = brain
+            .run_streaming("test query", &[], None, None, None)
+            .await;
+
+        assert!(
+            matches!(result, Err(AgentError::Timeout(_))),
+            "a CLI that never says anything must time out, got {:?}",
+            result
+        );
+        let _ = std::fs::remove_file(&script);
     }
 
     /// The bubble opens once and closes once, however many times it is asked.

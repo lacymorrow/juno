@@ -109,9 +109,17 @@ use crate::constants::settings::{store_keys, SETTINGS_STORE_FILE};
 /// falls back to the one-shot path having emitted nothing.
 const LIFECYCLE_ACK_TIMEOUT: Duration = Duration::from_secs(45);
 
-/// Ceiling on one turn. Matches the one-shot path's `CLI_TIMEOUT`, but applies to
-/// the turn rather than the process: a turn that overruns is interrupted, not killed.
-const TURN_TIMEOUT: Duration = Duration::from_secs(300);
+/// How long a turn may go **silent** before Juno stops waiting for it.
+///
+/// The one-shot path's window and the same reasoning (LAC-4612): measured from
+/// the last frame rather than from the start of the turn, so a turn that is
+/// still streaming is never cut off merely for taking a while. It is the same
+/// constant, not a copy of the number, because two timeouts that are supposed
+/// to agree drift the moment one of them is tuned.
+///
+/// What differs here is the remedy. A turn that overruns is interrupted, not
+/// killed: the process and the conversation both survive it.
+const TURN_IDLE_TIMEOUT: Duration = super::claude_cli::CLI_IDLE_TIMEOUT;
 
 /// How long to wait for the aborted `result` after sending an interrupt before
 /// giving up and killing the process. Measured at 10–35 ms in practice.
@@ -1030,6 +1038,12 @@ fn spawn_args(launch: &LaunchConfig, session_id: &str, session_is_new: bool) -> 
         "stream-json".to_string(),
         "--output-format".to_string(),
         "stream-json".to_string(),
+        // Required by some `claude` builds alongside --print and
+        // --output-format=stream-json, accepted by the rest. Same reasoning as
+        // the one-shot path's `build_args` (LAC-4612) — and it matters more
+        // here, because without it the spawn dies before its input loop ever
+        // answers and every turn in the session falls back.
+        super::claude_cli::VERBOSE_FLAG.to_string(),
         "--model".to_string(),
         launch.model.clone(),
         // Same per-turn effort as the one-shot path. Without it a persistent
@@ -1650,7 +1664,8 @@ async fn run_own_turn(
     };
     global_rx.borrow_and_update();
 
-    let turn_deadline = Instant::now() + TURN_TIMEOUT;
+    // Pushed forward by every frame, so it bounds silence rather than the turn.
+    let mut turn_deadline = Instant::now() + TURN_IDLE_TIMEOUT;
     let mut cancel_deadline: Option<Instant> = None;
     let mut end = turn.renderer.feed(&first);
 
@@ -1685,6 +1700,8 @@ async fn run_own_turn(
 
         match received {
             Ok(Some(frame)) => {
+                // Anything at all proves the process is still working.
+                turn_deadline = Instant::now() + TURN_IDLE_TIMEOUT;
                 let kind = frame.get("type").and_then(Value::as_str).unwrap_or("");
                 if kind == "command_lifecycle" || kind == "control_response" {
                     continue;
@@ -1699,8 +1716,8 @@ async fn run_own_turn(
                     break OwnTurnEnd::Cancelled;
                 }
                 warn!(
-                    "[CliSession] Claude's own turn exceeded {}s; interrupting",
-                    TURN_TIMEOUT.as_secs()
+                    "[CliSession] Claude's own turn went silent for {}s; interrupting",
+                    TURN_IDLE_TIMEOUT.as_secs()
                 );
                 send_interrupt(session);
                 turn.renderer.muted = true;
@@ -1730,10 +1747,10 @@ impl TurnFailure {
     fn timed_out() -> Self {
         Self {
             error: AgentError::Timeout(format!(
-                "Claude CLI timed out after {} seconds",
-                TURN_TIMEOUT.as_secs()
+                "Claude Code sent nothing for {} minutes, so Juno stopped waiting for it",
+                TURN_IDLE_TIMEOUT.as_secs() / 60
             )),
-            shown: "Claude CLI timed out",
+            shown: "Claude Code stopped responding",
         }
     }
 }
@@ -1791,14 +1808,17 @@ async fn stream_turn(
     // Set once, when the interrupt goes out, so the grace window cannot be pushed
     // forward forever by a process that keeps talking but never ends the turn.
     let mut cancel_deadline: Option<Instant> = None;
-    // The interrupt was ours, for running over TURN_TIMEOUT, not the person's.
+    // The interrupt was ours, for going silent past TURN_IDLE_TIMEOUT, not the
+    // person's.
     let mut timed_out = false;
     let mut final_result: Option<String> = None;
 
     // Claude's own turn ahead of ours holds our message in the CLI's queue, so
     // the acknowledgement window restarts with each of its frames.
     let mut ack_deadline = Instant::now() + LIFECYCLE_ACK_TIMEOUT;
-    let turn_deadline = Instant::now() + TURN_TIMEOUT;
+    // Likewise pushed forward by every frame: it bounds how long the turn may
+    // say nothing, not how long it may take.
+    let mut turn_deadline = Instant::now() + TURN_IDLE_TIMEOUT;
 
     let failure: Option<TurnFailure> = loop {
         let deadline = match (cancel_deadline, ours) {
@@ -1874,11 +1894,11 @@ async fn stream_turn(
                     }
                     return Ok(TurnOutcome::Unavailable);
                 }
-                // A turn that overran is interrupted, not killed, and its aborted
+                // A turn that went silent is interrupted, not killed, and its aborted
                 // result is drained so it cannot surface later as a turn of its own.
                 warn!(
-                    "[CliSession] Turn exceeded {}s; interrupting",
-                    TURN_TIMEOUT.as_secs()
+                    "[CliSession] Turn went silent for {}s; interrupting",
+                    TURN_IDLE_TIMEOUT.as_secs()
                 );
                 send_interrupt(session);
                 renderer.muted = true;
@@ -1887,6 +1907,10 @@ async fn stream_turn(
                 continue;
             }
         };
+
+        // A frame of any kind means the process is alive and working, so the
+        // silence window starts again (LAC-4612).
+        turn_deadline = Instant::now() + TURN_IDLE_TIMEOUT;
 
         match correlator.route(&frame) {
             Route::Skip => {
@@ -2329,6 +2353,20 @@ mod tests {
         assert!(spare
             .windows(2)
             .any(|w| w[0] == "--disallowedTools" && w[1] == WAKE_TOOLS));
+    }
+
+    /// The persistent path needs `--verbose` for the same reason the one-shot
+    /// path does, and needs it more: on a build that refuses stream-json
+    /// without it the process dies before its input loop ever answers, so
+    /// every turn in the session pays the fallback (LAC-4612).
+    #[test]
+    fn a_session_spawn_passes_verbose() {
+        let args = spawn_args(&launch("sonnet"), "a-session", true);
+        assert!(
+            args.contains(&"--verbose".to_string()),
+            "every session spawn must carry --verbose, got {args:?}"
+        );
+        assert!(args.contains(&"-p".to_string()));
     }
 
     #[test]
