@@ -226,6 +226,9 @@ mod tests {
 
     /// Words that only a speech instruction contains. "hear" and "speak" are
     /// not here on purpose: "what the user needs to hear" is about content.
+    ///
+    /// Matched as whole words by [`words`], never as substrings: a prompt is
+    /// allowed to mention an `invoice.pdf`.
     const BANNED: &[&str] = &[
         "tts",
         "spoken",
@@ -236,6 +239,33 @@ mod tests {
         "hears you",
         "hear you",
     ];
+
+    /// One line of a prompt as the words in it: lowercased, every run of
+    /// non-alphanumeric characters collapsed to a single space, and padded at
+    /// both ends so `" voice "` means the word and nothing else.
+    ///
+    /// Splitting on non-alphanumerics rather than on a regex word boundary is
+    /// the point. `\bvoice\b` would miss `<voice_guidelines>`, because `_` is
+    /// a word character; this sees `voice` and `guidelines`. And it reads
+    /// `invoice.pdf` as `invoice`, which is how a filename in a card example
+    /// stopped being a speech instruction (LAC-4623).
+    ///
+    /// Per line, not per prompt, so a two-word entry like "hear you" cannot
+    /// match across a line break.
+    fn words(line: &str) -> String {
+        let mut out = String::from(" ");
+        for ch in line.chars() {
+            if ch.is_alphanumeric() {
+                out.extend(ch.to_lowercase());
+            } else if !out.ends_with(' ') {
+                out.push(' ');
+            }
+        }
+        if !out.ends_with(' ') {
+            out.push(' ');
+        }
+        out
+    }
 
     fn every_template() -> Vec<(String, String)> {
         DefaultPrompts::get_all()
@@ -262,18 +292,38 @@ mod tests {
 
     #[test]
     fn no_prompt_mentions_speech_when_voice_is_off() {
+        let banned: Vec<String> = BANNED.iter().map(|word| format!(" {word} ")).collect();
         let mut checked = 0;
         for (name, content) in every_template() {
-            let stripped = apply(content, false).to_lowercase();
-            for word in BANNED {
-                assert!(
-                    !stripped.contains(word),
-                    "{name} still mentions {word:?} with voice off"
-                );
+            for line in apply(content, false).lines() {
+                let words = words(line);
+                for word in &banned {
+                    assert!(
+                        !words.contains(word.as_str()),
+                        "{name} still mentions {:?} with voice off, in: {line}",
+                        word.trim()
+                    );
+                }
             }
             checked += 1;
         }
         assert!(checked > 0, "no templates were checked");
+    }
+
+    #[test]
+    fn a_word_that_merely_contains_a_banned_word_is_not_one() {
+        // A `<FileListCard>` example gained an `invoice.pdf` and turned main
+        // red: the guard read "voice" inside it and failed every PR for a day
+        // (LAC-4623). Everything below it is what the guard must still catch.
+        let invoice = words(r#"{name: "invoice.pdf", type: "document"}"#);
+        assert!(invoice.contains(" invoice "));
+        assert!(!invoice.contains(" voice "));
+
+        assert!(words("<voice_guidelines>").contains(" voice "));
+        assert!(words("COMMUNICATION: Voice-first - sounds natural").contains(" voice "));
+        assert!(words("Good response: <TTS>Sure.</TTS>").contains(" tts "));
+        assert!(words("1. **SPEAK FIRST**: your first output").contains(" speak first "));
+        assert!(words("| Scenario | Text | Voice | Component |").contains(" voice "));
     }
 
     #[test]
