@@ -156,6 +156,18 @@ pub fn handle_stop_key_event(app: &AppHandle, pressed: bool) {
 
     let app_handle_clone = app.clone();
     tauri::async_runtime::spawn(async move {
+        // An open dictation is the newest layer, whatever window is in front:
+        // it is a live microphone opened from a hotkey on top of everything
+        // else, Settings included. It comes off first (or the newer run above
+        // it does; see `escape_scope`). Checked before Settings because
+        // Settings used to take every press while it was focused, and when
+        // something inside it held Escape the window did not close either:
+        // ten presses in a row reached nothing and the microphone stayed open
+        // (juno-2026-10-17.log, 20:04:59 to 20:05:03).
+        if crate::commands::dictation::escape_spent_on_dictation(&app_handle_clone).await {
+            return;
+        }
+
         // Settings in front of the person is the top of the stack: the window
         // closes on this press itself, and the work underneath waits for the
         // next. Read here, off the monitor's callback, like every window query.
@@ -165,12 +177,6 @@ pub fn handle_stop_key_event(app: &AppHandle, pressed: bool) {
             .unwrap_or(false);
         if settings_focused {
             info!("[Escape Key] Settings is in front - it takes this press");
-            return;
-        }
-
-        // A dictation open on top of a running agent is the layer Escape
-        // takes off first; the run keeps going (see `escape_scope`).
-        if crate::commands::dictation::escape_spent_on_dictation(&app_handle_clone).await {
             return;
         }
 
