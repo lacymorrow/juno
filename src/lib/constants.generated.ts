@@ -155,6 +155,7 @@ export const EVENTS = {
   PERMISSIONS_GRANTED: 'permission-granted',
   PERMISSIONS_NEEDED: 'permission-needed',
   PERMISSIONS_AUTO_GRANT_PROGRESS: 'permissions-auto-grant-progress',
+  PERMISSIONS_COACH: 'permission-coach',
   DEV_TOOL_NOTIFICATION: 'dev-tool-notification',
   MESSAGES_USER_MESSAGE_SUBMITTED: 'user-message-submitted',
   MESSAGES_CONVERSATION_LOADED: 'conversation-loaded',
@@ -411,6 +412,7 @@ export const UI = {
   WINDOW_LABELS_DYNAMIC_BAR: 'dynamic-bar',
   WINDOW_LABELS_SNAP_WELLS_OVERLAY: 'snap-wells-overlay',
   WINDOW_LABELS_INTRO: 'intro',
+  WINDOW_LABELS_PERMISSION_COACH: 'permission-coach',
   AGENT_SESSION_COLORS_SLOT_0: '#3B82F6',
   AGENT_SESSION_COLORS_SLOT_1: '#10B981',
   AGENT_SESSION_COLORS_SLOT_2: '#F59E0B',
@@ -667,6 +669,7 @@ export const COMMANDS = {
   PERMISSIONS_OPEN_SYSTEM_PREFERENCES: 'open_system_preferences',
   PERMISSIONS_START_PERMISSIONS_MONITORING: 'start_permissions_monitoring',
   PERMISSIONS_STOP_PERMISSIONS_MONITORING: 'stop_permissions_monitoring',
+  PERMISSIONS_COACH_STATE: 'permission_coach_state',
   WINDOWS_CLOSE_MAIN_WINDOW: 'close_main_window',
   WINDOWS_OPEN_MAIN_WINDOW: 'open_main_window',
   WINDOWS_ESCAPE_MAIN_WINDOW: 'escape_main_window',
@@ -1599,6 +1602,7 @@ export const WINDOW_LABELS = {
   DYNAMIC_BAR: 'dynamic-bar',
   SNAP_WELLS_OVERLAY: 'snap-wells-overlay',
   INTRO: 'intro',
+  PERMISSION_COACH: 'permission-coach',
 } as const;
 
 // Frontend-specific constants (not duplicated from Rust)
