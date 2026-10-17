@@ -49,7 +49,8 @@ const HOVER_FRAME_PX = 40;
 
 /**
  * The hover capsule for a number of controls (Talk, Type, Show last answer,
- * the wake phrase). Three fit the 132 capsule; a fourth widens it by one.
+ * Open chat, the wake phrase). Three fit the 132 capsule; each one past that
+ * widens it by one.
  */
 export function hoverShapeFor(buttons: number): ShapeSize {
   return { ...HOVER_SHAPE, width: Math.max(HOVER_SHAPE.width, HOVER_FRAME_PX + buttons * HOVER_BUTTON_PX) };
@@ -273,9 +274,10 @@ export interface FaceInput {
    */
   dictation: boolean;
   /**
-   * The composer was just put away (Escape, its close control) and Rust has
-   * not left its input state yet. Without this the box would flash back for
-   * the moment Rust takes to shrink.
+   * The composer was put away by hand (Escape, its close control). At rest,
+   * and while Rust is still leaving its input state, the island is the
+   * capsule even with a draft kept in the box: the draft waits there until
+   * the person opens the composer again or starts typing.
    */
   dismissed?: boolean;
   /** The chat face was asked for (its expand control, the tray's Show Chat). */
@@ -303,7 +305,7 @@ export function faceFor({
   // The whole conversation stays up through every state: a new turn, spoken
   // or typed, streams into it rather than taking it away.
   if (chatOpen) return "chat";
-  if (dismissed && isInputState(state) && !answerOpen) return "idle";
+  if (dismissed && !answerOpen && (isInputState(state) || isRestingState(state))) return "idle";
   const spokenTurn = isVoiceState(state) && !isRestingState(state) && !dictation;
   if (answerOpen && !spokenTurn) return componentShown ? "component" : "answer";
   if (isRestingState(state)) return composerActive ? "compose" : "idle";
@@ -466,10 +468,23 @@ export function stopControl({
 }
 
 /**
+ * Whether a press of Escape belongs to Rust's work rather than to the
+ * island's own layers. Anything Rust is doing that is not rest or the
+ * composer (a dictation, a spoken turn, a run, a reply being spoken, an
+ * error) is the newest rung, so it comes off first and the island's faces
+ * wait for the next press. Rust ends every one of these states on the press
+ * (`bar_escape_to_idle`, or the stop-key monitor), so the next press always
+ * finds the island at rest.
+ */
+export function escapeIsRusts(state: string): boolean {
+  return !isRestingState(state) && !isInputState(state);
+}
+
+/**
  * One rung down the Island's own part of the Escape ladder (`barEscape.ts`
  * owns the rest): chat to the answer it grew from (or the composer when
  * there is none), a component to the composer, an answer or the composer to
- * the capsule.
+ * the capsule. The composer's draft is kept through every rung.
  */
 export function islandEscapeStep(face: Face, { answerShown }: { answerShown: boolean }): Face {
   switch (face) {

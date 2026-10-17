@@ -139,6 +139,19 @@ describe("the Island's own rungs", () => {
 describe("Rust's half of the one Escape", () => {
   const rust = read("src-tauri/src/commands/ui_commands.rs");
 
+  it("ends an open dictation before Settings can take the press", () => {
+    // Settings took every press while it was focused, and when something in
+    // it held Escape the window stayed up too: a dictation could not be
+    // stopped with Escape at all. The microphone is the newest layer.
+    const monitor = read("src-tauri/src/events/shortcuts.rs");
+    const handler = monitor.slice(monitor.indexOf("pub fn handle_stop_key_event"));
+    const dictation = handler.indexOf("escape_spent_on_dictation(");
+    const settings = handler.indexOf("Settings is in front");
+    expect(dictation).toBeGreaterThan(-1);
+    expect(settings).toBeGreaterThan(-1);
+    expect(dictation).toBeLessThan(settings);
+  });
+
   it("runs the reported Escape outside the UI manager lock", () => {
     // The press every look reports (`ui_handle_interaction(escape)`) used to
     // run the coordinated stop while holding the manager's tokio mutex, and

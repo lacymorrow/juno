@@ -35,6 +35,7 @@ import {
   chatSizeInWindow,
   hoverShapeFor,
   islandEscapeStep,
+  escapeIsRusts,
   islandMaxFor,
   rosterShown,
   rosterWidthFor,
@@ -205,6 +206,43 @@ describe("escape rungs", () => {
     expect(islandEscapeStep("component", { answerShown: true })).toBe("compose");
     expect(islandEscapeStep("answer", { answerShown: true })).toBe("idle");
     expect(islandEscapeStep("compose", { answerShown: false })).toBe("idle");
+  });
+  it("while Rust is busy the press is Rust's: the work comes off before any face", () => {
+    for (const busy of [
+      UI.BAR_STATES_DICTATING,
+      UI.BAR_STATES_LISTENING,
+      UI.BAR_STATES_TRANSCRIBING,
+      UI.BAR_STATES_SUBMITTING,
+      UI.BAR_STATES_LOADING,
+      UI.BAR_STATES_AGENT_RESPONDING,
+      UI.BAR_STATES_SPEAKING,
+      UI.BAR_STATES_FINISHING,
+      UI.BAR_STATES_SUCCESS,
+      UI.BAR_STATES_ERROR,
+      UI.BAR_STATES_STOPPING,
+    ]) {
+      expect(escapeIsRusts(busy), busy).toBe(true);
+    }
+    for (const quiet of [
+      UI.BAR_STATES_DEFAULT,
+      UI.BAR_STATES_DICTATION_READY,
+      UI.BAR_STATES_ALWAYS_LISTENING,
+      UI.BAR_STATES_SHRINKING,
+      UI.BAR_STATES_INPUT,
+      UI.BAR_STATES_EXPANDING,
+    ]) {
+      expect(escapeIsRusts(quiet), quiet).toBe(false);
+    }
+  });
+  it("a composer put away is the capsule at rest, draft or not, until it is opened again", () => {
+    const put = { answerOpen: false, componentShown: false, composerActive: true, dictation: false, dismissed: true };
+    expect(faceFor({ ...put, state: UI.BAR_STATES_DEFAULT })).toBe("idle");
+    expect(faceFor({ ...put, state: UI.BAR_STATES_INPUT })).toBe("idle");
+    expect(faceFor({ ...put, state: UI.BAR_STATES_SHRINKING })).toBe("idle");
+    // A new turn is still the text box, and an answer still shows.
+    expect(faceFor({ ...put, state: UI.BAR_STATES_LISTENING })).toBe("compose");
+    expect(faceFor({ ...put, state: UI.BAR_STATES_DEFAULT, answerOpen: true })).toBe("answer");
+    expect(faceFor({ ...put, state: UI.BAR_STATES_DEFAULT, dismissed: false })).toBe("compose");
   });
 });
 
