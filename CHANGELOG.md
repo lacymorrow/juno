@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.209] - 2026-10-17
+
+### Fixed
+
+- **prompts:** the voice-off guard matches words, not substrings (#828) (09d822dc)
+
 ## [0.8.208] - 2026-10-16
 
 ### Added
@@ -1476,7 +1482,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.208...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.209...HEAD
+[0.8.209]: https://github.com/lacymorrow/juno/compare/cua-v0.8.208...v0.8.209
 [0.8.208]: https://github.com/lacymorrow/juno/compare/cua-v0.8.207...v0.8.208
 [0.8.207]: https://github.com/lacymorrow/juno/compare/cua-v0.8.206...v0.8.207
 [0.8.206]: https://github.com/lacymorrow/juno/compare/cua-v0.8.205...v0.8.206
