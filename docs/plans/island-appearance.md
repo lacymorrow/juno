@@ -24,7 +24,7 @@ A dark capsule sits at the top of the screen with one breathing dot. They hold t
 
 | Face | Shape | What is in it |
 |---|---|---|
-| idle | 92 x 28 capsule, radius 14. Under the pointer 132 x 32 with Talk, Type, (once there is a turn) Show last answer and (when a wake phrase is set) the wake phrase toggle; four controls widen it to 144 | the dot |
+| idle | 92 x 28 capsule, radius 14. Under the pointer 132 x 32 with Talk, Type, (once there is a turn) Show last answer, Open chat and (when a wake phrase is set) the wake phrase toggle; each control past three widens it by 26 (144 for four, 170 for five) | the dot |
 | compose | 360 wide; 36 tall, growing with the text to four lines (90). The small bar (248 x 36) while nobody is writing, see below | the composer only |
 | answer | 360 wide; composer plus content, up to 400 tall, then the body scrolls | question line (dot, your words dimmed, speaker toggle when there is both text and speech, linger ring), the answer body, the composer as the follow-up field |
 | component | 360 wide, same height rule | caption line (the prose folded to one line, click to expand), the component edge to edge, the composer |
@@ -36,7 +36,7 @@ The composer is not part of any face. It is one textarea mounted for the life of
 
 The Pill opens `BarChatPane` under the pill. The Island does not get a pane: the same black shape grows into the conversation. It is sized for the display it is on (`chatSizeFor`: 60% of the display both ways, clamped, never more than the window can be given there) and pinned to the well's docked edges like every other face, so it grows away from the docked edge: down from a top well, up from a low one, out from a side. A well in the middle of a side has only the room between it and the window's edge, so there the chat is shorter (`roomForContent`).
 
-- **Way in:** the expand control in the answer or component header ("Show the conversation"), or the tray's Show Chat (`bar-toggle-pane`). From the capsule the tray opens chat only once there is a turn.
+- **Way in:** the expand control in the answer or component header ("Show the conversation"), the hover capsule's Open chat (the Pill's hover expand, always offered), or the tray's Show Chat (`bar-toggle-pane`). From the capsule the tray opens chat only once there is a turn.
 - **Way out:** Escape steps down one rung (`islandEscapeStep`): to the answer or component it grew from, or to the composer (caret in it) when there is no answer. The header's one control does the same thing. Show Chat again settles to the capsule.
 - **Through a turn:** chat stays up through every Rust state. A new spoken or typed turn streams into the conversation; it never turns the chat back into the composer the way it does an answer.
 - **No ring.** Chat stays until it is put down.
@@ -49,7 +49,7 @@ What was removed from the Pill's pane on the way in (the `insanely-great` pass, 
 - The "esc to close" / "working" status words. The dot and the placeholder already say what is happening.
 - A second close control. The one collapse control steps down a rung, the same as Escape.
 - The question line, the speaker toggle and the linger ring of the answer face: the conversation shows the question, and the full message renders its own spoken text and actions.
-- An empty chat. There is no way into chat without a turn, so the example prompts never show here (their handler still fills the composer).
+- ~~An empty chat.~~ Reversed 2026-10-17: the hover capsule's Open chat is always offered, as the Pill's is, so chat can open before a turn and shows the example prompts (a click fills the composer).
 
 ### Parity with the Pill
 
@@ -58,8 +58,9 @@ What was removed from the Pill's pane on the way in (the `insanely-great` pass, 
 | Pasted pictures | the composer | A pasted image is kept as a data URL and sent with the text through `dispatch_query` (the Pill's path). A thumbnail row (32 px, one `x` each, "Remove image") sits above the text. A picture alone is a draft: the box is the full 360 width, not the small bar, and Send is armed | `hooks/usePastedImages.ts`, shared with the Pill |
 | Wake phrase toggle | the hover capsule, last | Shown only when a phrase is configured. Ear while listening ("Stop listening for the wake phrase"), crossed ear while paused ("Listen for the wake phrase"). It pauses the engine, never the trigger; it follows Rust's `voice-trigger-listening` | `hooks/useWakePhrase.ts`, shared with the Pill |
 | Connection dot | every face with a dot | System red and still when Rust says Juno cannot answer (`connectivity-changed` / `get_connectivity`, `pillStatus.dotTone`); an open mic still wins. Its label is Rust's reason ("Network unavailable") | `dotFor(state, driving, connectivity)`, `dotLabel` |
-| Agent roster | beside the shape | From two agents: a second small black capsule (the capsule's height, 8 px away) beside the island, level with the docked edge, on the side away from a side-docked edge. Apple's split island: a second activity is a second small shape, so the island itself never moves for it. Its rect is reported as a second hit region. Hidden while the island is carried | `AgentRosterStrip`, `rosterWidthFor` |
-| Tooltips | the dot and every icon control (Talk, Type, Show last answer, wake phrase, expand, collapse, close, spoken aloud, the composer's mic, Send and stop, Remove image) | `PillTooltip`: 500 ms, opens from the native forwarded hover (`mouse-moved-window`) as well as DOM hover, closed during a drag (`useBarDragging`), toward the side the island grows. `title` stays as the fallback and steps aside while the tooltip shows. Text buttons (Allow, Don't, the caption) carry no tooltip | `bar/PillTooltip.tsx` |
+| Agent roster | beside the shape | From two agents: a second small black capsule (the capsule's height, 8 px away) beside the island, level with the docked edge, on the side away from a side-docked edge. Apple's split island: a second activity is a second small shape, so the island itself never moves for it. Its rect is reported as a second hit region. Hidden while the island is carried |
+| Hover expand | the hover capsule, after Show last answer | Open chat (`Maximize2`), the Pill's hover control: opens the chat face. Always offered | `IslandBar.tsx` | `AgentRosterStrip`, `rosterWidthFor` |
+| Tooltips | the dot and every icon control (Talk, Type, Show last answer, Open chat, wake phrase, expand, collapse, close, spoken aloud, the composer's mic, Send and stop, Remove image) | `PillTooltip`: 500 ms, opens from the native forwarded hover (`mouse-moved-window`) as well as DOM hover, closed during a drag (`useBarDragging`), toward the side the island grows. `title` stays as the fallback and steps aside while the tooltip shows. Text buttons (Allow, Don't, the caption) carry no tooltip | `bar/PillTooltip.tsx` |
 
 ### The small bar
 
@@ -77,7 +78,7 @@ The Island carries the Pill's canvas-ui flame border (`BarFlameBorder`) with the
 
 | Rust bar state | Face, nothing open | Face, answer open | Placeholder | Controls in the box |
 |---|---|---|---|---|
-| default | idle (compose if there is a draft, the caret, or a step back from a component) | answer / component | Ask Juno, or Follow up beside an answer | Talk, Send (disabled when empty), Close without sending in compose |
+| default | idle (compose if there is a draft, the caret, or a step back from a component; a draft put away with Escape stays idle) | answer / component | Ask Juno, or Follow up beside an answer | Talk, Send (disabled when empty), Close without sending in compose |
 | dictation_ready | idle | answer / component | as default | as default |
 | shrinking | idle | answer / component | as default | as default |
 | always_listening (wake phrase armed: a resting state) | idle | answer / component | as default | as default |
@@ -107,7 +108,7 @@ Local conditions on top:
 | answer has text and speech | the speaker toggle in the question line reveals the spoken text under the body |
 | answer taller than 400 | the body scrolls inside the shape |
 | a new answer while the island is up | the answer face opens; an answer already there at mount (history) does not |
-| hover over idle | the hover controls; Show last answer brings a settled answer back |
+| hover over idle | the hover controls; Show last answer brings a settled answer back; Open chat opens the chat face |
 | tray Show/Hide Chat | opens the chat face (once there is a turn); again, settles to the capsule |
 | chat face open | stays through every bar state; Escape or its collapse control steps down to the answer, or to the composer with no answer |
 | a picture pasted into the composer | thumbnail row above the text; the compose face is the full box; Send sends text and pictures through `dispatch_query` |
@@ -118,18 +119,21 @@ Local conditions on top:
 
 ## Escape and the close controls
 
-Escape is still the shared one (`useEscapeToIdle`, `barEscape.ts`, the ladder from #797). The island only says what one rung down is:
+Escape is still the shared one (`useEscapeToIdle`, `barEscape.ts`, the ladder from #797). Every press is one rung, and repeated presses always reach the capsule. The island only says what one rung down is:
 
+- Rust busy (a dictation, a spoken turn, a run, a reply being spoken, an error, `escapeIsRusts`): the press is Rust's and the island's faces do not move on it. Rust ends the work and rests (`bar_escape_to_idle`, or the stop-key monitor on its own), so the next press finds the island at rest. Before 2026-10-17 the chat face stepped down on the same press that stopped the work: two rungs in one.
 - chat: Escape or its collapse control steps back to the answer or component, or to compose (caret in it) when there is no answer.
 - component: X or Escape steps back to compose, draft and caret kept.
-- answer: X or Escape settles to idle.
-- compose at rest: Escape (or Close without sending) puts the box away and clears the draft. Rust is told the composer blurred so it leaves its input state; until it does the island stays idle rather than flashing the box back.
-- compose while Juno works: Escape stops the work (Rust's call). The draft is kept.
+- answer: X or Escape settles to idle. The X closes even while the reply is being spoken (it used to do nothing until the voice finished); the speaking state then shows as the small bar.
+- compose: Escape (or Close without sending) puts the box away and **keeps the draft** (Lacy, 2026-10-17: "if there is text in the text box and someone pushes escape we should still go down to the idle state and just keep that text there"). The island is the capsule at rest even with text in the box (`faceFor`'s `dismissed`). Rust's copy of the text is only a mirror, so it is emptied and then told the box blurred, in that order, and Rust leaves its input state. The draft is back, with the caret, when the composer opens again (a click on the capsule, Type, the Dock) or is focused; focusing it hands Rust its copy again, so Cmd+Enter still sends it. A put-away draft does not hold an answer's ring.
+- compose while Juno works: the first press stops the work (Rust's call), the second puts the box away. The draft is kept through both.
+
+Ladder, every face, with or without a draft: chat, then the answer or component, then compose, then idle; dictating or listening, then (stopped) wherever the island was, then on down. Rust's stop-key monitor now ends an open dictation before Settings can take the press (`events/shortcuts.rs`): with Settings focused and something in it holding Escape, every press used to go to Settings and reach nothing, so a dictation could not be stopped with Escape at all (Juno log, 2026-10-17 20:04:59 to 20:05:03, ten presses).
 
 ## The ring
 
 - Runs on the answer and component faces only, once the answer has finished streaming, Rust is not working and no tool waits on Allow.
-- Never runs while the composer has text or the caret.
+- Never runs while the composer has the caret, or text that has not been put away.
 - Twelve seconds. Pauses while the pointer is over the island or anything in it has focus. A press on a control inside cancels it until the pointer leaves, then it starts over.
 - On expiry the island settles to idle.
 
@@ -167,5 +171,9 @@ Committed with the PR under `docs/changelog/media/<PR>/`: one PNG per face from 
 Second pass, also under `docs/changelog/media/818/`: `hover-wake-toggle.png` (`demo=hover&tip=listen&wake=on`), `dot-offline-tooltip.png` (`demo=hover&tip=dot&net=offline`), `roster.png` (`state=default&agents=3`), `composer-pasted-image.png` (`demo=paste`), `chat-face.png` (`demo=chat&hold=chat&pin=frame`) and `answer-chat-answer.mp4` (`scripts/bench-record.sh dynamic demo=chat`: the answer, Show Chat into the conversation, Escape back to the answer).
 
 Tests: `islandModel.test.ts` (face for every state, shapes, placeholder, stop control, ring rule, the turn reducer, the chat size per display and its read-back, chat in every well grows away from the docked edge inside the window, the escape rungs, pasted pictures as a draft, the hover width, the red dot, the roster), `IslandBar.test.tsx` (one composer node through every state and into chat, answer and component faces, Escape ladder including chat, ring, approvals, hover, Rust's real dictation key-up sequence replayed into the follow-up field, a picture pasted and sent alone, the wake toggle, the red dot with its label, the roster at two agents without moving the shape, a tooltip from the forwarded hover), `escapeContract.test.ts` (the Island's chat rung), `notchPosture.test.ts`, `mixed-content-renderer.test.tsx` (`splitHeroContent`).
+
+Third pass (2026-10-17, `fix/island-escape-expand-drag`): Escape reaches the capsule from every face and state, one rung a press, with the draft kept; the hover capsule's Open chat; drag fixes (below). Media under `docs/changelog/media/<PR>/`. Tests: the whole ladder against a stand-in Rust over both routes (the island's own keydown and Rust's monitor), with and without a draft, during a dictation, a spoken reply and a run; the kept draft coming back with Rust's copy; Open chat; the hover capsule held through a drag; the composer draggable by its edge; Rust's dictation-before-Settings order in `escapeContract.test.ts`.
+
+Drag, from the 2026-10-17 `[Drag]` log and the code: the compose face (every state past rest, including the small Listening and Working bar) could not be picked up at all, because the whole composer was `data-no-drag`; now only the text is (`textarea` is in the shared no-drag selector) and the box's padding and controls drag like the Pill's. And the hover capsule could fold to the idle capsule mid-drag on a leave reported as the drag window shrank and moved, shrinking the shape inside a window sized for the hover capsule; it now keeps the look it had at the press until the drop. Seen in the log and not fixed here (shared drag code, every look): a drag that starts late (313 ms and 447 ms from the threshold to the drag window) misses a quick flick, so the window jumps under the cursor and then does not follow.
 
 Not verified here: the real window on hardware, including the larger chat-sized frame through a drag, a drop in every well and a display hop to a display of another size. The bench runs the same components on the fake Tauri layer, so click-through, drag, focus, a real dictation paste and the Rust side of each interaction are for the hardware pass.

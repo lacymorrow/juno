@@ -70,6 +70,7 @@ import {
   THUMB_PX,
   canSend,
   chatSizeInWindow,
+  escapeIsRusts,
   islandEscapeStep,
   rosterShown,
   rosterWidthFor,
@@ -86,7 +87,6 @@ import {
   faceFor,
   isInputState,
   isRecording,
-  isRestingState,
   isWorkingState,
   latestTurn,
   lingerShouldRun,
@@ -330,7 +330,8 @@ export function IslandBar() {
   const [steppedBack, setSteppedBack] = useState<string | null>(null);
   const [composerHeld, setComposerHeld] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
-  // Put away by hand while Rust still holds its input state: stay idle until it lets go.
+  // Put away by hand (Escape, the close control): the capsule, with any draft
+  // kept in the box until the composer is opened again or typed into.
   const [dismissed, setDismissed] = useState(false);
   const [draft, setDraft] = useState("");
   // The whole conversation, grown out of the same shape (the chat face).
@@ -399,14 +400,18 @@ export function IslandBar() {
   const focusComposer = useCallback(() => {
     composer.ref.current?.focus();
   }, [composer.ref]);
-  // Rust's input state is the composer opened on purpose (a click, the type
-  // control, the field itself): put the caret in it.
+  // Rust entering its input state is the composer opened on purpose (a
+  // click, the type control, the Dock): bring a put-away draft back and put
+  // the caret in it. Rust still in its input state just after the box was
+  // put away is only Rust catching up, and the box stays away.
+  const prevBarStateRef = useRef(bar.barState);
   useEffect(() => {
-    if (!isInputState(bar.barState)) {
-      setDismissed(false);
-      return;
-    }
-    if (!dismissedRef.current) focusComposer();
+    const was = prevBarStateRef.current;
+    prevBarStateRef.current = bar.barState;
+    if (!isInputState(bar.barState)) return;
+    if (!isInputState(was)) setDismissed(false);
+    else if (dismissedRef.current) return;
+    focusComposer();
   }, [bar.barState, focusComposer]);
 
   const changeDraft = useCallback((value: string) => {
@@ -435,21 +440,28 @@ export function IslandBar() {
     setHoverHeld(true);
   }, []);
   /**
-   * Put the island away by hand (Escape, the close control). At rest the
-   * draft goes too, which is what putting it away means; while Rust is busy
-   * the press is Rust's to act on and the draft is kept.
+   * Put the island away by hand (Escape, the close control): back to the
+   * capsule, whatever the draft. The draft stays in the box, out of sight,
+   * and is there again when the composer opens or the person starts typing
+   * (Lacy, 2026-10-17). Whether a press of Escape reaches this at all while
+   * Rust is busy is `collapseOneRung`'s call, not this one's: the close
+   * controls always do what they say.
    */
   const putAway = useCallback(() => {
-    const resting = isRestingState(barRef.current.barState) || isInputState(barRef.current.barState);
-    if (!resting) return;
     settle();
     setDismissed(true);
-    if (draftRef.current !== "") changeDraft("");
     composer.ref.current?.blur();
-    // The composer put Rust in its input state; with nothing typed, tell it
-    // the composer blurred so it shrinks to Default.
-    if (isInputState(barRef.current.barState)) void sendInteraction(UI.INTERACTION_TYPES_BLUR);
-  }, [settle, changeDraft, composer.ref]);
+    // The composer put Rust in its input state, and Rust keeps it there while
+    // its copy of the text is non-empty. Empty Rust's copy (only a mirror; the
+    // draft lives here), then say the box blurred, in that order, so Rust
+    // shrinks to Default.
+    if (!isInputState(barRef.current.barState)) return;
+    if (draftRef.current === "") void sendInteraction(UI.INTERACTION_TYPES_BLUR);
+    else
+      void sendInteraction(UI.INTERACTION_TYPES_INPUT_CHANGE, { value: "" }).then(() =>
+        sendInteraction(UI.INTERACTION_TYPES_BLUR),
+      );
+  }, [settle, composer.ref]);
   /** A component's X: step back to the composer, the draft and caret kept. */
   const stepBack = useCallback(() => {
     setSteppedBack(key);
@@ -491,7 +503,8 @@ export function IslandBar() {
     streaming,
     working,
     approvalPending: !!turn.approval,
-    composerEngaged,
+    // A draft that was put away is not a follow-up being written.
+    composerEngaged: composerFocused || (!dismissed && composerEngaged),
   });
   const { progress } = useLinger({
     running: counting && !engaged,
@@ -575,6 +588,10 @@ export function IslandBar() {
    * composer), a component to the composer, anything else to the capsule.
    */
   const collapseOneRung = useCallback(() => {
+    // Rust busy (a dictation, a turn, a reply being spoken): that is the
+    // newest rung, and this press is reported to Rust, which ends it. The
+    // island's own faces wait for the next press, so one press is one rung.
+    if (escapeIsRusts(barRef.current.barState)) return;
     const from = faceRef.current;
     const to = islandEscapeStep(from, { answerShown: hasAnswerRef.current });
     if (from === "chat") leaveChat(to);
@@ -620,6 +637,13 @@ export function IslandBar() {
       openAnswer();
     },
     [openAnswer],
+  );
+  const openChatFromHover = useCallback(
+    (e: ReactMouseEvent) => {
+      e.stopPropagation();
+      openChat();
+    },
+    [openChat],
   );
   const stopKind = stopControl({
     face,
@@ -674,10 +698,20 @@ export function IslandBar() {
     observer.observe(measureEl);
     return () => observer.disconnect();
   }, [measureEl]);
-  const hoverShown = face === "idle" && hovered && !hoverHeld;
+  // While the island is carried the capsule keeps the look it had at the
+  // press. The drag window is that shape (`dragLayout`), so a leave reported
+  // as the window shrinks and moves under the cursor must not fold the hover
+  // controls away mid-drag: the shape would shrink inside a window that
+  // cannot follow it, and the spot pressed would slide off the cursor.
+  const dragging = useBarDragging();
+  const hoverLive = face === "idle" && hovered && !hoverHeld;
+  const hoverAtPressRef = useRef(hoverLive);
+  if (!dragging) hoverAtPressRef.current = hoverLive;
+  const hoverShown = dragging ? hoverAtPressRef.current : hoverLive;
   const layout = frame.layout;
   const growUp = layout.growUp;
-  const hoverButtons = 2 + (hasTurn ? 1 : 0) + (wake.configured ? 1 : 0);
+  // Talk, Type and Open chat always; Show last answer once there is a turn.
+  const hoverButtons = 3 + (hasTurn ? 1 : 0) + (wake.configured ? 1 : 0);
   const shape = shapeFor(face, {
     hovered: hoverShown,
     hoverButtons,
@@ -703,7 +737,6 @@ export function IslandBar() {
   // from a side-docked edge, level with the docked edge. Apple's split island:
   // a second activity is a second small shape, never a change to the first.
   // Out of the way while the island is carried (the drag window is the shape).
-  const dragging = useBarDragging();
   const rosterVisible = rosterShown(agentSessions.length) && !dragging;
   const rosterW = rosterWidthFor(agentSessions.length);
   const rosterOnLeft = layout.anchorX === "end";
@@ -767,7 +800,8 @@ export function IslandBar() {
     spokenText: bar.spokenText,
     currentError: bar.currentError,
     working,
-    answerShown: face === "answer" || face === "component" || face === "chat",
+    // An empty chat (opened from the hover capsule before any turn) asks, it does not follow up.
+    answerShown: face === "answer" || face === "component" || (face === "chat" && hasTurn),
     runningTool: turn.runningTool,
     drivingLabel: isDriving && driving ? drivingLabel(driving) : null,
   });
@@ -809,6 +843,23 @@ export function IslandBar() {
                 <MessageSquare className="size-3.5" />
               </button>,
             )}
+          {/* The Pill's hover expand: the whole conversation, always offered,
+              so there is a way into chat from the capsule even before a turn. */}
+          {tip(
+            "chat",
+            "Open chat",
+            <button
+              type="button"
+              {...named("chat")}
+              onClick={openChatFromHover}
+              aria-label="Open chat"
+              title="Open chat"
+              data-testid="island-hover-expand"
+              className={control("chat")}
+            >
+              <Maximize2 className="size-3.5" />
+            </button>,
+          )}
           {/* The wake phrase, when there is one: pause an all-day microphone
               for a while without taking the trigger away in Settings. */}
           {wake.configured &&
@@ -1030,7 +1081,6 @@ export function IslandBar() {
     <motion.div
       data-testid="island-composer"
       data-compact={compact ? "true" : undefined}
-      data-no-drag
       aria-hidden={idle ? true : undefined}
       initial={false}
       animate={{ opacity: idle ? 0 : 1 }}
@@ -1105,6 +1155,11 @@ export function IslandBar() {
               setComposerFocused(true);
               setDismissed(false);
               void sendInteraction(UI.INTERACTION_TYPES_FOCUS, { isFocused: true });
+              // A draft kept through a put-away: Rust's mirror was emptied
+              // then, so Cmd+Enter (which sends Rust's copy) needs it back.
+              if (draftRef.current !== "") {
+                void sendInteraction(UI.INTERACTION_TYPES_INPUT_CHANGE, { value: draftRef.current });
+              }
             }}
             onBlur={() => {
               setComposerFocused(false);
@@ -1112,7 +1167,7 @@ export function IslandBar() {
               if (typeof document.hasFocus === "function" && !document.hasFocus()) return;
               if (!draftRef.current.trim()) void sendInteraction(UI.INTERACTION_TYPES_BLUR);
             }}
-            aria-label={beside ? "Follow up" : "Ask Juno"}
+            aria-label={beside && (face !== "chat" || hasTurn) ? "Follow up" : "Ask Juno"}
             placeholder={placeholder.text}
             className={cn(
               "block w-full resize-none border-none bg-transparent outline-none placeholder:text-transparent",

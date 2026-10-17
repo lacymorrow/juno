@@ -27,6 +27,29 @@ const { invoke, emit, listenHandlers, eventHandlers, chat, focusHandlers, setFoc
   },
 }));
 
+// The drag flag, as `useBarSnapWells` reports it; the rest of the module is real.
+const drag = vi.hoisted(() => ({ on: false, listeners: new Set<() => void>() }));
+vi.mock("@/hooks/useBarSnapWells", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/useBarSnapWells")>();
+  const { useSyncExternalStore } = await import("react");
+  return {
+    ...actual,
+    useBarDragging: () =>
+      useSyncExternalStore(
+        (fn: () => void) => {
+          drag.listeners.add(fn);
+          return () => drag.listeners.delete(fn);
+        },
+        () => drag.on,
+      ),
+  };
+});
+const setDragging = (on: boolean) =>
+  act(() => {
+    drag.on = on;
+    drag.listeners.forEach((fn) => fn());
+  });
+
 vi.mock("@/hooks/useAgentSessions", () => ({
   useAgentSessions: () => ({ sessions: agents.sessions, focusSession: agents.focusSession, cancelSession: vi.fn() }),
 }));
@@ -215,6 +238,7 @@ beforeEach(() => {
   chat.stop.mockClear();
   focusHandlers.length = 0;
   setFocus.mockClear();
+  drag.on = false;
 });
 
 afterEach(() => {
@@ -888,5 +912,340 @@ describe("IslandBar: chat face", () => {
     view.rerender(<IslandBar />);
     expect(face()).toBe("chat");
     expect(screen.getByTestId("chat-history")).toHaveTextContent("Rain.");
+  });
+});
+
+// ── The whole ladder, against a stand-in Rust ───────────────────────
+
+/**
+ * What Rust does with each interaction the island reports, reduced to the
+ * bar state it lands on (`ui_commands.rs`): Escape ends whatever is running
+ * and rests (`bar_escape_to_idle`); a click or focus at rest opens input; a
+ * blur leaves input only with its copy of the text empty.
+ */
+const rust = { state: UI.BAR_STATES_DEFAULT as string, mirror: "", pending: false };
+
+function standInRust(start: string = UI.BAR_STATES_DEFAULT) {
+  rust.state = start;
+  rust.mirror = "";
+  rust.pending = false;
+  invoke.mockImplementation((cmd: unknown, args: unknown) => {
+    if (cmd === "ui_handle_interaction") {
+      const { interaction_type: type, data } = (args as {
+        interaction: { interaction_type: string; data?: { value?: string } | null };
+      }).interaction;
+      const to = (state: string) => {
+        rust.state = state;
+        rust.pending = true;
+      };
+      if (type === UI.INTERACTION_TYPES_ESCAPE) {
+        rust.mirror = "";
+        to(UI.BAR_STATES_DEFAULT);
+      } else if (type === UI.INTERACTION_TYPES_INPUT_CHANGE) {
+        rust.mirror = data?.value ?? "";
+      } else if (type === UI.INTERACTION_TYPES_BLUR) {
+        if (rust.state === UI.BAR_STATES_INPUT && !rust.mirror.trim()) to(UI.BAR_STATES_DEFAULT);
+      } else if (type === UI.INTERACTION_TYPES_CLICK || type === UI.INTERACTION_TYPES_FOCUS) {
+        if (rust.state === UI.BAR_STATES_DEFAULT) to(UI.BAR_STATES_INPUT);
+      }
+    }
+    return Promise.resolve(typeof cmd === "string" && cmd in backend.answers ? backend.answers[cmd] : true);
+  });
+}
+
+/** Let the stand-in Rust's answers reach the island, as `bar-state-update` would. */
+async function rustAnswers() {
+  for (let i = 0; i < 4; i += 1) {
+    await act(async () => {});
+    if (rust.pending) {
+      rust.pending = false;
+      await send(rust.state);
+    }
+  }
+}
+
+/**
+ * One press of Escape, a beat after the last. `dom`: the island has the
+ * keyboard. `monitor`: another app does, and Rust's passive monitor saw it:
+ * with something running Rust stops it on its own (`stops`) and the island
+ * hears nothing but the new state; with nothing running it sends
+ * `bar-dismiss-pane`.
+ */
+async function escape(route: "dom" | "monitor" = "dom", { stops = false } = {}) {
+  await act(async () => {
+    vi.advanceTimersByTime(2000);
+  });
+  if (route === "dom") {
+    fireEvent.keyDown(document, { key: "Escape" });
+  } else if (stops) {
+    rust.state = UI.BAR_STATES_DEFAULT;
+    rust.pending = true;
+  } else {
+    await act(async () => {
+      eventHandlers.get(EVENTS.BAR_DISMISS_PANE)?.(null);
+    });
+  }
+  await rustAnswers();
+}
+
+describe("IslandBar: Escape walks all the way down to the capsule", () => {
+  it.each(["dom", "monitor"] as const)(
+    "chat, then the answer, then the capsule, one rung a press (%s)",
+    async (route) => {
+      standInRust();
+      renderWithAnswer();
+      fireEvent.click(screen.getByRole("button", { name: "Show the conversation" }));
+      expect(face()).toBe("chat");
+      await escape(route);
+      expect(face()).toBe("answer");
+      await escape(route);
+      expect(face()).toBe("idle");
+    },
+  );
+
+  it.each(["dom", "monitor"] as const)(
+    "a reply being spoken comes off first, then the chat, the answer and the capsule (%s)",
+    async (route) => {
+      standInRust();
+      renderWithAnswer();
+      fireEvent.click(screen.getByRole("button", { name: "Show the conversation" }));
+      await send(UI.BAR_STATES_SPEAKING);
+      rust.state = UI.BAR_STATES_SPEAKING;
+      await escape(route, { stops: true });
+      // The voice stopped; nothing of the island's moved on the same press.
+      expect(rust.state).toBe(UI.BAR_STATES_DEFAULT);
+      expect(face()).toBe("chat");
+      await escape(route);
+      expect(face()).toBe("answer");
+      await escape(route);
+      expect(face()).toBe("idle");
+    },
+  );
+
+  it("a component steps back to the composer, then to the capsule, the draft kept", async () => {
+    standInRust();
+    renderWithAnswer(COMPONENT_ANSWER);
+    await escape();
+    expect(face()).toBe("compose");
+    fireEvent.change(composer(), { target: { value: "also cc Sam" } });
+    await escape();
+    expect(face()).toBe("idle");
+    expect(composer().value).toBe("also cc Sam");
+  });
+
+  it.each(["dom", "monitor"] as const)("a composer with a draft goes to the capsule and keeps the text (%s)", async (route) => {
+    standInRust();
+    render(<IslandBar />);
+    fireEvent.pointerEnter(stage());
+    fireEvent.click(screen.getByRole("button", { name: "Type to Juno" }));
+    await rustAnswers();
+    expect(face()).toBe("compose");
+    expect(document.activeElement).toBe(composer());
+    fireEvent.change(composer(), { target: { value: "remind me at 5" } });
+    expect(rust.mirror).toBe("remind me at 5");
+
+    await escape(route);
+    expect(face()).toBe("idle");
+    expect(rust.state).toBe(UI.BAR_STATES_DEFAULT);
+    expect(composer().value).toBe("remind me at 5");
+    expect(document.activeElement).not.toBe(composer());
+    // Rust's copy is only a mirror: emptied so it could leave input.
+    expect(rust.mirror).toBe("");
+  });
+
+  it("the kept draft is there again when the composer opens, and Rust's copy with it", async () => {
+    standInRust();
+    render(<IslandBar />);
+    act(() => composer().focus());
+    await rustAnswers();
+    fireEvent.change(composer(), { target: { value: "draft one" } });
+    await escape();
+    expect(face()).toBe("idle");
+
+    // Opening it from the capsule: the hover's Type control.
+    fireEvent.pointerEnter(stage());
+    fireEvent.click(screen.getByRole("button", { name: "Type to Juno" }));
+    await rustAnswers();
+    expect(face()).toBe("compose");
+    expect(composer().value).toBe("draft one");
+    expect(document.activeElement).toBe(composer());
+    expect(rust.mirror).toBe("draft one");
+    // And it goes away again on the next press, still kept.
+    await escape();
+    expect(face()).toBe("idle");
+    expect(composer().value).toBe("draft one");
+  });
+
+  it("a put-away draft does not hold an answer open: the ring still runs", async () => {
+    standInRust();
+    const view = render(<IslandBar />);
+    act(() => composer().focus());
+    await rustAnswers();
+    fireEvent.change(composer(), { target: { value: "later" } });
+    await escape();
+    chat.messages = ANSWER;
+    view.rerender(<IslandBar />);
+    expect(face()).toBe("answer");
+    await act(async () => {
+      vi.advanceTimersByTime(LINGER_MS + 100);
+    });
+    expect(face()).toBe("idle");
+    expect(composer().value).toBe("later");
+  });
+
+  it("while Juno works: the work comes off first, then the composer, the draft kept throughout", async () => {
+    standInRust();
+    render(<IslandBar />);
+    await send(UI.BAR_STATES_LOADING, { lastSubmittedValue: "Go" });
+    fireEvent.change(composer(), { target: { value: "next" } });
+    await escape();
+    expect(sentInteraction(UI.INTERACTION_TYPES_ESCAPE)).toBe(true);
+    expect(face()).toBe("compose");
+    expect(composer().value).toBe("next");
+    await escape();
+    expect(face()).toBe("idle");
+    expect(composer().value).toBe("next");
+  });
+
+  it.each(["dom", "monitor"] as const)("a dictation is stopped by Escape, and the next press finds the capsule (%s)", async (route) => {
+    standInRust();
+    render(<IslandBar />);
+    await send(UI.BAR_STATES_DICTATING, { isDictationMode: true, audioLevel: 0.3 });
+    rust.state = UI.BAR_STATES_DICTATING;
+    expect(face()).toBe("compose");
+    invoke.mockClear();
+    await escape(route, { stops: true });
+    if (route === "dom") expect(sentInteraction(UI.INTERACTION_TYPES_ESCAPE)).toBe(true);
+    expect(face()).toBe("idle");
+  });
+
+  it("a dictation over an open answer: the dictation first, then the answer", async () => {
+    standInRust();
+    renderWithAnswer();
+    await send(UI.BAR_STATES_DICTATING, { isDictationMode: true });
+    rust.state = UI.BAR_STATES_DICTATING;
+    expect(face()).toBe("answer");
+    await escape("dom");
+    expect(rust.state).toBe(UI.BAR_STATES_DEFAULT);
+    expect(face()).toBe("answer");
+    await escape("dom");
+    expect(face()).toBe("idle");
+  });
+
+  it("a dictation with a draft in the box: stop, then the capsule, the draft kept", async () => {
+    standInRust();
+    render(<IslandBar />);
+    act(() => composer().focus());
+    await rustAnswers();
+    fireEvent.change(composer(), { target: { value: "Dear Maya," } });
+    act(() => composer().blur());
+    await send(UI.BAR_STATES_DICTATING, { isDictationMode: true });
+    rust.state = UI.BAR_STATES_DICTATING;
+    await escape("monitor", { stops: true });
+    expect(face()).toBe("compose");
+    await escape("monitor");
+    expect(face()).toBe("idle");
+    expect(composer().value).toBe("Dear Maya,");
+  });
+
+  it("the answer's close control closes even while the reply is being spoken", async () => {
+    standInRust();
+    renderWithAnswer();
+    await send(UI.BAR_STATES_SPEAKING);
+    expect(face()).toBe("answer");
+    // It used to do nothing until the voice finished.
+    fireEvent.click(screen.getByTestId("island-linger"));
+    expect(face()).toBe("compose");
+    expect(placeholder()).toHaveTextContent("Speaking…");
+    await send(UI.BAR_STATES_DEFAULT);
+    expect(face()).toBe("idle");
+  });
+});
+
+describe("IslandBar: Open chat from the hover capsule", () => {
+  it("the hover capsule carries the Pill's expand control, which opens the chat face", async () => {
+    standInRust();
+    renderWithAnswer();
+    await escape();
+    fireEvent.pointerEnter(stage());
+    expect(face()).toBe("hover");
+    const expand = screen.getByRole("button", { name: "Open chat" });
+    expect(screen.getByTestId("island-hover-expand")).toBe(expand);
+    invoke.mockClear();
+    fireEvent.click(expand);
+    expect(face()).toBe("chat");
+    // Not also a click on the capsule, which would open the composer.
+    expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(false);
+    await escape();
+    expect(face()).toBe("answer");
+    await escape();
+    expect(face()).toBe("idle");
+  });
+
+  it("is offered before there is a turn, and the hover capsule makes room for it", async () => {
+    standInRust();
+    render(<IslandBar />);
+    fireEvent.pointerEnter(stage());
+    expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
+    const shapeHit = (frameReport.mock.calls[frameReport.mock.calls.length - 1][1] as Array<{ width: number }>)[0];
+    // Talk, Type, Open chat.
+    expect(shapeHit.width).toBe(132);
+    fireEvent.click(screen.getByRole("button", { name: "Open chat" }));
+    expect(face()).toBe("chat");
+    // Nothing to follow up on yet.
+    expect(composer()).toHaveAccessibleName("Ask Juno");
+    expect(placeholder()).toHaveTextContent("Ask Juno");
+    await escape();
+    expect(face()).toBe("compose");
+    await escape();
+    expect(face()).toBe("idle");
+  });
+
+  it("opens its tooltip from the native forwarded hover", async () => {
+    render(<IslandBar />);
+    fireEvent.pointerEnter(stage());
+    const expand = screen.getByRole("button", { name: "Open chat" });
+    Object.defineProperty(document, "elementFromPoint", { value: vi.fn(() => expand), configurable: true });
+    await act(async () => {
+      eventHandlers.get(EVENTS.SYSTEM_MOUSE_MOVED_WINDOW)?.({ x: 5, y: 5 });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(PILL_TOOLTIP_DELAY_MS + 50);
+    });
+    expect(screen.getAllByText("Open chat").length).toBeGreaterThan(0);
+  });
+});
+
+describe("IslandBar: dragging", () => {
+  it("keeps the hover capsule while it is carried, even through a leave", async () => {
+    render(<IslandBar />);
+    fireEvent.pointerEnter(stage());
+    expect(face()).toBe("hover");
+    const widthBefore = (frameReport.mock.calls[frameReport.mock.calls.length - 1][0] as { width: number }).width;
+    setDragging(true);
+    await leaveVerified(stage());
+    expect(face()).toBe("hover");
+    expect((frameReport.mock.calls[frameReport.mock.calls.length - 1][0] as { width: number }).width).toBe(widthBefore);
+    // Dropped away from the cursor: the leave is believed again.
+    setDragging(false);
+    await leaveVerified(stage());
+    expect(face()).toBe("idle");
+  });
+
+  it("a capsule carried without its hover controls does not grow them mid-drag", async () => {
+    render(<IslandBar />);
+    setDragging(true);
+    fireEvent.pointerEnter(stage());
+    expect(face()).toBe("idle");
+    setDragging(false);
+    expect(face()).toBe("hover");
+  });
+
+  it("can be picked up by the composer's edge, never by its text", async () => {
+    render(<IslandBar />);
+    await send(UI.BAR_STATES_LOADING, { lastSubmittedValue: "Go" });
+    expect(face()).toBe("compose");
+    expect(screen.getByTestId("island-composer").closest("[data-no-drag]")).toBeNull();
+    expect(composer().matches("textarea")).toBe(true);
   });
 });
