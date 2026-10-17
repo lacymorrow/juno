@@ -53,7 +53,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::agent::providers::types::{Price, Provider, Rates};
 
@@ -150,7 +150,11 @@ impl TokenUsage {
 }
 
 /// One model request's cost. Serialized as one NDJSON line.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+///
+/// `Deserialize` as well as `Serialize`: the CSV export reads the log back,
+/// so the record is its own parser and the two can never disagree about a
+/// field name.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CostRecord {
     /// RFC 3339, UTC, milliseconds.
     pub timestamp: String,
