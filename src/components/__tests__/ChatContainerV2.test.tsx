@@ -381,6 +381,59 @@ describe("screenshots outside development", () => {
   });
 });
 
+/**
+ * The photo the person attached, in their own bubble.
+ *
+ * The bug this guards (LAC-4183) was a silent drop: the image travelled all the
+ * way to Rust and only one provider ever used it, so a pasted photo left no
+ * trace anywhere a person could see. The thumbnail is how they know it went.
+ * It renders from `msg.images`, which nothing else on the bubble reads, so a
+ * refactor that drops the field puts the silence back without failing a thing.
+ */
+describe("the person's own attachments", () => {
+  const PIXEL = "data:image/png;base64,aGVsbG8=";
+
+  beforeEach(() => {
+    vi.mocked(isDevelopment).mockResolvedValue(false);
+  });
+
+  it("shows the attached photo alongside what they typed", async () => {
+    renderChat([
+      { ...user("What is this?", 1_700_000_000_000), images: [PIXEL] },
+    ]);
+
+    const image = await waitFor(() =>
+      screen.getByRole("img", { name: "Attached image" }),
+    );
+    expect(image).toHaveAttribute("src", PIXEL);
+    // The text is still theirs to read; the photo is added to it, not swapped in.
+    expect(screen.getByText("What is this?")).toBeInTheDocument();
+  });
+
+  it("shows every attachment, in the order they attached them", async () => {
+    // Rendering the first and dropping the rest is the other way this goes wrong.
+    const second = "data:image/png;base64,d29ybGQ=";
+    renderChat([
+      { ...user("Compare these two", 1_700_000_000_000), images: [PIXEL, second] },
+    ]);
+
+    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(2));
+    expect(screen.getAllByRole("img").map((img) => img.getAttribute("src"))).toEqual([
+      PIXEL,
+      second,
+    ]);
+  });
+
+  it("leaves a plain typed message with no image in it", async () => {
+    renderChat([user("What is the capital of Spain?", 1_700_000_000_000)]);
+
+    await waitFor(() => {
+      expect(screen.getByText("What is the capital of Spain?")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+});
+
 describe("tool rows in development", () => {
   beforeEach(() => {
     vi.mocked(isDevelopment).mockResolvedValue(true);
