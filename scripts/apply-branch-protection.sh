@@ -9,8 +9,17 @@
 # .github/rulesets/main.json, this applies it, and `--check` fails when the
 # live one has drifted away from the file.
 #
-#   scripts/apply-branch-protection.sh          create or update, then verify
-#   scripts/apply-branch-protection.sh --check  verify only, non-zero on drift
+#   scripts/apply-branch-protection.sh --credentials   deploy key + secret only
+#   scripts/apply-branch-protection.sh                 all of it, then verify
+#   scripts/apply-branch-protection.sh --check         verify only, non-zero on drift
+#
+# **Run --credentials BEFORE the pull request that introduces this merges.**
+# For a push, GitHub reads the workflow file as it exists in the pushed commit,
+# so the merge commit already carries the `workflow_run` version of
+# release-every-merge.yml. The new release path therefore goes live the moment
+# that merge lands, and the very first run reads RELEASE_SSH_KEY. Creating the
+# credential afterwards is a race against a release. Creating it early is inert:
+# a deploy key nothing uses and a secret nothing reads until the workflow exists.
 #
 # Needs gh (authenticated, admin on the repo), jq and ssh-keygen.
 #
@@ -50,51 +59,72 @@ check() {
   return 1
 }
 
-if [ "${1:-apply}" = "--check" ]; then
-  check
-  exit $?
-fi
-
 # A required check that never reports blocks every merge forever, and renaming
 # a job in ci.yml is the easy way to cause it. GitHub matches these by string,
 # so assert each one is still a job name before handing it over.
-while read -r context; do
-  grep -Fq "name: $context" "$here/.github/workflows/ci.yml" ||
-    {
-      echo "Required check '$context' is not a job name in ci.yml. Fix one or the other first." >&2
-      exit 1
-    }
-done < <(jq -r '.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' "$spec")
+assert_contexts() {
+  while read -r context; do
+    grep -Fq "name: $context" "$here/.github/workflows/ci.yml" ||
+      {
+        echo "Required check '$context' is not a job name in ci.yml. Fix one or the other first." >&2
+        return 1
+      }
+  done < <(jq -r '.rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context' "$spec")
+}
 
 # The bypass actor. Required checks gate pushes as well as merges, and shipx
 # pushes the `release:` bump straight to main, so without a credential that can
-# bypass, the first merge after this runs would stop the release cadence dead.
-if gh api "repos/$repo/keys" --jq '.[].title' | grep -Fqx "$key_title"; then
-  echo "Deploy key '$key_title' is already present."
-  gh secret list --repo "$repo" | awk '{print $1}' | grep -Fqx "$secret" ||
-    {
-      echo "The deploy key exists but the $secret secret does not, so the release workflow cannot use it." >&2
-      echo "Delete the key titled '$key_title' and re-run to mint a fresh pair." >&2
-      exit 1
-    }
-else
+# bypass, the first merge after the ruleset lands would stop the release
+# cadence dead. Idempotent, and safe to run long before the ruleset exists.
+ensure_credential() {
+  if gh api "repos/$repo/keys" --jq '.[].title' | grep -Fqx "$key_title"; then
+    echo "Deploy key '$key_title' is already present."
+    gh secret list --repo "$repo" | awk '{print $1}' | grep -Fqx "$secret" ||
+      {
+        echo "The deploy key exists but the $secret secret does not, so the release workflow cannot use it." >&2
+        echo "Delete the key titled '$key_title' and re-run to mint a fresh pair." >&2
+        return 1
+      }
+    echo "The $secret secret is present."
+    return 0
+  fi
+
+  local tmp
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT
+  trap 'rm -rf "$tmp"' RETURN
   ssh-keygen -t ed25519 -N '' -C "$key_title" -f "$tmp/key" -q
   gh api -X POST "repos/$repo/keys" \
     -f title="$key_title" -f key="$(cat "$tmp/key.pub")" -F read_only=false \
     --jq '"Added deploy key \(.id)."'
   gh secret set "$secret" --repo "$repo" <"$tmp/key"
   echo "Stored its private half as the $secret secret."
-  rm -rf "$tmp"
-  trap - EXIT
-fi
+}
 
-id="$(live_id)"
-if [ -n "$id" ]; then
-  gh api -X PUT "repos/$repo/rulesets/$id" --input "$spec" --jq '"Updated ruleset \(.id)."'
-else
-  gh api -X POST "repos/$repo/rulesets" --input "$spec" --jq '"Created ruleset \(.id)."'
-fi
+apply_ruleset() {
+  local id
+  id="$(live_id)"
+  if [ -n "$id" ]; then
+    gh api -X PUT "repos/$repo/rulesets/$id" --input "$spec" --jq '"Updated ruleset \(.id)."'
+  else
+    gh api -X POST "repos/$repo/rulesets" --input "$spec" --jq '"Created ruleset \(.id)."'
+  fi
+}
 
-check
+case "${1:-apply}" in
+--check)
+  check
+  ;;
+--credentials)
+  ensure_credential
+  ;;
+apply)
+  assert_contexts
+  ensure_credential
+  apply_ruleset
+  check
+  ;;
+*)
+  echo "usage: $(basename "$0") [--credentials | --check]" >&2
+  exit 2
+  ;;
+esac

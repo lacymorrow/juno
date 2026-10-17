@@ -4,9 +4,29 @@
 applied and verified by `scripts/apply-branch-protection.sh`.
 
 ```bash
-scripts/apply-branch-protection.sh          # create or update, then verify
-scripts/apply-branch-protection.sh --check  # verify only, non-zero on drift
+scripts/apply-branch-protection.sh --credentials  # deploy key + secret only
+scripts/apply-branch-protection.sh                # all of it, then verify
+scripts/apply-branch-protection.sh --check        # verify only, non-zero on drift
 ```
+
+## Order of operations, and the one step that cannot move
+
+1. `--credentials`, **before** the pull request that introduces any of this merges.
+2. Merge.
+3. The full apply, which creates the ruleset.
+4. `--check`.
+
+Step 1 is early for a reason that is easy to get wrong. For a push, GitHub reads
+the workflow file **as it exists in the pushed commit**, so the merge commit
+already carries the `workflow_run` version of `release-every-merge.yml`. The new
+release path is therefore live the instant that merge lands, and its very first
+run reads `RELEASE_SSH_KEY`. Creating the credential after the merge is a race
+against a release. Creating it before is inert: a deploy key nothing uses and a
+secret nothing reads until the workflow that wants it exists.
+
+Step 3 is late for the mirror-image reason. Applying the ruleset before the
+merge would block that merge, because the workflow being replaced still pushes
+with `GITHUB_TOKEN` and nothing has granted that a bypass.
 
 ## What it requires
 
