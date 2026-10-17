@@ -64,6 +64,7 @@ pub mod startup_timing; // [Startup] log lines: milliseconds to each launch mile
 pub mod startup_windows; // Which windows are built at launch, in what order, and the rest after
 pub mod state;
 pub mod state_management; // Application state management, initialization, and monitoring
+pub mod task_timing; // [TaskTiming]/[StepTiming] log lines: how many steps a task took, and where the time went
 pub mod testing; // Test harness and mock implementations for headless integration tests
 pub mod tools;
 pub mod trash; // Deleting is recoverable: the shell session deletes to the Trash
