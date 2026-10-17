@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.213] - 2026-10-17
+
+### Fixed
+
+- **island:** Escape walks down to the capsule and keeps the draft; Open chat on hover; drag fixes (#831) (620908d4)
+
 ## [0.8.212] - 2026-10-17
 
 ### Fixed
@@ -1494,7 +1500,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.212...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.213...HEAD
+[0.8.213]: https://github.com/lacymorrow/juno/compare/cua-v0.8.212...v0.8.213
 [0.8.212]: https://github.com/lacymorrow/juno/compare/cua-v0.8.211...v0.8.212
 [0.8.210]: https://github.com/lacymorrow/juno/compare/cua-v0.8.209...v0.8.210
 [0.8.209]: https://github.com/lacymorrow/juno/compare/cua-v0.8.208...v0.8.209
