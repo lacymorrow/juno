@@ -685,6 +685,9 @@ impl HeadlessRuntime {
                     // HTTP transport spawns no process; the spawn approval gate
                     // does not apply, so no pre-approval is granted here.
                     approved: false,
+                    headers: std::collections::HashMap::new(),
+                    oauth: false,
+                    blocked_tools: Vec::new(),
                 };
 
                 let state = self.app_handle.state::<AppState>();

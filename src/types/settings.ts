@@ -75,6 +75,12 @@ export interface MCPServerConfig {
   auto_start: boolean;
   timeout_seconds: number;
   max_retries: number;
+  /** Extra HTTP headers; a `keychain:{account}` value resolves from the macOS Keychain. */
+  headers?: Record<string, string>;
+  /** Authenticates with MCP OAuth; tokens live in the Keychain. */
+  oauth?: boolean;
+  /** Tools never registered from this server, by their unprefixed names. */
+  blocked_tools?: string[];
 }
 
 export interface MCPServerStatus {
