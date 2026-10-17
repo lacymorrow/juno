@@ -2317,6 +2317,7 @@ mod tests {
             turns_waiting: AtomicUsize::new(0),
             turn_wanted: Notify::new(),
             live_effort: std::sync::Mutex::new("high".to_string()),
+            model: "opus".to_string(),
         })
     }
 
@@ -2715,6 +2716,7 @@ mod tests {
             turns_waiting: AtomicUsize::new(0),
             turn_wanted: Notify::new(),
             live_effort: std::sync::Mutex::new("high".to_string()),
+            model: "opus".to_string(),
         };
         // Same effort as the process was born with: nothing is written.
         align_effort(&session, "high");
