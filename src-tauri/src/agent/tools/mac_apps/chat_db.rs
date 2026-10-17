@@ -9,7 +9,7 @@
 //! Newer rows keep the text inside `attributedBody`, an archived
 //! `NSAttributedString` in Apple's old typedstream format, with `text` null.
 //! [`decode_attributed_body`] pulls the string out; it is pure and tested on a
-//! blob built by hand.
+//! blob built by hand and on two archives macOS itself wrote.
 //!
 //! SQL here is constant. The only values ever written into a query are
 //! integers this file produced (row ids, a timestamp), never anything a person
@@ -340,6 +340,56 @@ mod tests {
         ]);
         out.extend_from_slice(b"NSDictionary");
         out
+    }
+
+    /// Two archives macOS itself wrote: `NSArchiver` over an
+    /// `NSMutableAttributedString` carrying Messages' own
+    /// `__kIMMessagePartAttributeName`, which is the shape in `chat.db`.
+    /// Built on macOS 26.6.2 (`clang -framework Foundation`), so the class
+    /// chain, the `+` type byte and the length encoding are Apple's, not
+    /// this file's idea of them.
+    const REAL_SHORT: &str = concat!(
+        "040B73747265616D747970656481E803840140848484194E534D757461626C6541747472",
+        "696275746564537472696E67008484124E5341747472696275746564537472696E670084",
+        "84084E534F626A6563740085928484840F4E534D757461626C65537472696E6701848408",
+        "4E53537472696E67019584012B1C49276D2072756E6E696E672074656E206D696E757465",
+        "73206C6174658684026949011C928484840C4E5344696374696F6E617279009584016901",
+        "928498981D5F5F6B494D4D657373616765506172744174747269627574654E616D658692",
+        "848484084E534E756D626572008484074E5356616C7565009584012A849B9B00868686",
+    );
+    const REAL_LONG: &str = concat!(
+        "040B73747265616D747970656481E803840140848484194E534D757461626C6541747472",
+        "696275746564537472696E67008484124E5341747472696275746564537472696E670084",
+        "84084E534F626A6563740085928484840F4E534D757461626C65537472696E6701848408",
+        "4E53537472696E67019584012B81C8006C6F6E67206D6573736167652070616464696E67",
+        "206C6F6E67206D6573736167652070616464696E67206C6F6E67206D6573736167652070",
+        "616464696E67206C6F6E67206D6573736167652070616464696E67206C6F6E67206D6573",
+        "736167652070616464696E67206C6F6E67206D6573736167652070616464696E67206C6F",
+        "6E67206D6573736167652070616464696E67206C6F6E67206D6573736167652070616464",
+        "696E67206C6F6E67206D6573736167652070616464696E67206C6F6E67206D6573736167",
+        "86840269490181C800928484840C4E5344696374696F6E61727900958401690192849898",
+        "1D5F5F6B494D4D657373616765506172744174747269627574654E616D65869284848408",
+        "4E534E756D626572008484074E5356616C7565009584012A849B9B00868686",
+    );
+
+    #[test]
+    fn an_archive_macos_wrote_reads_the_same_as_the_hand_built_one() {
+        let short = from_hex(REAL_SHORT).expect("hex");
+        assert_eq!(
+            decode_attributed_body(&short).as_deref(),
+            Some("I'm running ten minutes late")
+        );
+
+        // Past 127 bytes the length is 0x81 and two bytes, little endian:
+        // 200 is `81 C8 00`. Read big endian it would be 51,200 and the body
+        // would come back empty, which is the quiet way this breaks.
+        let long = from_hex(REAL_LONG).expect("hex");
+        let expected: String = "long message padding "
+            .repeat(10)
+            .chars()
+            .take(200)
+            .collect();
+        assert_eq!(decode_attributed_body(&long), Some(expected));
     }
 
     #[test]

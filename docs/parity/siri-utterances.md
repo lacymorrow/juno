@@ -4,6 +4,16 @@ One row per thing a person says. Plan: `docs/plans/siri-parity.md`. A row is gre
 
 Tiers: 0 is a local intent (no model), 1 is a typed tool the model calls, 2 is computer use.
 
+## Walking the list
+
+`scripts/juno-build.sh` installs the branch build. Hold Fn+Control, say the row, and grant whatever macOS asks for in the moment: the ask is part of the row.
+
+- First audio: `grep TurnTiming ~/Library/Logs/Juno/juno-$(date +%F).log | tail -1`, the `first_audio=` field, milliseconds from key release.
+- Recording: one clip per row in `docs/changelog/media/<PR>/`, named after the row.
+- The Messages read rows need Full Disk Access. Without it the row should say so in one sentence, not come back empty; that is itself a row worth recording.
+
+What the Mac is needed for is the permission dialogs, the timings and the recordings. Everything checkable without it was checked in #814: the Music search areas and every Mail, Notes and Messages term against the installed dictionaries, the `attributedBody` decoder against archives macOS wrote, and the Juno Focus shortcut's signature and bundling.
+
 ## Reminders, Calendar, Contacts (slice 1, LAC-4233)
 
 | utterance | Siri on Mac | Juno tier | status | first-audio ms | recording |
