@@ -681,7 +681,9 @@ describe("a well the other display does not have", () => {
 
   it("gives the 5K five columns and the laptop three", () => {
     const columns = (i: number) =>
-      [...new Set(wells.filter((w) => w.monitorIndex === i).map((w) => w.fx))].sort();
+      [...new Set(wells.filter((w) => w.monitorIndex === i).map((w) => w.fx))].sort(
+        (a, b) => a - b,
+      );
     expect(columns(0)).toEqual([0, 0.25, 0.5, 0.75, 1]);
     expect(columns(1)).toEqual([0, 0.5, 1]);
   });
