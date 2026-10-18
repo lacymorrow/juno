@@ -24,7 +24,7 @@ A dark capsule sits at the top of the screen with one breathing dot. They hold t
 
 | Face | Shape | What is in it |
 |---|---|---|
-| idle | 92 x 28 capsule, radius 14. Under the pointer 132 x 32 with Talk, Type, (once there is a turn) Show last answer, Open chat and (when a wake phrase is set) the wake phrase toggle; each control past three widens it by 26 (144 for four, 170 for five) | the dot |
+| idle | 92 x 28 capsule, radius 14. Under the pointer 132 x 32 with Talk, Type, Open chat and (when a wake phrase is set) the wake phrase toggle; each control past three widens it by 26 (144 for four, 170 for five) | the dot |
 | compose | 360 wide; 36 tall, growing with the text to four lines (90). The small bar (248 x 36) while nobody is writing, see below | the composer only |
 | answer | 360 wide; composer plus content, up to 400 tall, then the body scrolls | question line (dot, your words dimmed, speaker toggle when there is both text and speech, linger ring), the answer body, the composer as the follow-up field |
 | component | 360 wide, same height rule | caption line (the prose folded to one line, click to expand), the component edge to edge, the composer |
@@ -59,8 +59,8 @@ What was removed from the Pill's pane on the way in (the `insanely-great` pass, 
 | Wake phrase toggle | the hover capsule, last | Shown only when a phrase is configured. Ear while listening ("Stop listening for the wake phrase"), crossed ear while paused ("Listen for the wake phrase"). It pauses the engine, never the trigger; it follows Rust's `voice-trigger-listening` | `hooks/useWakePhrase.ts`, shared with the Pill |
 | Connection dot | every face with a dot | System red and still when Rust says Juno cannot answer (`connectivity-changed` / `get_connectivity`, `pillStatus.dotTone`); an open mic still wins. Its label is Rust's reason ("Network unavailable") | `dotFor(state, driving, connectivity)`, `dotLabel` |
 | Agent roster | beside the shape | From two agents: a second small black capsule (the capsule's height, 8 px away) beside the island, level with the docked edge, on the side away from a side-docked edge. Apple's split island: a second activity is a second small shape, so the island itself never moves for it. Its rect is reported as a second hit region. Hidden while the island is carried |
-| Hover expand | the hover capsule, after Show last answer | Open chat (`Maximize2`), the Pill's hover control: opens the chat face. Always offered | `IslandBar.tsx` | `AgentRosterStrip`, `rosterWidthFor` |
-| Tooltips | the dot and every icon control (Talk, Type, Show last answer, Open chat, wake phrase, expand, collapse, close, spoken aloud, the composer's mic, Send and stop, Remove image) | `PillTooltip`: 500 ms, opens from the native forwarded hover (`mouse-moved-window`) as well as DOM hover, closed during a drag (`useBarDragging`), toward the side the island grows. `title` stays as the fallback and steps aside while the tooltip shows. Text buttons (Allow, Don't, the caption) carry no tooltip | `bar/PillTooltip.tsx` |
+| Hover expand | the hover capsule, after Type; the only way back to an answer from idle | Open chat (`Maximize2`), the Pill's hover control: opens the chat face. Always offered | `IslandBar.tsx` | `AgentRosterStrip`, `rosterWidthFor` |
+| Tooltips | the dot and every icon control (Talk, Type, Open chat, wake phrase, expand, collapse, close, spoken aloud, the composer's mic, Send and stop, Remove image) | `PillTooltip`: 500 ms, opens from the native forwarded hover (`mouse-moved-window`) as well as DOM hover, closed during a drag (`useBarDragging`), toward the side the island grows. `title` stays as the fallback and steps aside while the tooltip shows. Text buttons (Allow, Don't, the caption) carry no tooltip | `bar/PillTooltip.tsx` |
 
 ### The small bar
 
@@ -108,7 +108,7 @@ Local conditions on top:
 | answer has text and speech | the speaker toggle in the question line reveals the spoken text under the body |
 | answer taller than 400 | the body scrolls inside the shape |
 | a new answer while the island is up | the answer face opens; an answer already there at mount (history) does not |
-| hover over idle | the hover controls; Show last answer brings a settled answer back; Open chat opens the chat face |
+| hover over idle | the hover controls; Open chat opens the chat face, which holds the last answer |
 | tray Show/Hide Chat | opens the chat face (once there is a turn); again, settles to the capsule |
 | chat face open | stays through every bar state; Escape or its collapse control steps down to the answer, or to the composer with no answer |
 | a picture pasted into the composer | thumbnail row above the text; the compose face is the full box; Send sends text and pictures through `dispatch_query` |

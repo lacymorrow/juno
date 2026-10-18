@@ -586,6 +586,7 @@ describe("IslandBar: idle and hover", () => {
     expect(face()).toBe("hover");
     expect(screen.getByRole("button", { name: "Talk to Juno" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Type to Juno" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Show last answer" })).toBeNull();
     await leaveVerified(stage());
     expect(face()).toBe("idle");
@@ -619,15 +620,20 @@ describe("IslandBar: idle and hover", () => {
     expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(true);
   });
 
-  it("brings a settled answer back from the hover controls, and the tray toggles the chat face", async () => {
+  it("opens the chat from the hover controls with an answer settled, and the tray toggles the chat face", async () => {
     renderWithAnswer();
     await act(async () => {
       vi.advanceTimersByTime(LINGER_MS + 100);
     });
     expect(face()).toBe("idle");
     fireEvent.pointerEnter(stage());
-    fireEvent.click(screen.getByRole("button", { name: "Show last answer" }));
-    expect(face()).toBe("answer");
+    expect(screen.queryByRole("button", { name: "Show last answer" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open chat" }));
+    expect(face()).toBe("chat");
+    await act(async () => {
+      eventHandlers.get(EVENTS.BAR_TOGGLE_PANE)?.(null);
+    });
+    expect(face()).toBe("idle");
     // Show Chat: the whole conversation; again, back to the capsule.
     await act(async () => {
       eventHandlers.get(EVENTS.BAR_TOGGLE_PANE)?.(null);
