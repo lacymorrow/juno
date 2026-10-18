@@ -93,26 +93,33 @@ jobs:
             -f prerelease=true
           echo "Requested a signed prerelease build of ${{ steps.release.outputs.tag }}."
 
-      # shipx does not fail the run when a publish fails: it reports and moves
-      # on, which is right locally where a person reads the output. Unattended,
-      # that becomes a green job and a release where the app shipped and
-      # juno-cua silently did not. Check the registry and go red if so. The tag
-      # and the app build are already done and stay done; this only makes the
-      # gap visible.
-      - name: Confirm juno-cua reached the registry
-        env:
-          EXPECTED: ${{ steps.release.outputs.tag }}
-        run: |
-          want="${EXPECTED#v}"
-          got=""
-          # The registry is not read-your-writes, so give it a moment.
-          for _ in 1 2 3 4 5 6; do
-            got=$(npm view juno-cua version 2>/dev/null || echo "")
-            if [ "$got" = "$want" ]; then
-              echo "juno-cua@$want is on npm."
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "::error::juno-cua@$want did not reach npm (registry reports '${got:-nothing}'). The app release is unaffected; publish by hand from packages/juno-cua."
-          exit 1
+      # There is deliberately no "confirm juno-cua reached the registry" step.
+      #
+      # #602 added one, and it was the only thing that ever failed this
+      # workflow: 2 of 14 merges red, both on that step, both false (runs
+      # 38973675118 and 39065141781). It was unsound for the gap it was written
+      # to close, in two ways.
+      #
+      # It could not tell a failed publish from a lagging CDN. npm caches
+      # packuments for up to five minutes, so a successful publish stays
+      # invisible well past any budget worth spending a runner on. In
+      # 39065141781 shipx published at 20:05:02 and the registry did not serve
+      # 0.8.212 until 20:11:12 (370s), and `::error::` fired at 20:09:30.
+      # Lengthening the loop only moves the flake.
+      #
+      # And it was a worse copy of a check that had already run. shipx verifies
+      # its own publish (`verifyPublishedArtifact`) for ~187s with backoff,
+      # against the exact version and with `--prefer-online` so a miss cannot
+      # be replayed from npm's local cache. This step polled a flat 60s and read
+      # the `latest` dist-tag, which is the slowest field to propagate. When
+      # shipx cannot confirm it says so and adds "the publish itself succeeded",
+      # because it holds the publish exit status. This step did not, so all it
+      # could do was guess, loudly.
+      #
+      # The gap it aimed at is real: shipx warns instead of exiting non-zero
+      # when a publish genuinely fails, so an unattended run goes green with
+      # the app shipped and juno-cua not. That belongs in shipx, where the
+      # authoritative signal lives (lacymorrow/shipx#69). Fixing
+      # it there makes every consumer safe and costs this workflow nothing.
+      # Re-adding a registry poll here does not fix it, and it makes a red main
+      # stop meaning anything.
