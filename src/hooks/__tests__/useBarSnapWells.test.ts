@@ -8,7 +8,7 @@ const win = {
   outerPosition: vi.fn(async () => ({ ...win.position })),
   outerSize: vi.fn(async () => ({ width: 300, height: 200 })),
   scaleFactor: vi.fn(async () => 1),
-  setPosition: vi.fn(async () => {}),
+  setPosition: vi.fn(async (_position: { x: number; y: number }) => {}),
   startDragging: vi.fn(async () => {}),
 };
 let cursor: { x: number; y: number } | null = { x: 0, y: 0 };
@@ -118,7 +118,7 @@ import {
   type SteadyLayout,
 } from "@/lib/steadyFrame";
 import { monitorsInPoints, originUnderCursor } from "@/lib/desktopPoints";
-import { wellForSlot } from "@/lib/snapWells";
+import { computeWells, wellForSlot } from "@/lib/snapWells";
 
 const SPEC = { rest: { width: 88, height: 76 }, max: { width: 452, height: 574 }, stage: { width: 452, height: 76 } };
 const ONE = [{ position: { x: 0, y: 0 }, size: { width: 1440, height: 900 }, scaleFactor: 1 }];
@@ -806,5 +806,155 @@ describe("useBarDisplayFollow keeps the chosen well across a hop", () => {
     const leftOnBig = wellAt({ fx: 0, fy: 1 }, 0);
     await until(() => positionsSet().some((p) => p.x === leftOnBig.x && p.y === leftOnBig.y));
     expect(getDockIntent(label)).toEqual({ fx: 0, fy: 1 });
+  });
+});
+
+describe("the hop keeps the chosen well on the non-steady path too", () => {
+  // The looks without a steady frame (`useBarSnapWells.ts:758`) move the
+  // window itself against `computeWells` instead of swapping a steady layout
+  // against `steadyWells`. The intent read is shared with the steady path, but
+  // the write back is a second call site, so the round trip is asserted here
+  // as well rather than assumed from the Pill passing.
+  const rects = monitorsInPoints([BIG, SMALL]);
+  const label = "floating-bar";
+  const wells = computeWells(rects, {
+    windowWidth: 300,
+    windowHeight: 200,
+    includeCenter: true,
+  });
+  const wellAt = (slot: { fx: number; fy: number }, mon: number) =>
+    wellForSlot(slot, mon, wells)!;
+  const midOf = (i: number) => ({
+    x: rects[i].position.x + rects[i].size.width / 2,
+    y: rects[i].position.y + rects[i].size.height / 2,
+  });
+
+  async function until(cond: () => boolean): Promise<void> {
+    for (let i = 0; i < 100 && !cond(); i += 1) await tick(10);
+    if (!cond()) throw new Error("the hop never finished");
+  }
+
+  /** Every place this path put the window, in order. */
+  const moves = () => win.setPosition.mock.calls.map(([p]) => p);
+  const movedTo = (w: { x: number; y: number }) =>
+    moves().some((p) => p.x === w.x && p.y === w.y);
+
+  beforeEach(() => {
+    resetBarSnapState();
+    // No steady layout registered at all, which is what sends the hop down
+    // the second branch.
+    resetSteady();
+    resetDockSlots();
+    listeners.clear();
+    monitors = [BIG, SMALL];
+    // The window starts on the 5K, so the hop has somewhere to come home to.
+    win.position = { x: 700, y: 400 };
+    win.setPosition.mockClear();
+    // This path moves the real window, and then reads it back to work out
+    // which display it is on. A mock that only records would leave the bar
+    // apparently still on the 5K, and the hop home would be a no-op.
+    win.setPosition.mockImplementation(async (p: { x: number; y: number }) => {
+      win.position = { x: p.x, y: p.y };
+    });
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async () => {});
+  });
+
+  afterEach(() => {
+    monitors = ONE_DISPLAY;
+    listeners.clear();
+    win.setPosition.mockImplementation(async () => {});
+  });
+
+  it("gives the 5K a quarter-point column and the laptop none", () => {
+    const columns = (i: number) =>
+      [...new Set(wells.filter((w) => w.monitorIndex === i).map((w) => w.fx))].sort(
+        (a, b) => a - b,
+      );
+    expect(columns(0)).toContain(0.25);
+    expect(columns(1)).not.toContain(0.25);
+  });
+
+  it("projects onto the laptop and comes home to the column it was dragged to", async () => {
+    setDockSlot(label, QUARTER);
+    renderHook(() => useBarDisplayFollow());
+    await until(() => listeners.has("bar-cursor-display-changed"));
+
+    // Across to the laptop: drawn in a well the laptop has...
+    fireEvent("bar-cursor-display-changed", midOf(1));
+    await until(() => getDockSlot(label)?.fx === 0.5);
+    const onSmall = wellAt({ fx: 0.5, fy: 1 }, 1);
+    expect(moves().at(-1)).toMatchObject({ x: onSmall.x, y: onSmall.y });
+    // ...and the choice is untouched.
+    expect(getDockIntent(label)).toEqual(QUARTER);
+
+    // And back to the exact column, not the 5K's centre one.
+    fireEvent("bar-cursor-display-changed", midOf(0));
+    await until(() => getDockSlot(label)?.fx === QUARTER.fx);
+    const home = wellAt(QUARTER, 0);
+    expect(moves().at(-1)).toMatchObject({ x: home.x, y: home.y });
+    expect(getDockIntent(label)).toEqual(QUARTER);
+  });
+
+  it("holds the chosen well across repeated crossings", async () => {
+    setDockSlot(label, QUARTER);
+    renderHook(() => useBarDisplayFollow());
+    await until(() => listeners.has("bar-cursor-display-changed"));
+
+    for (let i = 0; i < 4; i += 1) {
+      fireEvent("bar-cursor-display-changed", midOf(1));
+      await until(() => getDockSlot(label)?.fx === 0.5);
+      fireEvent("bar-cursor-display-changed", midOf(0));
+      await until(() => getDockSlot(label)?.fx === QUARTER.fx);
+    }
+    expect(getDockSlot(label)).toEqual(QUARTER);
+    expect(getDockIntent(label)).toEqual(QUARTER);
+  });
+
+  it("takes a drag on the laptop as the new choice", async () => {
+    setDockSlot(label, QUARTER);
+    renderHook(() => useBarDisplayFollow());
+    await until(() => listeners.has("bar-cursor-display-changed"));
+
+    fireEvent("bar-cursor-display-changed", midOf(1));
+    await until(() => getDockSlot(label)?.fx === 0.5);
+
+    // A real choice on the laptop replaces the quarter-point column.
+    setDockSlot(label, { fx: 0, fy: 1 });
+    fireEvent("bar-cursor-display-changed", midOf(0));
+    await until(() => getDockSlot(label)?.fx === 0);
+    expect(getDockIntent(label)).toEqual({ fx: 0, fy: 1 });
+  });
+
+  it("leaves the edge and corner wells, which every display has, alone", async () => {
+    for (const slot of [
+      { fx: 0, fy: 0 },
+      { fx: 1, fy: 0 },
+      { fx: 0, fy: 1 },
+      { fx: 1, fy: 1 },
+      { fx: 0.5, fy: 0 },
+      { fx: 0.5, fy: 1 },
+    ]) {
+      resetDockSlots();
+      win.setPosition.mockClear();
+      setDockSlot(label, slot);
+      const { unmount } = renderHook(() => useBarDisplayFollow());
+      await until(() => listeners.has("bar-cursor-display-changed"));
+
+      fireEvent("bar-cursor-display-changed", midOf(1));
+      const there = wellAt(slot, 1);
+      await until(() => movedTo(there));
+      // The same well exists on the laptop, so the projection is exact and
+      // the intent is unchanged either way.
+      expect(getDockSlot(label)).toEqual(slot);
+      expect(getDockIntent(label)).toEqual(slot);
+
+      fireEvent("bar-cursor-display-changed", midOf(0));
+      const home = wellAt(slot, 0);
+      await until(() => movedTo(home));
+      expect(getDockSlot(label)).toEqual(slot);
+      unmount();
+      listeners.clear();
+    }
   });
 });
