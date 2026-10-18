@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderHook } from "@testing-library/react";
 
 // One 1440x900 display at 1x. The bar window is 300x200 logical.
 const win = {
@@ -12,11 +13,28 @@ const win = {
 };
 let cursor: { x: number; y: number } | null = { x: 0, y: 0 };
 
+/** The desk, as Tauri reports it. Mutable so a test can plug in its own. */
+type TauriMonitor = {
+  position: { x: number; y: number };
+  size: { width: number; height: number };
+  scaleFactor: number;
+};
+const ONE_DISPLAY: TauriMonitor[] = [
+  { position: { x: 0, y: 0 }, size: { width: 1440, height: 900 }, scaleFactor: 1 },
+];
+let monitors: TauriMonitor[] = ONE_DISPLAY;
+
+/** Every Tauri event listener registered, by event name. */
+const listeners = new Map<string, Array<(payload: unknown) => void>>();
+
+/** Deliver a backend event to whatever registered for it. */
+function fireEvent(name: string, payload: unknown): void {
+  for (const fn of listeners.get(name) ?? []) fn(payload);
+}
+
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => win,
-  availableMonitors: async () => [
-    { position: { x: 0, y: 0 }, size: { width: 1440, height: 900 }, scaleFactor: 1 },
-  ],
+  availableMonitors: async () => monitors,
   cursorPosition: async () => {
     if (!cursor) throw new Error("no cursor");
     return cursor;
@@ -35,10 +53,23 @@ vi.mock("@tauri-apps/api/window", () => ({
   },
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => {}) }));
-vi.mock("@tauri-apps/api/event", () => ({ emit: vi.fn(async () => {}), listen: vi.fn() }));
+vi.mock("@tauri-apps/api/event", () => ({
+  emit: vi.fn(async () => {}),
+  // Records the handler so a test can play the backend's part, and hands back
+  // the unlisten `useEventListener` expects.
+  listen: vi.fn(async (name: string, cb: (event: { payload: unknown }) => void) => {
+    const wrapped = (payload: unknown) => cb({ payload });
+    const forName = listeners.get(name) ?? [];
+    forName.push(wrapped);
+    listeners.set(name, forName);
+    return () => {
+      listeners.set(name, (listeners.get(name) ?? []).filter((fn) => fn !== wrapped));
+    };
+  }),
+}));
 
 import { armBarSnap, resetBarSnapState, settleBarSnap } from "../useBarSnapWells";
-import { getDockSlot } from "@/lib/barDock";
+import { getDockIntent, getDockSlot, resetDockSlots, setDockSlot } from "@/lib/barDock";
 
 describe("settleBarSnap", () => {
   beforeEach(() => {
@@ -67,7 +98,13 @@ describe("settleBarSnap", () => {
 });
 
 import { invoke } from "@tauri-apps/api/core";
-import { displayFollowTarget, isBarDragging, startBarDrag, steadyWells } from "../useBarSnapWells";
+import {
+  displayFollowTarget,
+  isBarDragging,
+  startBarDrag,
+  steadyWells,
+  useBarDisplayFollow,
+} from "../useBarSnapWells";
 import {
   anchorScreenOrigin,
   contentRect,
@@ -610,5 +647,162 @@ describe("display follow on mixed desks", () => {
   it("stays put when the cursor is on the bar's own display", () => {
     const rects = monitorsInPoints([laptop, externals.right]);
     expect(displayFollowTarget(rects, { fx: 1, fy: 0 }, { x: 100, y: 100 }, 0, steadyWells(rects, SPEC))).toBeNull();
+  });
+});
+
+// ── A well one display has and the other does not (LAC-4831) ──────────────
+//
+// `axisStops` gives an axis of 2000 points or more five stops and a shorter
+// one three, so the quarter-point columns exist on the 5K below and nowhere on
+// the laptop beside it. That is the only interesting desk for the hop, and
+// none of the desks above has it: 1512 and 1920 points are both three-stop.
+const BIG: TauriMonitor = {
+  // 2560 x 1440 points: a 27" 5K, or any ultrawide.
+  position: { x: 0, y: 0 },
+  size: { width: 5120, height: 2880 },
+  scaleFactor: 2,
+};
+const SMALL: TauriMonitor = {
+  // 1512 x 982 points, immediately right of the 5K (2560 x 2 physical).
+  position: { x: 5120, y: 0 },
+  size: { width: 3024, height: 1964 },
+  scaleFactor: 2,
+};
+/** The quarter-point column, bottom row: a well the 5K has and the laptop has not. */
+const QUARTER = { fx: 0.25, fy: 1 };
+
+describe("a well the other display does not have", () => {
+  const rects = monitorsInPoints([BIG, SMALL]);
+  const wells = steadyWells(rects, SPEC);
+  const midOf = (i: number) => ({
+    x: rects[i].position.x + rects[i].size.width / 2,
+    y: rects[i].position.y + rects[i].size.height / 2,
+  });
+
+  it("gives the 5K five columns and the laptop three", () => {
+    const columns = (i: number) =>
+      [...new Set(wells.filter((w) => w.monitorIndex === i).map((w) => w.fx))].sort();
+    expect(columns(0)).toEqual([0, 0.25, 0.5, 0.75, 1]);
+    expect(columns(1)).toEqual([0, 0.5, 1]);
+  });
+
+  it("projects the quarter-point column onto the laptop's centre one", () => {
+    const target = displayFollowTarget(rects, QUARTER, midOf(1), 0, wells)!;
+    // Equidistant from the laptop's left and centre columns; the tie goes to
+    // the centre, so the bar stays in view rather than hugging an edge.
+    expect(target).toMatchObject({ fx: 0.5, fy: 1, monitorIndex: 1 });
+  });
+
+  it("comes back to the exact column when it projects from the intent", () => {
+    const there = displayFollowTarget(rects, QUARTER, midOf(1), 0, wells)!;
+    const back = displayFollowTarget(rects, QUARTER, midOf(0), 1, wells)!;
+    expect(back).toMatchObject({ fx: 0.25, fy: 1, monitorIndex: 0 });
+    // And projecting from where it was *drawn* is the bug: the centre column
+    // of the laptop maps back to the centre column of the 5K, two columns off.
+    const wrong = displayFollowTarget(rects, there, midOf(0), 1, wells)!;
+    expect(wrong.fx).toBe(0.5);
+    expect(wrong.x).not.toBe(back.x);
+  });
+});
+
+describe("useBarDisplayFollow keeps the chosen well across a hop", () => {
+  const rects = monitorsInPoints([BIG, SMALL]);
+  const label = "floating-bar";
+  const wells = steadyWells(rects, SPEC);
+  const wellAt = (slot: { fx: number; fy: number }, mon: number) =>
+    wellForSlot(slot, mon, wells)!;
+  const midOf = (i: number) => ({
+    x: rects[i].position.x + rects[i].size.width / 2,
+    y: rects[i].position.y + rects[i].size.height / 2,
+  });
+
+  /** Spin on real timers until `cond` holds, so a hidden layout swap can finish. */
+  async function until(cond: () => boolean): Promise<void> {
+    for (let i = 0; i < 100 && !cond(); i += 1) await tick(10);
+    if (!cond()) throw new Error("the hop never finished");
+  }
+
+  const positionsSet = () =>
+    vi
+      .mocked(invoke)
+      .mock.calls.filter((c) => c[0] === "set_bar_position")
+      .map((c) => c[1] as { x: number; y: number });
+
+  beforeEach(() => {
+    resetBarSnapState();
+    resetSteady();
+    resetDockSlots();
+    listeners.clear();
+    monitors = [BIG, SMALL];
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async () => {});
+    registerSteady(label, SPEC);
+  });
+
+  afterEach(() => {
+    monitors = ONE_DISPLAY;
+    listeners.clear();
+  });
+
+  it("hops to the nearest well there and home to the one it was dragged to", async () => {
+    // Dragged to the 5K's quarter-point column, bottom row.
+    const chosen = wellAt(QUARTER, 0);
+    setSteadyLayout(label, steadyLayout(chosen, rects[0], SPEC));
+    setDockSlot(label, QUARTER);
+
+    renderHook(() => useBarDisplayFollow());
+    await until(() => listeners.has("bar-cursor-display-changed"));
+
+    // The cursor crosses to the laptop, which has no quarter-point column.
+    fireEvent("bar-cursor-display-changed", midOf(1));
+    const onSmall = wellAt({ fx: 0.5, fy: 1 }, 1);
+    await until(() => positionsSet().some((p) => p.x === onSmall.x && p.y === onSmall.y));
+    // Drawn in the laptop's centre column, and laid out for it...
+    expect(getDockSlot(label)).toEqual({ fx: 0.5, fy: 1 });
+    // ...but still remembering what was asked for. This is the whole fix: the
+    // hop used to write the projection back here and the choice was gone.
+    expect(getDockIntent(label)).toEqual(QUARTER);
+
+    // And back. Before the fix this landed in the 5K's centre column.
+    fireEvent("bar-cursor-display-changed", midOf(0));
+    await until(() => positionsSet().some((p) => p.x === chosen.x && p.y === chosen.y));
+    expect(getDockSlot(label)).toEqual(QUARTER);
+    expect(getDockIntent(label)).toEqual(QUARTER);
+  });
+
+  it("holds the chosen well however many times the cursor crosses", async () => {
+    const chosen = wellAt(QUARTER, 0);
+    setSteadyLayout(label, steadyLayout(chosen, rects[0], SPEC));
+    setDockSlot(label, QUARTER);
+    renderHook(() => useBarDisplayFollow());
+    await until(() => listeners.has("bar-cursor-display-changed"));
+
+    const onSmall = wellAt({ fx: 0.5, fy: 1 }, 1);
+    for (let i = 0; i < 3; i += 1) {
+      fireEvent("bar-cursor-display-changed", midOf(1));
+      await until(() => getDockSlot(label)?.fx === onSmall.fx);
+      fireEvent("bar-cursor-display-changed", midOf(0));
+      await until(() => getDockSlot(label)?.fx === QUARTER.fx);
+    }
+    expect(getDockSlot(label)).toEqual(QUARTER);
+    expect(positionsSet().at(-1)).toEqual({ x: chosen.x, y: chosen.y });
+  });
+
+  it("takes a drag on the smaller display as the new choice", async () => {
+    setSteadyLayout(label, steadyLayout(wellAt(QUARTER, 0), rects[0], SPEC));
+    setDockSlot(label, QUARTER);
+    renderHook(() => useBarDisplayFollow());
+    await until(() => listeners.has("bar-cursor-display-changed"));
+
+    fireEvent("bar-cursor-display-changed", midOf(1));
+    await until(() => getDockSlot(label)?.fx === 0.5);
+
+    // Dragged to the laptop's left column: a choice, so the quarter-point
+    // column is not somewhere to return to any more.
+    setDockSlot(label, { fx: 0, fy: 1 });
+    fireEvent("bar-cursor-display-changed", midOf(0));
+    const leftOnBig = wellAt({ fx: 0, fy: 1 }, 0);
+    await until(() => positionsSet().some((p) => p.x === leftOnBig.x && p.y === leftOnBig.y));
+    expect(getDockIntent(label)).toEqual({ fx: 0, fy: 1 });
   });
 });
