@@ -82,10 +82,24 @@ jobs:
       - name: Check formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 
-      # `--all-targets` covers tests and examples, not just the lib — that is
+      # `--all-targets` covers tests and examples, not just the lib, which is
       # where most of the original findings were.
+      #
+      # `--workspace`, not `--manifest-path src-tauri`, because the latter makes
+      # exactly one package primary and `-D warnings` after `--` reaches primary
+      # packages only. `mcp-server-os-level` and `crates/juno-cua` are workspace
+      # members, so their lints are not capped and their warnings do print, but
+      # nothing failed on them: a run could say "`computer-use-ai-sdk` (lib)
+      # generated 7 warnings" and still go green. It did, for seven dead-code
+      # warnings that sat in the macOS interaction layer across 200 releases
+      # until unrelated work happened to put the symbols to use (LAC-2071).
+      # juno-cua was worse off still: never linted and never compiled by CI at
+      # all, so release-cua.yml was the first thing to find out.
+      #
+      # Vendored crates stay out of this: the root manifest `exclude`s them, and
+      # `--workspace` honours that.
       - name: Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       # Excludes the `#[ignore]`d suites that need a live Chrome on :9222
       # (tests/browser_cdp_live.rs) — those are run by hand during QA.
@@ -164,8 +178,11 @@ jobs:
       # `--all-targets` so the arch-gated `#[cfg(test)]` code is compiled too.
       # Those tests are where the Intel fallback is asserted, and a gate that
       # only breaks the test build still breaks the release.
+      #
+      # `--workspace` for the same reason as the clippy step above, and it
+      # replaces the separate voice-plugin step this used to need. It also
+      # brings in `crates/juno-cua`, which no CI job compiled on either
+      # architecture: release-cua.yml builds it for x86_64, so a release was
+      # the first place an Intel break in it could show up.
       - name: Check (x86_64)
-        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets --target x86_64-apple-darwin
-
-      - name: Check the voice plugin (x86_64)
-        run: cargo check --manifest-path tauri-plugin-voice-transcription/Cargo.toml --all-targets --target x86_64-apple-darwin
+        run: cargo check --workspace --all-targets --target x86_64-apple-darwin
