@@ -134,9 +134,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Sort each category by count (highest first)
-    definitely_interactable_roles.sort_by(|a, b| b.1.cmp(&a.1));
-    sometimes_interactable_roles.sort_by(|a, b| b.1.cmp(&a.1));
-    non_interactable_roles.sort_by(|a, b| b.1.cmp(&a.1));
+    definitely_interactable_roles.sort_by_key(|b| std::cmp::Reverse(b.1));
+    sometimes_interactable_roles.sort_by_key(|b| std::cmp::Reverse(b.1));
+    non_interactable_roles.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     // Display counts by category
     info!("element interactivity breakdown:");

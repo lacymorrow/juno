@@ -56,7 +56,7 @@ fn print_element_stats(elements: &[UIElement]) {
 
     // Sort roles by count (most frequent first)
     let mut roles: Vec<_> = role_counts.into_iter().collect();
-    roles.sort_by(|a, b| b.1.cmp(&a.1));
+    roles.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     println!("top 10 element roles:");
     for (i, (role, count)) in roles.iter().take(10).enumerate() {
@@ -88,7 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 app.attributes()
                     .label
                     .as_ref()
-                    .map_or(false, |label| label.contains("Arc"))
+                    .is_some_and(|label| label.contains("Arc"))
             });
 
             match arc {

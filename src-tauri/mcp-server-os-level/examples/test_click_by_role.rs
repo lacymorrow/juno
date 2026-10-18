@@ -39,7 +39,7 @@ fn main() -> Result<()> {
                 app.attributes()
                     .label
                     .as_ref()
-                    .map_or(false, |label| label.contains("Arc"))
+                    .is_some_and(|label| label.contains("Arc"))
             });
 
             match arc {
