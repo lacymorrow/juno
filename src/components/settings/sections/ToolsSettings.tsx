@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
+import { ConnectedApps } from "./ConnectedApps";
 import { COMMANDS } from "@/lib/constants.generated";
 
 export default function ToolsSettings({ settings }: SettingsSectionProps) {
@@ -253,6 +254,10 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
           />
         </SettingsRow>
       </SettingsGroup>
+
+      {/* Connected apps (LAC-4210): rows appear only once something is
+          connected; the BYO Composio toggle inside is advanced-gated. */}
+      <ConnectedApps />
 
       <SettingsGroup
         title="Tool Categories"
