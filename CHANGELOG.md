@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.216] - 2026-10-18
+
+### Fixed
+
+- **island:** one Open chat control on the hover capsule, always offered; the last answer lives in the chat (#838) (694ef080)
+
 ## [0.8.214] - 2026-10-18
 
 ### Fixed
@@ -1506,7 +1512,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.214...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.216...HEAD
+[0.8.216]: https://github.com/lacymorrow/juno/compare/cua-v0.8.215...v0.8.216
 [0.8.214]: https://github.com/lacymorrow/juno/compare/cua-v0.8.213...v0.8.214
 [0.8.213]: https://github.com/lacymorrow/juno/compare/cua-v0.8.212...v0.8.213
 [0.8.212]: https://github.com/lacymorrow/juno/compare/cua-v0.8.211...v0.8.212
