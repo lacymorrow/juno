@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.214] - 2026-10-18
+
+### Fixed
+
+- **permissions:** the 1s permission poll dies with setup (LAC-2070) (#833) (d5912d48)
+
 ## [0.8.213] - 2026-10-17
 
 ### Fixed
@@ -1500,7 +1506,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.213...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.214...HEAD
+[0.8.214]: https://github.com/lacymorrow/juno/compare/cua-v0.8.213...v0.8.214
 [0.8.213]: https://github.com/lacymorrow/juno/compare/cua-v0.8.212...v0.8.213
 [0.8.212]: https://github.com/lacymorrow/juno/compare/cua-v0.8.211...v0.8.212
 [0.8.210]: https://github.com/lacymorrow/juno/compare/cua-v0.8.209...v0.8.210
