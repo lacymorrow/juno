@@ -48,7 +48,7 @@ const HOVER_BUTTON_PX = 26;
 const HOVER_FRAME_PX = 40;
 
 /**
- * The hover capsule for a number of controls (Talk, Type, Show last answer,
+ * The hover capsule for a number of controls (Talk, Type,
  * Open chat, the wake phrase). Three fit the 132 capsule; each one past that
  * widens it by one.
  */

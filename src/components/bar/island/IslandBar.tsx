@@ -18,7 +18,6 @@ import {
   Ear,
   EarOff,
   Maximize2,
-  MessageSquare,
   Mic,
   Minimize2,
   Square,
@@ -631,13 +630,6 @@ export function IslandBar() {
     activateWindow();
     void sendInteraction(UI.INTERACTION_TYPES_CLICK);
   }, []);
-  const showAnswer = useCallback(
-    (e: ReactMouseEvent) => {
-      e.stopPropagation();
-      openAnswer();
-    },
-    [openAnswer],
-  );
   const openChatFromHover = useCallback(
     (e: ReactMouseEvent) => {
       e.stopPropagation();
@@ -710,8 +702,8 @@ export function IslandBar() {
   const hoverShown = dragging ? hoverAtPressRef.current : hoverLive;
   const layout = frame.layout;
   const growUp = layout.growUp;
-  // Talk, Type and Open chat always; Show last answer once there is a turn.
-  const hoverButtons = 3 + (hasTurn ? 1 : 0) + (wake.configured ? 1 : 0);
+  // Talk, Type and Open chat always; the wake phrase toggle when one is set.
+  const hoverButtons = 3 + (wake.configured ? 1 : 0);
   const shape = shapeFor(face, {
     hovered: hoverShown,
     hoverButtons,
@@ -835,16 +827,9 @@ export function IslandBar() {
               <Type className="size-3.5" />
             </button>,
           )}
-          {hasTurn &&
-            tip(
-              "answer",
-              "Show last answer",
-              <button type="button" {...named("answer")} onClick={showAnswer} aria-label="Show last answer" title="Show last answer" className={control("answer")}>
-                <MessageSquare className="size-3.5" />
-              </button>,
-            )}
           {/* The Pill's hover expand: the whole conversation, always offered,
-              so there is a way into chat from the capsule even before a turn. */}
+              so there is a way into chat from the capsule even before a turn.
+              The last answer is in there too, so it has no button of its own. */}
           {tip(
             "chat",
             "Open chat",
