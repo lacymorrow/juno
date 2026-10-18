@@ -913,9 +913,13 @@ export default function OnboardingFlow({
         clearTimeout(timer);
       }
       onboardingTimers.current = [];
-      // Stop monitoring when onboarding closes so we're not paying for a
-      // 1s tick across the rest of the app's lifetime. PermissionsManager /
-      // PermissionsFlow re-start it on demand when they mount.
+      // Belt and braces only, and NOT what stops the 1s tick: every way out
+      // of onboarding destroys this webview, and React does not flush effect
+      // cleanups on page teardown, so this does not run on the paths that
+      // matter. Rust owns the poll's lifetime and stops it in
+      // `window_management::restore_after_onboarding`, which both the close
+      // command and the red X reach (LAC-2070). This remains for the one case
+      // that is a real unmount: StrictMode's remount in dev.
       invoke(COMMANDS.PERMISSIONS_STOP_PERMISSIONS_MONITORING).catch((err) => {
         console.debug("[Onboarding] stop_permissions_monitoring failed:", err);
       });

@@ -638,6 +638,20 @@ async fn put_away_for_onboarding(app: &AppHandle) {
 /// Put back what [`open_onboarding_window`] took away. Safe to call twice: the
 /// close command and the window's destruction both land here.
 pub async fn restore_after_onboarding(app: &AppHandle) {
+    // Setup is the only thing that wants permissions polled every second, so
+    // setup going away is what stops it. This used to be a React cleanup in
+    // Onboarding.tsx, which never ran: every way out of onboarding destroys
+    // the webview (the close command, Cmd+W, the red X), and React flushes
+    // effect cleanups on unmount, not on page teardown. So the 1s tick — four
+    // TCC round trips with the cache deliberately invalidated each time —
+    // outlived setup and ran for the rest of the process's life (LAC-2070).
+    // The poll is Rust's, so its lifetime is Rust's.
+    if let Err(e) = crate::commands::permissions::stop_permissions_monitoring().await {
+        warn!(
+            "Could not stop permissions monitoring after onboarding: {}",
+            e
+        );
+    }
     if ONBOARDING_ISOLATED.swap(false, std::sync::atomic::Ordering::SeqCst) {
         restore_dock_after_onboarding(app).await;
     }
@@ -942,5 +956,28 @@ mod tests {
         let onboarding = find_declared_window(&windows, window_labels::ONBOARDING)
             .expect("onboarding window should be declared");
         assert!(!onboarding.always_on_top);
+    }
+
+    /// Setup's 1s permission poll belongs to Rust, so it has to die with setup.
+    /// It was stopped only from a React cleanup that window teardown never runs,
+    /// so it outlived onboarding and polled TCC once a second for the rest of
+    /// the process's life (LAC-2070). Both ways out of onboarding — the close
+    /// command and `WindowEvent::Destroyed` — land in `restore_after_onboarding`,
+    /// so that is the one place the stop can live.
+    #[test]
+    fn leaving_onboarding_stops_the_permission_poll() {
+        let source = include_str!("window_management.rs");
+        let body = source
+            .split_once("pub async fn restore_after_onboarding")
+            .and_then(|(_, rest)| rest.split_once("\n}\n"))
+            .map(|(body, _)| body)
+            .expect("restore_after_onboarding should still exist");
+        assert!(
+            body.contains("stop_permissions_monitoring"),
+            "restore_after_onboarding must stop the permissions poll. Without it \
+             the 1s tick started for onboarding auto-advance runs forever, \
+             because the React cleanup that used to own this never fires on \
+             window teardown."
+        );
     }
 }
