@@ -169,10 +169,10 @@ fn app_tool_definitions() -> Vec<ToolDefinition> {
                  Calendar has, Google and iCloud included. Use this instead of AppleScript or a cloud calendar tool. {note}"
             ),
             json!({
-                "from": {"type": "string", "description": "Start of the window."},
-                "to": {"type": "string", "description": "End of the window. A bare date includes that whole day."}
+                "from": {"type": "string", "description": "Start of the window. Leave out for today."},
+                "to": {"type": "string", "description": "End of the window. A bare date includes that whole day. Leave out for the end of the day `from` falls on (today by default)."}
             }),
-            &["from", "to"],
+            &[],
         ),
         definition(
             tool_names::CALENDAR_CREATE_EVENT,
@@ -330,7 +330,10 @@ fn command_tool_definitions() -> Vec<ToolDefinition> {
     vec![
         definition(
             tool_names::MUSIC_PLAY,
-            "Play something from the person's Apple Music library by name and report what is now playing. \
+            "Play music in the Music app: the person's library first, then Apple Music's own catalog, and report what is now playing. \
+             The query must be a concrete song, album, artist or playlist name. For a mood or a genre (\"something groovy\", \"play some jazz\"), \
+             YOU choose a well-known song or artist that fits and pass that; never pass the mood or genre word as the query. \
+             A catalog item may open in Music without starting; the result says which, so repeat only what it says. \
              Apple Music only: Spotify cannot be searched, so if Spotify is in front the result says so and \
              nothing plays. Use this instead of AppleScript. When it returns a `card`, finish with that tag exactly as given."
                 .to_string(),
@@ -515,6 +518,28 @@ pub(crate) fn text_arg<'a>(input: &'a Value, key: &str) -> Option<&'a str> {
 
 pub(crate) fn required_text<'a>(input: &'a Value, key: &str) -> Result<&'a str, String> {
     text_arg(input, key).ok_or_else(|| format!("Missing {key}."))
+}
+
+/// The window `calendar_events` asks about. `from` left out is today on this
+/// Mac's clock; `to` left out is the day `from` falls on when `from` is a bare
+/// date, and today otherwise.
+pub(crate) fn event_window(input: &Value, today: NaiveDate) -> (String, String) {
+    let today_text = today.format("%Y-%m-%d").to_string();
+    let from = text_arg(input, "from").map(str::to_string);
+    let to = text_arg(input, "to").map(str::to_string);
+    match (from, to) {
+        (Some(from), Some(to)) => (from, to),
+        (Some(from), None) => {
+            let to = if NaiveDate::parse_from_str(&from, "%Y-%m-%d").is_ok() {
+                from.clone()
+            } else {
+                today_text
+            };
+            (from, to)
+        }
+        (None, Some(to)) => (today_text, to),
+        (None, None) => (today_text.clone(), today_text),
+    }
 }
 
 /// A list of strings, accepting one string as a list of one.
@@ -1280,6 +1305,32 @@ mod tests {
             place: None,
             done: false,
         }
+    }
+
+    #[test]
+    fn an_events_window_with_no_dates_is_today() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 18).unwrap_or_default();
+        assert_eq!(
+            event_window(&json!({}), today),
+            ("2026-10-18".to_string(), "2026-10-18".to_string())
+        );
+        assert_eq!(
+            event_window(&json!({"from": "  "}), today),
+            ("2026-10-18".to_string(), "2026-10-18".to_string())
+        );
+        // A bare `from` day is the whole day; a moment runs to the end of today.
+        assert_eq!(
+            event_window(&json!({"from": "2026-10-20"}), today),
+            ("2026-10-20".to_string(), "2026-10-20".to_string())
+        );
+        assert_eq!(
+            event_window(&json!({"from": "2026-10-18T09:00:00-04:00"}), today).1,
+            "2026-10-18"
+        );
+        assert_eq!(
+            event_window(&json!({"to": "2026-10-25"}), today),
+            ("2026-10-18".to_string(), "2026-10-25".to_string())
+        );
     }
 
     #[test]

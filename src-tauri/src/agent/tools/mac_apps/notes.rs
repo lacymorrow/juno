@@ -13,6 +13,11 @@ use super::*;
 const MAX_NOTES: usize = 10;
 
 /// argv: html body, folder ("" for the default). Answers id, name, folder.
+///
+/// The folder name is read inside its own `try` and falls back to "". Notes
+/// can throw when asked for `name of container` of a note it just made (it
+/// cannot coerce the `cntr` to text), and by then the note exists: failing the
+/// whole call would report a made note as a failure.
 const CREATE_BODY: &str = r#"set h to item 1 of argv
 set folderName to item 2 of argv
 tell application "Notes"
@@ -23,7 +28,15 @@ set n to make new note at folder folderName with properties {body:h}
 end if
 set theId to id of n
 set fresh to note id theId
-return "OK" & US & (id of fresh) & US & (name of fresh) & US & (name of container of fresh)
+set theName to ""
+try
+set theName to (name of fresh) as text
+end try
+set folderLabel to ""
+try
+set folderLabel to (name of container of fresh) as text
+end try
+return "OK" & US & (id of fresh) & US & theName & US & folderLabel
 end tell"#;
 
 /// argv: note name, html to add, plain text added. Exact name first, then a
@@ -68,7 +81,11 @@ repeat with i from 1 to n
 set m to item i of found
 set p to plaintext of m
 if (length of p) > 160 then set p to text 1 thru 160 of p
-set out to out & (id of m) & US & (name of m) & US & (name of container of m) & US & p & RS
+set folderLabel to ""
+try
+set folderLabel to (name of container of m) as text
+end try
+set out to out & (id of m) & US & (name of m) & US & folderLabel & US & p & RS
 end repeat
 end tell
 return out"#;
@@ -117,15 +134,24 @@ pub fn create(input: &Value) -> Result<Value, String> {
             return Ok(script::error_result(App::Notes, number, &message))
         }
     };
-    let [id, name, folder_name] = match fields.as_slice() {
-        [id, name, folder_name, ..] => [id, name, folder_name],
+    let (id, name, folder_name) = match fields.as_slice() {
+        [id, name, rest @ ..] => (id, name, rest.first().map(String::as_str).unwrap_or("")),
         _ => return Err("Notes made the note but did not say where it is.".to_string()),
     };
     Ok(json!({
         "ok": true,
-        "summary": format!("Made a note: {name}, in {folder_name}."),
+        "summary": created_summary(name, folder_name),
         "observed": { "id": id, "name": name, "folder": folder_name },
     }))
+}
+
+/// The sentence for a made note. The folder is left out when Notes would not say.
+pub fn created_summary(name: &str, folder: &str) -> String {
+    if folder.trim().is_empty() {
+        format!("Made a note: {name}.")
+    } else {
+        format!("Made a note: {name}, in {folder}.")
+    }
 }
 
 /// `notes_append`
@@ -251,6 +277,36 @@ mod tests {
         assert_eq!(done["summary"], "Added to Groceries.");
         let unseen = append_answer("Groceries", &s(&["DONE", "id", "Groceries", "no"]));
         assert_eq!(unseen["ok"], false);
+    }
+
+    /// `name of container of` throws on a fresh note. It may appear only
+    /// between a `try` and its `end try`.
+    #[test]
+    fn no_script_reads_a_container_name_outside_a_try() {
+        for body in [CREATE_BODY, APPEND_BODY, SEARCH_BODY] {
+            let mut depth = 0usize;
+            for line in body.lines() {
+                let line = line.trim();
+                if line == "try" || line.starts_with("try ") {
+                    depth += 1;
+                } else if line == "end try" {
+                    depth = depth.saturating_sub(1);
+                }
+                if line.contains("name of container of") {
+                    assert!(depth > 0, "unguarded container read: {line}");
+                }
+            }
+        }
+        assert!(CREATE_BODY.contains("name of container of"));
+    }
+
+    #[test]
+    fn a_note_with_no_known_folder_is_still_a_made_note() {
+        assert_eq!(created_summary("Groceries", ""), "Made a note: Groceries.");
+        assert_eq!(
+            created_summary("Groceries", "Notes"),
+            "Made a note: Groceries, in Notes."
+        );
     }
 
     #[test]
