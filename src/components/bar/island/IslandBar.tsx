@@ -73,6 +73,7 @@ import {
   chatSizeInWindow,
   escapeIsRusts,
   islandEscapeStep,
+  islandRestFrame,
   rosterShown,
   rosterWidthFor,
   ISLAND_WIDTH,
@@ -831,10 +832,14 @@ export function IslandBar() {
         height: ROSTER_HEIGHT,
       }
     : null;
+  // The window the island can rest in while the capsule is all it draws. Null
+  // for every other face: those need the whole window. Hover is not a face, so
+  // it is inside the resting frame and never changes the window (LAC-4832).
+  const restFrame = face === "idle" ? islandRestFrame(agentSessions.length) : null;
   const { report } = frame;
   useLayoutEffect(() => {
-    report({ width: block.width, height: block.height }, rosterHit ? [hit, rosterHit] : [hit]);
-  }, [report, block.width, block.height, hit.x, hit.y, hit.width, hit.height, rosterHit?.x, rosterHit?.y, rosterHit?.width]); // eslint-disable-line react-hooks/exhaustive-deps
+    report({ width: block.width, height: block.height }, rosterHit ? [hit, rosterHit] : [hit], restFrame);
+  }, [report, block.width, block.height, hit.x, hit.y, hit.width, hit.height, rosterHit?.x, rosterHit?.y, rosterHit?.width, restFrame?.width, restFrame?.height]); // eslint-disable-line react-hooks/exhaustive-deps
   const place = contentPlacement(layout);
   // Tooltips open toward the side the island grows: the frame always has room there.
   const tooltipSide = growUp ? "top" : "bottom";
