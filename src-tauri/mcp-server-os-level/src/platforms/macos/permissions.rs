@@ -13,12 +13,15 @@ use std::process::Command;
 use std::sync::Mutex;
 use tracing::{debug, info, warn};
 
+/// A test's stand-in for one of the two `CGScreenCaptureAccess` calls, which
+/// cannot run on a machine with no screen-recording grant to give.
 #[cfg(test)]
-static SCREEN_RECORDING_CHECK_OVERRIDE: Lazy<Mutex<Option<Box<dyn Fn() -> bool + Send + Sync>>>> =
-    Lazy::new(|| Mutex::new(None));
+type ScreenRecordingOverride = Lazy<Mutex<Option<Box<dyn Fn() -> bool + Send + Sync>>>>;
+
 #[cfg(test)]
-static SCREEN_RECORDING_REQUEST_OVERRIDE: Lazy<Mutex<Option<Box<dyn Fn() -> bool + Send + Sync>>>> =
-    Lazy::new(|| Mutex::new(None));
+static SCREEN_RECORDING_CHECK_OVERRIDE: ScreenRecordingOverride = Lazy::new(|| Mutex::new(None));
+#[cfg(test)]
+static SCREEN_RECORDING_REQUEST_OVERRIDE: ScreenRecordingOverride = Lazy::new(|| Mutex::new(None));
 
 // Make the function public so it can be called from server.rs
 pub fn check_accessibility_permissions(show_prompt: bool) -> Result<bool, AutomationError> {

@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // sort by name for easier viewing
-    app_details.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    app_details.sort_by_key(|a| a.0.to_lowercase());
 
     // print application details
     info!("application details:");
