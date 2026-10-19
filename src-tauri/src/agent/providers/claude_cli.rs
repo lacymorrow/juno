@@ -1304,9 +1304,10 @@ impl ClaudeCliBrain {
             // them what to do was read, logged, and dropped (LAC-4612). The
             // CLI's own wording is what survives a CLI change; Juno's guess
             // about it does not.
+            let code = exit_code_label(&status);
             return Err(AgentError::LlmError(match first_stderr_line(&stderr_buf) {
-                Some(detail) => format!("Claude CLI exited with status {}: {}", status, detail),
-                None => format!("Claude CLI exited with status {} and no output", status),
+                Some(detail) => format!("Claude CLI exited with status {}: {}", code, detail),
+                None => format!("Claude CLI exited with status {} and no output", code),
             }));
         }
 
@@ -2249,6 +2250,18 @@ fn first_stderr_line(stderr: &str) -> Option<String> {
         .map(str::trim)
         .find(|line| !line.is_empty())
         .map(|line| line.chars().take(300).collect())
+}
+
+/// The exit code alone, for a sentence that already says "exited with status".
+///
+/// `ExitStatus`'s `Display` is "exit status: 1", which doubled the words
+/// (LAC-4637). A process killed by a signal, as Escape does, has no code, so
+/// that case keeps the full `Display` ("signal: 9 (SIGKILL)").
+pub(crate) fn exit_code_label(status: &std::process::ExitStatus) -> String {
+    status
+        .code()
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| status.to_string())
 }
 
 /// The tool as a person would say it.
@@ -3201,6 +3214,11 @@ mod tests {
                 assert!(
                     message.contains("requires --verbose"),
                     "the CLI's own explanation must reach the person, got {:?}",
+                    message
+                );
+                assert!(
+                    message.starts_with("Claude CLI exited with status 1: "),
+                    "the status must read once, as a number, got {:?}",
                     message
                 );
             }

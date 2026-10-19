@@ -599,7 +599,7 @@ impl CodexCliBrain {
         if final_text.is_empty() && !status.success() {
             return Err(AgentError::LlmError(format!(
                 "Codex CLI exited with status {} and no output",
-                status
+                super::claude_cli::exit_code_label(&status)
             )));
         }
 
