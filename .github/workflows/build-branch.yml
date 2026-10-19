@@ -102,6 +102,9 @@ jobs:
       - name: Build Juno.app
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # Read with option_env! in updater.rs: a branch build is never
+          # auto-replaced by the update schedule.
+          JUNO_BUILD_KIND: branch
         run: |
           bunx tauri build --target universal-apple-darwin --bundles app \
             --config '{"bundle":{"createUpdaterArtifacts":false}}'

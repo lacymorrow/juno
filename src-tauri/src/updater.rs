@@ -25,13 +25,21 @@
 //! there still applies to both: the channel decides which manifest is read,
 //! never whether the signature is checked.
 //!
-//! # Why it never interrupts
+//! # Why it never interrupts, and never swaps the bundle under a live process
 //!
-//! An update is downloaded and installed in the background, which on macOS
-//! swaps the bundle on disk while the running process carries on with the old
-//! code. Nothing restarts on its own. Quitting normally and reopening is
-//! enough; the Restart button is a shortcut, not a requirement. Juno is a
-//! dictation tool, and a relaunch it chose itself would land mid-sentence.
+//! During the session an update is only *downloaded*; the verified bytes wait
+//! in process state ([`PENDING`]). They are installed when Juno quits
+//! ([`install_pending`], called from the exit path in `lib.rs`) or when the
+//! person presses "Restart to update". Installing mid-session replaced
+//! `/Applications/Juno.app` on disk under the running process, after which
+//! macOS TCC judged the process against a bundle it no longer matched and
+//! every permission (Music automation, screen capture, microphone) failed
+//! until relaunch. Nothing restarts on its own: Juno is a dictation tool, and
+//! a relaunch it chose itself would land mid-sentence.
+//!
+//! A build that is not a published release (a CI branch build installed with
+//! `juno-build <branch>`) is never replaced by the schedule at all; see
+//! [`is_branch_build`].
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -39,7 +47,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
-use tauri_plugin_updater::UpdaterExt;
+use tauri_plugin_updater::{Update, UpdaterExt};
 use tracing::{debug, info, warn};
 
 use crate::constants::events;
@@ -116,7 +124,8 @@ pub enum UpdateStage {
     UpToDate,
     /// A newer build exists and is coming down.
     Downloading,
-    /// Installed on disk. The running process is still the old one.
+    /// Downloaded and verified, waiting in memory. It installs when Juno
+    /// quits; the running bundle on disk is untouched until then.
     ReadyToRestart,
     /// The last attempt failed. `error` says how.
     Failed,
@@ -136,6 +145,9 @@ pub struct UpdateStatus {
     /// Why the last attempt failed, when `stage` is `Failed`: one plain line
     /// a person may read (see [`failure_line`]). The detail is in the log.
     pub error: Option<String>,
+    /// One plain sentence for the UI to show for the current stage, when the
+    /// backend has something specific to say (the UI renders it verbatim).
+    pub detail: Option<String>,
     /// Which feed the last check read.
     pub channel: UpdateChannel,
     /// Downloaded bytes, while `stage` is `Downloading`.
@@ -152,6 +164,7 @@ impl UpdateStatus {
             available_version: None,
             notes: None,
             error: None,
+            detail: None,
             channel,
             downloaded_bytes: 0,
             total_bytes: None,
@@ -168,144 +181,99 @@ fn status_cell() -> &'static Mutex<UpdateStatus> {
 /// start a second download of the same bytes.
 static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
-/// Read the current status. Never blocks on the network.
-pub fn current_status() -> UpdateStatus {
-    match status_cell().lock() {
-        Ok(status) => status.clone(),
-        // A poisoned lock means a previous holder panicked mid-update. The
-        // status is display state, so recovering the value is strictly better
-        // than propagating the panic into the UI.
-        Err(poisoned) => poisoned.into_inner().clone(),
+/// A downloaded, signature-verified update waiting for Juno to quit.
+struct PendingInstall {
+    update: Update,
+    bytes: Vec<u8>,
+}
+
+static PENDING: Mutex<Option<PendingInstall>> = Mutex::new(None);
+
+fn pending_slot() -> std::sync::MutexGuard<'static, Option<PendingInstall>> {
+    match PENDING.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
     }
 }
 
-/// Apply `mutate` to the status and tell the UI, in that order.
-fn update_status<F: FnOnce(&mut UpdateStatus)>(app: &AppHandle, mutate: F) {
-    let snapshot = {
-        let mut guard = match status_cell().lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        mutate(&mut guard);
-        guard.clone()
+/// The compile-time build kind: `"branch"` for a CI branch build
+/// (`build-branch.yml` sets `JUNO_BUILD_KIND=branch`), unset for releases.
+const BUILD_KIND: Option<&str> = option_env!("JUNO_BUILD_KIND");
+
+/// Whether `kind` names a branch build. Pure, so it can be tested.
+pub fn is_branch_kind(kind: Option<&str>) -> bool {
+    matches!(kind.map(str::trim), Some(k) if k.eq_ignore_ascii_case("branch"))
+}
+
+/// True for a build that is not a published release. The schedule must not
+/// replace it: a tester's branch build would be overwritten within seconds.
+pub fn is_branch_build() -> bool {
+    is_branch_kind(BUILD_KIND)
+}
+
+/// What Settings says once an update is downloaded and waiting.
+pub fn ready_line(version: Option<&str>) -> String {
+    match version.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(v) => format!("Juno {v} is downloaded. It installs when Juno quits."),
+        None => "An update is downloaded. It installs when Juno quits.".to_string(),
+    }
+}
+
+/// Install the waiting update, if any. Called when Juno quits, and before a
+/// relaunch. Synchronous: the exit path cannot await. Takes the update out of
+/// the slot first, so it can never install twice. Returns whether it installed.
+pub fn install_pending() -> bool {
+    let Some(PendingInstall { update, bytes }) = pending_slot().take() else {
+        return false;
     };
-    if let Err(e) = app.emit(events::updates::STATUS, &snapshot) {
-        debug!("[Updater] no listener for the status event: {e}");
-    }
-}
-
-/// Look for a newer build, and take it if there is one.
-///
-/// Safe to call from anywhere: a second call while one is running returns
-/// immediately rather than queueing. Errors land in the status rather than
-/// propagating, because most callers are timers with nobody to tell.
-pub async fn check_and_install(app: &AppHandle, channel: UpdateChannel) {
-    if IN_FLIGHT.swap(true, Ordering::SeqCst) {
-        debug!("[Updater] a check is already running; skipping this one");
-        return;
-    }
-
-    let outcome = run_check(app, channel).await;
-
-    if let Err(message) = outcome {
-        warn!("[Updater] {message}");
-        update_status(app, |status| {
-            status.stage = UpdateStage::Failed;
-            status.error = Some(failure_line(&message).to_string());
-        });
-    }
-
-    IN_FLIGHT.store(false, Ordering::SeqCst);
-}
-
-/// What Settings shows after a check that did not finish. The raw reason
-/// names a feed URL and an error chain, which tells a person nothing they can
-/// act on; it goes to the log. A lost connection is worth saying plainly,
-/// because it explains itself and fixes itself.
-pub fn failure_line(message: &str) -> &'static str {
-    if crate::utils::network::is_network_error(message) {
-        "No internet connection. Juno will check again later."
-    } else {
-        "The last check didn't finish. Juno will check again later."
-    }
-}
-
-/// The body of a check. Split out so [`check_and_install`] owns the in-flight
-/// flag on every exit path, including the error ones.
-async fn run_check(app: &AppHandle, channel: UpdateChannel) -> Result<(), String> {
-    update_status(app, |status| {
-        status.stage = UpdateStage::Checking;
-        status.error = None;
-        status.channel = channel;
-        status.downloaded_bytes = 0;
-        status.total_bytes = None;
-    });
-
-    let endpoint = channel
-        .endpoint()
-        .parse()
-        .map_err(|e| format!("the {} feed URL is not a URL: {e}", channel.as_str()))?;
-
-    let updater = app
-        .updater_builder()
-        .endpoints(vec![endpoint])
-        .map_err(|e| {
-            format!(
-                "could not point the updater at the {} feed: {e}",
-                channel.as_str()
-            )
-        })?
-        .build()
-        .map_err(|e| format!("could not build the updater: {e}"))?;
-
-    let found = updater
-        .check()
-        .await
-        .map_err(|e| format!("could not read the {} feed: {e}", channel.as_str()))?;
-
-    let Some(update) = found else {
-        info!(
-            "[Updater] {} is the newest build on the {} channel",
-            env!("CARGO_PKG_VERSION"),
-            channel.as_str()
-        );
-        update_status(app, |status| {
-            status.stage = UpdateStage::UpToDate;
-            status.available_version = None;
-            status.notes = None;
-        });
-        return Ok(());
-    };
-
     let version = update.version.clone();
     let notes = update.body.clone();
+
+    let already_waiting = pending_slot()
+        .as_ref()
+        .is_some_and(|p| p.update.version == version);
+    if already_waiting {
+        debug!("[Updater] {version} is already downloaded and waiting for quit");
+        update_status(app, |status| {
+            status.stage = UpdateStage::ReadyToRestart;
+            status.available_version = Some(version.clone());
+            status.notes = notes;
+            status.detail = Some(ready_line(Some(&version)));
+        });
+        return Ok(());
+    }
+
     info!("[Updater] {version} is available; downloading");
     update_status(app, |status| {
         status.stage = UpdateStage::Downloading;
         status.available_version = Some(version.clone());
         status.notes = notes;
+        status.detail = None;
     });
 
     // `on_chunk` is called per chunk with the chunk's length, so the running
     // total is ours to keep. The closure is synchronous and must stay cheap:
     // it runs between reads of the socket.
     let progress_app = app.clone();
-    update
-        .download_and_install(
+    let bytes = update
+        .download(
             move |chunk, total| {
                 update_status(&progress_app, |status| {
                     status.downloaded_bytes += chunk as u64;
                     status.total_bytes = total;
                 });
             },
-            || debug!("[Updater] download finished; installing"),
+            || debug!("[Updater] download finished and verified"),
         )
         .await
-        .map_err(|e| format!("could not install {version}: {e}"))?;
+        .map_err(|e| format!("could not download {version}: {e}"))?;
 
-    info!("[Updater] {version} is installed; it runs on the next launch");
+    *pending_slot() = Some(PendingInstall { update, bytes });
+
+    info!("[Updater] {version} is downloaded; it installs when Juno quits");
     update_status(app, |status| {
         status.stage = UpdateStage::ReadyToRestart;
+        status.detail = Some(ready_line(Some(&version)));
     });
     Ok(())
 }
@@ -321,6 +289,10 @@ pub fn spawn_schedule(app: AppHandle) {
         tokio::time::sleep(FIRST_CHECK_DELAY).await;
         loop {
             match settings_for(&app).await {
+                Ok((true, _)) if is_branch_build() => info!(
+                    "[Updater] this is a branch build, not a release; \
+                     scheduled updates would overwrite it, so none will run"
+                ),
                 Ok((true, channel)) => check_and_install(&app, channel).await,
                 Ok((false, _)) => {
                     debug!("[Updater] automatic checks are off; skipping this tick")
@@ -344,6 +316,26 @@ pub async fn settings_for(app: &AppHandle) -> Result<(bool, UpdateChannel), Stri
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_the_branch_kind_marks_a_branch_build() {
+        assert!(is_branch_kind(Some("branch")));
+        assert!(is_branch_kind(Some(" Branch ")));
+        assert!(!is_branch_kind(None));
+        assert!(!is_branch_kind(Some("")));
+        assert!(!is_branch_kind(Some("release")));
+    }
+
+    #[test]
+    fn the_ready_line_says_it_installs_on_quit() {
+        let line = ready_line(Some("0.8.216"));
+        assert!(line.contains("0.8.216") && line.contains("installs when Juno quits"));
+        assert_eq!(
+            ready_line(None),
+            "An update is downloaded. It installs when Juno quits."
+        );
+        assert_eq!(ready_line(Some("  ")), ready_line(None));
+        assert!(!line.contains('\u{2014}'));
+    }
 
     #[test]
     fn a_failed_check_never_shows_a_url_or_an_error_chain() {

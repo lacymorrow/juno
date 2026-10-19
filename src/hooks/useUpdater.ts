@@ -25,6 +25,8 @@ export interface UpdateStatus {
   availableVersion: string | null;
   notes: string | null;
   error: string | null;
+  /** A sentence from the backend for the current stage, shown as is. */
+  detail: string | null;
   channel: UpdateChannel;
   downloadedBytes: number;
   totalBytes: number | null;

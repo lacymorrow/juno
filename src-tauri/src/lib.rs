@@ -1325,6 +1325,10 @@ pub fn run() {
                     // being torn down around the children (their conversations
                     // survive via their session ids on disk).
                     tauri::RunEvent::Exit => {
+                        // The only moment a downloaded update is swapped in:
+                        // the process is ending, so no TCC check can run
+                        // against a bundle that changed under it.
+                        updater::install_pending();
                         tauri::async_runtime::block_on(
                             agent::providers::claude_cli_session::shutdown_all(),
                         );
