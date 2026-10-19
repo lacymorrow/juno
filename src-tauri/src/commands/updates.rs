@@ -36,14 +36,20 @@ pub async fn check_for_updates_now(app_handle: AppHandle) -> Result<(), String> 
     Ok(())
 }
 
-/// Relaunch into a version already installed on disk.
+/// Install the downloaded update, then relaunch into it.
 ///
-/// Only meaningful once the status reads `readyToRestart`. `restart` does not
-/// return, so nothing after it runs.
+/// Only meaningful once the status reads `readyToRestart`. The install happens
+/// here, with the person's explicit press, because `restart` does not run the
+/// exit path. `restart` does not return, so nothing after it runs.
 #[tauri::command]
 pub async fn restart_to_update(app_handle: AppHandle) -> Result<(), String> {
-    info!("[Updater] restarting into the installed version");
-    // `restart` diverges, so the Ok arm below is unreachable by construction.
+    info!("[Updater] installing, then restarting into the new version");
+    let installed = tauri::async_runtime::spawn_blocking(updater::install_pending)
+        .await
+        .map_err(|e| format!("the install did not finish: {e}"))?;
+    if !installed {
+        return Err("There is no downloaded update to install.".to_string());
+    }
     app_handle.restart()
 }
 

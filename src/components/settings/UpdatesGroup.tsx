@@ -31,9 +31,9 @@ function describe(status: UpdateStatus): string {
       return `Downloading ${version}.`;
     }
     case "readyToRestart":
-      return `Juno ${status.availableVersion ?? ""} is installed. It runs the next time Juno starts.`.replace(
-        "  ",
-        " ",
+      return (
+        status.detail ??
+        "An update is downloaded. It installs when Juno quits."
       );
     case "upToDate":
       return "This is the newest version.";
@@ -67,7 +67,7 @@ export function UpdatesGroup() {
       console.error("Update action failed:", error);
       toast.error(
         ready
-          ? "Couldn't restart. Quit Juno and open it again."
+          ? "Couldn't restart. Quit Juno and the update installs."
           : "Couldn't check for updates right now. Juno will try again later.",
       );
     }
@@ -103,7 +103,7 @@ export function UpdatesGroup() {
           variant={ready ? "default" : "outline"}
           size="sm"
         >
-          {ready ? "Restart" : busy ? "Checking…" : "Check for Updates"}
+          {ready ? "Restart to update" : busy ? "Checking…" : "Check for Updates"}
         </Button>
       </SettingsRow>
 
