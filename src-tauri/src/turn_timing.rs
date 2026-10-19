@@ -6,10 +6,16 @@
 //! millisecond offsets from the key release:
 //!
 //! ```text
-//! [TurnTiming] turn=7 outcome=first_audio released=0 transcript_final=412 llm_request_sent=455 llm_first_token=1210 first_tts_text=1388 first_audio=1702 provider=claude_cli/persistent-warm model=sonnet effort=medium tts=kokoro source=voice
+//! [TurnTiming] turn=7 outcome=first_audio released=0 transcript_final=412 llm_request_sent=455 llm_first_token=1210 tts_open=1240 first_tts_text=1388 first_audio=1702 provider=claude_cli/persistent-warm model=sonnet effort=medium tts=kokoro source=voice
 //! ```
 //!
 //! A stage the turn never reached prints as `-`. Grep `[TurnTiming]` in the log.
+//!
+//! Reading the gaps matters as much as the totals, because each one has a
+//! different owner: `llm_first_token` is the model round trip, `tts_open`
+//! minus it is the model writing something before it opened `<TTS>`, and
+//! `first_tts_text` minus `tts_open` is the parser waiting for a sentence it
+//! is allowed to release.
 //!
 //! A typed query opens a turn too ([`begin_typed`]), timed from the submit, so
 //! `released=0` is the moment it was sent and `transcript_final` is `-`.
@@ -56,6 +62,17 @@ pub enum Stage {
     LlmRequestSent,
     /// The first streamed content came back from the model.
     LlmFirstToken,
+    /// The model opened the spoken channel: `<TTS>` arrived in the stream.
+    ///
+    /// Splits the wait between the first token and the first spoken text into
+    /// its two causes, which have opposite fixes. Time before this mark is the
+    /// model writing something else first (display text, a component, a
+    /// preamble) and is a prompt problem. Time after it is the parser holding
+    /// the spoken text until a sentence is releasable (see
+    /// `agent::tts_tags::split_ready_sentences` and `MIN_SPOKEN_CHUNK_CHARS`)
+    /// and is a chunking problem. Without the split the whole gap is one
+    /// number that cannot tell the two apart.
+    TtsBlockOpen,
     /// The first text was handed to text-to-speech.
     FirstTtsText,
     /// Audio playback actually started.
@@ -63,10 +80,11 @@ pub enum Stage {
 }
 
 impl Stage {
-    pub const ALL: [Stage; 5] = [
+    pub const ALL: [Stage; 6] = [
         Stage::TranscriptFinal,
         Stage::LlmRequestSent,
         Stage::LlmFirstToken,
+        Stage::TtsBlockOpen,
         Stage::FirstTtsText,
         Stage::FirstAudio,
     ];
@@ -76,6 +94,7 @@ impl Stage {
             Stage::TranscriptFinal => "transcript_final",
             Stage::LlmRequestSent => "llm_request_sent",
             Stage::LlmFirstToken => "llm_first_token",
+            Stage::TtsBlockOpen => "tts_open",
             Stage::FirstTtsText => "first_tts_text",
             Stage::FirstAudio => "first_audio",
         }
@@ -86,8 +105,9 @@ impl Stage {
             Stage::TranscriptFinal => 0,
             Stage::LlmRequestSent => 1,
             Stage::LlmFirstToken => 2,
-            Stage::FirstTtsText => 3,
-            Stage::FirstAudio => 4,
+            Stage::TtsBlockOpen => 3,
+            Stage::FirstTtsText => 4,
+            Stage::FirstAudio => 5,
         }
     }
 }
@@ -99,7 +119,7 @@ pub struct TurnTimer {
     /// The voice session whose release opened this turn, when known.
     voice_session: Option<u64>,
     released: Instant,
-    marks: [Option<Duration>; 5],
+    marks: [Option<Duration>; Stage::ALL.len()],
     provider: Option<String>,
     model: Option<String>,
     /// The Claude CLI `--effort` the turn ran at.
@@ -115,7 +135,7 @@ impl TurnTimer {
             id,
             voice_session: None,
             released,
-            marks: [None; 5],
+            marks: [None; Stage::ALL.len()],
             provider: None,
             model: None,
             effort: None,
@@ -438,6 +458,9 @@ mod tests {
             .mark_at(Stage::LlmFirstToken, t0 + ms(1200))
             .is_none());
         assert!(tracker
+            .mark_at(Stage::TtsBlockOpen, t0 + ms(1240))
+            .is_none());
+        assert!(tracker
             .mark_at(Stage::FirstTtsText, t0 + ms(1380))
             .is_none());
         let line = tracker
@@ -446,7 +469,7 @@ mod tests {
         assert_eq!(
             line,
             "turn=1 outcome=first_audio released=0 transcript_final=400 llm_request_sent=450 \
-             llm_first_token=1200 first_tts_text=1380 first_audio=1700 \
+             llm_first_token=1200 tts_open=1240 first_tts_text=1380 first_audio=1700 \
              provider=claude_cli/persistent-warm model=sonnet effort=- tts=kokoro source=voice"
         );
         // Emitted once: the turn is gone, later marks do nothing.
@@ -479,8 +502,58 @@ mod tests {
         assert_eq!(
             line,
             "turn=2 outcome=timeout released=0 transcript_final=300 llm_request_sent=- \
-             llm_first_token=- first_tts_text=- first_audio=- provider=- model=- effort=- tts=- source=voice"
+             llm_first_token=- tts_open=- first_tts_text=- first_audio=- provider=- model=- effort=- tts=- source=voice"
         );
+    }
+
+    /// A turn that spoke has a `tts_open` between its first token and its
+    /// first spoken text, so the wait can be split into the model's share and
+    /// the parser's. Without it the gap is one number with two possible
+    /// causes and opposite fixes.
+    #[test]
+    fn tts_open_sits_between_first_token_and_first_spoken_text() {
+        let t0 = Instant::now();
+        let mut timer = TurnTimer::new(4, t0);
+        timer.mark_at(Stage::LlmFirstToken, t0 + ms(1200));
+        timer.mark_at(Stage::TtsBlockOpen, t0 + ms(1500));
+        timer.mark_at(Stage::FirstTtsText, t0 + ms(1900));
+
+        assert!(timer
+            .line("first_audio")
+            .contains("llm_first_token=1200 tts_open=1500 first_tts_text=1900"));
+
+        let gap = |a, b| timer.offset(b).unwrap() - timer.offset(a).unwrap();
+        // Before the tag: the model wrote something else first (prompt fix).
+        assert_eq!(gap(Stage::LlmFirstToken, Stage::TtsBlockOpen), ms(300));
+        // After it: the parser held the text for a sentence (chunking fix).
+        assert_eq!(gap(Stage::TtsBlockOpen, Stage::FirstTtsText), ms(400));
+    }
+
+    /// `index` is a hand-written position into the marks array and `ALL` is a
+    /// hand-written order. A stage added to one and not the other would either
+    /// silently overwrite another stage's mark or print out of order, and
+    /// nothing else would fail. Pin them to each other.
+    #[test]
+    fn every_stage_indexes_its_own_slot_in_order() {
+        for (position, stage) in Stage::ALL.into_iter().enumerate() {
+            assert_eq!(stage.index(), position, "{:?} is out of order", stage);
+        }
+        let mut labels: Vec<&str> = Stage::ALL.iter().map(|s| s.label()).collect();
+        labels.sort_unstable();
+        let count = labels.len();
+        labels.dedup();
+        assert_eq!(labels.len(), count, "two stages share a label");
+    }
+
+    /// Only the first `<TTS>` of a turn is on the path to the first sound. A
+    /// reply with a second spoken block must not move the mark.
+    #[test]
+    fn a_later_tts_block_does_not_move_tts_open() {
+        let t0 = Instant::now();
+        let mut timer = TurnTimer::new(5, t0);
+        assert!(timer.mark_at(Stage::TtsBlockOpen, t0 + ms(800)));
+        assert!(!timer.mark_at(Stage::TtsBlockOpen, t0 + ms(2400)));
+        assert_eq!(timer.offset(Stage::TtsBlockOpen), Some(ms(800)));
     }
 
     #[test]

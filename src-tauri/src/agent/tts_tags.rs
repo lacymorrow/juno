@@ -195,11 +195,36 @@ pub struct TtsTagStream {
     in_tag: bool,
     /// Spoken text collected since the last `<TTS>`.
     spoken: String,
+    /// Whether this stream has already seen its first `<TTS>`. Only the first
+    /// one is on the path to the first sound, so only the first is timed.
+    block_opened: bool,
 }
 
 impl TtsTagStream {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Whether this stream has seen a `<TTS>` yet.
+    pub fn block_opened(&self) -> bool {
+        self.block_opened
+    }
+
+    /// The first `<TTS>` of this stream just arrived: time it.
+    ///
+    /// This is the one place in the app that knows when the spoken channel
+    /// opened. Every provider feeds its stream through here precisely so the
+    /// tag rules live in one module, so re-finding the tag in each provider
+    /// to time it would reintroduce the bug this module exists to prevent (a
+    /// provider that forgets). [`crate::turn_timing::mark`] is a no-op with no
+    /// open turn, so this costs one uncontended lock off the voice path and
+    /// nothing in tests.
+    fn note_block_opened(&mut self) {
+        if self.block_opened {
+            return;
+        }
+        self.block_opened = true;
+        crate::turn_timing::mark(crate::turn_timing::Stage::TtsBlockOpen);
     }
 
     /// Move every finished sentence out of the open block's text.
@@ -258,6 +283,7 @@ impl TtsTagStream {
             } else {
                 if rest.starts_with(OPEN_TAG) {
                     self.in_tag = true;
+                    self.note_block_opened();
                     consumed += OPEN_TAG.len();
                     continue;
                 }
@@ -347,6 +373,55 @@ pub fn contains_tts_tags(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The open tag is what `turn_timing`'s `tts_open` stage times, so it has
+    /// to be noticed the moment it resolves: on the chunk that completes the
+    /// tag, not when the first sentence is ready. Those are different times,
+    /// and telling them apart is the whole point of the stage.
+    #[test]
+    fn block_opened_is_set_when_the_tag_resolves_not_when_speech_is_ready() {
+        let mut stream = TtsTagStream::new();
+        assert!(!stream.block_opened());
+
+        // Display text before the spoken channel opens: still closed.
+        let (_, spoken) = stream.push("Here you go. ");
+        assert!(spoken.is_empty());
+        assert!(!stream.block_opened());
+
+        // The tag arrives split across chunks: closed until it resolves.
+        stream.push("<TT");
+        assert!(!stream.block_opened());
+        let (_, spoken) = stream.push("S>Playing it");
+        assert!(stream.block_opened(), "the tag resolved on this chunk");
+        assert!(
+            spoken.is_empty(),
+            "open is earlier than the first releasable sentence"
+        );
+
+        let (_, spoken) = stream.push(" now.</TTS>");
+        assert_eq!(spoken, vec!["Playing it now."]);
+    }
+
+    /// Only the first block of a reply is on the path to the first sound.
+    #[test]
+    fn block_opened_stays_set_across_later_blocks() {
+        let mut stream = TtsTagStream::new();
+        stream.push("<TTS>The first line here.</TTS>");
+        assert!(stream.block_opened());
+        stream.push("middle<TTS>A second spoken line.</TTS>");
+        assert!(stream.block_opened());
+    }
+
+    /// A reply that never speaks must never claim it opened the channel, or
+    /// `tts_open` would be timed on turns that had no speech at all.
+    #[test]
+    fn block_opened_stays_clear_without_a_tag() {
+        let mut stream = TtsTagStream::new();
+        stream.push("Just display text, no spoken channel. ");
+        let (_, spoken) = stream.finish();
+        assert!(spoken.is_empty());
+        assert!(!stream.block_opened());
+    }
 
     #[test]
     fn whole_string_extracts_and_strips() {
