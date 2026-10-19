@@ -36,7 +36,7 @@ The composer is not part of any face. It is one textarea mounted for the life of
 
 The Pill opens `BarChatPane` under the pill. The Island does not get a pane: the same black shape grows into the conversation. It is sized for the display it is on (`chatSizeFor`: 60% of the display both ways, clamped, never more than the window can be given there) and pinned to the well's docked edges like every other face, so it grows away from the docked edge: down from a top well, up from a low one, out from a side. A well in the middle of a side has only the room between it and the window's edge, so there the chat is shorter (`roomForContent`).
 
-- **Way in:** the expand control in the answer or component header ("Show the conversation"), the hover capsule's Open chat (the Pill's hover expand, always offered), or the tray's Show Chat (`bar-toggle-pane`). From the capsule the tray opens chat only once there is a turn.
+- **Way in:** the expand control in the answer or component header ("Show the conversation"), the answer reached from the hover capsule's Open chat (one size up: idle, then the small chat, then the full chat), or the tray's Show Chat (`bar-toggle-pane`). From the capsule the tray opens chat only once there is a turn.
 - **Way out:** Escape steps down one rung (`islandEscapeStep`): to the answer or component it grew from, or to the composer (caret in it) when there is no answer. The header's one control does the same thing. Show Chat again settles to the capsule.
 - **Through a turn:** chat stays up through every Rust state. A new spoken or typed turn streams into the conversation; it never turns the chat back into the composer the way it does an answer.
 - **No ring.** Chat stays until it is put down.
@@ -49,7 +49,7 @@ What was removed from the Pill's pane on the way in (the `insanely-great` pass, 
 - The "esc to close" / "working" status words. The dot and the placeholder already say what is happening.
 - A second close control. The one collapse control steps down a rung, the same as Escape.
 - The question line, the speaker toggle and the linger ring of the answer face: the conversation shows the question, and the full message renders its own spoken text and actions.
-- ~~An empty chat.~~ Reversed 2026-10-17: the hover capsule's Open chat is always offered, as the Pill's is, so chat can open before a turn and shows the example prompts (a click fills the composer).
+- An empty chat. The hover capsule's Open chat is always offered, as the Pill's is, but it climbs one size at a time (Lacy, 2026-10-19: "Expand button on the small idle bar should open the small chat, not the full chat. Expand button on the small chat should open the full chat"). Before any turn it opens the composer, where a chat starts.
 
 ### Parity with the Pill
 
@@ -59,7 +59,7 @@ What was removed from the Pill's pane on the way in (the `insanely-great` pass, 
 | Wake phrase toggle | the hover capsule, last | Shown only when a phrase is configured. Ear while listening ("Stop listening for the wake phrase"), crossed ear while paused ("Listen for the wake phrase"). It pauses the engine, never the trigger; it follows Rust's `voice-trigger-listening` | `hooks/useWakePhrase.ts`, shared with the Pill |
 | Connection dot | every face with a dot | System red and still when Rust says Juno cannot answer (`connectivity-changed` / `get_connectivity`, `pillStatus.dotTone`); an open mic still wins. Its label is Rust's reason ("Network unavailable") | `dotFor(state, driving, connectivity)`, `dotLabel` |
 | Agent roster | beside the shape | From two agents: a second small black capsule (the capsule's height, 8 px away) beside the island, level with the docked edge, on the side away from a side-docked edge. Apple's split island: a second activity is a second small shape, so the island itself never moves for it. Its rect is reported as a second hit region. Hidden while the island is carried |
-| Hover expand | the hover capsule, after Talk; the only way back to an answer from idle | Open chat (`Maximize2`), the Pill's hover control: opens the chat face. Always offered | `IslandBar.tsx` | `AgentRosterStrip`, `rosterWidthFor` |
+| Hover expand | the hover capsule, after Talk; the only way back to an answer from idle | Open chat (`Maximize2`), the Pill's hover control: opens the small chat (the last answer), or the composer before any turn. Always offered. The answer's own expand opens the full chat | `IslandBar.tsx` | `AgentRosterStrip`, `rosterWidthFor` |
 | Tooltips | the dot and every icon control (Talk, Open chat, wake phrase, expand, collapse, close, spoken aloud, the composer's mic, Send and stop, Remove image) | `PillTooltip`: 500 ms, opens from the native forwarded hover (`mouse-moved-window`) as well as DOM hover, closed during a drag (`useBarDragging`), toward the side the island grows. `title` stays as the fallback and steps aside while the tooltip shows. Text buttons (Allow, Don't, the caption) carry no tooltip | `bar/PillTooltip.tsx` |
 
 ### The small bar
@@ -108,7 +108,7 @@ Local conditions on top:
 | answer has text and speech | the speaker toggle in the question line reveals the spoken text under the body |
 | answer taller than 400 | the body scrolls inside the shape |
 | a new answer while the island is up | the answer face opens; an answer already there at mount (history) does not |
-| hover over idle | the hover controls; Open chat opens the chat face, which holds the last answer |
+| hover over idle | the hover controls; Open chat opens the small chat (the last answer) or, before any turn, the composer; the small chat's expand opens the full chat |
 | tray Show/Hide Chat | opens the chat face (once there is a turn); again, settles to the capsule |
 | chat face open | stays through every bar state; Escape or its collapse control steps down to the answer, or to the composer with no answer |
 | a picture pasted into the composer | thumbnail row above the text; the compose face is the full box; Send sends text and pictures through `dispatch_query` |

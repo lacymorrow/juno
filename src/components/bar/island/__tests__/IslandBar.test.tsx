@@ -620,7 +620,7 @@ describe("IslandBar: idle and hover", () => {
     expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(true);
   });
 
-  it("opens the chat from the hover controls with an answer settled, and the tray toggles the chat face", async () => {
+  it("climbs from the hover controls to the small chat, then the full chat, and the tray toggles the chat face", async () => {
     renderWithAnswer();
     await act(async () => {
       vi.advanceTimersByTime(LINGER_MS + 100);
@@ -629,6 +629,8 @@ describe("IslandBar: idle and hover", () => {
     fireEvent.pointerEnter(stage());
     expect(screen.queryByRole("button", { name: "Show last answer" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Open chat" }));
+    expect(face()).toBe("answer");
+    fireEvent.click(screen.getByTestId("island-expand"));
     expect(face()).toBe("chat");
     await act(async () => {
       eventHandlers.get(EVENTS.BAR_TOGGLE_PANE)?.(null);
@@ -1169,7 +1171,7 @@ describe("IslandBar: Escape walks all the way down to the capsule", () => {
 });
 
 describe("IslandBar: Open chat from the hover capsule", () => {
-  it("the hover capsule carries the Pill's expand control, which opens the chat face", async () => {
+  it("the hover capsule's expand opens the small chat, whose expand opens the full chat", async () => {
     standInRust();
     renderWithAnswer();
     await escape();
@@ -1179,9 +1181,11 @@ describe("IslandBar: Open chat from the hover capsule", () => {
     expect(screen.getByTestId("island-hover-expand")).toBe(expand);
     invoke.mockClear();
     fireEvent.click(expand);
-    expect(face()).toBe("chat");
+    expect(face()).toBe("answer");
     // Not also a click on the capsule, which would open the composer.
     expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(false);
+    fireEvent.click(screen.getByTestId("island-expand"));
+    expect(face()).toBe("chat");
     await escape();
     expect(face()).toBe("answer");
     await escape();
@@ -1196,13 +1200,12 @@ describe("IslandBar: Open chat from the hover capsule", () => {
     const shapeHit = (frameReport.mock.calls[frameReport.mock.calls.length - 1][1] as Array<{ width: number }>)[0];
     // Talk and Open chat.
     expect(shapeHit.width).toBe(104);
+    // No answer yet: the small surface is the composer, where a chat starts.
     fireEvent.click(screen.getByRole("button", { name: "Open chat" }));
-    expect(face()).toBe("chat");
-    // Nothing to follow up on yet.
-    expect(composer()).toHaveAccessibleName("Ask Juno");
-    expect(placeholder()).toHaveTextContent("Ask Juno");
-    await escape();
+    expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(true);
+    await rustAnswers();
     expect(face()).toBe("compose");
+    expect(placeholder()).toHaveTextContent("Ask Juno");
     await escape();
     expect(face()).toBe("idle");
   });
