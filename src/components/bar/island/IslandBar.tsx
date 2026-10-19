@@ -20,6 +20,7 @@ import {
   Maximize2,
   Mic,
   Minimize2,
+  Plus,
   Square,
   Volume2,
   X,
@@ -85,6 +86,7 @@ import {
   faceFor,
   isInputState,
   isRecording,
+  isRestingState,
   isWorkingState,
   latestTurn,
   lingerShouldRun,
@@ -359,6 +361,28 @@ export function IslandBar() {
   useEffect(() => {
     if (turn.approval) setAnswerOpen(true);
   }, [turn.approval]);
+  // A new turn puts the last answer away. The answer on screen belongs to the
+  // last question, and between the end of a spoken turn and Rust announcing
+  // the new question (the final decode, then Sending) it was still the latest
+  // turn, so it came back: talking to Juno showed her last reply. It goes once
+  // the turn is really under way, the spoken words being decoded or anything
+  // being sent; the new answer opens itself when it arrives. A spoken turn
+  // cancelled while listening leaves it, and so does a dictation, whose final
+  // decode arrives without the dictation flag (the field it types into may be
+  // the follow-up under the answer).
+  const dictatingNow = bar.isDictationMode || bar.barState === UI.BAR_STATES_DICTATING;
+  const spokenTurnRef = useRef(false);
+  useEffect(() => {
+    const state = bar.barState;
+    if (dictatingNow) spokenTurnRef.current = false;
+    else if (state === UI.BAR_STATES_LISTENING) spokenTurnRef.current = true;
+    const decodingSpokenTurn =
+      state === UI.BAR_STATES_TRANSCRIBING && !bar.transcriptionProvisional && spokenTurnRef.current;
+    if (decodingSpokenTurn || state === UI.BAR_STATES_SUBMITTING) {
+      spokenTurnRef.current = false;
+      setAnswerOpen(false);
+    }
+  }, [bar.barState, bar.transcriptionProvisional, dictatingNow]);
   useEventListener(EVENTS.INPUT_CONTROL_REQUEST, () => setAnswerOpen(true));
 
   // ── The face ──
@@ -460,6 +484,8 @@ export function IslandBar() {
         sendInteraction(UI.INTERACTION_TYPES_BLUR),
       );
   }, [settle, composer.ref]);
+  const putAwayRef = useRef(putAway);
+  putAwayRef.current = putAway;
   /** A component's X: step back to the composer, the draft and caret kept. */
   const stepBack = useCallback(() => {
     setSteppedBack(key);
@@ -523,6 +549,21 @@ export function IslandBar() {
   //
   // Only losing focus is reported. A press on the capsule makes the window
   // key, and reporting that would turn every drag into "open the composer".
+  //
+  // Going somewhere else (another app, the desktop, another Juno window) puts
+  // a composer nobody is using away: the island is the idle capsule again.
+  // Rust's press-outside event covers the case where no focus change reaches
+  // the page (the box was opened without the window ever becoming key). An
+  // answer, a component, the chat or anything Juno is doing stays: those are
+  // being shown, and the ring or Escape puts them away.
+  const leftForElsewhere = useCallback(() => {
+    if (faceRef.current !== "compose") return;
+    const state = barRef.current.barState;
+    if (!isInputState(state) && !isRestingState(state)) return;
+    // A draft is kept, out of sight, the same as Escape.
+    putAwayRef.current();
+  }, []);
+  useEventListener(EVENTS.SYSTEM_MOUSE_PRESSED_OUTSIDE, leftForElsewhere);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let mounted = true;
@@ -533,6 +574,7 @@ export function IslandBar() {
         // after a step back folds away.
         if (!draftRef.current.trim()) setComposerHeld(false);
         void sendInteraction(UI.INTERACTION_TYPES_BLUR);
+        leftForElsewhere();
       })
       .then((fn) => {
         if (mounted) unlisten = fn;
@@ -575,10 +617,52 @@ export function IslandBar() {
     setChatOpen(true);
     setEngaged(false);
   }, []);
-  // The tray's Show/Hide Chat: the chat face, or back to the capsule.
+  // Show/Hide Chat (the bar's right-click menu): the chat face, or back to
+  // the capsule. Before any turn there is no chat to show, so it opens the
+  // composer, the same as the hover capsule's Open chat.
   useEventListener(EVENTS.BAR_TOGGLE_PANE, () => {
     if (faceRef.current === "chat") settle();
     else if (hasTurnRef.current) openChat();
+    else {
+      activateWindow();
+      void sendInteraction(UI.INTERACTION_TYPES_CLICK);
+    }
+  });
+
+  // ── New chat: the tray, the right-click menu, Cmd+N, the + in a header ──
+  //
+  // The Pill's rule: stop an answer still arriving (rotating under a live
+  // stream left it landing in a conversation nobody could see), start a fresh
+  // conversation in Rust, clear the screen, and leave the caret in the box.
+  // The chat face stays the chat face, empty with its example prompts.
+  const workingRef = useRef(working);
+  workingRef.current = working;
+  const mainWindowOpenRef = useRef(false);
+  useEventListener(EVENTS.BAR_MAIN_WINDOW_OPENED, () => {
+    mainWindowOpenRef.current = true;
+  });
+  useEventListener(EVENTS.BAR_MAIN_WINDOW_CLOSED, () => {
+    mainWindowOpenRef.current = false;
+  });
+  const startNewChat = useCallback(() => {
+    void (async () => {
+      if (workingRef.current) await chat.stop();
+      await invoke(COMMANDS.CONVERSATIONS_NEW_CONVERSATION).catch(() => {});
+      chat.startNewChat();
+      setAnswerOpen(false);
+      setSpokenOpen(false);
+      setCaptionOpen(false);
+      setSteppedBack(null);
+      setDismissed(false);
+      if (faceRef.current !== "chat") setComposerHeld(true);
+      activateWindow();
+      focusComposer();
+    })();
+  }, [chat.stop, chat.startNewChat, focusComposer]); // eslint-disable-line react-hooks/exhaustive-deps
+  // While the full-size window is up it owns the conversation and answers
+  // the menu itself.
+  useEventListener(EVENTS.MENU_NEW_CHAT_REQUESTED, () => {
+    if (!mainWindowOpenRef.current) startNewChat();
   });
 
   /**
@@ -801,6 +885,25 @@ export function IslandBar() {
   });
 
   const wakeLabel = wake.listening ? "Stop listening for the wake phrase" : "Listen for the wake phrase";
+  // The Pill pane's +: a fresh conversation, the caret in the box.
+  const newChatControl = tip(
+    "new-chat",
+    "New chat",
+    <button
+      type="button"
+      {...named("new-chat")}
+      onClick={(e) => {
+        e.stopPropagation();
+        startNewChat();
+      }}
+      aria-label="New chat"
+      title="New chat"
+      data-testid="island-new-chat"
+      className={cn(CONTROL, "text-white/40", lit === "new-chat" && CONTROL_LIT)}
+    >
+      <Plus className="size-3.5" />
+    </button>,
+  );
 
   let layer: ReactNode = null;
   if (layerKey === "idle") {
@@ -872,6 +975,7 @@ export function IslandBar() {
         <header className="flex shrink-0 items-center gap-2.5 pl-2.5 pr-3" style={{ height: HEADER_H }}>
           {dotTarget}
           <div className="flex-1" />
+          {newChatControl}
           {tip(
             "collapse",
             hasAnswer ? "Back to the answer" : "Back to the text box",

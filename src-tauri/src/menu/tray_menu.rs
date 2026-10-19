@@ -136,6 +136,15 @@ impl TrayIconState {
         }
     }
 
+    /// Whether the icon is showing Juno at work: a mic open, words becoming
+    /// text, or a run. The tray's talk row offers Cancel for these.
+    pub fn is_busy(self) -> bool {
+        matches!(
+            self,
+            TrayIconState::Recording | TrayIconState::Transcribing | TrayIconState::Agent
+        )
+    }
+
     /// Tooltip for the menu bar icon.
     fn tooltip(self) -> String {
         format!("{} · {}", crate::demo::display_name(), self.label())
@@ -151,6 +160,12 @@ pub struct TrayIconManager {
     /// The surface the chat row is currently offering to act on, read as the
     /// pointer reached the icon. Taken by the click it was read for.
     pending_chat_surface: Option<ChatSurface>,
+    /// What the Show/Hide Juno row is offering, read with the surface.
+    pending_juno_row: Option<JunoRow>,
+    /// The Talk to Juno / Cancel row, kept so its text can follow her state.
+    talk_item: Option<MenuItem<tauri::Wry>>,
+    /// Whether the talk row is offering Cancel, read as the pointer arrived.
+    pending_busy: Option<bool>,
     current_state: TrayIconState,
     /// Bumped on every state change. A running animation loop stops as soon as
     /// it sees a generation other than the one it was started with.
@@ -165,6 +180,9 @@ impl TrayIconManager {
             status_item: None,
             chat_toggle_item: None,
             pending_chat_surface: None,
+            pending_juno_row: None,
+            talk_item: None,
+            pending_busy: None,
             current_state: TrayIconState::Idle,
             animation_generation: 0,
         }
@@ -199,6 +217,13 @@ impl TrayIconManager {
         tray_icon.set_tooltip(Some(new_state.tooltip()))?;
         if let Some(item) = &self.status_item {
             item.set_text(new_state.label())?;
+        }
+        // An open menu follows along: the talk row turns into Cancel the
+        // moment Juno gets busy, and the click acts on what it then says.
+        if let Some(item) = &self.talk_item {
+            let busy = new_state.is_busy();
+            item.set_text(talk_label(busy))?;
+            self.pending_busy = Some(busy);
         }
 
         self.current_state = new_state;
@@ -235,6 +260,11 @@ impl TrayIconManager {
     /// Set the menu row that shows or hides the chat
     pub fn set_chat_toggle_item(&mut self, item: MenuItem<tauri::Wry>) {
         self.chat_toggle_item = Some(item);
+    }
+
+    /// Set the Talk to Juno / Cancel row
+    pub fn set_talk_item(&mut self, item: MenuItem<tauri::Wry>) {
+        self.talk_item = Some(item);
     }
 
     /// Get the current tray icon state
@@ -408,6 +438,7 @@ pub struct TrayMenu {
     pub menu: tauri::menu::Menu<tauri::Wry>,
     pub status_item: MenuItem<tauri::Wry>,
     pub chat_toggle_item: MenuItem<tauri::Wry>,
+    pub talk_item: MenuItem<tauri::Wry>,
 }
 
 /// What the chat row should say about the surface it is going to act on.
@@ -425,6 +456,75 @@ fn chat_toggle_label(surface: ChatSurface) -> &'static str {
     }
 }
 
+/// What the tray's one Show/Hide row will do. It used to be two rows, Show/Hide
+/// Chat and Show/Hide Floating Bar, which for the bar looks were the same
+/// thing said twice, and a "Show/Hide" label never says which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JunoRow {
+    /// The full-size chat window is in front: put it away.
+    HideChat,
+    /// The full-size chat window is up but behind something: bring it back.
+    BringChatForward,
+    /// The floating bar is on screen: take Juno off the screen.
+    HideJuno,
+    /// The floating bar is hidden: put it back.
+    ShowJuno,
+}
+
+impl JunoRow {
+    pub fn label(self) -> &'static str {
+        match self {
+            JunoRow::HideChat => "Hide Chat",
+            JunoRow::BringChatForward => "Bring Chat to Front",
+            JunoRow::HideJuno => "Hide Juno",
+            JunoRow::ShowJuno => "Show Juno",
+        }
+    }
+}
+
+/// The row for what is on screen. The chat window wins while it is up: it is
+/// the Juno the person is looking at.
+pub fn juno_row(surface: ChatSurface, bar_visible: bool) -> JunoRow {
+    match surface {
+        ChatSurface::MainWindow { frontmost: true } => JunoRow::HideChat,
+        ChatSurface::MainWindow { frontmost: false } => JunoRow::BringChatForward,
+        ChatSurface::BarPane if bar_visible => JunoRow::HideJuno,
+        ChatSurface::BarPane => JunoRow::ShowJuno,
+    }
+}
+
+/// The talk row's text: one action at a time, never both. Busy means anything
+/// Escape would stop (`something_to_stop`): a turn, a dictation, a reply being
+/// spoken.
+pub fn talk_label(busy: bool) -> &'static str {
+    if busy {
+        "Cancel"
+    } else {
+        "Talk to Juno"
+    }
+}
+
+fn bar_visible(app: &AppHandle) -> bool {
+    crate::window_management::WindowManager::is_window_visible(
+        app,
+        crate::constants::ui::window_labels::FLOATING_BAR,
+    )
+}
+
+/// Bring the talk row up to date with whether Juno is busy, and remember what
+/// it offered for the click.
+async fn refresh_talk_row(app: &AppHandle) {
+    let busy = crate::commands::escape_key_coordinator::something_to_stop(app).await;
+    let manager = get_tray_icon_manager().await;
+    let mut guard = manager.lock().await;
+    guard.pending_busy = Some(busy);
+    if let Some(item) = &guard.talk_item {
+        if let Err(e) = item.set_text(talk_label(busy)) {
+            warn!("Could not update the tray talk row: {e}");
+        }
+    }
+}
+
 /// Read what is on screen, say so in the chat row, and remember the answer for
 /// the click that is probably coming.
 ///
@@ -437,14 +537,75 @@ fn chat_toggle_label(surface: ChatSurface) -> &'static str {
 /// then do another.
 async fn refresh_chat_toggle_label(app: &AppHandle) {
     let surface = active_chat_surface(app);
+    let row = juno_row(surface, bar_visible(app));
     let manager = get_tray_icon_manager().await;
     let mut guard = manager.lock().await;
     guard.pending_chat_surface = Some(surface);
+    guard.pending_juno_row = Some(row);
     if let Some(item) = &guard.chat_toggle_item {
-        if let Err(e) = item.set_text(chat_toggle_label(surface)) {
+        if let Err(e) = item.set_text(row.label()) {
             warn!("Could not update the tray chat row: {e}");
         }
     }
+}
+
+/// Act on what the Show/Hide Juno row is currently offering. Falls back to
+/// reading it now if nothing has been read yet.
+async fn toggle_juno_from_tray(app: &AppHandle) {
+    let row = {
+        let manager = get_tray_icon_manager().await;
+        let mut guard = manager.lock().await;
+        guard.pending_chat_surface = None;
+        guard.pending_juno_row.take()
+    };
+    let row = row.unwrap_or_else(|| juno_row(active_chat_surface(app), bar_visible(app)));
+    match row {
+        JunoRow::HideChat => {
+            crate::window_management::toggle_chat_surface(
+                app,
+                ChatSurface::MainWindow { frontmost: true },
+            )
+            .await
+        }
+        JunoRow::BringChatForward => {
+            crate::window_management::toggle_chat_surface(
+                app,
+                ChatSurface::MainWindow { frontmost: false },
+            )
+            .await
+        }
+        // The same toggle Cmd+B makes, which also keeps the bar away while
+        // setup is open.
+        JunoRow::HideJuno | JunoRow::ShowJuno => {
+            if let Err(e) = app.emit(events::menu::TOGGLE_FLOATING_BAR_REQUESTED, ()) {
+                warn!("Could not toggle the floating bar: {e}");
+            }
+        }
+    }
+    refresh_chat_toggle_label(app).await;
+}
+
+/// Talk to Juno, or cancel what she is doing: whichever the row offered.
+async fn talk_or_cancel_from_tray(app: &AppHandle) {
+    let busy = {
+        let manager = get_tray_icon_manager().await;
+        let mut guard = manager.lock().await;
+        guard.pending_busy.take()
+    };
+    let busy = match busy {
+        Some(busy) => busy,
+        None => crate::commands::escape_key_coordinator::something_to_stop(app).await,
+    };
+    if busy {
+        // Exactly what Escape does: stop the newest work, end at rest.
+        crate::commands::ui_commands::bar_escape_to_idle(app, "tray cancel").await;
+    } else if crate::window_management::onboarding_is_open(app) {
+        // Nothing listens during setup, the same as a trigger press.
+        crate::window_management::bring_onboarding_forward(app);
+    } else if let Err(e) = crate::agent_monitor::agent_voice(app.clone(), "start".into()).await {
+        error!("{} could not start talking: {e}", prefixes::TRAY_MENU);
+    }
+    refresh_talk_row(app).await;
 }
 
 /// Act on the chat surface the row is currently offering.
@@ -517,11 +678,13 @@ fn quit_label() -> String {
     format!("Quit {}", crate::demo::display_name())
 }
 
-/// The tray menu. "Talk to Juno" and "Cancel" are real actions with no
-/// accelerator, because triggers are gestures now (see `triggers/mod.rs`) and
-/// a menu cannot say "hold Fn". Dictation has no row: it needs the target app
-/// to hold focus and only its trigger can say when to stop.
-pub fn tray_menu_spec(chat_label: &str) -> Vec<MenuEntry> {
+/// The tray menu. The talk row is "Talk to Juno" while she is idle and
+/// "Cancel" while she is busy, never both, with no accelerator, because
+/// triggers are gestures now (see `triggers/mod.rs`) and a menu cannot say
+/// "hold Fn". Dictation has no row: it needs the target app to hold focus and
+/// only its trigger can say when to stop. Show/Hide Juno is one row for the
+/// bar and the chat window both (`JunoRow`).
+pub fn tray_menu_spec(juno_label: &str, busy: bool) -> Vec<MenuEntry> {
     let mut entries = vec![
         MenuEntry::Row(RowSpec {
             id: tray_menu_ids::STATUS,
@@ -530,17 +693,10 @@ pub fn tray_menu_spec(chat_label: &str) -> Vec<MenuEntry> {
             enabled: false,
         }),
         MenuEntry::Separator,
-        row(tray_menu_ids::SHOW_HIDE, chat_label, None),
+        row(tray_menu_ids::TALK, talk_label(busy), None),
         row(tray_menu_ids::NEW_CHAT, "New Chat", Some("CmdOrCtrl+N")),
         MenuEntry::Separator,
-        row(tray_menu_ids::TALK, "Talk to Juno", None),
-        row(tray_menu_ids::CANCEL, "Cancel", None),
-        MenuEntry::Separator,
-        row(
-            tray_menu_ids::SHOW_HIDE_FLOATING_BAR,
-            "Show/Hide Floating Bar",
-            Some("CmdOrCtrl+B"),
-        ),
+        row(tray_menu_ids::SHOW_HIDE, juno_label, None),
         row(
             tray_menu_ids::CENTER_FLOATING_BAR,
             "Center Floating Bar",
@@ -572,7 +728,7 @@ pub fn tray_menu_spec(chat_label: &str) -> Vec<MenuEntry> {
 /// it is a context menu, and the chat row only says what it will do.
 pub fn bar_context_menu_spec(chat_label: &str) -> Vec<MenuEntry> {
     vec![
-        row(tray_menu_ids::SHOW_HIDE, chat_label, None),
+        row(tray_menu_ids::BAR_CHAT, chat_label, None),
         row(tray_menu_ids::NEW_CHAT, "New Chat", None),
         row(tray_menu_ids::SETTINGS, "Settings\u{2026}", None),
         MenuEntry::Separator,
@@ -590,7 +746,27 @@ fn build_menu_from_spec(
     app: &AppHandle,
     spec: &[MenuEntry],
 ) -> Result<BuiltMenu, Box<dyn std::error::Error>> {
+    build_menu_with_edit_items(app, &[], spec)
+}
+
+/// The same, led by AppKit's own text items and a separator when there are any.
+fn build_menu_with_edit_items(
+    app: &AppHandle,
+    edit: &[EditItem],
+    spec: &[MenuEntry],
+) -> Result<BuiltMenu, Box<dyn std::error::Error>> {
     let mut builder = MenuBuilder::new(app);
+    for item in edit {
+        builder = match item {
+            EditItem::Cut => builder.cut(),
+            EditItem::Copy => builder.copy(),
+            EditItem::Paste => builder.paste(),
+            EditItem::SelectAll => builder.select_all(),
+        };
+    }
+    if !edit.is_empty() {
+        builder = builder.separator();
+    }
     let mut items = Vec::new();
     for entry in spec {
         match entry {
@@ -609,12 +785,55 @@ fn build_menu_from_spec(
     Ok((builder.build()?, items))
 }
 
+/// The Mac text items a right-click on the bar starts with, from what was
+/// under the pointer: in a text box, Cut, Copy, Paste and Select All; on
+/// selected text that cannot be edited, Copy. Anywhere else, none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditItem {
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+}
+
+pub fn edit_items_for(editable: bool, has_selection: bool) -> Vec<EditItem> {
+    if editable {
+        vec![
+            EditItem::Cut,
+            EditItem::Copy,
+            EditItem::Paste,
+            EditItem::SelectAll,
+        ]
+    } else if has_selection {
+        vec![EditItem::Copy]
+    } else {
+        Vec::new()
+    }
+}
+
 /// Pop the bar's right-click menu at the cursor. One command for every bar
 /// appearance, called from `useBarDrag`.
+///
+/// The text items are AppKit's own (`cut:`, `copy:`, ...), sent down the
+/// responder chain to the web view, so they act on its selection and AppKit
+/// enables each one the way it does in any Mac text field. That needs the bar
+/// to be the key window, so it is made key first when there are any.
 #[tauri::command]
-pub fn show_bar_context_menu(app: AppHandle, window: tauri::Window) -> Result<(), String> {
+pub fn show_bar_context_menu(
+    app: AppHandle,
+    window: tauri::Window,
+    editable: Option<bool>,
+    has_selection: Option<bool>,
+) -> Result<(), String> {
+    let edit = edit_items_for(editable.unwrap_or(false), has_selection.unwrap_or(false));
+    if !edit.is_empty() {
+        if let Err(e) = window.set_focus() {
+            warn!("Could not make the bar key for its text menu: {e}");
+        }
+    }
     let spec = bar_context_menu_spec(chat_toggle_label(active_chat_surface(&app)));
-    let (menu, _items) = build_menu_from_spec(&app, &spec).map_err(|e| e.to_string())?;
+    let (menu, _items) =
+        build_menu_with_edit_items(&app, &edit, &spec).map_err(|e| e.to_string())?;
     window.popup_menu(&menu).map_err(|e| e.to_string())
 }
 
@@ -638,7 +857,10 @@ pub fn create_state_aware_tray_menu(
         }
     };
 
-    let spec = tray_menu_spec(chat_toggle_label(active_chat_surface(app)));
+    let spec = tray_menu_spec(
+        juno_row(active_chat_surface(app), bar_visible(app)).label(),
+        false,
+    );
     let (tray_menu, items) = build_menu_from_spec(app, &spec)?;
     let take = |id: &str| -> Result<MenuItem<tauri::Wry>, Box<dyn std::error::Error>> {
         items
@@ -649,12 +871,14 @@ pub fn create_state_aware_tray_menu(
     };
     let status_item = take(tray_menu_ids::STATUS)?;
     let show_hide_item = take(tray_menu_ids::SHOW_HIDE)?;
+    let talk_item = take(tray_menu_ids::TALK)?;
 
     info!("✅ State-aware tray menu created successfully");
     Ok(TrayMenu {
         menu: tray_menu,
         status_item,
         chat_toggle_item: show_hide_item,
+        talk_item,
     })
 }
 
@@ -666,6 +890,7 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
         menu: tray_menu,
         status_item,
         chat_toggle_item,
+        talk_item,
     } = create_state_aware_tray_menu(app)?;
 
     // Load the idle frame. Template mode lets macOS tint it for the menu bar.
@@ -691,6 +916,7 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
         manager_guard.set_tray_icon(tray_icon);
         manager_guard.set_status_item(status_item);
         manager_guard.set_chat_toggle_item(chat_toggle_item);
+        manager_guard.set_talk_item(talk_item);
         // Honour the saved "show tray icon" preference. Shown is the default,
         // so only a hidden icon needs applying.
         let visible = read_tray_icon_visible(&app_handle).await;
@@ -1054,7 +1280,14 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
 
     match event_id {
         tray_menu_ids::SHOW_HIDE => {
-            info!("[TrayMenu] Show/Hide Chat menu item clicked");
+            info!("[TrayMenu] Show/Hide Juno menu item clicked");
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                toggle_juno_from_tray(&app_handle).await;
+            });
+        }
+        tray_menu_ids::BAR_CHAT => {
+            info!("[TrayMenu] Bar chat menu item clicked");
             // Act on whichever chat surface is up, rather than always on the
             // full-size window. Which one that is, and what to do with it, is
             // resolved in one place so this row and a click on the icon cannot
@@ -1069,7 +1302,14 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
             // The main window's listener (App) and the pill's both start a
             // fresh chat on this event, the same call the pane's + makes. The
             // bar's other looks have no listener, so the backend conversation
-            // is rotated here too; rotating twice is harmless.
+            // is rotated here too; rotating twice is harmless. A hidden bar
+            // comes back for it: a new chat is somewhere to type.
+            if !crate::window_management::WindowManager::is_window_visible(
+                &app_handle,
+                crate::constants::ui::window_labels::MAIN,
+            ) {
+                crate::window_management::show_bar(&app_handle);
+            }
             {
                 let app_handle = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
@@ -1136,18 +1376,10 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
             });
         }
         tray_menu_ids::TALK => {
-            info!("[TrayMenu] Talk to Juno menu item clicked");
-            // Nothing listens during setup, the same as a trigger press.
-            if crate::window_management::onboarding_is_open(&app_handle) {
-                crate::window_management::bring_onboarding_forward(&app_handle);
-                return;
-            }
+            info!("[TrayMenu] Talk/Cancel menu item clicked");
             let app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = crate::agent_monitor::agent_voice(app_handle, "start".into()).await
-                {
-                    error!("{} could not start talking: {e}", prefixes::TRAY_MENU);
-                }
+                talk_or_cancel_from_tray(&app_handle).await;
             });
         }
         tray_menu_ids::CANCEL => {
@@ -1215,6 +1447,7 @@ pub fn handle_tray_icon_event(app_handle: &AppHandle, event: tauri::tray::TrayIc
             let app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
                 refresh_chat_toggle_label(&app_handle).await;
+                refresh_talk_row(&app_handle).await;
             });
         }
         _ => {
@@ -1248,7 +1481,7 @@ mod tests {
     /// build. A released app (no debug assertions) never shows it.
     #[test]
     fn developer_tools_only_in_a_development_build() {
-        let listed = tray_menu_spec("Show Chat").iter().any(
+        let listed = tray_menu_spec("Hide Juno", false).iter().any(
             |entry| matches!(entry, MenuEntry::Row(r) if r.id == tray_menu_ids::DEVELOPER_TOOLS),
         );
         assert_eq!(listed, super::super::SHOW_DEVELOPER_MENUS);
@@ -1431,7 +1664,8 @@ mod tests {
     #[test]
     fn no_menu_row_carries_a_stale_accelerator() {
         for spec in [
-            tray_menu_spec("Show/Hide Chat"),
+            tray_menu_spec("Hide Juno", false),
+            tray_menu_spec("Hide Juno", true),
             bar_context_menu_spec("Show/Hide Chat"),
         ] {
             for r in rows(&spec) {
@@ -1452,11 +1686,12 @@ mod tests {
                 }
             }
         }
-        let tray = tray_menu_spec("Show/Hide Chat");
-        for id in [tray_menu_ids::TALK, tray_menu_ids::CANCEL] {
-            let r = rows(&tray).into_iter().find(|r| r.id == id).unwrap();
-            assert!(r.accelerator.is_none() && r.enabled);
-        }
+        let tray = tray_menu_spec("Hide Juno", false);
+        let r = rows(&tray)
+            .into_iter()
+            .find(|r| r.id == tray_menu_ids::TALK)
+            .unwrap();
+        assert!(r.accelerator.is_none() && r.enabled);
         assert!(rows(&tray).iter().all(|r| r.label != "Dictation Mode"));
     }
 
@@ -1467,7 +1702,7 @@ mod tests {
         assert_eq!(
             ids,
             [
-                tray_menu_ids::SHOW_HIDE,
+                tray_menu_ids::BAR_CHAT,
                 tray_menu_ids::NEW_CHAT,
                 tray_menu_ids::SETTINGS,
                 tray_menu_ids::QUIT
@@ -1480,6 +1715,86 @@ mod tests {
         for r in rows(&spec) {
             assert!(crate::menu::is_tray_menu_event(r.id));
         }
+    }
+
+    #[test]
+    fn talk_and_cancel_are_one_row_that_follows_her_state() {
+        for busy in [false, true] {
+            let spec = tray_menu_spec("Hide Juno", busy);
+            let labels: Vec<_> = rows(&spec).iter().map(|r| r.label.clone()).collect();
+            let talk = labels.iter().filter(|l| *l == "Talk to Juno").count();
+            let cancel = labels.iter().filter(|l| *l == "Cancel").count();
+            assert_eq!((talk, cancel), if busy { (0, 1) } else { (1, 0) });
+            assert!(!rows(&spec).iter().any(|r| r.id == tray_menu_ids::CANCEL));
+        }
+        assert!(TrayIconState::Agent.is_busy());
+        assert!(TrayIconState::Recording.is_busy());
+        assert!(TrayIconState::Transcribing.is_busy());
+        assert!(!TrayIconState::Idle.is_busy());
+        assert!(!TrayIconState::Armed.is_busy());
+        assert!(!TrayIconState::Error.is_busy());
+    }
+
+    #[test]
+    fn one_show_hide_row_for_the_bar_and_the_chat_window() {
+        let spec = tray_menu_spec("Hide Juno", false);
+        let ids: Vec<_> = rows(&spec).iter().map(|r| r.id).collect();
+        assert!(!ids.contains(&tray_menu_ids::SHOW_HIDE_FLOATING_BAR));
+        assert_eq!(
+            ids.iter()
+                .filter(|id| **id == tray_menu_ids::SHOW_HIDE)
+                .count(),
+            1
+        );
+        let bar = ChatSurface::BarPane;
+        assert_eq!(juno_row(bar, true), JunoRow::HideJuno);
+        assert_eq!(juno_row(bar, false), JunoRow::ShowJuno);
+        // The chat window is what the person is looking at, bar or not.
+        for visible in [false, true] {
+            assert_eq!(
+                juno_row(ChatSurface::MainWindow { frontmost: true }, visible),
+                JunoRow::HideChat
+            );
+            assert_eq!(
+                juno_row(ChatSurface::MainWindow { frontmost: false }, visible),
+                JunoRow::BringChatForward
+            );
+        }
+    }
+
+    /// The app menu is matched first, so a tray row sharing an app menu id
+    /// never reaches the tray handler. That is how the tray's New Chat did
+    /// nothing for the bar.
+    #[test]
+    fn no_tray_row_shares_an_app_menu_id() {
+        for spec in [
+            tray_menu_spec("Hide Juno", false),
+            bar_context_menu_spec("Show/Hide Chat"),
+        ] {
+            for r in rows(&spec) {
+                assert!(
+                    !crate::menu::is_app_menu_event(r.id),
+                    "{} is taken by the app menu",
+                    r.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_right_click_menu_starts_with_the_mac_text_items_on_text() {
+        assert_eq!(
+            edit_items_for(true, false),
+            [
+                EditItem::Cut,
+                EditItem::Copy,
+                EditItem::Paste,
+                EditItem::SelectAll
+            ]
+        );
+        assert_eq!(edit_items_for(true, true), edit_items_for(true, false));
+        assert_eq!(edit_items_for(false, true), [EditItem::Copy]);
+        assert!(edit_items_for(false, false).is_empty());
     }
 
     #[test]

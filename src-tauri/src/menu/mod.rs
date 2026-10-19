@@ -64,7 +64,7 @@ fn handle_menu_event(app_handle: AppHandle, event_id: &str) {
 }
 
 /// Check if an event ID belongs to the app menu
-fn is_app_menu_event(event_id: &str) -> bool {
+pub(crate) fn is_app_menu_event(event_id: &str) -> bool {
     matches!(
         event_id,
         constants::app_menu_ids::CHECK_FOR_UPDATES
@@ -105,6 +105,7 @@ pub fn is_tray_menu_event(event_id: &str) -> bool {
     matches!(
         event_id,
         constants::tray_menu_ids::SHOW_HIDE
+            | constants::tray_menu_ids::BAR_CHAT
             | constants::tray_menu_ids::NEW_CHAT
             | constants::tray_menu_ids::SHOW_HIDE_FLOATING_BAR
             | constants::tray_menu_ids::CENTER_FLOATING_BAR
