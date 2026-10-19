@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.221] - 2026-10-19
+
+### Fixed
+
+- **mac-apps:** first real-Mac bug round (Notes, Maps, Music catalog, FDA restart, me/Mom, calendar default) (#837) (06b3e6ca)
+
 ## [0.8.220] - 2026-10-19
 
 ### Fixed
@@ -1530,7 +1536,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.220...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.221...HEAD
+[0.8.221]: https://github.com/lacymorrow/juno/compare/cua-v0.8.220...v0.8.221
 [0.8.220]: https://github.com/lacymorrow/juno/compare/cua-v0.8.219...v0.8.220
 [0.8.218]: https://github.com/lacymorrow/juno/compare/cua-v0.8.217...v0.8.218
 [0.8.217]: https://github.com/lacymorrow/juno/compare/cua-v0.8.216...v0.8.217
