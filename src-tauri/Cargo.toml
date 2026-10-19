@@ -1,6 +1,6 @@
 [package]
 name = "juno"
-version = "0.8.217"
+version = "0.8.218"
 description = "A Tauri App"
 authors = ["Lacy Morrow <me@lacymorrow.com>"]
 edition = "2021"

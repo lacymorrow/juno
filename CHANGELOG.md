@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.218] - 2026-10-19
+
+### Fixed
+
+- **updater:** install on quit, never swap the bundle under a running Juno (#840) (5d5f7855)
+
 ## [0.8.217] - 2026-10-19
 
 ### Fixed
@@ -1518,7 +1524,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.217...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.218...HEAD
+[0.8.218]: https://github.com/lacymorrow/juno/compare/cua-v0.8.217...v0.8.218
 [0.8.217]: https://github.com/lacymorrow/juno/compare/cua-v0.8.216...v0.8.217
 [0.8.216]: https://github.com/lacymorrow/juno/compare/cua-v0.8.215...v0.8.216
 [0.8.214]: https://github.com/lacymorrow/juno/compare/cua-v0.8.213...v0.8.214
