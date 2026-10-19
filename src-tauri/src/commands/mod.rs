@@ -55,6 +55,7 @@ pub mod providers;
 pub mod scheduled_tasks; // User-facing scheduled automations (LAC-1431)
                          // pub mod self_improvement; // TODO: Fix module not found
 
+pub mod mac_access; // Full Disk Access re-check for the Mac app cards
 pub mod settings;
 pub mod shell;
 pub mod shortcuts;

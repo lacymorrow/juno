@@ -324,6 +324,12 @@ pub mod skills {
     pub const LIST_AVAILABLE_SKILLS: &str = "list_available_skills";
 }
 
+/// Mac app card commands.
+pub mod mac_access {
+    /// Can the running Juno read the Messages history now (Full Disk Access)?
+    pub const FULL_DISK_ACCESS_GRANTED: &str = "full_disk_access_granted";
+}
+
 /// Auto-update command names. The backend owns the schedule, the channel and
 /// the install; these three are the whole bridge to the UI.
 pub mod updates {

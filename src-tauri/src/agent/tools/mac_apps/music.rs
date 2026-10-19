@@ -1,7 +1,11 @@
-//! Play something from the person's Apple Music library by name.
+//! Play something in the Music app by name.
 //!
-//! Music's own scripting search finds the match and plays it; the query
-//! travels as `argv`, never as script text. Spotify has no scripting search,
+//! The library comes first: Music's own scripting search finds the match and
+//! plays it; the query travels as `argv`, never as script text. When the
+//! library has nothing, Apple's own catalog is searched (the public iTunes
+//! Search API, no key) and the match is opened in Music. Opening a catalog
+//! item does not always start it, so the answer says what Music shows: playing
+//! only when Music reports it, otherwise "it's up in Music, press play". Spotify has no scripting search,
 //! so when Spotify is the app in front the answer says so and nothing is
 //! guessed (`docs/plans/siri-parity.md`, "Considered and cut").
 //!
@@ -13,13 +17,23 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
+use super::maps::link_card;
 use super::proc;
-use super::{required_text, text_arg};
+use super::{fold, required_text, text_arg};
 use crate::constants::permissions::urls;
 
 /// The Automation dialog waits on a person, so the search may take a while.
 const SEARCH_WAIT: Duration = Duration::from_secs(120);
 const READ_WAIT: Duration = Duration::from_secs(10);
+
+/// How long the catalog lookup may take.
+const CATALOG_WAIT: Duration = Duration::from_secs(10);
+
+/// After a play (or an open), how long Music gets to report `playing`. A cloud
+/// library track or a catalog item can take several seconds to buffer. This
+/// reads back a state the tool just caused, so it is bounded, not open-ended.
+const START_TRIES: u32 = 14;
+const START_EVERY: Duration = Duration::from_millis(500);
 
 /// Separates the fields a script hands back.
 const SEP: char = '\u{1f}';
@@ -207,6 +221,217 @@ fn spotify_is_frontmost() -> bool {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Apple's catalog
+// ---------------------------------------------------------------------------
+
+/// One catalog match: what it is called, whose it is, and its Apple Music page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogHit {
+    pub title: String,
+    pub artist: String,
+    pub url: String,
+}
+
+/// The two-letter storefront for a macOS locale id like `en_US` or
+/// `en_GB@rg=uszzzz`. Anything unreadable is the US storefront.
+pub fn country_from_locale(locale: &str) -> String {
+    let base = locale.split('@').next().unwrap_or_default();
+    base.rsplit_once('_')
+        .map(|(_, region)| region.trim().to_uppercase())
+        .filter(|r| r.len() == 2 && r.chars().all(|c| c.is_ascii_alphabetic()))
+        .unwrap_or_else(|| "US".to_string())
+}
+
+fn system_country() -> String {
+    let args = vec![
+        "read".to_string(),
+        "-g".to_string(),
+        "AppleLocale".to_string(),
+    ];
+    match proc::run("defaults", &args, None, READ_WAIT) {
+        Ok(r) if r.ok => country_from_locale(r.stdout.trim()),
+        _ => "US".to_string(),
+    }
+}
+
+/// The iTunes Search API URL for a query. An artist is asked for through their
+/// songs (`attribute=artistTerm`), because a song is something Music can open
+/// and play and an artist page is not.
+pub fn catalog_url(query: &str, kind: Kind, by_artist: bool, country: &str) -> String {
+    let entity = if kind == Kind::Album { "album" } else { "song" };
+    let attribute = if by_artist || kind == Kind::Artist {
+        "&attribute=artistTerm"
+    } else {
+        ""
+    };
+    format!(
+        "https://itunes.apple.com/search?term={}&entity={entity}{attribute}&limit=10&country={}",
+        super::maps::encode(query),
+        super::maps::encode(country),
+    )
+}
+
+/// Pick the match from an iTunes Search answer. For an artist, the first song
+/// whose artist is the one asked for wins, else the first result.
+pub fn parse_catalog(body: &str, query: &str, artist_asked: bool) -> Option<CatalogHit> {
+    let parsed: Value = serde_json::from_str(body).ok()?;
+    let hits: Vec<CatalogHit> = parsed
+        .get("results")?
+        .as_array()?
+        .iter()
+        .filter_map(|r| {
+            let text = |k: &str| r.get(k).and_then(Value::as_str).map(str::to_string);
+            let url = text("trackViewUrl").or_else(|| text("collectionViewUrl"))?;
+            Some(CatalogHit {
+                title: text("trackName").or_else(|| text("collectionName"))?,
+                artist: text("artistName").unwrap_or_default(),
+                url,
+            })
+        })
+        .collect();
+    if artist_asked {
+        let wanted = fold(query);
+        if let Some(hit) = hits.iter().find(|h| fold(&h.artist) == wanted) {
+            return Some(hit.clone());
+        }
+    }
+    hits.into_iter().next()
+}
+
+/// The `music://` address that opens an Apple Music page in the Music app.
+/// Only Apple's own hosts are accepted; the tracking parameter is dropped.
+pub fn music_app_url(page: &str) -> Option<String> {
+    let rest = page.strip_prefix("https://")?;
+    let (host_and_path, query) = match rest.split_once('?') {
+        Some((a, b)) => (a, Some(b)),
+        None => (rest, None),
+    };
+    let host = host_and_path.split('/').next().unwrap_or_default();
+    if host != "music.apple.com" && host != "itunes.apple.com" {
+        return None;
+    }
+    let kept: Vec<&str> = query
+        .map(|q| q.split('&').filter(|p| !p.starts_with("uo=")).collect())
+        .unwrap_or_default();
+    Some(if kept.is_empty() {
+        format!("music://{host_and_path}")
+    } else {
+        format!("music://{host_and_path}?{}", kept.join("&"))
+    })
+}
+
+/// Look the query up in Apple's catalog. Songs by name first; when that finds
+/// nothing and the kind was open, songs by an artist of that name.
+fn catalog_lookup(query: &str, kind: Kind) -> Option<CatalogHit> {
+    // A catalog has no playlists a name search can reach.
+    if kind == Kind::Playlist {
+        return None;
+    }
+    let country = system_country();
+    let attempts = if kind == Kind::Any {
+        vec![(false, false), (true, true)]
+    } else {
+        vec![(kind == Kind::Artist, kind == Kind::Artist)]
+    };
+    for (by_artist, artist_asked) in attempts {
+        let url = catalog_url(query, kind, by_artist, &country);
+        let args = vec![
+            "-s".to_string(),
+            "--max-time".to_string(),
+            "8".to_string(),
+            url,
+        ];
+        let Ok(ran) = proc::run("curl", &args, None, CATALOG_WAIT) else {
+            continue;
+        };
+        if !ran.ok {
+            continue;
+        }
+        if let Some(hit) = parse_catalog(&ran.stdout, query, artist_asked) {
+            return Some(hit);
+        }
+    }
+    None
+}
+
+/// Let Music report `playing`, up to a bound. `expected` is the catalog title
+/// when one was opened; the answer then only counts if Music shows that track.
+fn read_back(expected: Option<&str>) -> Result<Playing, String> {
+    let mut last = None;
+    for attempt in 0..START_TRIES {
+        if attempt > 0 {
+            thread::sleep(START_EVERY);
+        }
+        let seen = proc::osascript(NOW_PLAYING, &[], READ_WAIT)?;
+        let parsed = parse_playing(&seen.stdout);
+        let started = parsed.state == "playing" && is_expected(&parsed, expected);
+        last = Some(parsed);
+        if started {
+            break;
+        }
+    }
+    last.ok_or_else(|| "Music did not report what it is playing.".to_string())
+}
+
+/// Is what Music shows the thing that was opened? With nothing expected, any
+/// track is. A catalog stream may name no track at all, which cannot be checked.
+fn is_expected(playing: &Playing, expected: Option<&str>) -> bool {
+    match (expected, playing.track.as_deref()) {
+        (Some(want), Some(have)) => {
+            let (want, have) = (fold(want), fold(have));
+            have.contains(&want) || want.contains(&have)
+        }
+        _ => true,
+    }
+}
+
+/// The sentence when Music was asked and is not playing. Says what Music shows.
+pub fn not_playing_line(playing: &Playing, query: &str) -> String {
+    match &playing.track {
+        Some(t) => format!("Music has {t} up but it is {}. Press play.", playing.state),
+        None => format!(
+            "Music has {query} up but it is {}. Press play.",
+            playing.state
+        ),
+    }
+}
+
+/// Open a catalog hit in Music and say what Music then shows.
+fn open_catalog_hit(hit: &CatalogHit) -> Result<Value, String> {
+    let Some(address) = music_app_url(&hit.url) else {
+        return Ok(json!({
+            "ok": false,
+            "summary": format!("I found {} in Apple Music but could not open it.", hit.title),
+        }));
+    };
+    let ran = proc::run(
+        "open",
+        &["-a".to_string(), "Music".to_string(), address.clone()],
+        None,
+        READ_WAIT,
+    )?;
+    if !ran.ok {
+        return Err("Music would not open that.".to_string());
+    }
+    let playing = read_back(Some(&hit.title))?;
+    let title = format!("{} by {}", hit.title, hit.artist);
+    if playing.state == "playing" && is_expected(&playing, Some(&hit.title)) {
+        return Ok(json!({
+            "ok": true,
+            "summary": format!("Playing {title} from Apple Music."),
+            "observed": { "app": "Music", "state": playing.state, "track": playing.track, "artist": playing.artist },
+            "card": "<NowPlayingCard app=\"Music\" />",
+        }));
+    }
+    Ok(json!({
+        "ok": true,
+        "summary": format!("{title} is up in Music. Press play."),
+        "observed": { "app": "Music", "state": playing.state, "track": playing.track, "artist": playing.artist, "opened": hit.title },
+        "card": link_card(&address, &title),
+    }))
+}
+
 /// `music_play`
 pub fn play(input: &Value) -> Result<Value, String> {
     let query = required_text(input, "query")?;
@@ -226,10 +451,13 @@ pub fn play(input: &Value) -> Result<Value, String> {
     match parse_search(&ran.stdout) {
         Search::Played => {}
         Search::NoMatch => {
-            return Ok(json!({
-                "ok": false,
-                "summary": format!("I couldn't find {query} in your Apple Music library."),
-            }))
+            return match catalog_lookup(query, kind) {
+                Some(hit) => open_catalog_hit(&hit),
+                None => Ok(json!({
+                    "ok": false,
+                    "summary": format!("I couldn't find {query} in your library or in Apple Music."),
+                })),
+            }
         }
         Search::NotAllowed => return Ok(declined()),
         Search::Failed(code) => {
@@ -238,27 +466,21 @@ pub fn play(input: &Value) -> Result<Value, String> {
         }
     }
 
-    // Read back what is playing, giving Music a moment to start.
-    let mut playing = None;
-    for _ in 0..6 {
-        thread::sleep(Duration::from_millis(400));
-        let seen = proc::osascript(NOW_PLAYING, &[], READ_WAIT)?;
-        let parsed = parse_playing(&seen.stdout);
-        let started = parsed.state == "playing";
-        playing = Some(parsed);
-        if started {
-            break;
-        }
-    }
-    let playing = playing.ok_or_else(|| "Music did not report what it is playing.".to_string())?;
+    let playing = read_back(None)?;
     if playing.state != "playing" {
-        return Err(format!("Music found {query} but did not start it."));
+        // Music was told to play and shows something else: say what it shows.
+        return Ok(json!({
+            "ok": false,
+            "summary": not_playing_line(&playing, query),
+            "observed": { "app": "Music", "state": playing.state, "track": playing.track, "artist": playing.artist },
+        }));
     }
     Ok(json!({
         "ok": true,
         "summary": now_playing_line(&playing),
         "track": playing.track,
         "artist": playing.artist,
+        "observed": { "app": "Music", "state": playing.state, "track": playing.track, "artist": playing.artist },
         "card": "<NowPlayingCard app=\"Music\" />",
     }))
 }
@@ -360,5 +582,94 @@ mod tests {
     fn a_missing_query_is_a_plain_error() {
         assert_eq!(play(&json!({})), Err("Missing query.".to_string()));
         assert!(play(&json!({"query": "x", "kind": "podcast"})).is_err());
+    }
+
+    const ITUNES: &str = r#"{"resultCount":2,"results":[
+{"wrapperType":"track","kind":"song","artistName":"Someone Else","trackName":"Other","trackViewUrl":"https://music.apple.com/us/album/other/1?i=2&uo=4"},
+{"wrapperType":"track","kind":"song","artistName":"Flume","trackName":"The Difference","trackViewUrl":"https://music.apple.com/us/album/the-difference/1694793030?i=1694793033&uo=4"}]}"#;
+
+    #[test]
+    fn the_catalog_url_is_encoded_and_asks_for_songs() {
+        assert_eq!(
+            catalog_url("Jurassic 5", Kind::Artist, false, "US"),
+            "https://itunes.apple.com/search?term=Jurassic%205&entity=song&attribute=artistTerm&limit=10&country=US"
+        );
+        assert_eq!(
+            catalog_url("Roygbiv & co", Kind::Song, false, "GB"),
+            "https://itunes.apple.com/search?term=Roygbiv%20%26%20co&entity=song&limit=10&country=GB"
+        );
+        assert!(catalog_url("Geogaddi", Kind::Album, false, "US").contains("entity=album"));
+    }
+
+    #[test]
+    fn the_storefront_comes_from_the_system_locale() {
+        assert_eq!(country_from_locale("en_US"), "US");
+        assert_eq!(country_from_locale("en_GB@rg=uszzzz"), "GB");
+        assert_eq!(country_from_locale("fr"), "US");
+        assert_eq!(country_from_locale(""), "US");
+    }
+
+    #[test]
+    fn an_itunes_answer_reads_into_one_hit() {
+        let first = parse_catalog(ITUNES, "something", false);
+        assert_eq!(first.map(|h| h.title), Some("Other".to_string()));
+        let flume = parse_catalog(ITUNES, "Flume", true);
+        assert_eq!(
+            flume,
+            Some(CatalogHit {
+                title: "The Difference".to_string(),
+                artist: "Flume".to_string(),
+                url: "https://music.apple.com/us/album/the-difference/1694793030?i=1694793033&uo=4"
+                    .to_string(),
+            })
+        );
+        assert_eq!(
+            parse_catalog("{\"resultCount\":0,\"results\":[]}", "x", false),
+            None
+        );
+        assert_eq!(parse_catalog("not json", "x", false), None);
+    }
+
+    #[test]
+    fn only_apples_own_pages_open_in_music() {
+        assert_eq!(
+            music_app_url("https://music.apple.com/us/album/a/1?i=2&uo=4"),
+            Some("music://music.apple.com/us/album/a/1?i=2".to_string())
+        );
+        assert_eq!(
+            music_app_url("https://music.apple.com/us/artist/a/1?uo=4"),
+            Some("music://music.apple.com/us/artist/a/1".to_string())
+        );
+        assert_eq!(music_app_url("https://evil.example/a?i=2"), None);
+        assert_eq!(music_app_url("http://music.apple.com/x"), None);
+    }
+
+    #[test]
+    fn a_track_that_is_not_the_one_opened_does_not_count() {
+        let other = Playing {
+            state: "playing".to_string(),
+            track: Some("Some Old Song".to_string()),
+            artist: None,
+        };
+        assert!(!is_expected(&other, Some("The Difference")));
+        assert!(is_expected(&other, None));
+        let same = Playing {
+            track: Some("The Difference (feat. Toro y Moi)".to_string()),
+            ..other
+        };
+        assert!(is_expected(&same, Some("The Difference")));
+    }
+
+    #[test]
+    fn a_stopped_player_is_reported_as_what_music_shows() {
+        let p = Playing {
+            state: "paused".to_string(),
+            track: Some("Roygbiv".to_string()),
+            artist: None,
+        };
+        assert_eq!(
+            not_playing_line(&p, "x"),
+            "Music has Roygbiv up but it is paused. Press play."
+        );
     }
 }

@@ -17,8 +17,9 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Check, Loader2 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { COMMANDS } from "@/lib/constants.generated";
 import { cn } from "@/lib/utils";
 import { AccessRow } from "./access-row";
@@ -47,6 +48,14 @@ export interface MessageCardProps {
 }
 
 const SETTINGS_PREFIX = "x-apple.systempreferences:";
+const FULL_DISK_ACCESS = "Full Disk Access";
+
+/**
+ * Where the Full Disk Access walk-through stands. macOS applies the switch to
+ * a process only when it starts, so after the person adds Juno the running app
+ * is still refused and a restart is the last step.
+ */
+type FdaStep = "settings" | "restart" | "done";
 
 function StateLine({ state }: { state: MessageCardState }) {
   if (state === "sent") {
@@ -88,18 +97,87 @@ export function MessageCard({
   const [pressed, setPressed] = useState(false);
   const [opening, setOpening] = useState(false);
   const current = normalizeState(state);
+  const isFullDisk = needsAccess === FULL_DISK_ACCESS;
+  const [fdaStep, setFdaStep] = useState<FdaStep>("settings");
+  const [visitedSettings, setVisitedSettings] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+
+  // When Juno is reactivated after the pane was opened, ask the backend again.
+  // An activation event, not a timer: it fires when the person comes back.
+  useEffect(() => {
+    if (!isFullDisk || !visitedSettings || fdaStep !== "settings") return;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const stop = await getCurrentWindow().onFocusChanged(async ({ payload: focused }) => {
+          if (!focused) return;
+          try {
+            const granted = await invoke<boolean>(COMMANDS.MAC_ACCESS_FULL_DISK_ACCESS_GRANTED);
+            setFdaStep(granted ? "done" : "restart");
+          } catch (err) {
+            console.error("MessageCard: could not re-check Full Disk Access:", err);
+          }
+        });
+        if (cancelled) stop();
+        else unlisten = stop;
+      } catch (err) {
+        console.error("MessageCard: could not watch for Juno coming back:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [isFullDisk, visitedSettings, fdaStep]);
+
+  const restartJuno = useCallback(async () => {
+    setRestarting(true);
+    try {
+      await invoke(COMMANDS.PERMISSIONS_RESTART_AFTER_PERMISSIONS);
+    } catch (err) {
+      console.error("MessageCard: could not restart Juno:", err);
+      setRestarting(false);
+    }
+  }, []);
 
   const openSettings = useCallback(async () => {
     if (!settingsUrl || !settingsUrl.startsWith(SETTINGS_PREFIX)) return;
     setOpening(true);
     try {
       await invoke(COMMANDS.DESKTOP_OPEN_URL, { url: settingsUrl });
+      setVisitedSettings(true);
     } catch (err) {
       console.error("MessageCard: could not open System Settings:", err);
     } finally {
       setOpening(false);
     }
   }, [settingsUrl]);
+
+  if (needsAccess && isFullDisk && fdaStep === "restart") {
+    return (
+      <AccessRow
+        className={className}
+        data-testid="message-card"
+        data-state="needs-restart"
+        line="Restart Juno to finish. Then ask me again."
+        action="Restart Juno"
+        onAction={() => void restartJuno()}
+        disabled={restarting}
+      />
+    );
+  }
+
+  if (needsAccess && isFullDisk && fdaStep === "done") {
+    return (
+      <AccessRow
+        className={className}
+        data-testid="message-card"
+        data-state="access-on"
+        line="Full Disk Access is on. Ask me again."
+      />
+    );
+  }
 
   if (needsAccess) {
     const canOpen = !!settingsUrl && settingsUrl.startsWith(SETTINGS_PREFIX);

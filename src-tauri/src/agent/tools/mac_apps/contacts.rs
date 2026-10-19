@@ -102,6 +102,32 @@ pub fn relationship_labels(query: &str) -> Option<Vec<&'static str>> {
     Some(labels.to_vec())
 }
 
+/// Does the phrase mean the person themself ("me", "myself", "my number")?
+/// These resolve to the Me card, never to a name search: "me" fuzzy-matches
+/// strangers.
+pub fn is_self_reference(query: &str) -> bool {
+    matches!(
+        fold(query).trim_end_matches(['.', '!', '?']),
+        "me" | "myself" | "i" | "my number" | "my card" | "my own number" | "my phone"
+    )
+}
+
+/// Narrow a name search for a related person to the card that is exactly that
+/// name, when there is one. "Barbara Lee" must not also bring "Barbara Leeds".
+pub(crate) fn prefer_exact(name: &str, people: Vec<Person>) -> Vec<Person> {
+    let wanted = fold(name);
+    let exact: Vec<Person> = people
+        .iter()
+        .filter(|p| fold(&p.name) == wanted)
+        .cloned()
+        .collect();
+    if exact.is_empty() {
+        people
+    } else {
+        exact
+    }
+}
+
 /// Did the person say "my ..."? A bare "Mom" might be a contact's actual name.
 pub fn is_possessive(query: &str) -> bool {
     fold(query).starts_with("my ")
@@ -274,6 +300,16 @@ fn related_names(
     )
 }
 
+/// The person's own card, as Contacts marks it. `None` when no card is.
+fn my_card(
+    store: &CNContactStore,
+    keys: &NSArray<ProtocolObject<dyn CNKeyDescriptor>>,
+) -> Option<Person> {
+    // SAFETY: a read on a live store. Fails when no card is marked as the person's own.
+    let me = unsafe { store.unifiedMeContactWithKeysToFetch_error(keys) }.ok()?;
+    Some(person(&me))
+}
+
 /// The people a query found and the line said if a dialog ran, or a finished
 /// answer to hand back as is.
 pub(crate) type Found = Result<(Vec<Person>, Option<String>), Value>;
@@ -294,11 +330,20 @@ pub(crate) fn people_for(query: &str) -> Result<Found, String> {
     let keys = keys();
 
     let mut people: Vec<Person> = Vec::new();
+    if is_self_reference(query) {
+        return Ok(match my_card(&store, &keys) {
+            Some(me) => Ok((vec![me], asked)),
+            None => Err(json!({
+                "ok": false,
+                "summary": "Contacts does not know which card is yours, so I cannot tell which number is yours. Ask for a name or a number instead.",
+            })),
+        });
+    }
     if let Some(wanted) = relationship_labels(query) {
         match related_names(&store, &keys, &wanted) {
             Some(names) => {
                 for name in names {
-                    people.extend(search(&store, &keys, &name)?);
+                    people.extend(prefer_exact(&name, search(&store, &keys, &name)?));
                 }
             }
             None if is_possessive(query) => {
@@ -310,9 +355,14 @@ pub(crate) fn people_for(query: &str) -> Result<Found, String> {
             }
             None => {}
         }
-        // "Mom" on its own may be a contact's actual name.
+        // "Mom" on its own may be a contact's actual name. Only an exact one:
+        // a fuzzy match on a relationship word finds strangers.
         if people.is_empty() && !is_possessive(query) {
-            people = search(&store, &keys, query)?;
+            let wanted = fold(query);
+            people = search(&store, &keys, query)?
+                .into_iter()
+                .filter(|p| fold(&p.name) == wanted)
+                .collect();
         }
     } else {
         people = search(&store, &keys, query)?;
@@ -444,6 +494,40 @@ mod tests {
         assert!(relationship_labels("Mom").is_some());
         assert!(relationship_labels("Katie").is_none());
         assert!(relationship_labels("my accountant").is_none());
+    }
+
+    #[test]
+    fn me_and_myself_mean_the_me_card_not_a_name() {
+        for yes in ["me", "Me", "myself", "my number", "me."] {
+            assert!(is_self_reference(yes), "{yes}");
+        }
+        for no in ["Kelsey Medlock", "Meg", "my wife", "Medlin"] {
+            assert!(!is_self_reference(no), "{no}");
+        }
+        // The family words are relationships, answered from the Me card's relations.
+        for word in [
+            "mom", "Mother", "dad", "my wife", "husband", "sister", "brother",
+        ] {
+            assert!(relationship_labels(word).is_some(), "{word}");
+        }
+    }
+
+    #[test]
+    fn a_related_name_brings_only_the_exact_card_when_there_is_one() {
+        let card = |name: &str, id: &str| Person {
+            name: name.to_string(),
+            organization: None,
+            phones: Vec::new(),
+            emails: Vec::new(),
+            related: Vec::new(),
+            identifier: id.to_string(),
+        };
+        let both = vec![card("Barbara Leeds", "1"), card("Barbara Lee", "2")];
+        let kept = prefer_exact("barbara lee", both);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].identifier, "2");
+        let none_exact = vec![card("Barbara Leeds", "1"), card("Barb Lee", "2")];
+        assert_eq!(prefer_exact("Barbara Lee", none_exact).len(), 2);
     }
 
     #[test]

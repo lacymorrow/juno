@@ -835,6 +835,7 @@ pub fn run() {
             commands::updates::get_update_status,
             commands::updates::check_for_updates_now,
             commands::updates::restart_to_update,
+            commands::mac_access::full_disk_access_granted,
             commands::updates::get_update_settings,
             commands::updates::set_update_settings,
 
