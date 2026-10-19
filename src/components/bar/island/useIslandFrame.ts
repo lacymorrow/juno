@@ -267,6 +267,13 @@ export function useIslandFrame(): IslandFrame {
     void swapSteadyLayout(label, want, applySteadyFrame).catch((error) =>
       console.debug("Island: resting frame failed:", error),
     );
+    // This runs after the paint, so the render that first draws a full face
+    // still has the resting window. IslandBar draws nothing for that render
+    // (it compares what it is drawing against `layout.size`), because a
+    // 360-wide composer clipped to a 166-wide window is a visible flash of
+    // the wrong geometry. It cannot be hidden from here: the frame has to be
+    // decided during that render, and the ask only reaches this hook from
+    // IslandBar's layout effect, one render later.
   }, [placed, dragging, stored, restWanted, label]);
 
   return { layout, hidden: steady?.hidden ?? false, region, report };

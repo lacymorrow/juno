@@ -8,7 +8,7 @@ import { PILL_TOOLTIP_DELAY_MS } from "../../PillTooltip";
 
 // ── Tauri and hook stand-ins ────────────────────────────────────────
 
-const { invoke, emit, listenHandlers, eventHandlers, chat, focusHandlers, setFocus, frameReport, agents, backend } = vi.hoisted(() => ({
+const { invoke, emit, listenHandlers, eventHandlers, chat, focusHandlers, setFocus, frameReport, frameSize, agents, backend } = vi.hoisted(() => ({
   agents: { sessions: [] as Array<Record<string, unknown>>, focusSession: vi.fn() },
   /** What the stand-in backend answers, per command. Unlisted commands answer true. */
   backend: { answers: {} as Record<string, unknown> },
@@ -19,6 +19,9 @@ const { invoke, emit, listenHandlers, eventHandlers, chat, focusHandlers, setFoc
   listenHandlers: new Map<string, (event: { payload: unknown }) => void>(),
   eventHandlers: new Map<string, (payload: unknown) => void>(),
   frameReport: vi.fn(),
+  // Which window the island is in. "rest" is the capsule-sized one it waits
+  // in between turns (LAC-4832); the grow lands a render later than the face.
+  frameSize: { rest: false },
   chat: {
     messages: [] as ChatMessage[],
     isProcessing: false,
@@ -138,15 +141,22 @@ vi.mock("@/components/ui/mixed-content-renderer", () => ({
 }));
 // The steady frame, already placed in a top-centre well: the island grows down.
 vi.mock("../useIslandFrame", async () => {
-  const { steadyLayout } = await import("@/lib/steadyFrame");
-  const { ISLAND_STEADY_SPEC } = await import("../islandModel");
+  const { dragLayout, steadyLayout } = await import("@/lib/steadyFrame");
+  const { ISLAND_STEADY_SPEC, islandRestFrame } = await import("../islandModel");
+  const well = { x: 650, y: 30, width: 140, height: 76, fx: 0.5, fy: 0, monitorIndex: 0 };
   const layout = steadyLayout(
-    { x: 650, y: 30, width: 140, height: 76, fx: 0.5, fy: 0, monitorIndex: 0 },
+    well,
     { position: { x: 0, y: 0 }, size: { width: 1440, height: 900 }, scaleFactor: 1 },
     ISLAND_STEADY_SPEC,
   );
+  const resting = dragLayout(layout, islandRestFrame(0));
   return {
-    useIslandFrame: () => ({ layout, hidden: false, region: { current: null }, report: frameReport }),
+    useIslandFrame: () => ({
+      layout: frameSize.rest ? resting : layout,
+      hidden: false,
+      region: { current: null },
+      report: frameReport,
+    }),
   };
 });
 vi.mock("motion/react", async () => {
@@ -248,6 +258,7 @@ beforeEach(() => {
   agents.sessions = [];
   emit.mockClear();
   frameReport.mockClear();
+  frameSize.rest = false;
   chat.messages = [];
   chat.isProcessing = false;
   chat.stop.mockClear();
@@ -372,6 +383,27 @@ describe("IslandBar: one surface", () => {
     expect(composer().value).toBe("half a thought");
     // A draft at rest keeps the box up.
     expect(face()).toBe("compose");
+  });
+
+  it("draws nothing rather than a face clipped by the resting window", async () => {
+    // LAC-4832: between turns the window is the capsule (`islandRestFrame`),
+    // and it grows a render after the face that needs it. A 360-wide composer
+    // drawn inside a 166-wide window is a visible flash of wrong geometry, so
+    // that render draws nothing instead.
+    frameSize.rest = true;
+    const view = render(<IslandBar />);
+    const block = () => screen.getByTestId("island-stage");
+    // Resting, in the window sized for resting: drawn.
+    expect(block().style.opacity).toBe("1");
+
+    // The composer needs the full window, which has not arrived yet.
+    await send(UI.BAR_STATES_INPUT);
+    expect(block().style.opacity).toBe("0");
+
+    // The frame grew: drawn again, and nothing was ever drawn clipped.
+    frameSize.rest = false;
+    view.rerender(<IslandBar />);
+    expect(block().style.opacity).toBe("1");
   });
 
   it("reports the drawn shape as the only part that takes the mouse", async () => {
