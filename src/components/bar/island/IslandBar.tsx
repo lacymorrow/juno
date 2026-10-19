@@ -623,12 +623,20 @@ export function IslandBar() {
       console.error("Island: could not start listening:", error),
     );
   }, []);
-  const openChatFromHover = useCallback(
+  // The hover expand climbs one size: the small chat (the last answer), whose
+  // own expand opens the full chat. Before any turn there is no answer to
+  // show, so it opens the composer, where a chat starts.
+  const expandFromHover = useCallback(
     (e: ReactMouseEvent) => {
       e.stopPropagation();
-      openChat();
+      if (hasTurnRef.current) {
+        openAnswer();
+        return;
+      }
+      activateWindow();
+      void sendInteraction(UI.INTERACTION_TYPES_CLICK);
     },
-    [openChat],
+    [openAnswer],
   );
   const stopKind = stopControl({
     face,
@@ -814,16 +822,16 @@ export function IslandBar() {
               <Mic className="size-3.5" />
             </button>,
           )}
-          {/* The Pill's hover expand: the whole conversation, always offered,
-              so there is a way into chat from the capsule even before a turn.
-              The last answer is in there too, so it has no button of its own. */}
+          {/* The Pill's hover expand, always offered: one size up, the small
+              chat (or the composer before any turn), never straight to the
+              full chat. */}
           {tip(
             "chat",
             "Open chat",
             <button
               type="button"
               {...named("chat")}
-              onClick={openChatFromHover}
+              onClick={expandFromHover}
               aria-label="Open chat"
               title="Open chat"
               data-testid="island-hover-expand"
