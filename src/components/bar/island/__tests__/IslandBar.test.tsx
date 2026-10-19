@@ -585,7 +585,7 @@ describe("IslandBar: idle and hover", () => {
     fireEvent.pointerEnter(stage());
     expect(face()).toBe("hover");
     expect(screen.getByRole("button", { name: "Talk to Juno" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Type to Juno" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Type to Juno" })).toBeNull();
     expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Show last answer" })).toBeNull();
     await leaveVerified(stage());
@@ -606,7 +606,7 @@ describe("IslandBar: idle and hover", () => {
     expect(face()).toBe("idle");
   });
 
-  it("hover controls talk and type without the click also opening the composer twice", async () => {
+  it("the hover mic talks, and a click on the capsule types, without opening the composer twice", async () => {
     render(<IslandBar />);
     fireEvent.pointerEnter(stage());
     invoke.mockClear();
@@ -614,7 +614,7 @@ describe("IslandBar: idle and hover", () => {
     expect(invoke).toHaveBeenCalledWith("agent_voice", { action: "start" });
     expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(false);
 
-    fireEvent.click(screen.getByRole("button", { name: "Type to Juno" }));
+    fireEvent.click(screen.getByTestId("island-dot-target"));
     expect(setFocus).toHaveBeenCalled();
     expect(invoke.mock.calls.filter(([cmd]) => cmd === "ui_handle_interaction")).toHaveLength(1);
     expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(true);
@@ -1043,7 +1043,7 @@ describe("IslandBar: Escape walks all the way down to the capsule", () => {
     standInRust();
     render(<IslandBar />);
     fireEvent.pointerEnter(stage());
-    fireEvent.click(screen.getByRole("button", { name: "Type to Juno" }));
+    fireEvent.click(screen.getByTestId("island-dot-target"));
     await rustAnswers();
     expect(face()).toBe("compose");
     expect(document.activeElement).toBe(composer());
@@ -1068,9 +1068,9 @@ describe("IslandBar: Escape walks all the way down to the capsule", () => {
     await escape();
     expect(face()).toBe("idle");
 
-    // Opening it from the capsule: the hover's Type control.
+    // Opening it from the capsule: a click on the capsule itself.
     fireEvent.pointerEnter(stage());
-    fireEvent.click(screen.getByRole("button", { name: "Type to Juno" }));
+    fireEvent.click(screen.getByTestId("island-dot-target"));
     await rustAnswers();
     expect(face()).toBe("compose");
     expect(composer().value).toBe("draft one");
@@ -1194,8 +1194,8 @@ describe("IslandBar: Open chat from the hover capsule", () => {
     fireEvent.pointerEnter(stage());
     expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
     const shapeHit = (frameReport.mock.calls[frameReport.mock.calls.length - 1][1] as Array<{ width: number }>)[0];
-    // Talk, Type, Open chat.
-    expect(shapeHit.width).toBe(132);
+    // Talk and Open chat.
+    expect(shapeHit.width).toBe(104);
     fireEvent.click(screen.getByRole("button", { name: "Open chat" }));
     expect(face()).toBe("chat");
     // Nothing to follow up on yet.

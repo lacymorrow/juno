@@ -40,7 +40,7 @@ export const ISLAND_WIDTH = 360;
 export const IDLE_SHAPE: ShapeSize = { width: 92, height: 28, radius: 14 };
 
 /** The capsule with its controls showing: barely bigger, so it reads as the same object. */
-export const HOVER_SHAPE: ShapeSize = { width: 132, height: 32, radius: 16 };
+export const HOVER_SHAPE: ShapeSize = { width: 104, height: 32, radius: 16 };
 
 /** One hover control and the gap after it. */
 const HOVER_BUTTON_PX = 26;
@@ -48,9 +48,8 @@ const HOVER_BUTTON_PX = 26;
 const HOVER_FRAME_PX = 40;
 
 /**
- * The hover capsule for a number of controls (Talk, Type,
- * Open chat, the wake phrase). Three fit the 132 capsule; each one past that
- * widens it by one.
+ * The hover capsule for a number of controls (Talk, Open chat, the wake
+ * phrase). Two fit the 104 capsule; each one past that widens it by one.
  */
 export function hoverShapeFor(buttons: number): ShapeSize {
   return { ...HOVER_SHAPE, width: Math.max(HOVER_SHAPE.width, HOVER_FRAME_PX + buttons * HOVER_BUTTON_PX) };

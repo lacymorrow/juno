@@ -262,9 +262,9 @@ describe("pasted images", () => {
 
 describe("hover, dot and roster", () => {
   it("a fourth hover control (the wake phrase) widens the capsule by one", () => {
-    expect(hoverShapeFor(3)).toEqual(HOVER_SHAPE);
-    expect(hoverShapeFor(4).width).toBeGreaterThan(HOVER_SHAPE.width);
-    expect(hoverShapeFor(4).height).toBe(HOVER_SHAPE.height);
+    expect(hoverShapeFor(2)).toEqual(HOVER_SHAPE);
+    expect(hoverShapeFor(3).width).toBeGreaterThan(HOVER_SHAPE.width);
+    expect(hoverShapeFor(3).height).toBe(HOVER_SHAPE.height);
   });
 
   it("the dot is system red when Juno cannot answer, except while a mic is open", () => {

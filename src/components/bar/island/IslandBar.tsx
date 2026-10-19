@@ -21,7 +21,6 @@ import {
   Mic,
   Minimize2,
   Square,
-  Type,
   Volume2,
   X,
 } from "lucide-react";
@@ -624,12 +623,6 @@ export function IslandBar() {
       console.error("Island: could not start listening:", error),
     );
   }, []);
-  const startTyping = useCallback((e: ReactMouseEvent) => {
-    e.stopPropagation();
-    // Typing has to land here, so the window is made key on purpose.
-    activateWindow();
-    void sendInteraction(UI.INTERACTION_TYPES_CLICK);
-  }, []);
   const openChatFromHover = useCallback(
     (e: ReactMouseEvent) => {
       e.stopPropagation();
@@ -702,8 +695,9 @@ export function IslandBar() {
   const hoverShown = dragging ? hoverAtPressRef.current : hoverLive;
   const layout = frame.layout;
   const growUp = layout.growUp;
-  // Talk, Type and Open chat always; the wake phrase toggle when one is set.
-  const hoverButtons = 3 + (wake.configured ? 1 : 0);
+  // Talk and Open chat always; the wake phrase toggle when one is set. Typing
+  // is the capsule itself: a click anywhere on it opens the composer.
+  const hoverButtons = 2 + (wake.configured ? 1 : 0);
   const shape = shapeFor(face, {
     hovered: hoverShown,
     hoverButtons,
@@ -818,13 +812,6 @@ export function IslandBar() {
             "Talk to Juno",
             <button type="button" {...named("mic")} onClick={startTalking} aria-label="Talk to Juno" title="Talk to Juno" className={control("mic")}>
               <Mic className="size-3.5" />
-            </button>,
-          )}
-          {tip(
-            "type",
-            "Type to Juno",
-            <button type="button" {...named("type")} onClick={startTyping} aria-label="Type to Juno" title="Type to Juno" className={control("type")}>
-              <Type className="size-3.5" />
             </button>,
           )}
           {/* The Pill's hover expand: the whole conversation, always offered,
