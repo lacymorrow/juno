@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { UI } from "@/lib/constants.generated";
+import { MAX_SUGGESTIONS } from "@/hooks/useSkillAutocomplete";
 import type { ChatMessage } from "@/types/chat";
 import {
   COMPACT_COMPOSE_WIDTH,
@@ -38,6 +39,11 @@ import {
   escapeIsRusts,
   HOVER_BUTTONS_MAX,
   islandMaxFor,
+  SUGGESTION_GAP,
+  SUGGESTION_LIST_PAD,
+  SUGGESTION_ROOM,
+  SUGGESTION_ROWS,
+  SUGGESTION_ROW_H,
   islandRestFrame,
   ROSTER_GAP,
   rosterShown,
@@ -325,6 +331,23 @@ describe("islandRestFrame", () => {
     expect(two.width).toBe(islandRestFrame(0).width + 2 * (ROSTER_GAP + rosterWidthFor(2)));
     expect(two.height).toBe(islandRestFrame(0).height);
     expect(islandRestFrame(9).width).toBeGreaterThan(two.width);
+  });
+
+  it("leaves room for the tallest face with a full suggestion list", () => {
+    // The invariant the clipped-render guard depends on: if the tallest thing
+    // the island can draw does not fit its own window, that guard hides the
+    // island instead of clipping it by a pixel. SUGGESTION_ROOM was 200
+    // against a list needing 202, which is exactly that.
+    // The window's budget must cover the list's own cap.
+    expect(SUGGESTION_ROWS).toBeGreaterThanOrEqual(MAX_SUGGESTIONS);
+    const fullList = SUGGESTION_GAP + MAX_SUGGESTIONS * SUGGESTION_ROW_H + SUGGESTION_LIST_PAD;
+    expect(SUGGESTION_ROOM).toBeGreaterThanOrEqual(fullList);
+    for (const display of displays) {
+      const window = islandMaxFor(display);
+      const chat = chatSizeInWindow(window);
+      const tallest = Math.max(chat.height, SHAPE_MAX_HEIGHT) + 2 * SHADOW_PAD + fullList;
+      expect(tallest).toBeLessThanOrEqual(window.height);
+    }
   });
 
   it("still fits inside the full window with the widest roster on a small display", () => {
