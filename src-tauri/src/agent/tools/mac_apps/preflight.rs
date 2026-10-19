@@ -141,6 +141,14 @@ fn full_disk_status() -> Access {
     }
 }
 
+/// Can this running process read the Messages history now? The Full Disk
+/// Access card re-asks this when Juno is reactivated after the person visited
+/// System Settings. macOS applies the switch to a process only when it starts,
+/// so "still no" after they added Juno means a restart is the missing step.
+pub fn full_disk_access_granted() -> bool {
+    full_disk_status() == Access::Granted
+}
+
 // ---------------------------------------------------------------------------
 // Automation, read silently
 // ---------------------------------------------------------------------------

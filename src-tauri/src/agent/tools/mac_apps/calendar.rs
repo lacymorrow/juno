@@ -115,8 +115,9 @@ fn find_event(id: &str) -> Option<(Retained<EKEventStore>, Retained<EKEvent>)> {
 
 /// `calendar_events`
 pub fn events(input: &Value) -> Result<Value, String> {
-    let from = parse_when(required_text(input, "from")?)?.start()?;
-    let to = parse_when(required_text(input, "to")?)?.end_exclusive()?;
+    let (from_text, to_text) = event_window(input, Local::now().date_naive());
+    let from = parse_when(&from_text)?.start()?;
+    let to = parse_when(&to_text)?.end_exclusive()?;
     if to <= from {
         return Err("The end of the window is not after its start.".to_string());
     }

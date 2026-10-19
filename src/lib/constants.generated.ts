@@ -732,6 +732,7 @@ export const COMMANDS = {
   MEDIA_GET_STATE: 'media_get_state',
   MEDIA_CONTROL: 'media_control',
   SKILLS_LIST_AVAILABLE_SKILLS: 'list_available_skills',
+  MAC_ACCESS_FULL_DISK_ACCESS_GRANTED: 'full_disk_access_granted',
   UPDATES_GET_STATUS: 'get_update_status',
   UPDATES_CHECK_NOW: 'check_for_updates_now',
   UPDATES_RESTART_TO_UPDATE: 'restart_to_update',

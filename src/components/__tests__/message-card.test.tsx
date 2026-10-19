@@ -8,6 +8,19 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
+// The window's focus handler, captured so a test can play "Juno came back".
+let focusHandler: ((event: { payload: boolean }) => void) | undefined;
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    onFocusChanged: vi.fn(async (handler: (event: { payload: boolean }) => void) => {
+      focusHandler = handler;
+      return () => {
+        focusHandler = undefined;
+      };
+    }),
+  }),
+}));
+
 const mockedInvoke = vi.mocked(invoke);
 
 const FULL_DISK_URL =
@@ -100,6 +113,36 @@ describe("MessageCard", () => {
 
   it("never follows a link that is not System Settings", () => {
     render(<MessageCard needsAccess="Messages" settingsUrl="https://example.com" />);
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("Full Disk Access: coming back still refused turns the step into one Restart button", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) =>
+      cmd === "full_disk_access_granted" ? false : undefined,
+    );
+    render(
+      <MessageCard needsAccess="Full Disk Access" reason="I need Full Disk Access to read your messages." settingsUrl={FULL_DISK_URL} />,
+    );
+    fireEvent.click(screen.getByRole("button"));
+    await waitFor(() => expect(focusHandler).toBeDefined());
+    focusHandler?.({ payload: true });
+    await waitFor(() => expect(screen.getByText(/Restart Juno to finish/)).toBeTruthy());
+    const buttons = screen.getAllByRole("button");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toBe("Restart Juno");
+    fireEvent.click(buttons[0]);
+    await waitFor(() => expect(mockedInvoke).toHaveBeenCalledWith("restart_app_after_permissions"));
+  });
+
+  it("Full Disk Access: coming back and granted says so with no button", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) =>
+      cmd === "full_disk_access_granted" ? true : undefined,
+    );
+    render(<MessageCard needsAccess="Full Disk Access" settingsUrl={FULL_DISK_URL} />);
+    fireEvent.click(screen.getByRole("button"));
+    await waitFor(() => expect(focusHandler).toBeDefined());
+    focusHandler?.({ payload: true });
+    await waitFor(() => expect(screen.getByText(/Full Disk Access is on/)).toBeTruthy());
     expect(screen.queryAllByRole("button")).toHaveLength(0);
   });
 

@@ -525,7 +525,8 @@ points the Settings window at them. \
 For Reminders, Calendar and Contacts use the juno server's reminders_, calendar_ and contacts_ \
 tools, never AppleScript, osascript or other shell commands. \
 For music, directions, the person's own shortcuts and Do Not Disturb use music_play, \
-maps_directions, shortcuts_run and focus_set from the same server.";
+maps_directions, shortcuts_run and focus_set from the same server. For a mood or genre pick a well-known \
+song or artist yourself and pass that to music_play. A tool's `observed` read-back is the truth: never narrate what you could not see on screen, and never tell the person a result is unconfirmed when the tool observed it.";
 
 /// Check if Claude CLI is both installed and authenticated.
 /// Runs `claude auth status --json` and returns Ok(()) if logged in.
