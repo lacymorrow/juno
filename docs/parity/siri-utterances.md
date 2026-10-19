@@ -9,10 +9,43 @@ Tiers: 0 is a local intent (no model), 1 is a typed tool the model calls, 2 is c
 `scripts/juno-build.sh` installs the branch build. Hold Fn+Control, say the row, and grant whatever macOS asks for in the moment: the ask is part of the row.
 
 - First audio: `grep TurnTiming ~/Library/Logs/Juno/juno-$(date +%F).log | tail -1`, the `first_audio=` field, milliseconds from key release.
+- A row that misses 1500 ms: keep the whole line, not just the number. The gaps between the fields say which lever the row needs, and they have different owners:
+
+  | gap | what it is | lever |
+  | --- | --- | --- |
+  | release → `llm_request_sent` | speech-to-text and dispatch | STT |
+  | `llm_request_sent` → `llm_first_token` | the model round trip | plan lever 1, the small-turn router |
+  | `llm_first_token` → `tts_open` | the model wrote something before it opened `<TTS>` | the prompt |
+  | `tts_open` → `first_tts_text` | the parser waiting for a sentence it may release (`MIN_SPOKEN_CHUNK_CHARS`) | the chunking rule |
+  | `first_tts_text` → `first_audio` | the speech engine | the TTS engine |
+
+  A row that misses only because of the last two gaps does not need the speed slice at all, so recording them is what keeps the plan's "only if the number misses" from over-firing.
 - Recording: one clip per row in `docs/changelog/media/<PR>/`, named after the row.
 - The Messages read rows need Full Disk Access. Without it the row should say so in one sentence, not come back empty; that is itself a row worth recording.
 
 What the Mac is needed for is the permission dialogs, the timings and the recordings. Everything checkable without it was checked in #814: the Music search areas and every Mail, Notes and Messages term against the installed dictionaries, the `attributedBody` decoder against archives macOS wrote, and the Juno Focus shortcut's signature and bundling.
+
+## Where the time goes today
+
+Measured from `~/Library/Logs/Juno/juno-*.log`, 12 to 18 October 2026: 61 `[TurnTiming]` turns, 49 reached first audio, 38 of those by voice. Every one ran sonnet through `claude_cli/persistent-*` with system TTS.
+
+| | voice (n=38) |
+| --- | --- |
+| turns under the 1500 ms target | 1 |
+| median first audio | 3447 ms |
+| best turn logged | 1492 ms |
+
+Median of each gap, voice turns (gaps are measured per turn, then taken as a median, so they do not sum to the median total):
+
+| gap | median | share of a 3447 ms turn |
+| --- | --- | --- |
+| to `llm_first_token` | 2219 ms | 64% |
+| `llm_first_token` → `first_tts_text` | 695 ms | 20% |
+| `first_tts_text` → `first_audio` | 47 ms | 1% |
+
+Two things this does and does not say. The model round trip is most of the budget and has never gone under 1236 ms by voice in any logged turn, which is already 82% of the target on its own. But these are organic turns with real conversation context, not the short single-intent utterances below, so they are an upper bound and not a measurement of these rows. That is what the walkthrough is for.
+
+The 695 ms middle gap is the reason `tts_open` exists: until a row is recorded with it, that fifth of the budget cannot be attributed to either the prompt or the chunking rule.
 
 ## Reminders, Calendar, Contacts (slice 1, LAC-4233)
 
