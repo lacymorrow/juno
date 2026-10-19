@@ -32,6 +32,9 @@ const CAPABLE: Model = {
   is_legacy: false,
 };
 
+/** The picker reads `is_legacy` off the backend and never decides it here.
+ * Haiku 4.5 is a real legacy model as of 2026-10-19 (LAC-4856), when Haiku 5.5
+ * replaced it in Anthropic's current lineup. */
 const LEGACY: Model = {
   id: "claude-haiku-4-5-20251001",
   name: "Claude Haiku 4.5",

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **models:** Claude Haiku 5.5 is selectable, and Claude Haiku 4.5 moved to the legacy list, following Anthropic's own lineup. Haiku 5.5 is the fastest and cheapest current model, so the smart router now classifies requests with it. Its screenshots capture at full resolution, where Haiku 4.5's were downscaled. The default model is unchanged: Claude Opus 5.5.
+
 ## [0.8.233] - 2026-10-20
 
 ### Fixed
