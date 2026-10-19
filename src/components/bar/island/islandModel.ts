@@ -86,8 +86,30 @@ export function canSend({ draft, images, working }: { draft: string; images: num
 /** The tallest the shape gets. Taller answers scroll inside it. */
 export const SHAPE_MAX_HEIGHT = 400;
 
-/** Room beyond the composer for the skill suggestions. */
-export const SUGGESTION_ROOM = 200;
+/** One row of the skill suggestions, the list's own padding, and its gap from the shape. */
+export const SUGGESTION_ROW_H = 29;
+export const SUGGESTION_LIST_PAD = 20;
+export const SUGGESTION_GAP = 8;
+
+/**
+ * Suggestion rows the window keeps room for. This model stays free of the
+ * autocomplete hook (every test that mocks the hook would otherwise have to
+ * know about window geometry), so a test pins this against the list's own cap,
+ * `MAX_SUGGESTIONS`.
+ */
+export const SUGGESTION_ROWS = 6;
+
+/**
+ * Room beyond the composer for the skill suggestions: a full list, exactly.
+ *
+ * Derived, not a round number. It was 200 against a list that needs 202, so
+ * the tallest face with a full list overflowed its window by 2px and was
+ * quietly clipped. That became load-bearing when the Island started drawing
+ * nothing rather than drawing clipped (LAC-4832), where 2px of overflow would
+ * have hidden the whole island. Keep it derived and they cannot drift.
+ */
+export const SUGGESTION_ROOM =
+  SUGGESTION_GAP + SUGGESTION_ROWS * SUGGESTION_ROW_H + SUGGESTION_LIST_PAD;
 
 // === THE ROSTER ===
 

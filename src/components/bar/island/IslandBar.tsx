@@ -75,6 +75,9 @@ import {
   islandEscapeStep,
   islandRestFrame,
   rosterShown,
+  SUGGESTION_GAP,
+  SUGGESTION_LIST_PAD,
+  SUGGESTION_ROW_H,
   rosterWidthFor,
   ISLAND_WIDTH,
   LINGER_MS,
@@ -122,10 +125,6 @@ const COMPONENT_ID = UI.ELEMENT_IDS_DYNAMIC_BAR;
 const HEADER_H = 36;
 /** Room under the answer body, above the composer's hairline. */
 const BODY_PAD_BOTTOM = 12;
-/** One row of the skill suggestions, and the list's own padding. */
-const SUGGESTION_ROW_H = 29;
-const SUGGESTION_LIST_PAD = 20;
-const SUGGESTION_GAP = 8;
 
 interface BarStateData {
   barState: string;
