@@ -113,7 +113,7 @@ Local conditions on top:
 | right-click Show/Hide Chat | opens the chat face (the composer before any turn); again, settles to the capsule |
 | New Chat (tray, right-click, Cmd+N, the + in the chat header) | stops an answer still arriving, rotates Rust's conversation, clears the screen, caret in the box; the chat face stays the chat face. Skipped while the full-size window is up (it owns the conversation) |
 | a spoken turn reaches its final decode, or anything is sent | the open answer is put away; the new one opens when it arrives (it used to come back between the mic closing and the new question landing) |
-| a press outside the island, or the window losing focus, with the composer up and Juno at rest | back to the capsule, the draft kept (the same as Escape). An answer, a component, the chat, or Juno at work stays |
+| a press outside the island (the shared ladder, `outsidePressStep` in `src/lib/barEscape.ts`) | one rung down per click, never stopping work: with a draft in the box the first click leaves it open, then the capsule, then hidden. Without one, the capsule, then hidden. Juno at work is never hidden, and clicks Juno makes while driving another app do not count. Focus loss alone only folds an empty composer |
 | chat face open | stays through every bar state; Escape or its collapse control steps down to the answer, or to the composer with no answer |
 | a picture pasted into the composer | thumbnail row above the text; the compose face is the full box; Send sends text and pictures through `dispatch_query` |
 | wake phrase configured | the hover capsule gains the wake phrase toggle |

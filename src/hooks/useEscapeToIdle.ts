@@ -13,6 +13,7 @@ import {
   escapeHandled,
   escapeHidesBar,
   escapeOutcome,
+  outsidePressStep,
   type BarEscapeState,
   type ClimbTarget,
   type LadderStep,
@@ -51,6 +52,17 @@ export interface EscapeToIdleOptions extends BarEscapeState {
    * look without one gets the full-size chat window instead.
    */
   openFullChat?: () => void;
+  /**
+   * Something is typed or pasted in this look's box. A press outside the bar
+   * then leaves the chat open once before putting it away (`outsidePressStep`).
+   */
+  draftPresent?: boolean;
+  /**
+   * Straight to the idle bar, draft kept, for a press outside. Defaults to
+   * `collapse`; a look whose `collapse` steps down one rung at a time (the
+   * Island) passes its put-away.
+   */
+  putAway?: () => void;
 }
 
 /**
@@ -117,7 +129,6 @@ export function useEscapeToIdle(options: EscapeToIdleOptions): void {
     window.clearTimeout(presentedTimer.current);
     presentedTimer.current = window.setTimeout(() => setPresented(false), PRESENTED_MS);
   });
-  useEventListener(EVENTS.SYSTEM_MOUSE_PRESSED_OUTSIDE, endPresented);
   useEffect(() => () => window.clearTimeout(presentedTimer.current), []);
   const claimed = expanded || chainOpen || presented;
 
@@ -191,6 +202,58 @@ export function useEscapeToIdle(options: EscapeToIdleOptions): void {
   );
 
   useEventListener(EVENTS.BAR_DISMISS_PANE, pressFromBackend);
+
+  // ── A press outside the bar ──
+  //
+  // Rust reports a fresh mouse press anywhere the bar is not drawing (never
+  // while the agent drives the mouse). Each one walks the ladder a rung:
+  // `outsidePressStep` decides, and a click never stops Juno's work.
+  //
+  // The same click often also takes focus from the bar, and the looks fold an
+  // empty composer on focus loss. A press arriving just after the bar's layers
+  // closed is that same click, not a second one, so it does not hide the bar.
+  const layersOpen = overlayOpen || composerOpen;
+  const sparedRef = useRef(false);
+  const layersClosedAtRef = useRef(0);
+  const layersOpenRef = useRef(layersOpen);
+  useEffect(() => {
+    if (layersOpenRef.current && !layersOpen) {
+      layersClosedAtRef.current = Date.now();
+      sparedRef.current = false;
+    }
+    layersOpenRef.current = layersOpen;
+  }, [layersOpen]);
+  // Back in the bar (typing, clicking in it): the next click away is a first one.
+  useEffect(() => {
+    const engaged = () => {
+      sparedRef.current = false;
+    };
+    document.addEventListener("keydown", engaged);
+    document.addEventListener("pointerdown", engaged);
+    return () => {
+      document.removeEventListener("keydown", engaged);
+      document.removeEventListener("pointerdown", engaged);
+    };
+  }, []);
+  useEventListener(EVENTS.SYSTEM_MOUSE_PRESSED_OUTSIDE, () => {
+    // A press elsewhere also ends the window just after Juno appeared.
+    endPresented();
+    if (Date.now() - layersClosedAtRef.current < ESCAPE_COALESCE_MS) return;
+    const { barState, working, overlayOpen, composerOpen, popupOpen } = latest.current;
+    const { collapse, putAway, report, draftPresent = false } = latest.current;
+    const state = { barState, working, overlayOpen, composerOpen, popupOpen };
+    const step = outsidePressStep(state, { draftPresent, spared: sparedRef.current });
+    if (step === "spare") {
+      sparedRef.current = true;
+    } else if (step === "collapse") {
+      (putAway ?? collapse)();
+      // Rust holds a composer's input state; settle it, but only when nothing
+      // is running, since reporting is what stops work.
+      if (composerOpen && !working) report();
+    } else if (step === "hide") {
+      void invoke(COMMANDS.WINDOWS_HIDE_FLOATING_BAR).catch(() => {});
+    }
+  });
 
   // One rung up: the Dock or tray icon, or Escape in the big chat.
   useEventListener<{ to: LadderStep }>(EVENTS.BAR_LADDER, (payload) => {

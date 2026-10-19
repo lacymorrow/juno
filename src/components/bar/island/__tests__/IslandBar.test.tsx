@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import type { ChatMessage } from "@/types/chat";
@@ -1426,49 +1426,85 @@ describe("IslandBar: new chat", () => {
 });
 
 describe("IslandBar: out of the way when the person goes elsewhere", () => {
+  // Each press is a separate click, well apart: a press just after the bar
+  // closed is the same click (see useEscapeToIdle).
+  let offset = 0;
+  const realNow = Date.now.bind(Date);
+  beforeEach(() => {
+    offset = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => realNow() + offset);
+  });
+  afterEach(() => vi.mocked(Date.now).mockRestore());
   const pressOutside = () =>
     act(async () => {
+      offset += 1000;
       eventHandlers.get(EVENTS.SYSTEM_MOUSE_PRESSED_OUTSIDE)?.(null);
     });
+  const hid = () => invoke.mock.calls.some(([cmd]) => cmd === "hide_floating_bar");
 
-  it("an empty composer goes back to the idle capsule on a press elsewhere", async () => {
+  it("an empty composer goes to the idle capsule, then the bar hides", async () => {
     render(<IslandBar />);
     act(() => composer().focus());
     await send(UI.BAR_STATES_INPUT);
     expect(face()).toBe("compose");
     await pressOutside();
     expect(face()).toBe("idle");
-    expect(sentInteraction(UI.INTERACTION_TYPES_BLUR)).toBe(true);
+    // The composer's input state is Rust's: the click reported it, Rust settles.
+    expect(sentInteraction(UI.INTERACTION_TYPES_ESCAPE)).toBe(true);
+    await send(UI.BAR_STATES_DEFAULT);
+    expect(hid()).toBe(false);
+    await pressOutside();
+    expect(hid()).toBe(true);
   });
 
-  it("and on the window losing focus", async () => {
-    render(<IslandBar />);
-    act(() => composer().focus());
-    await send(UI.BAR_STATES_INPUT);
-    await act(async () => {
-      focusHandlers.forEach((h) => h({ payload: false }));
-    });
-    expect(face()).toBe("idle");
-  });
-
-  it("a draft goes away with it and is kept for next time", async () => {
+  it("a draft keeps the box open for one click, then idles, then hides, kept throughout", async () => {
     render(<IslandBar />);
     act(() => composer().focus());
     await send(UI.BAR_STATES_INPUT);
     fireEvent.change(composer(), { target: { value: "half a thought" } });
     await pressOutside();
+    expect(face()).toBe("compose");
+    await pressOutside();
     expect(face()).toBe("idle");
+    // The composer's input state is Rust's: the click reported it, Rust settles.
+    expect(sentInteraction(UI.INTERACTION_TYPES_ESCAPE)).toBe(true);
+    await send(UI.BAR_STATES_DEFAULT);
+    expect(hid()).toBe(false);
+    await pressOutside();
+    expect(hid()).toBe(true);
     expect(composer().value).toBe("half a thought");
   });
 
-  it("an answer, or Juno at work, stays where it is", async () => {
+  it("losing focus alone leaves a draft where it is", async () => {
+    render(<IslandBar />);
+    act(() => composer().focus());
+    await send(UI.BAR_STATES_INPUT);
+    fireEvent.change(composer(), { target: { value: "half a thought" } });
+    await act(async () => {
+      focusHandlers.forEach((h) => h({ payload: false }));
+    });
+    expect(face()).toBe("compose");
+  });
+
+  it("the chat goes straight to the capsule, not one rung down", async () => {
     renderWithAnswer();
+    await act(async () => {
+      vi.advanceTimersByTime(LINGER_MS + 100);
+    });
+    await act(async () => {
+      eventHandlers.get(EVENTS.BAR_TOGGLE_PANE)?.(null);
+    });
+    expect(face()).toBe("chat");
     await pressOutside();
-    expect(face()).toBe("answer");
-    cleanup();
+    expect(face()).toBe("idle");
+  });
+
+  it("Juno at work is never stopped or hidden by a click", async () => {
     render(<IslandBar />);
     await send(UI.BAR_STATES_LOADING);
     await pressOutside();
-    expect(face()).toBe("compose");
+    await pressOutside();
+    expect(sentInteraction(UI.INTERACTION_TYPES_ESCAPE)).toBe(false);
+    expect(hid()).toBe(false);
   });
 });
