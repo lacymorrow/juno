@@ -64,11 +64,13 @@ export interface IslandFrame {
    *
    * `rest` is the window the island can rest in while this is all it draws
    * (`islandRestFrame`), or null while the drawn face needs the whole window.
+   * Required, not optional: a face that forgets to decide would leave the
+   * window at its display-sized frame for good, and that is the bug.
    */
   report: (
     footprint: { width: number; height: number },
     hit: Rect | Rect[],
-    rest?: Size | null,
+    rest: Size | null,
   ) => void;
 }
 
@@ -224,7 +226,7 @@ export function useIslandFrame(): IslandFrame {
 
   const lastReported = useRef("");
   const report = useCallback(
-    (footprint: { width: number; height: number }, hit: Rect | Rect[], rest: Size | null = null) => {
+    (footprint: { width: number; height: number }, hit: Rect | Rect[], rest: Size | null) => {
       restWantedRef.current = rest;
       setRestWanted((prev) => (sameSize(prev, rest) ? prev : rest));
       const regions = Array.isArray(hit) ? hit : [hit];
