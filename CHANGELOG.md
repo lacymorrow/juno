@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.223] - 2026-10-19
+
+### Added
+
+- **timing:** add tts_open stage so the gap before speech has an owner (#845) (f3797270)
+
 ## [0.8.222] - 2026-10-19
 
 ### Fixed
@@ -1542,7 +1548,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.222...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.223...HEAD
+[0.8.223]: https://github.com/lacymorrow/juno/compare/cua-v0.8.222...v0.8.223
 [0.8.222]: https://github.com/lacymorrow/juno/compare/cua-v0.8.221...v0.8.222
 [0.8.221]: https://github.com/lacymorrow/juno/compare/cua-v0.8.220...v0.8.221
 [0.8.220]: https://github.com/lacymorrow/juno/compare/cua-v0.8.219...v0.8.220
