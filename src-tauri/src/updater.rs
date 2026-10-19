@@ -227,6 +227,130 @@ pub fn install_pending() -> bool {
         return false;
     };
     let version = update.version.clone();
+    match update.install(bytes) {
+        Ok(()) => {
+            info!("[Updater] {version} installed on quit; it runs on the next launch");
+            true
+        }
+        Err(e) => {
+            warn!("[Updater] could not install {version} on quit: {e}");
+            false
+        }
+    }
+}
+
+/// Read the current status. Never blocks on the network.
+pub fn current_status() -> UpdateStatus {
+    match status_cell().lock() {
+        Ok(status) => status.clone(),
+        // A poisoned lock means a previous holder panicked mid-update. The
+        // status is display state, so recovering the value is strictly better
+        // than propagating the panic into the UI.
+        Err(poisoned) => poisoned.into_inner().clone(),
+    }
+}
+
+/// Apply `mutate` to the status and tell the UI, in that order.
+fn update_status<F: FnOnce(&mut UpdateStatus)>(app: &AppHandle, mutate: F) {
+    let snapshot = {
+        let mut guard = match status_cell().lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        mutate(&mut guard);
+        guard.clone()
+    };
+    if let Err(e) = app.emit(events::updates::STATUS, &snapshot) {
+        debug!("[Updater] no listener for the status event: {e}");
+    }
+}
+
+/// Look for a newer build, and download it if there is one. It installs when
+/// Juno quits ([`install_pending`]).
+///
+/// Safe to call from anywhere: a second call while one is running returns
+/// immediately rather than queueing. Errors land in the status rather than
+/// propagating, because most callers are timers with nobody to tell.
+pub async fn check_and_install(app: &AppHandle, channel: UpdateChannel) {
+    if IN_FLIGHT.swap(true, Ordering::SeqCst) {
+        debug!("[Updater] a check is already running; skipping this one");
+        return;
+    }
+
+    let outcome = run_check(app, channel).await;
+
+    if let Err(message) = outcome {
+        warn!("[Updater] {message}");
+        update_status(app, |status| {
+            status.stage = UpdateStage::Failed;
+            status.error = Some(failure_line(&message).to_string());
+        });
+    }
+
+    IN_FLIGHT.store(false, Ordering::SeqCst);
+}
+
+/// What Settings shows after a check that did not finish. The raw reason
+/// names a feed URL and an error chain, which tells a person nothing they can
+/// act on; it goes to the log. A lost connection is worth saying plainly,
+/// because it explains itself and fixes itself.
+pub fn failure_line(message: &str) -> &'static str {
+    if crate::utils::network::is_network_error(message) {
+        "No internet connection. Juno will check again later."
+    } else {
+        "The last check didn't finish. Juno will check again later."
+    }
+}
+
+/// The body of a check. Split out so [`check_and_install`] owns the in-flight
+/// flag on every exit path, including the error ones.
+async fn run_check(app: &AppHandle, channel: UpdateChannel) -> Result<(), String> {
+    update_status(app, |status| {
+        status.stage = UpdateStage::Checking;
+        status.error = None;
+        status.channel = channel;
+        status.downloaded_bytes = 0;
+        status.total_bytes = None;
+    });
+
+    let endpoint = channel
+        .endpoint()
+        .parse()
+        .map_err(|e| format!("the {} feed URL is not a URL: {e}", channel.as_str()))?;
+
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(|e| {
+            format!(
+                "could not point the updater at the {} feed: {e}",
+                channel.as_str()
+            )
+        })?
+        .build()
+        .map_err(|e| format!("could not build the updater: {e}"))?;
+
+    let found = updater
+        .check()
+        .await
+        .map_err(|e| format!("could not read the {} feed: {e}", channel.as_str()))?;
+
+    let Some(update) = found else {
+        info!(
+            "[Updater] {} is the newest build on the {} channel",
+            env!("CARGO_PKG_VERSION"),
+            channel.as_str()
+        );
+        update_status(app, |status| {
+            status.stage = UpdateStage::UpToDate;
+            status.available_version = None;
+            status.notes = None;
+            status.detail = None;
+        });
+        return Ok(());
+    };
+
+    let version = update.version.clone();
     let notes = update.body.clone();
 
     let already_waiting = pending_slot()
