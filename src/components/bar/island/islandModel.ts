@@ -160,6 +160,49 @@ export function islandMaxFor(monitor: MonitorRect): Size {
 }
 
 /**
+ * Controls the hover capsule can carry: Talk, Open chat, and the wake phrase
+ * when one is set. The resting window is sized for all three, so showing them
+ * is a CSS morph and never a window change.
+ */
+export const HOVER_BUTTONS_MAX = 3;
+
+/**
+ * The window the Island rests in: the capsule, the hover capsule it becomes,
+ * the roster bubble beside it, and the shadow room around all of it.
+ *
+ * Why this exists when the steady frame says a window is never resized per
+ * state (`docs/plans/appearance-steady-frame.md`). macOS lists a window by its
+ * frame, not by what it draws, and `islandMaxFor` makes that frame most of the
+ * display (1364 x 788 of a 1440 x 900, 83% of its area). So an invisible,
+ * click-through, display-sized Juno rectangle still sits over every app behind
+ * it, and a screen-share picker (which hit-tests the window list rather than
+ * routing mouse events) offers Juno instead of the app underneath (LAC-4832). `sharingType = .none` does not help: the window
+ * stays in both `CGWindowList` and `SCShareableContent`, that flag only blanks
+ * the content inside a capture. The frame itself is the only lever.
+ *
+ * So the window holds the full face only while a full face is drawn. Resting
+ * is where the Island spends nearly all of its time, and the only state
+ * someone is in while reaching for another window. Every state change inside a
+ * turn still happens in one unchanging window; see `useIslandFrame` for the
+ * one boundary this crosses and what it costs.
+ */
+export function islandRestFrame(agents: number): Size {
+  const hover = hoverShapeFor(HOVER_BUTTONS_MAX);
+  const shape = {
+    width: Math.max(IDLE_SHAPE.width, hover.width),
+    height: Math.max(IDLE_SHAPE.height, hover.height),
+  };
+  // The bubble sits on whichever side the well leaves free, so the resting
+  // window keeps its room on both: a drop into a well that docks the other
+  // way must not need the window resized again.
+  const roster = rosterShown(agents) ? 2 * (ROSTER_GAP + rosterWidthFor(agents)) : 0;
+  return {
+    width: shape.width + roster + 2 * SHADOW_PAD,
+    height: shape.height + 2 * SHADOW_PAD,
+  };
+}
+
+/**
  * The chat face inside a placed window, read back from the window's size
  * and capped to the room its well leaves to grow into
  * (the inverse of `islandMaxFor`), so every placement path (launch, drop,

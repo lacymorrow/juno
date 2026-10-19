@@ -36,7 +36,10 @@ import {
   hoverShapeFor,
   islandEscapeStep,
   escapeIsRusts,
+  HOVER_BUTTONS_MAX,
   islandMaxFor,
+  islandRestFrame,
+  ROSTER_GAP,
   rosterShown,
   rosterWidthFor,
 } from "../islandModel";
@@ -280,6 +283,55 @@ describe("hover, dot and roster", () => {
     expect(rosterShown(2)).toBe(true);
     expect(rosterWidthFor(3)).toBeGreaterThan(rosterWidthFor(2));
     expect(rosterWidthFor(20)).toBeLessThanOrEqual(ROSTER_ROOM);
+  });
+});
+
+/**
+ * LAC-4832: the window the Island rests in. macOS lists a window by its frame,
+ * so the resting frame is what a screen-share picker sees nearly all the time.
+ */
+describe("islandRestFrame", () => {
+  const displays = [
+    { position: { x: 0, y: 0 }, size: { width: 1440, height: 900 }, scaleFactor: 1 },
+    { position: { x: 0, y: 0 }, size: { width: 3840, height: 2160 }, scaleFactor: 2 },
+    { position: { x: 0, y: 0 }, size: { width: 1280, height: 800 }, scaleFactor: 1 },
+  ];
+
+  it("is a small fraction of every display the full window would fill", () => {
+    const rest = islandRestFrame(0);
+    for (const display of displays) {
+      const full = islandMaxFor(display);
+      expect(rest.width).toBeLessThan(full.width);
+      expect(rest.height).toBeLessThan(full.height);
+      const area = display.size.width * display.size.height;
+      expect((rest.width * rest.height) / area).toBeLessThan(0.02);
+    }
+  });
+
+  it("holds the hover capsule with every control, so hover is never a window change", () => {
+    const rest = islandRestFrame(0);
+    const widest = hoverShapeFor(HOVER_BUTTONS_MAX);
+    expect(rest.width).toBeGreaterThanOrEqual(widest.width + 2 * SHADOW_PAD);
+    expect(rest.height).toBeGreaterThanOrEqual(widest.height + 2 * SHADOW_PAD);
+    // And the capsule itself, which is wider than the hover shape in neither
+    // direction today but must not be able to outgrow the frame unnoticed.
+    expect(rest.width).toBeGreaterThanOrEqual(IDLE_SHAPE.width + 2 * SHADOW_PAD);
+    expect(rest.height).toBeGreaterThanOrEqual(IDLE_SHAPE.height + 2 * SHADOW_PAD);
+  });
+
+  it("keeps the roster bubble's room on both sides once a roster shows", () => {
+    expect(islandRestFrame(1)).toEqual(islandRestFrame(0));
+    const two = islandRestFrame(2);
+    expect(two.width).toBe(islandRestFrame(0).width + 2 * (ROSTER_GAP + rosterWidthFor(2)));
+    expect(two.height).toBe(islandRestFrame(0).height);
+    expect(islandRestFrame(9).width).toBeGreaterThan(two.width);
+  });
+
+  it("still fits inside the full window with the widest roster on a small display", () => {
+    const full = islandMaxFor(displays[2]);
+    const rest = islandRestFrame(99);
+    expect(rest.width).toBeLessThanOrEqual(full.width);
+    expect(rest.height).toBeLessThanOrEqual(full.height);
   });
 });
 
