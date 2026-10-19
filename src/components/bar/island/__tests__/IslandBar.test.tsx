@@ -1223,6 +1223,25 @@ describe("IslandBar: Open chat from the hover capsule", () => {
     });
     expect(screen.getAllByText("Open chat").length).toBeGreaterThan(0);
   });
+
+  it("names Talk's live shortcut in its tooltip, as the Pill does", async () => {
+    backend.answers.get_trigger_hints = {
+      agent: { shortcut: "Control+Option", gesture: "Hold", sentence: "Hold to talk to Juno" },
+      dictation: null,
+    };
+    render(<IslandBar />);
+    await act(async () => {});
+    fireEvent.pointerEnter(stage());
+    const talk = screen.getByRole("button", { name: "Talk to Juno" });
+    Object.defineProperty(document, "elementFromPoint", { value: vi.fn(() => talk), configurable: true });
+    await act(async () => {
+      eventHandlers.get(EVENTS.SYSTEM_MOUSE_MOVED_WINDOW)?.({ x: 5, y: 5 });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(PILL_TOOLTIP_DELAY_MS + 50);
+    });
+    expect(screen.getAllByText("Hold ⌃⌥").length).toBeGreaterThan(0);
+  });
 });
 
 describe("IslandBar: dragging", () => {

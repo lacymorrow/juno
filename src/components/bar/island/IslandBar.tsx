@@ -58,6 +58,7 @@ import { ChatContainerV2 } from "@/components/chat/ChatContainerV2";
 import { AgentRosterStrip } from "@/components/AgentRosterStrip";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { PillTooltip, PILL_TOOLTIP_DELAY_MS } from "../PillTooltip";
+import { useTalkShortcut } from "../useTalkShortcut";
 import {
   COMPOSER_LINE_PX,
   COMPOSER_MAX_TEXT_PX,
@@ -752,9 +753,12 @@ export function IslandBar() {
 
   // ── Tooltips: the Pill's, for every control ──
   const lit = hover.hoveredButton;
-  const tip = (name: string, label: string, control: ReactElement<{ title?: string }>) => (
+  // Talk names its key, as the Pill's does ("Hold ⌃⌥").
+  const talkShortcut = useTalkShortcut();
+  const tip = (name: string, label: string, control: ReactElement<{ title?: string }>, detail?: string | null) => (
     <PillTooltip
       label={label}
+      detail={detail}
       forcedOpen={lit === name}
       blocked={lit === "dot" && name !== "dot"}
       side={tooltipSide}
@@ -821,6 +825,7 @@ export function IslandBar() {
             <button type="button" {...named("mic")} onClick={startTalking} aria-label="Talk to Juno" title="Talk to Juno" className={control("mic")}>
               <Mic className="size-3.5" />
             </button>,
+            talkShortcut,
           )}
           {/* The Pill's hover expand, always offered: one size up, the small
               chat (or the composer before any turn), never straight to the
@@ -1176,6 +1181,7 @@ export function IslandBar() {
               <button type="button" {...named("compose-mic")} onClick={startTalking} aria-label="Talk to Juno" title="Talk to Juno" className={cn(CONTROL, lit === "compose-mic" && CONTROL_LIT)}>
                 <Mic className="size-3" />
               </button>,
+              talkShortcut,
             )
           )}
           {recording
