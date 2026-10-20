@@ -1,6 +1,6 @@
 {
   "name": "juno-cua",
-  "version": "0.8.232",
+  "version": "0.8.233",
   "description": "Setup juno-cua desktop automation for AI coding agents (Claude Code, Cursor, Codex, Gemini CLI, etc.)",
   "keywords": [
     "juno",
