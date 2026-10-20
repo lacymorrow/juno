@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.224] - 2026-10-20
+
+### Fixed
+
+- **island,tray:** working New Chat, one Show/Hide Juno row, Talk/Cancel by state, out of the way on focus loss, no stale answer, text items on right-click (#841) (1c41fda5)
+
 ## [0.8.223] - 2026-10-19
 
 ### Added
@@ -1548,7 +1554,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.223...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.224...HEAD
+[0.8.224]: https://github.com/lacymorrow/juno/compare/cua-v0.8.223...v0.8.224
 [0.8.223]: https://github.com/lacymorrow/juno/compare/cua-v0.8.222...v0.8.223
 [0.8.222]: https://github.com/lacymorrow/juno/compare/cua-v0.8.221...v0.8.222
 [0.8.221]: https://github.com/lacymorrow/juno/compare/cua-v0.8.220...v0.8.221
