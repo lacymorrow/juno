@@ -394,9 +394,13 @@ mod macos_impl {
         }
         let window = window?;
 
-        if let Ok(focused) = app.attribute(&AXAttribute::<AXUIElement>::new(&CFString::new(
-            "AXFocusedUIElement",
-        ))) {
+        if let Some(focused) = app
+            .attribute(&AXAttribute::<CFType>::new(&CFString::new(
+                "AXFocusedUIElement",
+            )))
+            .ok()
+            .and_then(|value| value.downcast::<AXUIElement>())
+        {
             string_attr(&focused, AXAttribute::role()).hash(&mut hasher);
             string_attr(&focused, AXAttribute::title()).hash(&mut hasher);
             value_text(&focused).hash(&mut hasher);
