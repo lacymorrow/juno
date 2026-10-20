@@ -36,7 +36,7 @@ The composer is not part of any face. It is one textarea mounted for the life of
 
 The Pill opens `BarChatPane` under the pill. The Island does not get a pane: the same black shape grows into the conversation. It is sized for the display it is on (`chatSizeFor`: 60% of the display both ways, clamped, never more than the window can be given there) and pinned to the well's docked edges like every other face, so it grows away from the docked edge: down from a top well, up from a low one, out from a side. A well in the middle of a side has only the room between it and the window's edge, so there the chat is shorter (`roomForContent`).
 
-- **Way in:** the expand control in the answer or component header ("Show the conversation"), the answer reached from the hover capsule's Open chat (one size up: idle, then the small chat, then the full chat), or the tray's Show Chat (`bar-toggle-pane`). From the capsule the tray opens chat only once there is a turn.
+- **Way in:** the expand control in the answer or component header ("Show the conversation"), the answer reached from the hover capsule's Open chat (one size up: idle, then the small chat, then the full chat), or Show Chat in the bar's right-click menu (`bar-toggle-pane`); before any turn both open the composer instead.
 - **Way out:** Escape steps down one rung (`islandEscapeStep`): to the answer or component it grew from, or to the composer (caret in it) when there is no answer. The header's one control does the same thing. Show Chat again settles to the capsule.
 - **Through a turn:** chat stays up through every Rust state. A new spoken or typed turn streams into the conversation; it never turns the chat back into the composer the way it does an answer.
 - **No ring.** Chat stays until it is put down.
@@ -109,7 +109,10 @@ Local conditions on top:
 | answer taller than 400 | the body scrolls inside the shape |
 | a new answer while the island is up | the answer face opens; an answer already there at mount (history) does not |
 | hover over idle | the hover controls; Open chat opens the small chat (the last answer) or, before any turn, the composer; the small chat's expand opens the full chat |
-| tray Show/Hide Chat | opens the chat face (once there is a turn); again, settles to the capsule |
+| right-click Show/Hide Chat | opens the chat face (the composer before any turn); again, settles to the capsule |
+| New Chat (tray, right-click, Cmd+N, the + in the chat header) | stops an answer still arriving, rotates Rust's conversation, clears the screen, caret in the box; the chat face stays the chat face. Skipped while the full-size window is up (it owns the conversation) |
+| a spoken turn reaches its final decode, or anything is sent | the open answer is put away; the new one opens when it arrives (it used to come back between the mic closing and the new question landing) |
+| a press outside the island, or the window losing focus, with the composer up and Juno at rest | back to the capsule, the draft kept (the same as Escape). An answer, a component, the chat, or Juno at work stays |
 | chat face open | stays through every bar state; Escape or its collapse control steps down to the answer, or to the composer with no answer |
 | a picture pasted into the composer | thumbnail row above the text; the compose face is the full box; Send sends text and pictures through `dispatch_query` |
 | wake phrase configured | the hover capsule gains the wake phrase toggle |

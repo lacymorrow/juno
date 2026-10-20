@@ -404,6 +404,11 @@ pub mod system {
     pub const MOUSE_ENTERED_WINDOW: &str = "mouse-entered-window";
     pub const MOUSE_LEFT_WINDOW: &str = "mouse-left-window";
     pub const MOUSE_MOVED_WINDOW: &str = "mouse-moved-window";
+    /// The left button went down somewhere other than what the bar is
+    /// drawing: another app, the desktop, another Juno window. Sent to the
+    /// bar only, so a composer nobody is using can get out of the way even
+    /// when no focus change reaches the page.
+    pub const MOUSE_PRESSED_OUTSIDE: &str = "mouse-pressed-outside";
     pub const BACKEND_RESPONSE: &str = "backend-response";
     pub const PROVIDER_SETTINGS_CHANGED: &str = "provider_settings_changed";
     /// Network or provider health changed. Payload: `connectivity::Snapshot`

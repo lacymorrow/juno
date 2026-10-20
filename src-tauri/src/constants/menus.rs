@@ -10,16 +10,23 @@ pub mod tray_menu_ids {
     pub const SHOW_DEVTOOLS: &str = "show-devtools";
     pub const SHOW_MAIN_WINDOW: &str = "show-main-window";
     pub const HIDE_MAIN_WINDOW: &str = "hide-main-window";
-    pub const NEW_CHAT: &str = "new-chat";
+    /// Not "new-chat": that is the app menu's File > New Chat, and the app
+    /// menu is matched first, so a shared id never reached the tray handler.
+    pub const NEW_CHAT: &str = "tray-new-chat";
     pub const SETTINGS: &str = "tray-settings";
 
     // Additional menu constants
+    /// Show or hide Juno: the floating bar, or the chat window when that is
+    /// what is on screen. One row, labelled for what it will do.
     pub const SHOW_HIDE: &str = "show-hide";
+    /// The bar's right-click menu: open or close the bar's own chat.
+    pub const BAR_CHAT: &str = "bar-chat";
     pub const SHOW_HIDE_FLOATING_BAR: &str = "show-hide-floating-bar";
     pub const DEVELOPER_TOOLS: &str = "developer-tools";
     /// Disabled first row showing the state word
     pub const STATUS: &str = "tray-status";
-    /// Start talking to Juno (same action as the bar's mic)
+    /// Talk to Juno while she is idle, Cancel while she is busy: one row
+    /// whose text and action follow her state.
     pub const TALK: &str = "tray-talk";
     /// Cancel the current turn
     pub const CANCEL: &str = "tray-cancel";

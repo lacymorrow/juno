@@ -130,6 +130,13 @@ pub fn hit_state(prev: Option<bool>, in_regions: bool, button_down: bool) -> boo
     in_regions || (button_down && prev == Some(true))
 }
 
+/// Whether this tick saw the left button go down away from the bar: down now,
+/// up last tick, and not over anything the bar is drawing. A press that
+/// starts on the bar is the bar's own (a click, a drag, a text selection).
+pub fn pressed_outside(was_down: bool, down: bool, in_regions: bool) -> bool {
+    down && !was_down && !in_regions
+}
+
 /// Whether the left mouse button is down right now. Quartz, any thread.
 #[cfg(target_os = "macos")]
 pub fn left_button_down() -> bool {
@@ -183,6 +190,8 @@ pub fn start(app: AppHandle) {
 fn poll(app: AppHandle) {
     // What the cursor was last seen as, so only a change touches the window.
     let mut last_inside: Option<bool> = None;
+    // The button as last seen, so a press is told apart from a hold.
+    let mut last_down = false;
     loop {
         std::thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
 
@@ -204,11 +213,13 @@ fn poll(app: AppHandle) {
             continue;
         };
 
-        let inside = hit_state(
-            last_inside,
-            cursor_in_regions(cursor, origin, 1.0, &regions),
-            left_button_down(),
-        );
+        let in_regions = cursor_in_regions(cursor, origin, 1.0, &regions);
+        let down = left_button_down();
+        if pressed_outside(last_down, down, in_regions) {
+            let _ = window.emit(constants::events::system::MOUSE_PRESSED_OUTSIDE, ());
+        }
+        last_down = down;
+        let inside = hit_state(last_inside, in_regions, down);
         if last_inside == Some(inside) {
             continue;
         }
@@ -249,6 +260,17 @@ mod tests {
         width: 88.0,
         height: 76.0,
     };
+
+    #[test]
+    fn only_a_fresh_press_off_the_bar_counts_as_outside() {
+        assert!(pressed_outside(false, true, false));
+        // On the bar: the bar's own click, drag or selection.
+        assert!(!pressed_outside(false, true, true));
+        // A hold, not a press.
+        assert!(!pressed_outside(true, true, false));
+        // A release.
+        assert!(!pressed_outside(true, false, false));
+    }
 
     #[test]
     fn a_cursor_over_the_content_is_inside() {
