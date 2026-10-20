@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.230] - 2026-10-20
+
+### Fixed
+
+- **bar:** Escape puts Juno away just after she appears at launch (#852) (9106dbd1)
+
 ## [0.8.229] - 2026-10-20
 
 ### Fixed
@@ -1584,7 +1590,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.229...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.230...HEAD
+[0.8.230]: https://github.com/lacymorrow/juno/compare/cua-v0.8.229...v0.8.230
 [0.8.229]: https://github.com/lacymorrow/juno/compare/cua-v0.8.228...v0.8.229
 [0.8.228]: https://github.com/lacymorrow/juno/compare/cua-v0.8.227...v0.8.228
 [0.8.227]: https://github.com/lacymorrow/juno/compare/cua-v0.8.226...v0.8.227
