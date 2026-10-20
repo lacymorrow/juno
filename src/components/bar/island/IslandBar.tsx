@@ -21,6 +21,7 @@ import {
   Mic,
   Minimize2,
   Plus,
+  Settings,
   Square,
   Volume2,
   X,
@@ -309,8 +310,6 @@ export function IslandBar() {
   const streaming = !!answer?.isStreaming;
   const recording = isRecording(bar.barState, bar.transcriptionProvisional);
   const working = (isWorkingState(bar.barState) && !recording) || chat.isProcessing;
-  const workingRef = useRef(working);
-  workingRef.current = working;
 
   // The Pill's activity flame, same language: green for your dictation, blue
   // for listening, red for an error, the focused session's colour while Juno
@@ -425,19 +424,6 @@ export function IslandBar() {
   const focusComposer = useCallback(() => {
     composer.ref.current?.focus();
   }, [composer.ref]);
-  // The Pill pane's + : stop an answer still arriving (rotating under a live
-  // stream left it landing in a conversation nobody could see), start a new
-  // conversation in Rust, then an empty chat with the caret in the box.
-  const startNewChat = useCallback(() => {
-    void (async () => {
-      if (workingRef.current) await chat.stop();
-      await invoke(COMMANDS.CONVERSATIONS_NEW_CONVERSATION).catch((error) =>
-        console.error("Island: could not start a new conversation:", error),
-      );
-      chat.startNewChat();
-      focusComposer();
-    })();
-  }, [chat.stop, chat.startNewChat, focusComposer]); // eslint-disable-line react-hooks/exhaustive-deps
   // Rust entering its input state is the composer opened on purpose (a
   // click, the type control, the Dock): bring a put-away draft back and put
   // the caret in it. Rust still in its input state just after the box was
@@ -996,23 +982,6 @@ export function IslandBar() {
           {dotTarget}
           <div className="flex-1" />
           {newChatControl}
-          {tip(
-            "new-chat",
-            "New chat",
-            <button
-              type="button"
-              {...named("new-chat")}
-              onClick={(e) => {
-                e.stopPropagation();
-                startNewChat();
-              }}
-              aria-label="New chat"
-              title="New chat"
-              className={cn(CONTROL, "text-white/40", lit === "new-chat" && CONTROL_LIT)}
-            >
-              <Plus className="size-3.5" />
-            </button>,
-          )}
           {tip(
             "settings",
             "Settings",
