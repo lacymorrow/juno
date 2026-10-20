@@ -1,13 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "overlays",
-  "description": "Click-through overlays: the agent cursor, the snap wells, the listening glow and the intro smoke. Without this they cannot hear a single event.",
+  "description": "Click-through overlays: the agent cursor, the snap wells, the listening glow, the intro smoke and the permission coaching card. Without this they cannot hear a single event.",
   "windows": [
     "desktop-cursor-overlay",
     "snap-wells-overlay",
     "snap-wells-overlay-*",
     "listening-overlay",
-    "intro"
+    "intro",
+    "permission-coach"
   ],
   "permissions": [
     "core:default",
