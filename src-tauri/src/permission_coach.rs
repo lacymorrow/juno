@@ -519,14 +519,26 @@ async fn follow(app: AppHandle, id: u64, token: CancellationToken) {
 
     follow_until_done(&app, id, token).await;
 
-    // Hand the watcher back, unless a card still needs it. A newer card that
+    // Hand the watcher back, but only once no card needs it. A newer card that
     // replaced this one cancelled our token, so we arrive here while it is
     // mid-ask; stopping its watcher would leave *it* unable to leave, which is
     // the same bug one card along. When the lock cannot be read we keep the
     // watcher: a spare poll loop is cheaper than a card that cannot go away.
-    if ours && no_card_is_up() {
-        crate::commands::permissions::release_permissions_monitoring();
+    //
+    // `release` decides what stopping means. It also honours a stop that
+    // somebody else asked for and was refused while this card was up, which is
+    // why it is called whether or not this follow started the watcher.
+    if no_card_is_up() {
+        crate::commands::permissions::release_permissions_monitoring(ours);
     }
+}
+
+/// Does a coaching card still need the permission watcher running?
+///
+/// Read by `stop_permissions_monitoring`, so a stop from setup closing or a
+/// component unmounting cannot strand a card that can only leave on an event.
+pub(crate) fn a_card_needs_the_watcher() -> bool {
+    !no_card_is_up()
 }
 
 /// Is nothing at all up? Used only to decide whether the watcher is still owed.
@@ -1081,6 +1093,7 @@ mod tests {
 
         // Nothing up to begin with, so nothing is owed a watcher.
         assert!(no_card_is_up());
+        assert!(!a_card_needs_the_watcher());
 
         // One ask puts a card up, pointing rather than granted.
         let (first, first_token) = register(pane).expect("the registry took the card");
@@ -1092,6 +1105,10 @@ mod tests {
         // the window.
         assert!(is_current(first));
         assert!(!no_card_is_up(), "a card is up but the watcher looks idle");
+        assert!(
+            a_card_needs_the_watcher(),
+            "a stop from setup closing would now strand this card"
+        );
         assert_eq!(
             current_state(first).map(|s| s.headline),
             Some(pane.headline.to_string()),
@@ -1150,6 +1167,10 @@ mod tests {
         // card is up it must not, or that card could never leave.
         assert!(no_card_is_up());
         assert!(!is_current(second));
+        assert!(
+            !a_card_needs_the_watcher(),
+            "nothing is up, so a deferred stop must now be allowed through"
+        );
     }
 
     /// A source check rather than a behaviour one, deliberately: arming the
@@ -1166,16 +1187,26 @@ mod tests {
     /// switch they already turned on.
     #[test]
     fn raising_a_card_arms_the_watcher_that_takes_it_down() {
+        // Every needle is split and reassembled by `concat!`. `include_str!`
+        // reads this file, test included, so a needle written as one literal
+        // would match itself and the test would pass with the real call
+        // deleted — the exact thing it is here to catch.
         let source = include_str!("permission_coach.rs");
         assert!(
-            source.contains("ensure_permissions_monitoring(&app)"),
+            source.contains(concat!("ensure_permissions", "_monitoring(&app)")),
             "the follow no longer arms permission monitoring, so a card raised \
              outside PermissionsFlow or Onboarding can never leave on the grant"
         );
         assert!(
-            source.contains("release_permissions_monitoring()"),
+            source.contains(concat!("release_permissions", "_monitoring(ours)")),
             "the follow arms monitoring and never hands it back, so one coaching \
              card leaves a 1s native permission poll running for the life of the app"
+        );
+        assert!(
+            source.contains(concat!("pub(crate) fn ", "a_card_needs_the_watcher")),
+            "nothing stops `stop_permissions_monitoring` from stranding a live \
+             card: setup closing by any route, or PermissionsFlow unmounting, \
+             would take the watcher away mid-ask"
         );
     }
 
