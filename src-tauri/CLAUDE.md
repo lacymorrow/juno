@@ -296,6 +296,8 @@ calling the gate.
 | Per-operation policy | read size ceiling, list is a directory, write may create | `path_gate.rs` |
 | Tool-level policy | extension allow and block lists for model-driven tool calls | `agent/tools/basic_tools.rs`, `agent/tools/anthropic_computer_use.rs` |
 
+**A background click the app ignores is not a success.** A click posted to a process (`process_targeted`) returns success whether or not the app acts on it; Music and other SwiftUI/Catalyst apps drop them, double clicks most. `run_verified_click` (`agent/tools/anthropic_computer_use.rs`, used by element and coordinate left/double clicks, so the API tool and the MCP `computer` tool share it) fingerprints the target window's AX state before and after (`ax_elements::window_fingerprint`, self-updating sliders excluded) with a short bounded read-back. Unchanged means the app ignored it: the click retries once in the foreground behind the same ask-before-taking-the-mouse request (`input_control::request_physical_cursor`), activating the app and sending real HID events (`window_target::force_physical`). If the person declines, or the app still does nothing, the result is `success:false`, `ignored_in_background`, and a one-line `hint`. Element double clicks try an AX open action (`AXOpen`/`AXShowDefaultUI`) on the element or its nearest ancestor first. Decisions live in `mcp-server-os-level/src/click_verify.rs` (unit tested).
+
 The blocklist and the boundary apply to **every** operation, `list_files`
 included. Enumerating `~/.ssh` is a disclosure even when the file bodies are
 refused: it tells an agent exactly what to go after.

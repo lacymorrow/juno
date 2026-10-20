@@ -21,6 +21,7 @@ use tracing::{error, info};
 pub mod ax_elements;
 pub mod ax_text;
 pub mod background;
+pub mod click_verify;
 pub mod element;
 mod errors;
 pub mod input_tier;
