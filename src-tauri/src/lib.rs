@@ -1182,6 +1182,7 @@ pub fn run() {
             {
                 let follow_app = app.handle().clone();
                 crate::platform::cursor_follow::start(follow_app.clone());
+                crate::platform::app_activation::watch(&follow_app);
                 tauri::async_runtime::spawn(async move {
                     if let Ok(mgr) = crate::settings::manager::SettingsManager::new(follow_app) {
                         let enabled = mgr

@@ -3,6 +3,9 @@
 //! This module organizes platform-specific functionality for different operating systems.
 //! Currently supports macOS with comprehensive window management and mouse tracking.
 
+/// Switching to a hidden Juno brings the bar back.
+#[cfg(target_os = "macos")]
+pub mod app_activation;
 #[cfg(target_os = "macos")]
 pub mod cursor_follow; // Keep the bar on the display the cursor is on
 #[cfg(target_os = "macos")]
