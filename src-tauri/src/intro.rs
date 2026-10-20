@@ -308,6 +308,15 @@ pub fn reveal_in_flight() -> bool {
     IN_FLIGHT.load(Ordering::SeqCst)
 }
 
+/// Set the first time the bar reaches the screen at the end of a reveal.
+static BAR_APPEARED: AtomicBool = AtomicBool::new(false);
+
+/// Has the bar been on the screen yet this run? Until then its appearance
+/// is the intro reveal's, and nothing else should put it up.
+pub fn bar_has_appeared() -> bool {
+    BAR_APPEARED.load(Ordering::SeqCst)
+}
+
 /// Put the bar on screen the way she appears or, if the reveal cannot be
 /// arranged, the plain way. Either way the bar is on screen afterwards;
 /// nothing here is allowed to leave the person without one.
@@ -354,6 +363,7 @@ fn show_bar_plainly(app: &AppHandle) {
         match bar.show() {
             Ok(()) => {
                 crate::startup_timing::mark_once("bar shown");
+                BAR_APPEARED.store(true, Ordering::SeqCst);
                 // The bar is up: now the windows that waited for it.
                 crate::startup_windows::bar_is_up(app);
             }
