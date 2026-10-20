@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.231] - 2026-10-20
+
+### Fixed
+
+- **computer:** a background click the app ignores is not a success; press via AX, then foreground (#854) (6ce0fa39)
+
 ## [0.8.230] - 2026-10-20
 
 ### Fixed
@@ -1590,7 +1596,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.230...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.231...HEAD
+[0.8.231]: https://github.com/lacymorrow/juno/compare/cua-v0.8.230...v0.8.231
 [0.8.230]: https://github.com/lacymorrow/juno/compare/cua-v0.8.229...v0.8.230
 [0.8.229]: https://github.com/lacymorrow/juno/compare/cua-v0.8.228...v0.8.229
 [0.8.228]: https://github.com/lacymorrow/juno/compare/cua-v0.8.227...v0.8.228
