@@ -2634,7 +2634,11 @@ mod computer_toolset_request_tests {
         // models worth the toolset's ~2x input-token overhead. Every other
         // toolset-GA model stays on `computer_20251124` and is covered by the
         // test below.
-        for model in [model_ids::CLAUDE_OPUS_5_5, model_ids::CLAUDE_SONNET_5_5] {
+        for model in [
+            model_ids::CLAUDE_OPUS_5_5,
+            model_ids::CLAUDE_SONNET_5_5,
+            model_ids::CLAUDE_HAIKU_5_5,
+        ] {
             let b = brain(model);
             assert!(b.uses_computer_toolset(), "{model} should use the toolset");
             assert_eq!(b.computer_toolset_name(), Some("computer"));
@@ -2681,7 +2685,11 @@ mod computer_toolset_request_tests {
     /// rather than an exact string.
     #[test]
     fn toolset_models_send_no_computer_use_beta_flag() {
-        for model in [model_ids::CLAUDE_OPUS_5_5, model_ids::CLAUDE_SONNET_5_5] {
+        for model in [
+            model_ids::CLAUDE_OPUS_5_5,
+            model_ids::CLAUDE_SONNET_5_5,
+            model_ids::CLAUDE_HAIKU_5_5,
+        ] {
             let b = brain(model);
             assert_eq!(b.resolve_computer_use_beta_header(), None, "{model}");
             let header = b.beta_header_value();
