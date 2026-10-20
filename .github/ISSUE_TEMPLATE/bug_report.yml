@@ -5,12 +5,12 @@ body:
   - type: markdown
     attributes:
       value: |
-        One box is enough. Everything under it is optional, so fill in what you have and send it.
+        One box is enough. Everything below it is optional, so skip whatever you don't know.
   - type: textarea
     id: what-happened
     attributes:
       label: What happened?
-      description: What you did, what Juno did, and what you expected instead.
+      description: What you were doing, and what Juno did instead of what you expected.
       placeholder: "When I asked Juno to..., it instead..."
     validations:
       required: true
@@ -18,7 +18,7 @@ body:
     id: version
     attributes:
       label: Juno version
-      description: "Juno > About. Reports started from inside Juno fill this in for you."
+      description: "Juno > About. Reports filed from inside Juno already have this."
       placeholder: "v0.8.234"
   - type: input
     id: macos
@@ -39,4 +39,4 @@ body:
     id: logs
     attributes:
       label: Logs or screenshots
-      description: "Logs are in Console.app under Juno, or ~/Library/Logs/Juno."
+      description: "Logs are in Console.app under Juno, or in ~/Library/Logs/Juno."
