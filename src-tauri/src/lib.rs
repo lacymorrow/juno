@@ -91,12 +91,12 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 use commands::{
     accessibility_click, accessibility_scan, always_listening::*, app_url::*, autostart::*,
     computer, core::*, dictation::*, element::*, error_recovery::*, execute_accessibility_tool,
-    execute_safari_tool, filesystem::*, get_accessibility_tool_definitions, keyboard::*, media::*,
-    memory::*, mouse::*, permission_diagnostics::*, permissions::*, persistent_memory::*,
-    providers::*, safari_clear_cache, safari_click_element, safari_execute_javascript,
-    safari_extract_dom, safari_get_url, safari_is_active, safari_list_clickable_elements,
-    safari_navigate, safari_type_text, shell::*, sound::*, starters::*,
-    test_accessibility_permissions, text_editor::*, ui_commands::*, window::*,
+    execute_safari_tool, filesystem::*, get_accessibility_tool_definitions, issue_report::*,
+    keyboard::*, media::*, memory::*, mouse::*, permission_diagnostics::*, permissions::*,
+    persistent_memory::*, providers::*, safari_clear_cache, safari_click_element,
+    safari_execute_javascript, safari_extract_dom, safari_get_url, safari_is_active,
+    safari_list_clickable_elements, safari_navigate, safari_type_text, shell::*, sound::*,
+    starters::*, test_accessibility_permissions, text_editor::*, ui_commands::*, window::*,
 };
 
 // Import specific sound commands from sound.rs
@@ -434,6 +434,8 @@ pub fn run() {
             // Production app functions with debug capabilities
             open_application,
             open_url,
+            // "Report Issue...": the prefilled GitHub issue form (LAC-5069)
+            open_issue_report,
             // Live media state for agent-rendered <NowPlayingCard>
             media_get_state,
             media_control,
