@@ -595,9 +595,19 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
         info!("Stopped existing permissions monitoring");
     }
 
+    let (handle, cancellation_token) = spawn_monitor(app);
+
+    *task_guard = Some((handle, cancellation_token));
+    info!("Permissions monitoring started successfully (1s interval)");
+    Ok(())
+}
+
+/// Spawn the 1s poll loop, so the command above and
+/// [`ensure_permissions_monitoring`] share one loop rather than growing two.
+fn spawn_monitor(app: AppHandle) -> (JoinHandle<()>, CancellationToken) {
     let cancellation_token = CancellationToken::new();
     let token_clone = cancellation_token.clone();
-    let app_clone = app.clone();
+    let app_clone = app;
 
     let handle = tauri::async_runtime::spawn(async move {
         // 1-second tick for responsive onboarding auto-advance
@@ -650,9 +660,53 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
         }
     });
 
-    *task_guard = Some((handle, cancellation_token));
-    info!("Permissions monitoring started successfully (1s interval)");
-    Ok(())
+    (handle, cancellation_token)
+}
+
+/// Make sure *something* is watching for a permission flip, without disturbing a
+/// watcher that is already running. `true` means this call started it, so the
+/// caller owes a [`release_permissions_monitoring`] once nobody needs it.
+///
+/// Not the same as calling the command. `start_permissions_monitoring`
+/// deliberately restarts, which resets the delta baseline, and a flip that
+/// lands in that gap is recorded as the baseline and never reported as a
+/// change. Anything that merely needs *a* watcher has to come through here.
+///
+/// This exists because the coaching card leaves on an event and on nothing
+/// else, and monitoring used to start only when `PermissionsFlow` or
+/// `Onboarding` mounted (and stop again when they unmounted). A card raised
+/// from any other route therefore had nothing able to take it down, and went on
+/// saying "turn its switch on" for two minutes after the person had.
+pub(crate) fn ensure_permissions_monitoring(app: &AppHandle) -> bool {
+    match MONITORING_TASK.lock() {
+        Ok(mut guard) => {
+            if guard.is_some() {
+                return false;
+            }
+            info!("Nothing was watching for a permission flip; starting monitoring");
+            *guard = Some(spawn_monitor(app.clone()));
+            true
+        }
+        Err(e) => {
+            warn!("Could not lock the monitoring task to start it: {}", e);
+            false
+        }
+    }
+}
+
+/// Stop the watcher. Only for a caller that started one with
+/// [`ensure_permissions_monitoring`] and has established nobody still needs it.
+pub(crate) fn release_permissions_monitoring() {
+    match MONITORING_TASK.lock() {
+        Ok(mut guard) => {
+            if let Some((handle, token)) = guard.take() {
+                token.cancel();
+                handle.abort();
+                info!("Stopped the monitoring a coaching card had started");
+            }
+        }
+        Err(e) => warn!("Could not lock the monitoring task to stop it: {}", e),
+    }
 }
 
 /// Emit `permission-granted` when a permission flips from denied → granted.
