@@ -245,6 +245,36 @@ pub fn pin(target: Option<PinnedWindow>) -> PinGuard {
     PinGuard { previous }
 }
 
+thread_local! {
+    static FORCE_PHYSICAL: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Restores the previous setting when dropped.
+#[must_use = "input is only forced to the physical tier while this guard is alive"]
+pub struct ForcePhysicalGuard {
+    previous: bool,
+}
+
+impl Drop for ForcePhysicalGuard {
+    fn drop(&mut self) {
+        let previous = self.previous;
+        FORCE_PHYSICAL.with(|f| f.set(previous));
+    }
+}
+
+/// Make this thread's mouse input skip process-targeted posting and use real
+/// HID events, until the guard drops. Used for the one retry after an app
+/// ignored a background click; the caller has already been given the mouse.
+pub fn force_physical() -> ForcePhysicalGuard {
+    let previous = FORCE_PHYSICAL.with(|f| f.replace(true));
+    ForcePhysicalGuard { previous }
+}
+
+/// True while [`force_physical`] is in effect on this thread.
+pub fn physical_forced() -> bool {
+    FORCE_PHYSICAL.with(|f| f.get())
+}
+
 /// The window pinned on this thread, if any.
 pub fn pinned() -> Option<PinnedWindow> {
     PINNED.with(|p| p.get())

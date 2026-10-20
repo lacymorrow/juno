@@ -20,6 +20,22 @@ pub const MAX_NODES_VISITED: usize = 5_000;
 const MAX_DEPTH: usize = 50;
 /// Longest value reported for an element, in characters.
 const MAX_VALUE_CHARS: usize = 200;
+/// Nodes read for one window fingerprint. Smaller than a full listing: it runs
+/// twice around every background click.
+const FINGERPRINT_MAX_NODES: usize = 1_500;
+
+/// Roles whose value changes by itself (a playback position, a progress bar),
+/// which would make an ignored click look like it did something.
+pub fn is_self_updating_role(ax_role: &str) -> bool {
+    matches!(
+        ax_role,
+        "AXSlider"
+            | "AXProgressIndicator"
+            | "AXScrollBar"
+            | "AXValueIndicator"
+            | "AXLevelIndicator"
+    )
+}
 
 /// One element of a window, as an agent reads it.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -111,7 +127,9 @@ pub fn worth_listing(ax_role: &str, name: Option<&str>, value: Option<&str>) -> 
 }
 
 #[cfg(target_os = "macos")]
-pub use macos_impl::{focus, press, show_menu, window_elements, ElementRef};
+pub use macos_impl::{
+    focus, press, press_nearest, show_menu, window_elements, window_fingerprint, ElementRef,
+};
 
 #[cfg(not(target_os = "macos"))]
 #[derive(Clone, Debug)]
@@ -139,6 +157,19 @@ pub fn show_menu(_element: &ElementRef) -> Result<(), String> {
 #[cfg(not(target_os = "macos"))]
 pub fn focus(_element: &ElementRef) -> Result<(), String> {
     Err("Focusing an element is only available on macOS".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn press_nearest(
+    _element: &ElementRef,
+    _kind: crate::click_verify::ClickKind,
+) -> Result<&'static str, String> {
+    Err("Pressing an element is only available on macOS".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn window_fingerprint(_pid: i32, _window_id: u32) -> Option<u64> {
+    None
 }
 
 #[cfg(target_os = "macos")]
@@ -312,6 +343,106 @@ mod macos_impl {
             .map_err(|e| format!("The element has no menu to open: {e}"))
     }
 
+    /// Run `action` on the element, or on the nearest ancestor that offers an
+    /// action fit for this click (a row or cell around a title), and say which
+    /// action ran. No pointer, no focus change.
+    pub fn press_nearest(
+        element: &ElementRef,
+        kind: crate::click_verify::ClickKind,
+    ) -> Result<&'static str, String> {
+        let mut current = element.0.clone();
+        for _ in 0..=crate::click_verify::MAX_ANCESTORS {
+            let actions: Vec<String> = current
+                .action_names()
+                .map(|names| names.iter().map(|n| n.to_string()).collect())
+                .unwrap_or_default();
+            if let Some(action) = crate::click_verify::pick_ax_action(kind, &actions) {
+                current
+                    .perform_action(&CFString::new(action))
+                    .map_err(|e| format!("The element did not accept {action}: {e}"))?;
+                return Ok(action);
+            }
+            match current.attribute(&AXAttribute::parent()) {
+                Ok(parent) => current = parent,
+                Err(_) => break,
+            }
+        }
+        Err("No action on the element or its parents fits this click".to_string())
+    }
+
+    /// A cheap hash of everything about one window a click could change:
+    /// which windows the app has, which element has focus, and each listed
+    /// element's role, name, value, enabled and selected state.
+    ///
+    /// Values that tick on their own (sliders, progress bars) are left out, so
+    /// a playing track does not make every click look effective. `None` when
+    /// the window cannot be read.
+    pub fn window_fingerprint(pid: i32, window_id: u32) -> Option<u64> {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+
+        let app = AXUIElement::application(pid);
+        let _ = app.set_messaging_timeout(1.0);
+        let windows = app.attribute(&AXAttribute::windows()).ok()?;
+        let mut window = None;
+        for w in windows.iter() {
+            let id = crate::ax_text::window_id_of_window(w.as_concrete_TypeRef());
+            id.hash(&mut hasher);
+            if id == Some(window_id) {
+                window = Some((*w).clone());
+            }
+        }
+        let window = window?;
+
+        if let Some(focused) = app
+            .attribute(&AXAttribute::<CFType>::new(&CFString::new(
+                "AXFocusedUIElement",
+            )))
+            .ok()
+            .and_then(|value| value.downcast::<AXUIElement>())
+        {
+            string_attr(&focused, AXAttribute::role()).hash(&mut hasher);
+            string_attr(&focused, AXAttribute::title()).hash(&mut hasher);
+            value_text(&focused).hash(&mut hasher);
+        }
+
+        let selected = AXAttribute::<CFType>::new(&CFString::new("AXSelected"));
+        let mut queue = VecDeque::from([(window, 0usize)]);
+        let mut visited = 0usize;
+        while let Some((element, depth)) = queue.pop_front() {
+            visited += 1;
+            if visited > FINGERPRINT_MAX_NODES {
+                break;
+            }
+            let role = string_attr(&element, AXAttribute::role()).unwrap_or_default();
+            role.hash(&mut hasher);
+            string_attr(&element, AXAttribute::title()).hash(&mut hasher);
+            string_attr(&element, AXAttribute::description()).hash(&mut hasher);
+            if !is_self_updating_role(&role) && role != "AXSecureTextField" {
+                value_text(&element).hash(&mut hasher);
+            }
+            element
+                .attribute(&AXAttribute::enabled())
+                .map(bool::from)
+                .ok()
+                .hash(&mut hasher);
+            element
+                .attribute(&selected)
+                .ok()
+                .and_then(|v| v.downcast::<CFBoolean>())
+                .map(bool::from)
+                .hash(&mut hasher);
+            if depth < MAX_DEPTH {
+                if let Ok(children) = element.attribute(&AXAttribute::children()) {
+                    for child in children.iter() {
+                        queue.push_back(((*child).clone(), depth + 1));
+                    }
+                }
+            }
+        }
+        Some(hasher.finish())
+    }
+
     /// Give an element keyboard focus inside its app, without raising the
     /// window, so typing that follows lands in it.
     pub fn focus(element: &ElementRef) -> Result<(), String> {
@@ -350,6 +481,14 @@ mod tests {
             element_name(None, None, Some("clearButton")),
             Some("clearButton".to_string())
         );
+    }
+
+    #[test]
+    fn ticking_controls_do_not_count_as_a_reaction() {
+        assert!(is_self_updating_role("AXSlider"));
+        assert!(is_self_updating_role("AXProgressIndicator"));
+        assert!(!is_self_updating_role("AXButton"));
+        assert!(!is_self_updating_role("AXRow"));
     }
 
     #[test]

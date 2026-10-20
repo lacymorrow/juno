@@ -2765,6 +2765,21 @@ fn repeated_click_no_warp(
     clicks: i64,
     allow_physical: bool,
 ) -> Result<Option<InputOutcome>, AutomationError> {
+    // Forced real input: one genuine HID double click, which carries the click
+    // state the app needs to treat it as a double click.
+    if crate::window_target::physical_forced() && clicks == 2 && modifiers.is_none() {
+        if !allow_physical {
+            return Ok(None);
+        }
+        let saved_pos = get_cursor_position().ok();
+        let click_result = double_click(x, y);
+        if let Some((sx, sy)) = saved_pos {
+            thread::sleep(Duration::from_millis(MOUSE_EVENT_DELAY_MS));
+            let _ = mouse_move(sx, sy);
+        }
+        click_result?;
+        return Ok(Some(InputOutcome::physical_cursor("HID-double-click")));
+    }
     let target = resolve_click_target(x, y);
     let mut last = None;
     for click_state in 1..=clicks {
@@ -3150,7 +3165,13 @@ fn left_click_no_warp_inner(
 
     // Use pre-resolved target when provided (e.g. from double_click_no_warp) to
     // avoid calling CGWindowListCopyWindowInfo twice for the same coordinate.
-    if let Some((pid, window_id)) = target_override.or_else(|| resolve_click_target(x, y)) {
+    // After an app ignored a background click the caller forces real input.
+    let process_target = if crate::window_target::physical_forced() {
+        None
+    } else {
+        target_override.or_else(|| resolve_click_target(x, y))
+    };
+    if let Some((pid, window_id)) = process_target {
         debug!(
             "No-warp click: targeting PID {} window {:?} at ({:.0}, {:.0})",
             pid, window_id, x, y
