@@ -258,6 +258,12 @@ struct AnthropicMessageResponse {
     stop_reason: String, // e.g., "end_turn", "tool_use", "max_tokens"
     _stop_sequence: Option<String>,
     // usage: ApiUsageInfo,
+    /// Thinking blocks the API dropped from the request it just answered. Present on every
+    /// response while the thinking block-binding controls beta is on the request, empty
+    /// when nothing was dropped; `default` because a response from a model without
+    /// thinking carries no such field.
+    #[serde(default)]
+    input_transformations: Vec<Value>,
 }
 
 #[derive(Serialize, Debug)]
@@ -690,14 +696,47 @@ impl AnthropicBrain {
         if Provider::Anthropic.supports_server_side_fallbacks(&self.model) {
             flags.push(crate::constants::api::beta_flags::SERVER_SIDE_FALLBACK);
         }
+        if self.sends_thinking() {
+            flags.push(crate::constants::api::beta_flags::THINKING_BINDING_CONTROLS);
+        }
         flags.join(",")
+    }
+
+    /// Whether this request carries a `thinking` parameter at all.
+    ///
+    /// One predicate for two places: the `thinking` object itself and the beta flag that
+    /// permits the `block_binding` controls nested inside it. They must not drift — the
+    /// field without the header is a 400 on every request.
+    fn sends_thinking(&self) -> bool {
+        Provider::Anthropic.supports_adaptive_thinking(&self.model)
     }
 
     /// `thinking` request parameter for the selected model, or `None` when the model does
     /// not accept adaptive thinking (older models would return 400).
+    ///
+    /// `block_binding.prefix_mismatch_behavior: "drop_block"` is the insurance on the
+    /// thinking blocks Juno replays on tool-use turns. From Fable 5.1 onward (so Opus 5.5,
+    /// Sonnet 5.5 and Haiku 5.5, i.e. the default model) a replayed block's signature is
+    /// bound to the prefix that produced it: the top-level `system` prompt, the `tools`
+    /// array, and every message before the block. Juno changes all three inside a live
+    /// conversation — the system prompt is rebuilt per turn from live settings and the MCP
+    /// tool list (`anthropic::next_turn_system_prompt`), and the screenshot pruner rewrites
+    /// older message content in batches. The default on a mismatch is a 400 that kills the
+    /// turn; `"drop_block"` drops the offending blocks and answers anyway. Dropping costs
+    /// output tokens (the model re-derives what it had already reasoned through), which is
+    /// the better trade against losing the turn, and each drop is reported in the response's
+    /// `input_transformations` so it is visible rather than silent.
+    ///
+    /// Models that do not run the prefix check accept the object and report only
+    /// model-binding drops, so one request body is correct across the catalog and this
+    /// needs no per-model capability flag.
     fn thinking_param(&self) -> Option<Value> {
-        if Provider::Anthropic.supports_adaptive_thinking(&self.model) {
-            Some(serde_json::json!({ "type": "adaptive", "display": "summarized" }))
+        if self.sends_thinking() {
+            Some(serde_json::json!({
+                "type": "adaptive",
+                "display": "summarized",
+                "block_binding": { "prefix_mismatch_behavior": "drop_block" },
+            }))
         } else {
             None
         }
@@ -979,6 +1018,28 @@ impl AnthropicBrain {
         }
     }
 
+    /// Log the thinking blocks the API dropped from this request, if any.
+    ///
+    /// `input_transformations` rides on every response once the thinking block-binding
+    /// controls beta is on the request. An empty array is the healthy case and says
+    /// nothing. A non-empty one means a replayed thinking block was discarded instead of
+    /// 400ing the turn (`prefix_mismatch_behavior: "drop_block"`), which is a silent
+    /// quality loss unless it is written down: the model answered that turn without
+    /// reasoning it had already done. `reason` tells the two apart — `prefix_binding_mismatch`
+    /// is Juno editing the prefix under a live conversation, `model_binding_mismatch` is
+    /// someone switching model mid-conversation and is expected. Unknown entries are
+    /// logged as-is rather than filtered; the API adds values over time.
+    fn log_input_transformations(transformations: &[Value]) {
+        if transformations.is_empty() {
+            return;
+        }
+        log::warn!(
+            "Anthropic dropped {} replayed thinking block(s) from the request: {:?}",
+            transformations.len(),
+            transformations
+        );
+    }
+
     /// Handle streaming response from Anthropic API with XML-based TTS extraction
     /// Returns: (accumulated_text, tool_calls, stop_reason, stream_was_started, thinking_blocks)
     async fn handle_streaming_response<F>(
@@ -1071,6 +1132,15 @@ impl AnthropicBrain {
                     match event_type {
                         "message_start" => {
                             log::debug!("Stream: message started");
+                            // Thinking blocks the API dropped arrive here, on the `message`
+                            // object of the opening event, and nowhere else in the stream.
+                            if let Some(transformations) = event_data
+                                .get("message")
+                                .and_then(|m| m.get("input_transformations"))
+                                .and_then(|t| t.as_array())
+                            {
+                                Self::log_input_transformations(transformations);
+                            }
                         }
                         "content_block_start" => {
                             if let Some(content_block) = event_data.get("content_block") {
@@ -2399,6 +2469,7 @@ impl AgentBrain for AnthropicBrain {
                 "Received response from Anthropic: {:?}",
                 Self::sanitize_response_for_logging(&response_body)
             );
+            Self::log_input_transformations(&response_body.input_transformations);
 
             // --- 4. Determine AgentAction ---
             let mut tool_calls_to_execute = Vec::new();
@@ -2774,6 +2845,91 @@ mod computer_toolset_request_tests {
         assert_eq!(name, "computer");
         assert_eq!(toolset_name, None);
         assert_eq!(out, input, "legacy replay must be byte-identical");
+    }
+}
+
+/// The `thinking` request parameter, and the one thing about it that cannot be got
+/// wrong: `block_binding` is only legal with its beta flag on the same request.
+#[cfg(test)]
+mod thinking_block_binding_tests {
+    use super::*;
+    use crate::agent::providers::types::model_ids;
+    use crate::constants::api::beta_flags::THINKING_BINDING_CONTROLS;
+
+    fn brain(model: &str) -> AnthropicBrain {
+        AnthropicBrain::new("test-key".to_string(), Some(model.to_string()), None, None)
+            .expect("brain construction only builds an HTTP client")
+    }
+
+    fn binding(model: &str) -> Option<Value> {
+        brain(model).thinking_param()?.get("block_binding").cloned()
+    }
+
+    /// The models that run the prefix check on replayed thinking blocks. Juno rebuilds the
+    /// system prompt and the tool list every turn and rewrites older screenshots in
+    /// batches, so a replayed block *will* fail the check mid-conversation; without this
+    /// the API answers with a 400 that kills the turn.
+    #[test]
+    fn prefix_check_models_ask_the_api_to_drop_stale_thinking_blocks() {
+        for model in [
+            model_ids::CLAUDE_FABLE_5_1,
+            model_ids::CLAUDE_OPUS_5_5,
+            model_ids::CLAUDE_SONNET_5_5,
+        ] {
+            assert_eq!(
+                binding(model),
+                Some(serde_json::json!({ "prefix_mismatch_behavior": "drop_block" })),
+                "{model} would 400 mid-conversation on a replayed thinking block"
+            );
+        }
+    }
+
+    /// The trap this guards: `block_binding` without
+    /// `thinking-binding-controls-2026-08-01` is a 400 on *every* request, which is worse
+    /// than the bug it fixes. Asserted over the whole catalog in both directions, so
+    /// neither half can be added or removed alone.
+    #[test]
+    fn block_binding_never_ships_without_its_beta_flag() {
+        for def in Provider::Anthropic.model_definitions() {
+            let b = brain(def.id);
+            let sends_binding = b
+                .thinking_param()
+                .is_some_and(|t| t.get("block_binding").is_some());
+            let sends_flag = b.beta_header_value().contains(THINKING_BINDING_CONTROLS);
+            assert_eq!(
+                sends_binding, sends_flag,
+                "{} sends block_binding={sends_binding} with beta flag={sends_flag}",
+                def.id
+            );
+        }
+    }
+
+    /// Models with no adaptive thinking get no `thinking` object at all, so they must not
+    /// pick up the beta flag either.
+    #[test]
+    fn models_without_adaptive_thinking_send_neither_half() {
+        for model in [model_ids::CLAUDE_HAIKU_4_5, model_ids::CLAUDE_SONNET_4_5] {
+            let b = brain(model);
+            assert!(
+                b.thinking_param().is_none(),
+                "{model} must send no thinking parameter"
+            );
+            assert!(
+                !b.beta_header_value().contains(THINKING_BINDING_CONTROLS),
+                "{model} sent the binding-controls flag with no thinking object"
+            );
+        }
+    }
+
+    /// `block_binding` rides *alongside* the existing shape. Losing `display: summarized`
+    /// empties the UI's reasoning panel, which is how this change could regress silently.
+    #[test]
+    fn the_existing_thinking_shape_is_unchanged() {
+        let thinking = brain(model_ids::CLAUDE_OPUS_5_5)
+            .thinking_param()
+            .expect("the default model sends thinking");
+        assert_eq!(thinking["type"], serde_json::json!("adaptive"));
+        assert_eq!(thinking["display"], serde_json::json!("summarized"));
     }
 }
 
