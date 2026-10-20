@@ -141,6 +141,7 @@ pub(crate) fn preview(input: &Value) -> Result<Result<SendDraft, Value>, String>
             recipient,
             subject: None,
             body: body.to_string(),
+            attachments: Vec::new(),
         }),
     )
 }

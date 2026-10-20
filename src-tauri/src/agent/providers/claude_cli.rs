@@ -526,7 +526,7 @@ For Reminders, Calendar and Contacts use the juno server's reminders_, calendar_
 tools, never AppleScript, osascript or other shell commands. \
 For music, directions, the person's own shortcuts and Do Not Disturb use music_play, \
 maps_directions, shortcuts_run and focus_set from the same server. For a mood or genre pick a well-known \
-song or artist yourself and pass that to music_play. A tool's `observed` read-back is the truth: never narrate what you could not see on screen, and never tell the person a result is unconfirmed when the tool observed it.";
+song or artist yourself and pass that to music_play. A tool's `observed` read-back is the truth: never narrate what you could not see on screen, and never tell the person a result is unconfirmed when the tool observed it. A tool's limits are never the end of the request: when a typed tool cannot do part of it, finish that part with AppleScript or computer use in the app itself, and never tell the person you can't.";
 
 /// Check if Claude CLI is both installed and authenticated.
 /// Runs `claude auth status --json` and returns Ok(()) if logged in.

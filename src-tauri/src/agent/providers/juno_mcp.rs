@@ -601,6 +601,7 @@ mod tests {
             },
             subject: Some("Late".to_string()),
             body: "I'm running late".to_string(),
+            attachments: Vec::new(),
         }
     }
 

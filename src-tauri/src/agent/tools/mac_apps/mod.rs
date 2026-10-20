@@ -273,25 +273,27 @@ fn app_tool_definitions() -> Vec<ToolDefinition> {
         ),
         definition(
             tool_names::MAIL_SEND,
-            "Send an email from the Mail app. The person is always shown the email and must say \"send it\" \
+            "Send an email from the Mail app, with any files attached. The person is always shown the email and must say \"send it\" \
              first; you do not ask them yourself. Use mail_draft instead when they only want it written. Use \
              this instead of AppleScript or a cloud mail tool for mail set up on this Mac."
                 .to_string(),
             json!({
                 "to": {"type": "string", "description": "Who to email: a name, a relationship, or an email address."},
                 "subject": {"type": "string", "description": "The subject line."},
-                "body": {"type": "string", "description": "The email, exactly as it should arrive."}
+                "body": {"type": "string", "description": "The email, exactly as it should arrive."},
+                "attachments": {"type": "array", "items": {"type": "string"}, "description": "Full paths of files to attach, e.g. /Users/me/Desktop/quote.pdf. Find them first; every path must be a file."}
             }),
             &["to", "subject", "body"],
         ),
         definition(
             tool_names::MAIL_DRAFT,
-            "Write an email in the Mail app and leave it open, unsent, for the person to finish. Nothing is sent."
+            "Write an email in the Mail app, with any files attached, and leave it open, unsent, for the person to finish. Nothing is sent."
                 .to_string(),
             json!({
                 "to": {"type": "string", "description": "Who it is for: a name, a relationship, or an email address."},
                 "subject": {"type": "string", "description": "The subject line."},
-                "body": {"type": "string", "description": "The email."}
+                "body": {"type": "string", "description": "The email."},
+                "attachments": {"type": "array", "items": {"type": "string"}, "description": "Full paths of files to attach, e.g. /Users/me/Desktop/quote.pdf. Find them first; every path must be a file."}
             }),
             &["to", "body"],
         ),
@@ -333,9 +335,8 @@ fn command_tool_definitions() -> Vec<ToolDefinition> {
             "Play music in the Music app: the person's library first, then Apple Music's own catalog, and report what is now playing. \
              The query must be a concrete song, album, artist or playlist name. For a mood or a genre (\"something groovy\", \"play some jazz\"), \
              YOU choose a well-known song or artist that fits and pass that; never pass the mood or genre word as the query. \
-             A catalog item may open in Music without starting; the result says which, so repeat only what it says. \
-             Apple Music only: Spotify cannot be searched, so if Spotify is in front the result says so and \
-             nothing plays. Use this instead of AppleScript. When it returns a `card`, finish with that tag exactly as given."
+             If the result says the item is up but not playing, press play in Music yourself (computer use) and check; \
+             never ask the person to. Apple Music only: for Spotify, drive the Spotify app instead. Use this instead of AppleScript. When it returns a `card`, finish with that tag exactly as given."
                 .to_string(),
             json!({
                 "query": {"type": "string", "description": "What to play: a song, album, artist or playlist name, as the person said it."},

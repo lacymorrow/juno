@@ -431,6 +431,21 @@ pub fn find(input: &Value) -> Result<Value, String> {
         Err(answer) => return Ok(answer),
     };
 
+    if people.is_empty() {
+        let close = near_misses(query)?;
+        if !close.is_empty() {
+            return Ok(json!({
+                "ok": true,
+                "count": 0,
+                "close": close,
+                "summary": format!(
+                    "Nobody in Contacts is named {query}. Close: {}. Ask which one they meant.",
+                    close.join(", ")
+                ),
+                "people": [],
+            }));
+        }
+    }
     let summary = if people.is_empty() {
         format!("Nobody in Contacts matches {query}.")
     } else {
@@ -446,6 +461,68 @@ pub fn find(input: &Value) -> Result<Value, String> {
         map.insert("asked".to_string(), Value::String(line));
     }
     Ok(out)
+}
+
+/// Names a dictation slip away from `query` ("Jenny Ong" for "Jenny Song"):
+/// each word of the query is searched on its own, and only names within a
+/// couple of letters of the whole query are kept.
+fn near_misses(query: &str) -> Result<Vec<String>, String> {
+    let words: Vec<&str> = query
+        .split_whitespace()
+        .filter(|w| w.chars().count() > 1)
+        .collect();
+    if words.len() < 2 {
+        return Ok(Vec::new());
+    }
+    // SAFETY: `+new` on a plain NSObject subclass.
+    let store = unsafe { CNContactStore::new() };
+    let keys = keys();
+    let mut names = Vec::new();
+    for word in words {
+        names.extend(search(&store, &keys, word)?.into_iter().map(|p| p.name));
+    }
+    Ok(close_names(query, names))
+}
+
+/// Edit distance in characters, case and accents folded first.
+fn distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = fold(a).chars().collect();
+    let b: Vec<char> = fold(b).chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut prev = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let here = row[j + 1];
+            row[j + 1] = if ca == cb {
+                prev
+            } else {
+                1 + prev.min(row[j]).min(row[j + 1])
+            };
+            prev = here;
+        }
+    }
+    row[b.len()]
+}
+
+/// The names close enough to `query` to be what the person said, nearest
+/// first, at most three, each once.
+pub fn close_names(query: &str, names: Vec<String>) -> Vec<String> {
+    let limit = (fold(query).chars().count() / 5).max(2);
+    let mut scored: Vec<(usize, String)> = names
+        .into_iter()
+        .map(|n| (distance(query, &n), n))
+        .filter(|(d, _)| *d > 0 && *d <= limit)
+        .collect();
+    scored.sort();
+    let mut out: Vec<String> = Vec::new();
+    for (_, name) in scored {
+        if !out.contains(&name) {
+            out.push(name);
+        }
+    }
+    out.truncate(3);
+    out
 }
 
 /// One person as a sentence the model can read out.
@@ -572,5 +649,17 @@ mod tests {
             ..katie
         };
         assert_eq!(describe(&bare), "Katie Berrier (no number or email)");
+    }
+
+    #[test]
+    fn a_dictation_slip_finds_the_name_it_meant() {
+        let names = vec![
+            "Jenny Song".to_string(),
+            "Jenny Sperry".to_string(),
+            "Jenny Church".to_string(),
+        ];
+        assert_eq!(close_names("Jenny Ong", names.clone()), vec!["Jenny Song"]);
+        assert!(close_names("Jenny Song", names.clone()).is_empty());
+        assert!(close_names("Bob Marley", names).is_empty());
     }
 }
