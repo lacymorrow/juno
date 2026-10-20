@@ -2921,6 +2921,31 @@ mod thinking_block_binding_tests {
         }
     }
 
+    /// The wire shape, not just the helper's return value: the field has to survive
+    /// serialization at the nesting the API expects, `thinking.block_binding.
+    /// prefix_mismatch_behavior`. A `skip_serializing_if` or a rename on the way out
+    /// would pass every assertion above and still send nothing.
+    #[test]
+    fn the_serialized_request_carries_the_binding_at_the_documented_path() {
+        let b = brain(model_ids::CLAUDE_OPUS_5_5);
+        let request = AnthropicRequest {
+            model: b.model.clone(),
+            messages: Vec::new(),
+            tools: None,
+            system: None,
+            max_tokens: 1024,
+            stream: None,
+            tool_choice: None,
+            thinking: b.thinking_param(),
+            fallbacks: b.fallbacks_param(),
+        };
+        let json = serde_json::to_value(&request).expect("request serializes");
+        assert_eq!(
+            json["thinking"]["block_binding"]["prefix_mismatch_behavior"],
+            serde_json::json!("drop_block")
+        );
+    }
+
     /// `block_binding` rides *alongside* the existing shape. Losing `display: summarized`
     /// empties the UI's reasoning panel, which is how this change could regress silently.
     #[test]
