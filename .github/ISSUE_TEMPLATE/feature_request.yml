@@ -10,7 +10,7 @@ body:
     id: problem
     attributes:
       label: What problem does this solve?
-      description: The use case or the frustration this would fix.
+      description: The thing you're trying to do that Juno makes hard right now.
       placeholder: "I often need to... but currently Juno..."
     validations:
       required: true
