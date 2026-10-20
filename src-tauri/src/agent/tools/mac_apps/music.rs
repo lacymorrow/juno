@@ -5,7 +5,8 @@
 //! library has nothing, Apple's own catalog is searched (the public iTunes
 //! Search API, no key) and the match is opened in Music. Opening a catalog
 //! item does not always start it, so the answer says what Music shows: playing
-//! only when Music reports it, otherwise "it's up in Music, press play". Spotify has no scripting search,
+//! only when Music reports it; otherwise Music is asked to play once, kept
+//! only if it is that song, and the model is told to press play itself. Spotify has no scripting search,
 //! so when Spotify is the app in front the answer says so and nothing is
 //! guessed (`docs/plans/siri-parity.md`, "Considered and cut").
 //!
@@ -124,6 +125,11 @@ tell application "Music"
   end try
 end tell"#;
 
+/// Start playback of whatever Music has up.
+const PLAY: &str = r#"tell application "Music" to play"#;
+/// Stop a wrong track that `PLAY` started.
+const PAUSE: &str = r#"tell application "Music" to pause"#;
+
 /// AppleScript's "not authorized to send Apple events" error number.
 const NOT_AUTHORIZED: i64 = -1743;
 
@@ -199,7 +205,7 @@ pub fn declined() -> Value {
 pub fn spotify_in_front() -> Value {
     json!({
         "ok": false,
-        "summary": "Spotify is in front and can't be searched, so open Music or switch apps and ask again.",
+        "summary": "Spotify is the app in front, so play it in Spotify itself: open spotify:search:<words>, press play on the top result, and check it is playing.",
     })
 }
 
@@ -389,9 +395,12 @@ fn is_expected(playing: &Playing, expected: Option<&str>) -> bool {
 /// The sentence when Music was asked and is not playing. Says what Music shows.
 pub fn not_playing_line(playing: &Playing, query: &str) -> String {
     match &playing.track {
-        Some(t) => format!("Music has {t} up but it is {}. Press play.", playing.state),
+        Some(t) => format!(
+            "Music has {t} up but it is {}. Press play in Music's window yourself, then check it is playing.",
+            playing.state
+        ),
         None => format!(
-            "Music has {query} up but it is {}. Press play.",
+            "Music has {query} up but it is {}. Press play in Music's window yourself, then check it is playing.",
             playing.state
         ),
     }
@@ -414,9 +423,20 @@ fn open_catalog_hit(hit: &CatalogHit) -> Result<Value, String> {
     if !ran.ok {
         return Err("Music would not open that.".to_string());
     }
-    let playing = read_back(Some(&hit.title))?;
+    let mut playing = read_back(Some(&hit.title))?;
+    let started = |p: &Playing| p.state == "playing" && is_expected(p, Some(&hit.title));
+    if !started(&playing) {
+        // The page is open with the song on it, but Music waits for a press.
+        // Ask it to play once, and keep that only if it is the song we opened.
+        proc::osascript(PLAY, &[], READ_WAIT)?;
+        playing = read_back(Some(&hit.title))?;
+        if playing.state == "playing" && !started(&playing) {
+            proc::osascript(PAUSE, &[], READ_WAIT)?;
+            playing.state = "paused".to_string();
+        }
+    }
     let title = format!("{} by {}", hit.title, hit.artist);
-    if playing.state == "playing" && is_expected(&playing, Some(&hit.title)) {
+    if started(&playing) {
         return Ok(json!({
             "ok": true,
             "summary": format!("Playing {title} from Apple Music."),
@@ -426,7 +446,10 @@ fn open_catalog_hit(hit: &CatalogHit) -> Result<Value, String> {
     }
     Ok(json!({
         "ok": true,
-        "summary": format!("{title} is up in Music. Press play."),
+        "summary": format!(
+            "{title} is open in Music but not playing yet. Press its play button in Music's window yourself \
+             (computer use), then check it is playing. Do not ask the person to."
+        ),
         "observed": { "app": "Music", "state": playing.state, "track": playing.track, "artist": playing.artist, "opened": hit.title },
         "card": link_card(&address, &title),
     }))
@@ -669,7 +692,7 @@ mod tests {
         };
         assert_eq!(
             not_playing_line(&p, "x"),
-            "Music has Roygbiv up but it is paused. Press play."
+            "Music has Roygbiv up but it is paused. Press play in Music's window yourself, then check it is playing."
         );
     }
 }
