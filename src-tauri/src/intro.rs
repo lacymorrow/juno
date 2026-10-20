@@ -45,7 +45,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::Notify;
 use tracing::{debug, info, warn};
 
@@ -364,6 +364,10 @@ fn show_bar_plainly(app: &AppHandle) {
             Ok(()) => {
                 crate::startup_timing::mark_once("bar shown");
                 BAR_APPEARED.store(true, Ordering::SeqCst);
+                // She just appeared unasked: an Escape now is meant for her.
+                if let Err(e) = bar.emit(crate::constants::events::bar::PRESENTED, ()) {
+                    warn!("[Intro] Could not tell the bar it was presented: {}", e);
+                }
                 // The bar is up: now the windows that waited for it.
                 crate::startup_windows::bar_is_up(app);
             }

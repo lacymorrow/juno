@@ -456,6 +456,11 @@ pub mod bar {
     /// Reopen the chat pane if a conversation is retained, or close it if it is
     /// already open (tray "Show/Hide Chat"). Frontend flips its dismissed state.
     pub const TOGGLE_PANE: &str = "bar-toggle-pane";
+    /// The bar has just come onto the screen on Juno's own account: at launch
+    /// or when setup ends (`intro::show_bar_plainly`, the end of every reveal).
+    /// For a moment after, an Escape is taken as aimed at her, so it puts her
+    /// away even though the bar was never focused.
+    pub const PRESENTED: &str = "bar-presented";
     /// Close the chat pane. Emitted by the global Escape monitor when nothing is
     /// running, so Escape dismisses the pane even when the bar is not focused.
     pub const DISMISS_PANE: &str = "bar-dismiss-pane";

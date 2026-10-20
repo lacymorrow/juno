@@ -7,6 +7,7 @@ import {
   ESCAPE_COALESCE_MS,
   ESCAPE_REARM_MS,
   LADDER_CHAIN_MS,
+  PRESENTED_MS,
   barIsExpanded,
   climbTarget,
   escapeHandled,
@@ -93,7 +94,27 @@ export function useEscapeToIdle(options: EscapeToIdleOptions): void {
     chainTimer.current = window.setTimeout(() => setChainOpen(false), LADDER_CHAIN_MS);
   }, []);
   useEffect(() => () => window.clearTimeout(chainTimer.current), []);
-  const claimed = expanded || chainOpen;
+
+  // Just after Juno came onto the screen by herself (launch, setup ending),
+  // she is what an Escape is aimed at, though the bar was never focused: the
+  // stop key is claimed so the press can be seen at all, and the press puts
+  // her away. A press elsewhere, or any press she handled, ends it sooner.
+  const [presented, setPresented] = useState(false);
+  const presentedRef = useRef(false);
+  presentedRef.current = presented;
+  const presentedTimer = useRef<number | undefined>(undefined);
+  const endPresented = useCallback(() => {
+    window.clearTimeout(presentedTimer.current);
+    setPresented(false);
+  }, []);
+  useEventListener(EVENTS.BAR_PRESENTED, () => {
+    setPresented(true);
+    window.clearTimeout(presentedTimer.current);
+    presentedTimer.current = window.setTimeout(() => setPresented(false), PRESENTED_MS);
+  });
+  useEventListener(EVENTS.SYSTEM_MOUSE_PRESSED_OUTSIDE, endPresented);
+  useEffect(() => () => window.clearTimeout(presentedTimer.current), []);
+  const claimed = expanded || chainOpen || presented;
 
   /**
    * Act on one press. `route` is which of the two paths it arrived on: a press
@@ -110,6 +131,8 @@ export function useEscapeToIdle(options: EscapeToIdleOptions): void {
         latest.current;
       const state = { barState, working, overlayOpen, composerOpen, popupOpen };
       const outcome = escapeOutcome(state);
+      const wasPresented = aimedAtJuno && presentedRef.current;
+      if (presentedRef.current) endPresented();
       if (escapeHandled(outcome)) {
         lastHandledRef.current = { at: now, route };
         openChain();
@@ -120,12 +143,13 @@ export function useEscapeToIdle(options: EscapeToIdleOptions): void {
       const hides = escapeHidesBar(state, {
         focused: route === "dom",
         chained: aimedAtJuno && now - last.at < LADDER_CHAIN_MS,
+        presented: wasPresented,
       });
       if (!hides) return;
       lastHandledRef.current = { at: now, route };
       void invoke(COMMANDS.WINDOWS_HIDE_FLOATING_BAR).catch(() => {});
     },
-    [openChain],
+    [openChain, endPresented],
   );
 
   // The same event also says "the big chat took over" (`reason: main_window`).

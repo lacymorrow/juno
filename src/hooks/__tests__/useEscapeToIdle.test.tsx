@@ -1,7 +1,7 @@
 import { act, fireEvent, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UI } from "@/lib/constants.generated";
-import { ESCAPE_REARM_MS, LADDER_CHAIN_MS } from "@/lib/barEscape";
+import { ESCAPE_REARM_MS, LADDER_CHAIN_MS, PRESENTED_MS } from "@/lib/barEscape";
 import { useEscapeToIdle, type EscapeToIdleOptions } from "@/hooks/useEscapeToIdle";
 
 const invoke = vi.hoisted(() =>
@@ -264,5 +264,55 @@ describe("useEscapeToIdle: the ladder up", () => {
     const { climb } = render();
     ladder("floating");
     expect(climb).toHaveBeenCalledWith("floating");
+  });
+});
+
+describe("useEscapeToIdle: just after Juno appears by herself", () => {
+  const presented = () => act(() => void handlers.get("bar-presented")?.(null));
+
+  it("claims the stop key, and the first Escape puts her away though the bar was never focused", () => {
+    render();
+    presented();
+    expect(paneCalls().at(-1)).toBe(true);
+    backendDismiss();
+    expect(called(HIDE_BAR)).toBe(1);
+  });
+
+  it("is over after one press", () => {
+    render();
+    presented();
+    backendDismiss();
+    invoke.mockClear();
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        vi.advanceTimersByTime(LADDER_CHAIN_MS + 1);
+      });
+      backendDismiss();
+      expect(called(HIDE_BAR)).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lapses, and a press elsewhere ends it sooner", () => {
+    vi.useFakeTimers();
+    try {
+      render();
+      presented();
+      act(() => {
+        vi.advanceTimersByTime(PRESENTED_MS + 1);
+      });
+      expect(paneCalls().at(-1)).toBe(false);
+      backendDismiss();
+      expect(called(HIDE_BAR)).toBe(0);
+
+      presented();
+      act(() => void handlers.get("mouse-pressed-outside")?.(null));
+      backendDismiss();
+      expect(called(HIDE_BAR)).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
