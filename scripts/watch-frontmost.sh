@@ -43,12 +43,23 @@ started=$(date +%s)
 deadline=$((started + seconds))
 last=""
 changes=0
+readings=0
+blind=0
 
 printf 'Watching the frontmost app for %ss. Ctrl-C to stop.\n\n' "$seconds"
 
 while [ "$(date +%s)" -lt "$deadline" ]; do
 	now=$(read_front)
-	if [ -n "$now" ] && [ "$now" != "$last" ]; then
+	if [ -z "$now" ]; then
+		# Accessibility not granted, or osascript failed. Counted, never
+		# silently skipped: a watcher that saw nothing must not be able to
+		# report that nothing happened.
+		blind=$((blind + 1))
+		sleep "$interval"
+		continue
+	fi
+	readings=$((readings + 1))
+	if [ "$now" != "$last" ]; then
 		elapsed=$(($(date +%s) - started))
 		if [ -n "$last" ]; then
 			changes=$((changes + 1))
@@ -62,9 +73,22 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
 done
 
 printf '\n'
+
+# An empty transcript is not a pass. The whole point of this script is to be
+# believed, so it reports what it could not see rather than rounding it up.
+if [ "$readings" -eq 0 ]; then
+	printf 'INCONCLUSIVE: never read the frontmost app (%s failed attempts).\n' "$blind"
+	printf 'Grant Terminal accessibility access in System Settings > Privacy & Security, then rerun.\n'
+	exit 2
+fi
+if [ "$blind" -gt 0 ]; then
+	printf 'Note: %s of %s samples could not be read.\n' "$blind" "$((readings + blind))"
+fi
+
 if [ "$changes" -eq 0 ]; then
-	printf 'PASS: the front never changed. %s kept the keyboard the whole time.\n' "${last%% — *}"
+	printf 'PASS: the front never changed across %s samples. %s kept the keyboard the whole time.\n' \
+		"$readings" "${last%% — *}"
 	exit 0
 fi
-printf 'FAIL: the front changed %s time(s). Background mode let something take the screen.\n' "$changes"
+printf 'FAIL: the front changed %s time(s). Something took the screen.\n' "$changes"
 exit 1

@@ -242,7 +242,7 @@ pub fn parse_app_command(command: &str) -> Option<AppTarget> {
     }
     if let Some(caps) = patterns.tell_application.captures(command) {
         let app = name_of(caps.get(1)?.as_str())?;
-        let kind = if patterns.activates.is_match(command) {
+        let kind = if patterns.applescript_activate.is_match(command) {
             AppCommand::Activate
         } else {
             AppCommand::Control
@@ -264,21 +264,40 @@ pub fn parse_app_command(command: &str) -> Option<AppTarget> {
 /// way to do the same work quietly", so it does not: `open` has `-g`, and
 /// [`crate::agent::background_shell`] rewrites it rather than refusing it.
 /// What is left is AppleScript's `activate`, whose entire job is the front.
+///
+/// The name here only has to be something to say in a refusal, so unlike
+/// [`name_of`] it keeps a bundle id: `tell application id "com.apple.mail" to
+/// activate` has no readable name in it and still takes the screen. Refusing
+/// it and naming it awkwardly beats running it.
 pub fn applescript_activation(command: &str) -> Option<String> {
     let patterns = patterns()?;
     if let Some(caps) = patterns.activate_application.captures(command) {
-        return name_of(caps.get(1)?.as_str());
+        return label_of(caps.get(1)?.as_str());
     }
-    if !patterns.activates.is_match(command) {
+    if !patterns.applescript_activate.is_match(command) {
         return None;
     }
-    name_of(
+    label_of(
         patterns
             .tell_application
             .captures(command)?
             .get(1)?
             .as_str(),
     )
+}
+
+/// A name for the refusal sentence. Accepts what `name_of` rejects.
+fn label_of(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_matches(|c| c == '"' || c == '\'');
+    let name = match trimmed.rsplit('/').next() {
+        Some(last) if !last.is_empty() => last,
+        _ => trimmed,
+    };
+    let name = name.trim_end_matches(".app").trim();
+    if name.is_empty() || UNINTERESTING.contains(&name.to_lowercase().as_str()) {
+        return None;
+    }
+    Some(name.to_string())
 }
 
 /// An app name from a path or a bare name, or `None` when there is nothing
@@ -309,11 +328,17 @@ struct Patterns {
     open_a: regex::Regex,
     tell_application: regex::Regex,
     activate_application: regex::Regex,
-    activates: regex::Regex,
+    applescript_activate: regex::Regex,
 }
 
 impl Patterns {
     fn compile() -> Result<Self, regex::Error> {
+        // `application` has a short synonym and an id form, both ordinary
+        // AppleScript: `tell app "Mail"`, `tell application id
+        // "com.apple.mail"`. Matching only the long name let the other two
+        // through unrefused. `apple` does not match, because `\s+` has to
+        // follow `app` or `application`.
+        let app = r#"app(?:lication)?\s+(?:id\s+)?"([^"]+)""#;
         Ok(Self {
             // `-a` may arrive combined with other short flags (`open -na
             // ...`, `open -gja ...`), so the flag group only has to end in
@@ -322,9 +347,14 @@ impl Patterns {
             open_a: regex::Regex::new(
                 r#"(?i)\bopen\s+(?:-[a-z]+\s+)*-[a-z]*a\s+(?:"([^"]+)"|'([^']+)'|([^\s;|&'"]+))"#,
             )?,
-            tell_application: regex::Regex::new(r#"(?i)\btell\s+application\s+"([^"]+)""#)?,
-            activate_application: regex::Regex::new(r#"(?i)\bactivate\s+application\s+"([^"]+)""#)?,
-            activates: regex::Regex::new(r"(?i)\bactivate\b")?,
+            tell_application: regex::Regex::new(&format!(r"(?i)\btell\s+{app}"))?,
+            activate_application: regex::Regex::new(&format!(r"(?i)\bactivate\s+{app}"))?,
+            // `activate` as an AppleScript statement, not as the tail of a
+            // path. `\bactivate\b` also matched `source .venv/bin/activate`,
+            // which refused a command that touches nothing on screen. A
+            // preceding `/` or word character disqualifies it, which also
+            // keeps `deactivate` out.
+            applescript_activate: regex::Regex::new(r"(?i)(?:^|[^/\w])activate(?:[^/\w]|$)")?,
         })
     }
 }
@@ -989,6 +1019,61 @@ mod tests {
         ] {
             assert_eq!(applescript_activation(command), None, "{command:?}");
         }
+    }
+
+    /// `application` has a short form and an id form, both ordinary
+    /// AppleScript and both verified to activate. Matching only the long
+    /// spelling let them through as "nothing to see here".
+    #[test]
+    fn the_short_and_id_spellings_of_application_also_activate() {
+        assert_eq!(
+            applescript_activation(r#"osascript -e 'tell app "Mail" to activate'"#),
+            Some("Mail".to_string())
+        );
+        assert_eq!(
+            applescript_activation(r#"osascript -e 'activate app "Slack'"#),
+            None,
+            "an unterminated name is not a match"
+        );
+        // A bundle id has no readable name, and it still takes the screen, so
+        // it is refused and called what it is.
+        assert_eq!(
+            applescript_activation(
+                r#"osascript -e 'tell application id "com.apple.mail" to activate'"#
+            ),
+            Some("com.apple.mail".to_string())
+        );
+        // `apple` is not `app` followed by whitespace.
+        assert_eq!(
+            applescript_activation(r#"tell apple "Mail" to activate"#),
+            None
+        );
+    }
+
+    /// `\bactivate\b` matched the tail of a path, so entering a Python
+    /// virtualenv in the same command line refused a shell command that
+    /// touches nothing on screen.
+    #[test]
+    fn a_path_ending_in_activate_is_not_an_applescript_activate() {
+        assert_eq!(
+            applescript_activation(
+                r#"source .venv/bin/activate && osascript -e 'tell application "Mail" to get unread count of inbox'"#
+            ),
+            None
+        );
+        assert_eq!(applescript_activation(r#"source ~/env/bin/activate"#), None);
+        // `deactivate` is its own word and is not an activation either.
+        assert_eq!(
+            applescript_activation(r#"deactivate && tell application "Mail" to quit"#),
+            None
+        );
+        // The real thing in the same shape still refuses.
+        assert_eq!(
+            applescript_activation(
+                r#"source .venv/bin/activate && osascript -e 'tell application "Mail" to activate'"#
+            ),
+            Some("Mail".to_string())
+        );
     }
 
     #[test]

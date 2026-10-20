@@ -120,6 +120,17 @@ fn rewrite_opens(command: &str) -> Option<String> {
     Some(out)
 }
 
+/// Words that introduce another command rather than being one.
+///
+/// Without these, `for f in *.pdf; do open -a Preview "$f"; done` reads `do` as
+/// the command and `open` as one of its arguments, so the exact focus theft
+/// this module exists to stop walks straight through.
+const COMMAND_PREFIXES: &[&str] = &[
+    // Keywords that are followed by a command.
+    "do", "then", "else", "elif", "!", // Wrappers that run the command after them.
+    "sudo", "doas", "nohup", "command", "builtin", "exec", "time", "nice", "env", "xargs",
+];
+
 /// Byte offsets just past each `open` that starts a command and has no `-g`.
 ///
 /// Reads the text the way a shell does for the one question it has to answer:
@@ -154,8 +165,12 @@ fn opens_that_take_the_front(command: &str) -> Vec<usize> {
                 i += 1;
                 at_command_start = false;
             }
-            // Everything that ends one command and starts another.
-            b';' | b'&' | b'|' | b'(' | b'{' | b'\n' | b'`' => {
+            // Everything that ends one command and starts another. Every
+            // separator `is_word_break` knows about has to be listed here, or
+            // the word arm below reads an empty word and the scan never
+            // advances. `)` and `}` were missing and any `echo ${HOME}` hung
+            // the turn on a pinned CPU.
+            b';' | b'&' | b'|' | b'(' | b')' | b'{' | b'}' | b'\n' | b'`' => {
                 at_command_start = true;
                 i += 1;
             }
@@ -165,18 +180,40 @@ fn opens_that_take_the_front(command: &str) -> Vec<usize> {
                 while i < bytes.len() && !is_word_break(bytes[i]) {
                     i += 1;
                 }
-                if at_command_start
-                    && &command[start..i] == "open"
-                    && !already_background(command, i)
-                {
+                // A separator with no arm above would leave `i == start`.
+                // Stepping over it keeps a missed case a missed rewrite
+                // instead of a hung agent: this runs inside the CLI's
+                // permission request and inside the bash tool, and neither
+                // ever answers if this loop does not end. `the_scan_always_
+                // terminates` fuzzes it.
+                if i == start {
+                    i += 1;
+                    continue;
+                }
+                let word = &command[start..i];
+                if at_command_start && word == "open" && !already_background(command, i) {
                     found.push(i);
                 }
-                // Only the first word of a command is a command name.
-                at_command_start = false;
+                // `sudo open -a Mail` and `FOO=1 open -a Mail` both still have
+                // their command word ahead of them.
+                at_command_start =
+                    at_command_start && (COMMAND_PREFIXES.contains(&word) || is_assignment(word));
             }
         }
     }
     found
+}
+
+/// `FOO=bar`, the one word that can sit in front of a command without being it.
+fn is_assignment(word: &str) -> bool {
+    match word.split_once('=') {
+        Some((name, _)) => {
+            !name.is_empty()
+                && !name.starts_with(|c: char| c.is_ascii_digit())
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }
+        None => false,
+    }
 }
 
 fn is_word_break(b: u8) -> bool {
@@ -373,6 +410,102 @@ mod tests {
         ] {
             assert_eq!(policy_for(command), ShellPolicy::Run, "{command:?}");
         }
+    }
+
+    /// `)` and `}` are word breaks with no arm of their own, so the word arm
+    /// read a zero-length word and `i` never moved. `echo ${HOME}` spun
+    /// forever at 100% CPU inside the CLI's permission request, which never
+    /// gets an answer, so the turn hangs with no error anywhere.
+    ///
+    /// Asserted by running it, because the failure mode is "never returns":
+    /// an assertion that is never reached cannot fail.
+    #[test]
+    fn the_scan_always_terminates() {
+        use std::sync::mpsc;
+
+        let nasty: Vec<String> = [
+            "echo ${HOME}",
+            "open -a Mail $(ls)",
+            "{ open -a Mail; }",
+            "( open -a Mail )",
+            "echo )",
+            "}",
+            ")",
+            "))))",
+            "}{)(",
+            "open -a Mail && (cd /tmp && open -a Notes)",
+            "echo \"unterminated",
+            "echo 'unterminated",
+            "a`b",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            for command in &nasty {
+                let _ = policy_for(command);
+            }
+            // Every byte value in every position, which is the only honest
+            // way to say "no input hangs this".
+            for a in 0u8..=127 {
+                for b in 0u8..=127 {
+                    let s = String::from_utf8_lossy(&[b'o', b'p', b'e', b'n', a, b]).into_owned();
+                    let _ = policy_for(&s);
+                }
+            }
+            tx.send(()).ok();
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the scan must terminate on every input, not spin");
+    }
+
+    /// A subshell or group is a command boundary, so the `open` inside one is
+    /// still an `open` that would take the screen.
+    #[test]
+    fn an_open_inside_a_group_or_subshell_is_still_rewritten() {
+        for (before, after) in [
+            ("( open -a Mail )", "( open -g -a Mail )"),
+            ("{ open -a Mail; }", "{ open -g -a Mail; }"),
+            (
+                "ls && (cd /tmp && open -a Notes)",
+                "ls && (cd /tmp && open -g -a Notes)",
+            ),
+        ] {
+            assert_eq!(rewritten(before).as_deref(), Some(after), "{before:?}");
+        }
+    }
+
+    /// `do`, `sudo` and friends introduce a command rather than being one, so
+    /// the `open` after them is still in command position. The loop body form
+    /// is the realistic one and it was walking straight through.
+    #[test]
+    fn an_open_behind_a_shell_keyword_or_wrapper_is_not_missed() {
+        for (before, after) in [
+            (
+                "for f in *.pdf; do open -a Preview \"$f\"; done",
+                "for f in *.pdf; do open -g -a Preview \"$f\"; done",
+            ),
+            ("sudo open -a Mail", "sudo open -g -a Mail"),
+            ("nohup open -a Mail", "nohup open -g -a Mail"),
+            ("command open -a Mail", "command open -g -a Mail"),
+            ("time open -a Mail", "time open -g -a Mail"),
+            ("env open -a Mail", "env open -g -a Mail"),
+            ("FOO=1 open -a Mail", "FOO=1 open -g -a Mail"),
+            ("FOO=1 BAR=2 open -a Mail", "FOO=1 BAR=2 open -g -a Mail"),
+            (
+                "if true; then open -a Mail; fi",
+                "if true; then open -g -a Mail; fi",
+            ),
+        ] {
+            assert_eq!(rewritten(before).as_deref(), Some(after), "{before:?}");
+        }
+        // A prefix does not make everything after it a command forever: the
+        // `open` here is an argument to `grep`, not a command.
+        assert_eq!(policy_for("sudo grep open /etc/hosts"), ShellPolicy::Run);
+        // And a word that merely contains `=` is not an assignment.
+        assert_eq!(policy_for("test a=b open"), ShellPolicy::Run);
     }
 
     /// AppleScript activation: no background form, so it does not run, and the

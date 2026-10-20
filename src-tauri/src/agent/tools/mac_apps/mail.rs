@@ -96,7 +96,7 @@ return "OK" & US & "unseen""#;
 const DRAFT_BODY: &str = r#"set a to item 1 of argv
 set s to item 2 of argv
 set b to item 3 of argv
-set front to item 4 of argv
+set bringToFront to item 4 of argv
 tell application "Mail"
 set m to make new outgoing message with properties {subject:s, content:b, visible:true}
 tell m to make new to recipient at end of to recipients with properties {address:a}
@@ -105,7 +105,7 @@ repeat with i from 5 to (count of argv)
 tell content of m to make new attachment with properties {file name:(POSIX file (item i of argv))} at after last paragraph
 end repeat
 end if
-if front is "1" then activate
+if bringToFront is "1" then activate
 set n to count of (outgoing messages whose subject is s)
 set k to count of attachments of content of m
 end tell
@@ -436,6 +436,47 @@ mod tests {
         }
     }
 
+    /// Every `set <name> to item N of argv` line actually binds.
+    ///
+    /// This exists because a grep-only test cannot see a reserved word.
+    /// `set bringToFront to item 4 of argv` reads as `set beginning to ...` and fails
+    /// at runtime with -10006, so every `mail_draft` call would have returned
+    /// "Mail did not do it" while `cargo test` stayed green. Only the argv
+    /// prelude is run, so no mail app is touched and nothing is drafted.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn every_argv_binding_is_a_name_applescript_will_accept() {
+        for (name, body) in [
+            ("UNREAD_BODY", UNREAD_BODY),
+            ("SEARCH_BODY", SEARCH_BODY),
+            ("SEND_BODY", SEND_BODY),
+            ("DRAFT_BODY", DRAFT_BODY),
+        ] {
+            let prelude: Vec<&str> = body
+                .lines()
+                .take_while(|line| line.trim_start().starts_with("set "))
+                .filter(|line| line.contains("of argv"))
+                .collect();
+            assert!(!prelude.is_empty(), "{name} binds nothing from argv");
+
+            let script = script::wrap(&format!("{}\nreturn \"OK\"", prelude.join("\n")));
+            let argv = vec!["1".to_string(); 8];
+            let out = std::process::Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .args(&argv)
+                .output()
+                .expect("osascript must run on macOS");
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                matches!(script::parse(&stdout), script::Outcome::Ok(_)),
+                "{name} has a binding AppleScript will not accept: {}{}",
+                stdout.trim(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+    }
+
     /// LAC-5007. The compose window comes from `visible:true`; `activate` is
     /// what puts Mail on top of the person's work. It only runs when the
     /// caller asked for the front, and background mode never does.
@@ -445,7 +486,7 @@ mod tests {
             !DRAFT_BODY.contains("\nactivate"),
             "an unconditional activate steals focus from whatever they are typing in"
         );
-        assert!(DRAFT_BODY.contains("if front is \"1\" then activate"));
+        assert!(DRAFT_BODY.contains("if bringToFront is \"1\" then activate"));
         assert!(
             DRAFT_BODY.contains("visible:true"),
             "the window still opens"
