@@ -432,16 +432,23 @@ impl SettingKey {
             writes,
         };
         match self {
-            K::JunoVoice => row(
-                self,
-                "audio.voice",
-                "Juno's voice",
-                Pane::Audio,
-                "juno-voice",
-                V::LiveChoice,
-                "audio.system_voice",
-            ),
+            // The "Juno's voice" group in the Audio pane is behind the
+            // advanced toggle (`VoiceSettings.tsx`), so its rows are too, and
+            // a link to them turns the toggle on.
+            K::JunoVoice => SettingSpec {
+                advanced: true,
+                ..row(
+                    self,
+                    "audio.voice",
+                    "Juno's voice",
+                    Pane::Audio,
+                    "juno-voice",
+                    V::LiveChoice,
+                    "audio.system_voice",
+                )
+            },
             K::SpeakingSpeed => SettingSpec {
+                advanced: true,
                 beta_only: true,
                 ..row(
                     self,
@@ -1192,6 +1199,14 @@ mod tests {
             assert!(spec.id.contains('.'), "{} is not pane.setting", spec.id);
             assert_eq!(spec.key.spec().id, spec.id);
         }
+    }
+
+    /// The Audio pane shows Juno's voice only with advanced settings on, so
+    /// "show me Juno's voice" has to turn them on first.
+    #[test]
+    fn juno_s_voice_is_behind_the_advanced_toggle() {
+        assert!(SettingKey::JunoVoice.spec().needs_advanced());
+        assert!(SettingKey::SpeakingSpeed.spec().needs_advanced());
     }
 
     #[test]

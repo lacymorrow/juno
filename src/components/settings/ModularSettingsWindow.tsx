@@ -284,7 +284,7 @@ function SettingsWindowContent() {
   const [navigation, setNavigation] = useState<SettingsNavigation | null>(null);
   // The row to point at. Its own state, so clearing `navigation` does not
   // cancel the wait for a section that is still loading.
-  const [revealTarget, setRevealTarget] = useState<{ row: string } | null>(null);
+  const [revealTarget, setRevealTarget] = useState<{ row: string; retried?: boolean } | null>(null);
   // Bumped when the agent changes a setting: the pane remounts and reads
   // every value back from Rust, as if it had just been opened.
   const [paneVersion, setPaneVersion] = useState(0);
@@ -382,10 +382,19 @@ function SettingsWindowContent() {
     setNavigation(null);
   }, [navigation, categories, advancedLoading]);
 
+  // A row Juno points at that never shows up is behind the advanced toggle
+  // the registry did not know about: turn it on and look again, once. The
+  // person asked to be shown the setting, and it is not there to show.
+  const advancedRef = useRef(advanced);
+  advancedRef.current = advanced;
   useEffect(() => {
     if (!revealTarget) return;
-    return revealRow(revealTarget.row);
-  }, [revealTarget]);
+    return revealRow(revealTarget.row, undefined, () => {
+      if (advancedRef.current || revealTarget.retried) return;
+      void setAdvanced(true);
+      setRevealTarget({ row: revealTarget.row, retried: true });
+    });
+  }, [revealTarget, setAdvanced]);
 
   // Scroll the content pane back to the top whenever the section changes.
   // Skip when a row is deep-linked — that effect scrolls to the row instead.

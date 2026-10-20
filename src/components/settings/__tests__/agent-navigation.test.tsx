@@ -146,9 +146,12 @@ describe("revealRow", () => {
     expect(row.style.outline).toContain("2px solid");
     row.remove();
 
-    // Never appears: no throw, nothing left running past the wait.
-    revealRow("never", 100);
+    // Never appears: no throw, nothing left running past the wait, and the
+    // caller is told so it can do something about it.
+    const missing = vi.fn();
+    revealRow("never", 100, missing);
     vi.advanceTimersByTime(500);
+    expect(missing).toHaveBeenCalledTimes(1);
   });
 
   it("is flat: an inline system blue outline and a tint, never a glow or a spring", () => {
@@ -235,6 +238,33 @@ describe("the agent points the Settings window", () => {
     });
     await waitFor(() => expect(voiceMounts).toHaveBeenCalledTimes(2));
     expect(loadAllSettings).toHaveBeenCalled();
+  });
+
+  it("turns advanced settings on when the row it points at is not on screen", async () => {
+    // Juno's voice lives in a group behind the advanced toggle. A row the
+    // window cannot find while the toggle is off is one it is hiding.
+    backend({ pane: "security", row: "hidden-behind-advanced", reload: false }, false);
+    render(<ModularSettingsWindow />);
+    expect(await screen.findByTestId("section-security")).toBeTruthy();
+    await waitFor(
+      () =>
+        expect(invokeMock).toHaveBeenCalledWith(
+          COMMANDS.SETTINGS_SET_ADVANCED_SETTINGS_ENABLED,
+          { enabled: true },
+        ),
+      { timeout: 4000 },
+    );
+  });
+
+  it("leaves the toggle alone when advanced settings are already on", async () => {
+    backend({ pane: "security", row: "not-a-row", reload: false }, true);
+    render(<ModularSettingsWindow />);
+    expect(await screen.findByTestId("section-security")).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 2300));
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      COMMANDS.SETTINGS_SET_ADVANCED_SETTINGS_ENABLED,
+      expect.anything(),
+    );
   });
 
   it("waits for advanced settings before opening an advanced pane", async () => {
