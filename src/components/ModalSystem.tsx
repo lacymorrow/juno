@@ -92,18 +92,17 @@ export function ModalSystem({
     try {
       console.log("📝 Submitting feedback:", feedbackData);
 
-      // Create GitHub issue URL or mailto link for feedback
-      if (feedbackData.type === "issue") {
-        const title = encodeURIComponent(feedbackData.title);
-        const body = encodeURIComponent(
-          `**Priority:** ${feedbackData.priority}\n\n**Description:**\n${
-            feedbackData.description
-          }\n\n**Contact:** ${feedbackData.email || "Not provided"}`
-        );
-        const githubUrl = `https://github.com/lacymorrow/juno/issues/new?title=${title}&body=${body}`;
-
-        // Open GitHub issues page
-        await invoke(COMMANDS.DESKTOP_OPEN_URL, { url: githubUrl });
+      // A bug or a feature goes to the matching GitHub issue form, named by
+      // template so the prefills survive, with the version and the OS filled
+      // in by the backend. Priority and contact are deliberately not sent:
+      // neither has a field on the form, priority is triage's call, and
+      // GitHub already knows who is filing (LAC-5069).
+      if (feedbackData.type === "issue" || feedbackData.type === "feature") {
+        await invoke(COMMANDS.ISSUE_REPORT_OPEN, {
+          kind: feedbackData.type === "issue" ? "bug" : "feature",
+          title: feedbackData.title,
+          description: feedbackData.description,
+        });
       } else {
         // For general feedback, create mailto link
         const subject = encodeURIComponent(
@@ -117,7 +116,11 @@ export function ModalSystem({
         await invoke(COMMANDS.DESKTOP_OPEN_URL, { url: mailtoUrl });
       }
 
-      onAddSystemMessage("✅ Feedback form opened. Thank you for your input!");
+      onAddSystemMessage(
+        feedbackData.type === "general"
+          ? "✅ Feedback email opened. Thank you for your input!"
+          : "✅ GitHub form opened with your report filled in. Press Submit there to file it."
+      );
 
       // Reset form and close modal
       onFeedbackDataChange({
