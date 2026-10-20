@@ -689,14 +689,21 @@ export function useSettings() {
 		}
 	}, [invokeCommand]);
 
+	// Every answer about the Mac's devices is numbered, and only the newest one
+	// is drawn. A read asked for when the pane opened can land after a device
+	// was plugged in, and the older list must not replace the newer one.
+	const deviceRequest = useRef(0);
+
 	// Re-read the device lists. Cheap and read-only (listing never opens a
 	// device), and deliberately uncached: a microphone can be unplugged while
 	// the settings window is open.
 	const loadAudioDevices = useCallback(async () => {
+		const ticket = ++deviceRequest.current;
 		try {
-			setAudioDevices(
-				await invoke<AudioDeviceChoices>(COMMANDS.AUDIO_LIST_AUDIO_DEVICES),
+			const choices = await invoke<AudioDeviceChoices>(
+				COMMANDS.AUDIO_LIST_AUDIO_DEVICES,
 			);
+			if (ticket === deviceRequest.current) setAudioDevices(choices);
 		} catch (error) {
 			console.error("Failed to list audio devices:", error);
 		}
@@ -843,6 +850,16 @@ export function useSettings() {
 		setAlwaysListeningActive(false);
 		invalidateCache("alwaysListeningActive");
 		void loadAudioDevices();
+	});
+
+	// A microphone or speaker was plugged in or unplugged, or macOS picked a
+	// different default. Rust has already re-read both lists and this is them,
+	// so the pickers follow the hardware without the window being reopened.
+	useEventListener<AudioDeviceChoices>(EVENTS.AUDIO_DEVICES_CHANGED, (payload) => {
+		if (!payload) return;
+		// The newest answer there is: it beats any read still in flight.
+		deviceRequest.current += 1;
+		setAudioDevices(payload);
 	});
 
 	// A chosen microphone was gone and another one stood in. Not a failure:

@@ -36,8 +36,8 @@ pub use device_identity::{
     DeviceRef,
 };
 pub use devices::{
-    effective_input_device_name, list_input_devices, preferred_input_device,
-    set_preferred_input_device, AudioDeviceInfo,
+    effective_input_device_name, list_input_devices, on_hardware_change, preferred_input_device,
+    set_preferred_input_device, watch_audio_hardware, AudioDeviceInfo,
 };
 pub use engine::{startup_provider, SttProvider, TranscriptionEngine, TranscriptionSession};
 pub use engine_manager::EngineManager;

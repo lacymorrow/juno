@@ -791,6 +791,43 @@ fn microphones_changed() {
     request_warm();
 }
 
+/// What to do when the Mac's audio hardware changes, so a window showing the
+/// device list can be sent the list as it is now.
+///
+/// A callback rather than an `AppHandle`: this crate is generic over the Tauri
+/// runtime and has no window of its own, and the notification arrives on a
+/// CoreAudio thread. The host app installs what to do and keeps its own
+/// handle.
+static HARDWARE_CHANGED: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+
+/// Have `report` called whenever a device is plugged in or unplugged, or
+/// macOS picks a different default. Call once, during setup.
+pub fn on_hardware_change(report: impl Fn() + Send + Sync + 'static) {
+    if HARDWARE_CHANGED.set(Box::new(report)).is_err() {
+        tracing::warn!("[VoiceDevices] Something is already listening for hardware changes");
+    }
+}
+
+/// Tell the host the hardware changed.
+///
+/// Separate from the microphone's own freshness on purpose: what a settings
+/// window is told does not depend on the warm stream, and a change that only
+/// the speaker list cares about reports without asking for a microphone to be
+/// rebuilt.
+fn report_hardware_change() {
+    if let Some(report) = HARDWARE_CHANGED.get() {
+        report();
+    }
+}
+
+/// A microphone came or went, or macOS picked a different input. Two things
+/// are out of date: the microphone waiting for the next press, and any list of
+/// devices on screen.
+fn hardware_changed() {
+    microphones_changed();
+    report_hardware_change();
+}
+
 /// Build a stopped stream on `device`, ready to be lent to a recording.
 fn build_warm(
     device: cpal::Device,
@@ -880,14 +917,28 @@ pub fn request_warm() {
     }
 }
 
-/// From now on, keep the dictation microphone built and waiting: now, and
-/// again whenever the Mac's microphones change. Safe to call more than once.
-/// Only call it once microphone access is granted; building the device is
-/// what would ask for it.
-pub fn keep_microphone_warm() {
+/// Hear the Mac's audio hardware changing: a device plugged in or unplugged,
+/// and a new system default. Safe to call more than once.
+///
+/// Deliberately **not** gated on microphone permission, unlike
+/// [`keep_microphone_warm`]. Asking CoreAudio to report a change opens no
+/// device, so it needs no permission and makes no sound, and a settings window
+/// listing devices has to stay right on a Mac where dictation cannot run yet.
+pub fn watch_audio_hardware() {
     static WATCHING: OnceLock<()> = OnceLock::new();
     WATCHING.get_or_init(|| {
         SYSTEM_WATCHED.store(watch::system_changes(), Ordering::SeqCst);
+    });
+}
+
+/// From now on, keep the dictation microphone built and waiting: now, and
+/// again whenever the Mac's microphones change. Safe to call more than once.
+/// Only call it once microphone access is granted; building the device is
+/// what would ask for it. The watch itself does not wait on permission.
+pub fn keep_microphone_warm() {
+    static WATCHING: OnceLock<()> = OnceLock::new();
+    WATCHING.get_or_init(|| {
+        watch_audio_hardware();
         request_warm();
     });
 }
@@ -966,21 +1017,56 @@ fn ensure_warm() {
 mod watch {
     use coreaudio::sys::{
         kAudioDevicePropertyNominalSampleRate, kAudioHardwarePropertyDefaultInputDevice,
-        kAudioHardwarePropertyDevices, kAudioObjectPropertyElementMaster,
-        kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, AudioObjectAddPropertyListener,
-        AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertySelector,
-        AudioObjectRemovePropertyListener, OSStatus,
+        kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyElementMaster, kAudioObjectPropertyScopeGlobal,
+        kAudioObjectSystemObject, AudioObjectAddPropertyListener, AudioObjectID,
+        AudioObjectPropertyAddress, AudioObjectPropertySelector, AudioObjectRemovePropertyListener,
+        OSStatus,
     };
     use std::ffi::c_void;
     use std::ptr::null_mut;
 
-    unsafe extern "C" fn changed(
+    /// The signature CoreAudio calls back on. Named so each property can be
+    /// watched with the callback that matches what changing it means.
+    type Listener = unsafe extern "C" fn(
+        AudioObjectID,
+        u32,
+        *const AudioObjectPropertyAddress,
+        *mut c_void,
+    ) -> OSStatus;
+
+    /// A rate change on the one device the warm stream is holding. Nothing
+    /// outside the microphone is affected, so nothing outside it is told.
+    unsafe extern "C" fn rate_changed(
         _object: AudioObjectID,
         _count: u32,
         _addresses: *const AudioObjectPropertyAddress,
         _data: *mut c_void,
     ) -> OSStatus {
         super::microphones_changed();
+        0
+    }
+
+    /// A device plugged in or unplugged, or a new default input.
+    unsafe extern "C" fn hardware_changed(
+        _object: AudioObjectID,
+        _count: u32,
+        _addresses: *const AudioObjectPropertyAddress,
+        _data: *mut c_void,
+    ) -> OSStatus {
+        super::hardware_changed();
+        0
+    }
+
+    /// A new default speaker. The list on screen is out of date; the
+    /// microphone waiting for the next press is not, so it is left alone.
+    unsafe extern "C" fn output_changed(
+        _object: AudioObjectID,
+        _count: u32,
+        _addresses: *const AudioObjectPropertyAddress,
+        _data: *mut c_void,
+    ) -> OSStatus {
+        super::report_hardware_change();
         0
     }
 
@@ -992,27 +1078,46 @@ mod watch {
         }
     }
 
-    fn listen(object: AudioObjectID, selector: AudioObjectPropertySelector) -> bool {
+    fn listen(
+        object: AudioObjectID,
+        selector: AudioObjectPropertySelector,
+        on_change: Listener,
+    ) -> bool {
         let address = address(selector);
-        // SAFETY: `changed` is a plain function with the listener signature,
+        // SAFETY: `on_change` is a plain function with the listener signature,
         // and the address outlives the call (CoreAudio copies it).
-        let status =
-            unsafe { AudioObjectAddPropertyListener(object, &address, Some(changed), null_mut()) };
+        let status = unsafe {
+            AudioObjectAddPropertyListener(object, &address, Some(on_change), null_mut())
+        };
         if status != 0 {
-            tracing::warn!("[VoiceDevices] Could not watch for microphone changes ({status})");
+            tracing::warn!("[VoiceDevices] Could not watch for a device change ({status})");
         }
         status == 0
     }
 
-    /// A microphone plugged in or out, or a new default. True when both
-    /// are being heard.
+    /// A device plugged in or out, and a new default either way. The returned
+    /// bool answers only the microphone's question: are both the changes that
+    /// could stale the warm stream being heard.
     pub fn system_changes() -> bool {
-        let default = listen(
+        let default_input = listen(
             kAudioObjectSystemObject,
             kAudioHardwarePropertyDefaultInputDevice,
+            hardware_changed,
         );
-        let devices = listen(kAudioObjectSystemObject, kAudioHardwarePropertyDevices);
-        default && devices
+        let devices = listen(
+            kAudioObjectSystemObject,
+            kAudioHardwarePropertyDevices,
+            hardware_changed,
+        );
+        // The speaker half of the settings list moves with the default output,
+        // which the microphone does not care about. Kept out of the answer so
+        // a failure to watch it cannot make the warm stream distrust itself.
+        listen(
+            kAudioObjectSystemObject,
+            kAudioHardwarePropertyDefaultOutputDevice,
+            output_changed,
+        );
+        default_input && devices
     }
 
     fn device_id(device: &cpal::Device) -> AudioObjectID {
@@ -1031,7 +1136,7 @@ mod watch {
     impl RateWatch {
         pub fn new(device: &cpal::Device) -> Option<Self> {
             let id = device_id(device);
-            listen(id, kAudioDevicePropertyNominalSampleRate).then_some(Self(id))
+            listen(id, kAudioDevicePropertyNominalSampleRate, rate_changed).then_some(Self(id))
         }
     }
 
@@ -1040,7 +1145,7 @@ mod watch {
             let address = address(kAudioDevicePropertyNominalSampleRate);
             // SAFETY: the same object, address and function that were added.
             unsafe {
-                AudioObjectRemovePropertyListener(self.0, &address, Some(changed), null_mut());
+                AudioObjectRemovePropertyListener(self.0, &address, Some(rate_changed), null_mut());
             }
         }
     }
@@ -1083,6 +1188,46 @@ pub fn effective_input_device_name() -> Option<String> {
         InputChoice::Substituted { used, .. } => Some(used.name),
         InputChoice::SystemDefault(device) => Some(device.name),
         InputChoice::Nothing { .. } => None,
+    }
+}
+
+/// What the host app is told when the Mac's audio hardware changes.
+///
+/// One test, because the listener it installs is a process-wide static: the
+/// host installs it once at startup and there is nothing for a second one to
+/// mean.
+#[cfg(test)]
+mod hardware_change_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// The defect this is here for: CoreAudio was already telling Juno that a
+    /// device had come or gone, and the news reached the warm microphone and
+    /// stopped there. Nothing reached a window, so a mic plugged in with
+    /// Settings open was absent from the list until the window was reopened.
+    #[test]
+    fn a_hardware_change_reaches_the_host() {
+        let heard = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&heard);
+        super::on_hardware_change(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
+
+        super::report_hardware_change();
+        assert_eq!(heard.load(Ordering::SeqCst), 1);
+
+        // A second install is refused rather than stacked or swapped: two
+        // listeners on one change would send the list twice, and replacing the
+        // first would silently drop whoever was already drawing it.
+        let ignored = Arc::new(AtomicUsize::new(0));
+        let other = Arc::clone(&ignored);
+        super::on_hardware_change(move || {
+            other.fetch_add(1, Ordering::SeqCst);
+        });
+
+        super::report_hardware_change();
+        assert_eq!(heard.load(Ordering::SeqCst), 2);
+        assert_eq!(ignored.load(Ordering::SeqCst), 0);
     }
 }
 
