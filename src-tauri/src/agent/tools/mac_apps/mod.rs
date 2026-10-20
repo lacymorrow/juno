@@ -335,9 +335,8 @@ fn command_tool_definitions() -> Vec<ToolDefinition> {
             "Play music in the Music app: the person's library first, then Apple Music's own catalog, and report what is now playing. \
              The query must be a concrete song, album, artist or playlist name. For a mood or a genre (\"something groovy\", \"play some jazz\"), \
              YOU choose a well-known song or artist that fits and pass that; never pass the mood or genre word as the query. \
-             A catalog item may open in Music without starting; the result says which, so repeat only what it says. \
-             Apple Music only: Spotify cannot be searched, so if Spotify is in front the result says so and \
-             nothing plays. Use this instead of AppleScript. When it returns a `card`, finish with that tag exactly as given."
+             If the result says the item is up but not playing, press play in Music yourself (computer use) and check; \
+             never ask the person to. Apple Music only: for Spotify, drive the Spotify app instead. Use this instead of AppleScript. When it returns a `card`, finish with that tag exactly as given."
                 .to_string(),
             json!({
                 "query": {"type": "string", "description": "What to play: a song, album, artist or playlist name, as the person said it."},
