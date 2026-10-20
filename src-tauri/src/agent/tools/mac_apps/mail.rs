@@ -85,21 +85,27 @@ if (count of hits) > 0 then return "OK" & US & "sent"
 end repeat
 return "OK" & US & "unseen""#;
 
-/// argv: address, subject, body, then any file paths to attach. Opens the
-/// message in a window, unsent, and answers how many open messages have that
-/// subject and how many files it holds.
+/// argv: address, subject, body, "1" to bring Mail forward, then any file
+/// paths to attach. Opens the message in a window, unsent, and answers how
+/// many open messages have that subject and how many files it holds.
+///
+/// The compose window comes from `visible:true` alone. `activate` is what
+/// brings Mail to the front, and in background mode that is focus theft: the
+/// draft lands on top of whatever the person is typing in (LAC-5007). So it
+/// is a separate argument, and background mode passes "0".
 const DRAFT_BODY: &str = r#"set a to item 1 of argv
 set s to item 2 of argv
 set b to item 3 of argv
+set front to item 4 of argv
 tell application "Mail"
 set m to make new outgoing message with properties {subject:s, content:b, visible:true}
 tell m to make new to recipient at end of to recipients with properties {address:a}
-if (count of argv) > 3 then
-repeat with i from 4 to (count of argv)
+if (count of argv) > 4 then
+repeat with i from 5 to (count of argv)
 tell content of m to make new attachment with properties {file name:(POSIX file (item i of argv))} at after last paragraph
 end repeat
 end if
-activate
+if front is "1" then activate
 set n to count of (outgoing messages whose subject is s)
 set k to count of attachments of content of m
 end tell
@@ -283,6 +289,22 @@ fn argv_for(draft: &SendDraft) -> Vec<String> {
     argv
 }
 
+/// The same values with the foreground flag in fourth place, for [`DRAFT_BODY`].
+///
+/// `front` is read from the platform mirror of the background-mode setting,
+/// which is the one source synchronous code can ask. A draft made while the
+/// person is working appears in Mail without Mail coming forward.
+fn draft_argv(draft: &SendDraft, front: bool) -> Vec<String> {
+    let mut argv = vec![
+        draft.recipient.address.clone(),
+        draft.subject.clone().unwrap_or_default(),
+        draft.body.clone(),
+        if front { "1" } else { "0" }.to_string(),
+    ];
+    argv.extend(draft.attachments.iter().cloned());
+    argv
+}
+
 /// What Mail answered after a send, as evidence.
 pub fn send_evidence(answer: &str) -> Evidence {
     match answer.trim() {
@@ -325,7 +347,9 @@ pub fn draft(input: &Value) -> Result<Value, String> {
             return Ok(answer);
         }
     };
-    let (open, attached) = match script::run(&script::wrap(DRAFT_BODY), argv_for(&draft))? {
+    let front = !computer_use_ai_sdk::background::is_background_mode();
+    let (open, attached) = match script::run(&script::wrap(DRAFT_BODY), draft_argv(&draft, front))?
+    {
         Outcome::Ok(records) => {
             let field = |i: usize| {
                 records
@@ -353,16 +377,24 @@ pub fn draft(input: &Value) -> Result<Value, String> {
             format!(" Only {got} of {want} files attached; add the rest in the Mail window.")
         }
     };
+    // Where the window is, said plainly. In background mode Mail was never
+    // brought forward, so "open in Mail" on its own would read as "on your
+    // screen" and send the model looking for a window that is behind.
+    let where_it_is = if front {
+        "is open in Mail."
+    } else {
+        "is open in Mail, behind what you are working in."
+    };
     Ok(json!({
         "ok": true,
         "sent": false,
         "summary": format!(
-            "The draft to {} is open in Mail.{files} Nothing was sent.",
+            "The draft to {} {where_it_is}{files} Nothing was sent.",
             draft.recipient.name
         ),
         "to": draft.recipient.name,
         "address": draft.recipient.address,
-        "observed": { "attachments": attached },
+        "observed": { "attachments": attached, "brought_to_front": front },
     }))
 }
 
@@ -402,6 +434,46 @@ mod tests {
             assert!(body.contains("item i of argv"), "{body}");
             assert!(body.contains("make new attachment"), "{body}");
         }
+    }
+
+    /// LAC-5007. The compose window comes from `visible:true`; `activate` is
+    /// what puts Mail on top of the person's work. It only runs when the
+    /// caller asked for the front, and background mode never does.
+    #[test]
+    fn a_draft_only_takes_the_front_when_it_was_asked_to() {
+        assert!(
+            !DRAFT_BODY.contains("\nactivate"),
+            "an unconditional activate steals focus from whatever they are typing in"
+        );
+        assert!(DRAFT_BODY.contains("if front is \"1\" then activate"));
+        assert!(
+            DRAFT_BODY.contains("visible:true"),
+            "the window still opens"
+        );
+
+        let draft = SendDraft {
+            kind: SendKind::Email,
+            recipient: crate::agent::tools::mac_apps::recipients::Recipient {
+                name: "Jenny".to_string(),
+                address: "jenny@example.com".to_string(),
+                service: None,
+            },
+            subject: Some("Receipts".to_string()),
+            body: "Both attached.".to_string(),
+            attachments: vec!["/tmp/a.pdf".to_string(), "/tmp/b.pdf".to_string()],
+        };
+        // The flag is argv item 4, so the files start at 5 and the script's
+        // `repeat with i from 5` lines up with them.
+        assert_eq!(draft_argv(&draft, false)[3], "0");
+        assert_eq!(draft_argv(&draft, true)[3], "1");
+        assert_eq!(
+            &draft_argv(&draft, false)[4..],
+            ["/tmp/a.pdf", "/tmp/b.pdf"]
+        );
+        // A send takes no flag, so its files still start at item 4.
+        assert_eq!(&argv_for(&draft)[3..], ["/tmp/a.pdf", "/tmp/b.pdf"]);
+        assert!(SEND_BODY.contains("repeat with i from 4"));
+        assert!(DRAFT_BODY.contains("repeat with i from 5"));
         // A send never goes out before its files are in the message.
         let wait = SEND_BODY.find("count of attachments").unwrap_or(usize::MAX);
         let send = SEND_BODY.find("send m").unwrap_or(0);

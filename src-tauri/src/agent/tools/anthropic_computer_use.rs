@@ -3313,13 +3313,36 @@ pub async fn execute_bash_tool(
     // Handle restart parameter if provided (Anthropic Computer Use API requirement)
     let restart = input["restart"].as_bool().unwrap_or(false);
 
+    // Background mode covers the shell too (LAC-5007). `open -a Mail` takes
+    // the person's screen as surely as warping the pointer does, so it runs as
+    // `open -g -a Mail`, and an AppleScript `activate` does not run at all.
+    // The note travels with the output so the model does not then tell the
+    // person a window is in front of them when it is not.
+    use crate::agent::background_shell::ShellPolicy;
+    let (command, background_note) =
+        if crate::input_control::background_mode_enabled(app_handle).await {
+            match crate::agent::background_shell::policy_for(command) {
+                ShellPolicy::Run => (command.to_string(), None),
+                ShellPolicy::Rewritten { command, note } => {
+                    info!("[Bash] Background mode: running `{}` instead", command);
+                    (command, Some(note))
+                }
+                ShellPolicy::Refused(reason) => {
+                    info!("[Bash] Background mode refused `{}`", command);
+                    return Ok(create_anthropic_error_response(reason));
+                }
+            }
+        } else {
+            (command.to_string(), None)
+        };
+
     let state_manager = app_handle.state::<AppState>();
 
     // Use the Anthropic-compliant bash command execution - NO STRING COMPARISONS
     let result = handle_anthropic_result!(crate::commands::shell::bash_command(
         app_handle.clone(),
         state_manager,
-        command.to_string(),
+        command,
         None,          // timeout_seconds
         Some(restart), // restart parameter
         None,          // debug_mode
@@ -3331,28 +3354,33 @@ pub async fn execute_bash_tool(
     info!("Anthropic compliant bash result: {:?}", result);
 
     // Handle structured result - NO STRING COMPARISONS NEEDED
-    match result {
+    let mut answer = match result {
         crate::commands::shell::BashResult::Restarted => {
             // Tool was restarted - return official Anthropic message
-            Ok(json!({
+            json!({
                 "output": "tool has been restarted."
-            }))
+            })
         }
         crate::commands::shell::BashResult::Output(output) => {
             // Regular output
-            Ok(json!({
+            json!({
                 "output": output
-            }))
+            })
         }
         crate::commands::shell::BashResult::CommandResult { output, success } => {
             // Command execution result with exit code information
             let exit_code = if success { 0 } else { 1 };
-            Ok(json!({
+            json!({
                 "output": output,
                 "exit_code": exit_code
-            }))
+            })
         }
+    };
+
+    if let (Some(note), Some(map)) = (background_note, answer.as_object_mut()) {
+        map.insert("background_mode".to_string(), json!(note));
     }
+    Ok(answer)
 }
 
 /// Execute str_replace_based_edit_tool

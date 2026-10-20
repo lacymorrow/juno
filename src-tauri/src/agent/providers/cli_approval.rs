@@ -43,8 +43,23 @@ pub const APPROVE_TOOL_NAME: &str = "approve";
 /// round-trips through the prompt either, and so is `settings`, whose
 /// guardrail settings are refused by construction
 /// (`settings::registry::authorize_set`).
-pub const ALLOWED_TOOLS: &str = "Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,NotebookEdit,\
+///
+/// **`Bash` is deliberately not here** (LAC-5007). It used to be. The CLI's
+/// shell runs outside Juno's tool layer, so `open -a Mail` inside it took the
+/// person's screen while they were typing, with every one of background
+/// mode's guards looking the other way. Routing it through `approve` is what
+/// lets [`background_shell_answer`] read a command before it runs.
+///
+/// It costs one loopback round trip per shell call and asks the person
+/// nothing: with background mode off, or on a command that leaves the front
+/// alone, `verdict_for` allows it on the spot. Deciding per call rather than
+/// per spawn is also what makes toggling background mode take effect in the
+/// conversation already running, instead of at the next cold start.
+pub const ALLOWED_TOOLS: &str = "Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,NotebookEdit,\
      TodoWrite,Task,mcp__juno__computer,mcp__juno__settings";
+
+/// The CLI's own shell tool, as the permission prompt names it.
+pub const BASH_TOOL: &str = "Bash";
 
 /// How long the sheet waits for an answer before denying.
 pub const APPROVAL_TIMEOUT_SECS: u64 = 60;
@@ -102,6 +117,13 @@ pub async fn set_cli_ask_before_send_enabled(
 /// Without the server there is nothing to serve the prompt, so the old
 /// skip-permissions behaviour stays (that is the headless and test path,
 /// where no connectors load under `--strict-mcp-config` anyway).
+///
+/// Background mode's shell screen (LAC-5007) rides this same route, because
+/// `ALLOWED_TOOLS` no longer pre-approves `Bash`. The skip-permissions branch
+/// therefore has no shell screen: with no MCP server, or with "Ask before Juno
+/// sends" off, the CLI's `Bash` can still take the front and background mode's
+/// guarantee is limited to Juno's own tools. Both are headless, test or
+/// opted-out paths, and the gap is named rather than papered over.
 pub fn permission_args(ask_before_send: bool, has_mcp_server: bool) -> Vec<String> {
     if ask_before_send && has_mcp_server {
         vec![
@@ -112,6 +134,47 @@ pub fn permission_args(ask_before_send: bool, has_mcp_server: bool) -> Vec<Strin
         ]
     } else {
         vec!["--dangerously-skip-permissions".to_string()]
+    }
+}
+
+/// Read one `Bash` call against background mode, in the CLI's permission shape.
+///
+/// `None` when this is not a shell call, or when background mode is off, so
+/// the caller falls through to the ordinary send gate.
+///
+/// A rewrite travels as `updatedInput`, which the CLI runs in place of what
+/// the model wrote. A denial travels as the reason text, which the model does
+/// read. Nothing else is written into the input: a permission allow has no
+/// channel back to the model, so what it should say about a window that opened
+/// behind the person's work is taught once in `MCP_TOOL_GUIDANCE` instead of
+/// smuggled through a field meant for something else.
+async fn background_shell_answer(
+    app: &tauri::AppHandle,
+    tool_name: &str,
+    input: &Value,
+) -> Option<Value> {
+    use crate::agent::background_shell::{policy_for, ShellPolicy};
+
+    if tool_name != BASH_TOOL || !crate::input_control::background_mode_enabled(app).await {
+        return None;
+    }
+    let command = input.get("command").and_then(Value::as_str)?;
+    match policy_for(command) {
+        ShellPolicy::Run => None,
+        ShellPolicy::Rewritten {
+            command: rewritten, ..
+        } => {
+            info!("[CliApproval] Background mode: running `{rewritten}` instead");
+            let mut updated = input.clone();
+            if let Some(map) = updated.as_object_mut() {
+                map.insert("command".to_string(), json!(rewritten));
+            }
+            Some(allow_result(&updated))
+        }
+        ShellPolicy::Refused(reason) => {
+            info!("[CliApproval] Background mode refused `{command}`");
+            Some(deny_result(&reason))
+        }
     }
 }
 
@@ -455,6 +518,13 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
 
     if tool_name.is_empty() {
         return deny_result("Malformed permission request: no tool_name.");
+    }
+
+    // Background mode first, and independent of the send gate (LAC-5007).
+    // "Ask before Juno sends" is about what leaves the machine; this is about
+    // whose screen it is. Turning one off must not turn the other off.
+    if let Some(answer) = background_shell_answer(app, tool_name, &input).await {
+        return answer;
     }
 
     // Off means off: the old behaviour, everything runs.
@@ -847,6 +917,21 @@ mod tests {
         assert!(args.contains(&APPROVE_TOOL_CLI_NAME.to_string()));
         assert!(!args.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(args.contains(&"--allowedTools".to_string()));
+    }
+
+    /// LAC-5007. `Bash` was pre-approved, which is exactly why background mode
+    /// could not see `open -a Mail`: the call never reached Juno. The screen
+    /// in `background_shell_answer` only runs if the CLI asks first, so the
+    /// tool has to stay off this list.
+    #[test]
+    fn the_clis_shell_is_never_pre_approved() {
+        assert!(
+            !ALLOWED_TOOLS.split(',').any(|t| t == BASH_TOOL),
+            "pre-approving {BASH_TOOL} takes the CLI's shell out of background mode's reach"
+        );
+        // And it is still allowed once asked, so nothing new is put in front
+        // of the person: only a foregrounding command is ever stopped.
+        assert_eq!(verdict_for(BASH_TOOL), Verdict::Allow);
     }
 
     #[test]

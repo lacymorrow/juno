@@ -256,6 +256,31 @@ pub fn parse_app_command(command: &str) -> Option<AppTarget> {
     None
 }
 
+/// The app a command asks AppleScript to bring to the front, if it does.
+///
+/// Narrower than [`parse_app_command`] on purpose, and for a different
+/// question. That one asks "which app should Juno look at afterwards", so an
+/// `open -a` counts. This one asks "does this command take the screen with no
+/// way to do the same work quietly", so it does not: `open` has `-g`, and
+/// [`crate::agent::background_shell`] rewrites it rather than refusing it.
+/// What is left is AppleScript's `activate`, whose entire job is the front.
+pub fn applescript_activation(command: &str) -> Option<String> {
+    let patterns = patterns()?;
+    if let Some(caps) = patterns.activate_application.captures(command) {
+        return name_of(caps.get(1)?.as_str());
+    }
+    if !patterns.activates.is_match(command) {
+        return None;
+    }
+    name_of(
+        patterns
+            .tell_application
+            .captures(command)?
+            .get(1)?
+            .as_str(),
+    )
+}
+
 /// An app name from a path or a bare name, or `None` when there is nothing
 /// checkable there.
 fn name_of(raw: &str) -> Option<String> {
@@ -940,6 +965,29 @@ mod tests {
                 None,
                 "{command:?} should be left unobserved"
             );
+        }
+    }
+
+    /// The activation check answers a narrower question than the parse does:
+    /// only the forms with no quiet equivalent. `open -a` is excluded because
+    /// `open -g -a` exists, and that is what background mode uses instead.
+    #[test]
+    fn only_the_applescript_front_grabs_count_as_activation() {
+        assert_eq!(
+            applescript_activation(r#"osascript -e 'tell application "Mail" to activate'"#),
+            Some("Mail".to_string())
+        );
+        assert_eq!(
+            applescript_activation(r#"osascript -e 'activate application "Slack"'"#),
+            Some("Slack".to_string())
+        );
+        for command in [
+            "open -a Mail",
+            r#"osascript -e 'tell application "Music" to play'"#,
+            r#"osascript -e 'tell application "System Events" to keystroke "n"'"#,
+            "ls /Applications",
+        ] {
+            assert_eq!(applescript_activation(command), None, "{command:?}");
         }
     }
 

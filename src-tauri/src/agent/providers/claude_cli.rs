@@ -519,7 +519,11 @@ Work through accessibility first: list a window's controls with {\"action\": \"e
 Only fall back to screenshots and coordinates when a window lists no controls, and then take \
 the screenshot with 'window' so it shows just that window. The person keeps using their \
 computer while you work: never bring a window to the front or click into their apps to get \
-something done. For Juno's own settings (its voice, shortcuts, devices, or where a setting is) \
+something done. That rule covers the shell, not just the pointer: bringing an app forward with \
+`open -a` or `tell application \"X\" to activate` takes their hands off what they are typing in, \
+the same as grabbing the mouse would. Juno runs `open` in the background for you and refuses an \
+`activate`, so a window that appeared is behind their work: say that, and never tell them it is \
+on their screen. For Juno's own settings (its voice, shortcuts, devices, or where a setting is) \
 use the `settings` tool from the same server, never the desktop: it changes them live and \
 points the Settings window at them. \
 For Reminders, Calendar and Contacts use the juno server's reminders_, calendar_ and contacts_ \
