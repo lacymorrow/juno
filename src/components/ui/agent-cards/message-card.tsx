@@ -18,7 +18,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, Paperclip } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { COMMANDS } from "@/lib/constants.generated";
 import { cn } from "@/lib/utils";
@@ -36,6 +36,8 @@ export interface MessageCardProps {
   address?: string;
   subject?: string;
   body?: string;
+  /** File names attached to an email, in the order they go. */
+  attachments?: string[];
   /** The draft's one action. Only drawn while the draft waits. */
   onSend?: () => void;
   /** Set when access is off. Names what is needed: "Full Disk Access", "Messages". */
@@ -88,6 +90,7 @@ export function MessageCard({
   address,
   subject,
   body,
+  attachments,
   onSend,
   needsAccess,
   reason,
@@ -226,6 +229,17 @@ export function MessageCard({
       <p className={cn("mt-2 whitespace-pre-wrap break-words text-sm", current === "sent" && "text-muted-foreground")}>
         {body}
       </p>
+
+      {attachments && attachments.length > 0 ? (
+        <ul className="mt-2 space-y-1" aria-label="Attachments">
+          {attachments.map((name) => (
+            <li key={name} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
+              <span className="truncate">{name}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
 
       {showSend ? (
         <div className="mt-3 flex justify-end">

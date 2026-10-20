@@ -167,6 +167,16 @@ pub struct SendDraft {
     pub recipient: Recipient,
     pub subject: Option<String>,
     pub body: String,
+    /// Absolute paths of files to attach (email only), already checked to exist.
+    pub attachments: Vec<String>,
+}
+
+/// The file name a person recognises: "quote.pdf" for "/Users/x/quote.pdf".
+pub fn file_name(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
 }
 
 /// The fields the card draws.
@@ -180,6 +190,9 @@ pub struct CardData {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<String>,
     pub body: String,
+    /// Attached file names, in order. Empty for most messages.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<String>,
     /// The line Juno says while the card waits.
     pub prompt: String,
 }
@@ -207,6 +220,13 @@ impl SendDraft {
         let to = first_name(&self.recipient.name);
         let body = clip(self.body.trim(), 240);
         let body = body.trim_end_matches(['.', '!', '?']);
+        let files = match self.attachments.len() {
+            0 => String::new(),
+            1 => format!(" With {} attached.", file_name(&self.attachments[0])),
+            n => format!(" With {n} files attached."),
+        };
+        let body = format!("{body}.{files}");
+        let body = body.trim_end_matches('.');
         match (&self.kind, &self.subject) {
             (SendKind::Email, Some(subject)) if !subject.trim().is_empty() => format!(
                 "Email to {to}, {}: {body}. {SAY_SEND_IT}",
@@ -225,6 +245,7 @@ impl SendDraft {
             service: self.recipient.service.map(|s| s.as_str().to_string()),
             subject: self.subject.clone(),
             body: self.body.clone(),
+            attachments: self.attachments.iter().map(|p| file_name(p)).collect(),
             prompt: self.prompt(),
         }
     }
@@ -250,6 +271,11 @@ impl SendDraft {
         );
         if let Some(subject) = &data.subject {
             tag.push_str(&format!(" subject={{{}}}", attr(subject)));
+        }
+        if !data.attachments.is_empty() {
+            let names =
+                serde_json::to_string(&data.attachments).unwrap_or_else(|_| "[]".to_string());
+            tag.push_str(&format!(" attachments={{{names}}}"));
         }
         tag.push_str(&format!(" body={{{}}} />", attr(&data.body)));
         tag
@@ -371,6 +397,7 @@ mod tests {
             },
             subject: None,
             body: "I'm running ten minutes late".to_string(),
+            attachments: Vec::new(),
         }
     }
 

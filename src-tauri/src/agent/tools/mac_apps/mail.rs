@@ -52,8 +52,8 @@ end repeat
 end tell
 return out"#;
 
-/// argv: address, subject, body. Sends, then watches Sent for it.
-/// Answers "sent", "unseen" or "refused".
+/// argv: address, subject, body, then any file paths to attach. Sends, then
+/// watches Sent for it. Answers "sent", "unseen" or "refused".
 const SEND_BODY: &str = r#"set a to item 1 of argv
 set s to item 2 of argv
 set b to item 3 of argv
@@ -61,6 +61,18 @@ set startDate to (current date) - 5
 tell application "Mail"
 set m to make new outgoing message with properties {subject:s, content:b, visible:false}
 tell m to make new to recipient at end of to recipients with properties {address:a}
+if (count of argv) > 3 then
+repeat with i from 4 to (count of argv)
+tell content of m to make new attachment with properties {file name:(POSIX file (item i of argv))} at after last paragraph
+end repeat
+end if
+-- Mail adds attachments asynchronously; a send before they land goes without them.
+set want to (count of argv) - 3
+repeat 40 times
+if (count of attachments of content of m) >= want then exit repeat
+delay 0.25
+end repeat
+if (count of attachments of content of m) < want then return "OK" & US & "unattached"
 set didSend to send m
 end tell
 if didSend is false then return "OK" & US & "refused"
@@ -73,18 +85,25 @@ if (count of hits) > 0 then return "OK" & US & "sent"
 end repeat
 return "OK" & US & "unseen""#;
 
-/// argv: address, subject, body. Opens the message in a window, unsent, and
-/// answers how many open messages have that subject.
+/// argv: address, subject, body, then any file paths to attach. Opens the
+/// message in a window, unsent, and answers how many open messages have that
+/// subject and how many files it holds.
 const DRAFT_BODY: &str = r#"set a to item 1 of argv
 set s to item 2 of argv
 set b to item 3 of argv
 tell application "Mail"
 set m to make new outgoing message with properties {subject:s, content:b, visible:true}
 tell m to make new to recipient at end of to recipients with properties {address:a}
+if (count of argv) > 3 then
+repeat with i from 4 to (count of argv)
+tell content of m to make new attachment with properties {file name:(POSIX file (item i of argv))} at after last paragraph
+end repeat
+end if
 activate
 set n to count of (outgoing messages whose subject is s)
+set k to count of attachments of content of m
 end tell
-return "OK" & US & (n as text)"#;
+return "OK" & US & (n as text) & US & (k as text)"#;
 
 /// One message in a list, worded for a person.
 fn listed(records: &[Vec<String>]) -> Vec<Value> {
@@ -209,22 +228,59 @@ pub(crate) fn preview(input: &Value) -> Result<Result<SendDraft, Value>, String>
     let to = required_text(input, "to")?;
     let body = required_text(input, "body")?;
     let subject = text_arg(input, "subject").map(str::to_string);
+    let attachments = attachment_paths(input)?;
     Ok(
         resolve_recipient(to, Channel::Email)?.map(|recipient| SendDraft {
             kind: SendKind::Email,
             recipient,
             subject,
             body: body.to_string(),
+            attachments,
         }),
     )
 }
 
+/// The `attachments` argument as absolute paths of files that exist. `~/` is
+/// the home folder. A path that is not a file fails the whole call, so nothing
+/// is drafted or sent without a file the person asked for.
+pub fn attachment_paths(input: &Value) -> Result<Vec<String>, String> {
+    let Some(list) = input.get("attachments").and_then(Value::as_array) else {
+        return Ok(Vec::new());
+    };
+    let home = dirs::home_dir();
+    let mut paths = Vec::new();
+    let mut missing = Vec::new();
+    for raw in list.iter().filter_map(Value::as_str).map(str::trim) {
+        if raw.is_empty() {
+            continue;
+        }
+        let path = match (raw.strip_prefix("~/"), &home) {
+            (Some(rest), Some(home)) => home.join(rest),
+            _ => std::path::PathBuf::from(raw),
+        };
+        if path.is_absolute() && path.is_file() {
+            paths.push(path.to_string_lossy().into_owned());
+        } else {
+            missing.push(raw.to_string());
+        }
+    }
+    if !missing.is_empty() {
+        return Err(format!(
+            "No file at {}. Give the full path of each file to attach.",
+            missing.join(", ")
+        ));
+    }
+    Ok(paths)
+}
+
 fn argv_for(draft: &SendDraft) -> Vec<String> {
-    vec![
+    let mut argv = vec![
         draft.recipient.address.clone(),
         draft.subject.clone().unwrap_or_default(),
         draft.body.clone(),
-    ]
+    ];
+    argv.extend(draft.attachments.iter().cloned());
+    argv
 }
 
 /// What Mail answered after a send, as evidence.
@@ -232,6 +288,7 @@ pub fn send_evidence(answer: &str) -> Evidence {
     match answer.trim() {
         "sent" => Evidence::Confirmed,
         "refused" => Evidence::Failed,
+        "unattached" => Evidence::Failed,
         _ => Evidence::Unseen("Mail took it, but it has not shown up in Sent yet.".to_string()),
     }
 }
@@ -268,12 +325,17 @@ pub fn draft(input: &Value) -> Result<Value, String> {
             return Ok(answer);
         }
     };
-    let open = match script::run(&script::wrap(DRAFT_BODY), argv_for(&draft))? {
-        Outcome::Ok(records) => records
-            .first()
-            .and_then(|r| r.first())
-            .and_then(|n| n.trim().parse::<usize>().ok())
-            .unwrap_or(0),
+    let (open, attached) = match script::run(&script::wrap(DRAFT_BODY), argv_for(&draft))? {
+        Outcome::Ok(records) => {
+            let field = |i: usize| {
+                records
+                    .first()
+                    .and_then(|r| r.get(i))
+                    .and_then(|n| n.trim().parse::<usize>().ok())
+                    .unwrap_or(0)
+            };
+            (field(0), field(1))
+        }
         Outcome::Err { number, message } => {
             return Ok(script::error_result(App::Mail, number, &message))
         }
@@ -284,12 +346,23 @@ pub fn draft(input: &Value) -> Result<Value, String> {
             "summary": "Mail did not open the draft.",
         }));
     }
+    let files = match (draft.attachments.len(), attached) {
+        (0, _) => String::new(),
+        (want, got) if got >= want => format!(" {want} attached."),
+        (want, got) => {
+            format!(" Only {got} of {want} files attached; add the rest in the Mail window.")
+        }
+    };
     Ok(json!({
         "ok": true,
         "sent": false,
-        "summary": format!("The draft to {} is open in Mail. Nothing was sent.", draft.recipient.name),
+        "summary": format!(
+            "The draft to {} is open in Mail.{files} Nothing was sent.",
+            draft.recipient.name
+        ),
         "to": draft.recipient.name,
         "address": draft.recipient.address,
+        "observed": { "attachments": attached },
     }))
 }
 
@@ -324,6 +397,35 @@ mod tests {
             assert!(!script.contains("{}"), "{body}");
         }
         assert!(!DRAFT_BODY.contains("send m"), "a draft never sends");
+        // Files reach both scripts only as argv items after the body.
+        for body in [SEND_BODY, DRAFT_BODY] {
+            assert!(body.contains("item i of argv"), "{body}");
+            assert!(body.contains("make new attachment"), "{body}");
+        }
+        // A send never goes out before its files are in the message.
+        let wait = SEND_BODY.find("count of attachments").unwrap_or(usize::MAX);
+        let send = SEND_BODY.find("send m").unwrap_or(0);
+        assert!(wait < send);
+    }
+
+    #[test]
+    fn attachments_must_be_real_files() {
+        assert_eq!(attachment_paths(&json!({})), Ok(Vec::new()));
+        let here = std::env::current_exe()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        assert_eq!(
+            attachment_paths(&json!({"attachments": [here.clone()]})),
+            Ok(vec![here])
+        );
+        let err = attachment_paths(&json!({"attachments": ["/no/such/quote.pdf"]}));
+        assert!(err.is_err_and(|e| e.contains("/no/such/quote.pdf")));
+        assert!(attachment_paths(&json!({"attachments": ["relative.pdf"]})).is_err());
+    }
+
+    #[test]
+    fn an_attachment_that_never_lands_is_not_a_send() {
+        assert_eq!(send_evidence("unattached"), Evidence::Failed);
     }
 
     #[test]
