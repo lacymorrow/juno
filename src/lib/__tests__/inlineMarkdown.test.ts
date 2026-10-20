@@ -58,6 +58,22 @@ describe("parseInlineMarkdown: prose that only looks like markdown", () => {
     expect(parse("MAX_RECENT and MIN_RECENT")).toBe("MAX_RECENT and MIN_RECENT");
   });
 
+  it("keeps a filename whole, which is stricter than markdown on purpose", () => {
+    // CommonMark bolds the `init` here. Juno's answers name files, so a
+    // filename losing its underscores is the bug `snake_case` already avoids.
+    expect(parse("__init__.py is a file")).toBe("__init__.py is a file");
+    expect(parse("see my_mod_.ts")).toBe("see my_mod_.ts");
+    // Prose is untouched: a sentence ends with `.` and a space, not `.` + word.
+    expect(parse("it was _fine_. Then it broke")).toBe("it was em(fine). Then it broke");
+  });
+
+  it("leaves a path or a URL with underscores in it alone", () => {
+    expect(parse("Use src/lib/my_module.ts and other_file.ts")).toBe(
+      "Use src/lib/my_module.ts and other_file.ts",
+    );
+    expect(parse("See https://ex.com/a_b_c/d_e now")).toBe("See https://ex.com/a_b_c/d_e now");
+  });
+
   it("keeps an unclosed mark as the characters it is", () => {
     expect(parse("**half a thought")).toBe("**half a thought");
     expect(parse("a lone ` backtick")).toBe("a lone ` backtick");
