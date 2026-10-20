@@ -1706,17 +1706,29 @@ pub async fn ui_set_bar_config(
         let mut manager = manager.lock().await;
         manager.bar_config = config.clone();
         manager.save_bar_config().await?;
+        let drawn = as_drawn(&app_handle, config);
 
         // The bar window is not navigated on an appearance change. Every bar
         // route renders `BarHost`, which swaps the component when this event
         // arrives; a navigation only reloaded the page (a blank window, a cold
         // fetch of the orb and avatar chunks, and a second settings load whose
         // failure toast surfaced in the settings window).
-        if let Err(e) = manager
-            .app_handle
-            .emit(events::bar::CONFIG_CHANGED, as_drawn(&app_handle, config))
-        {
+        if let Err(e) = manager.app_handle.emit(events::bar::CONFIG_CHANGED, &drawn) {
             warn!("Failed to emit config change event: {}", e);
+        }
+        drop(manager);
+
+        // Switching to a look that holds the big chat itself puts the chat
+        // window away, so the same conversation is not on screen twice.
+        if ui::bar_appearances::owns_full_chat(&drawn.bar_appearance)
+            && crate::window_management::WindowManager::is_window_visible(
+                &app_handle,
+                crate::constants::ui::window_labels::MAIN,
+            )
+        {
+            if let Err(e) = crate::window_management::close_main_window(app_handle.clone()).await {
+                warn!("Could not put the chat window away for the Island: {}", e);
+            }
         }
 
         Ok(())

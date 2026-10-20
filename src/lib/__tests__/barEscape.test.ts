@@ -160,8 +160,10 @@ describe("barEscape: the visibility ladder", () => {
       climbTarget(UI.LADDER_STEPS_NEXT as LadderStep, { ...rest, composerOpen: true }),
     ).toBe("floating");
     expect(climbTarget(UI.LADDER_STEPS_NEXT as LadderStep, { ...rest, overlayOpen: true })).toBe(
-      "main",
+      "full",
     );
     expect(climbTarget(UI.LADDER_STEPS_FLOATING as LadderStep, rest)).toBe("floating");
+    // Rust asks a look that holds the big chat itself for it by name.
+    expect(climbTarget(UI.LADDER_STEPS_FULL as LadderStep, rest)).toBe("full");
   });
 });

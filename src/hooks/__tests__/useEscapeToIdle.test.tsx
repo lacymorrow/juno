@@ -260,6 +260,16 @@ describe("useEscapeToIdle: the ladder up", () => {
     expect(called(OPEN_MAIN)).toBe(1);
   });
 
+  it("opens a look's own big chat instead of the chat window when it has one", () => {
+    const openFullChat = vi.fn();
+    const { climb } = render({ overlayOpen: true, openFullChat });
+    ladder("next");
+    ladder("full");
+    expect(openFullChat).toHaveBeenCalledTimes(2);
+    expect(climb).not.toHaveBeenCalled();
+    expect(called(OPEN_MAIN)).toBe(0);
+  });
+
   it("opens the floating chat when Escape steps down from the big chat", () => {
     const { climb } = render();
     ladder("floating");

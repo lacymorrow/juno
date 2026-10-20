@@ -700,6 +700,9 @@ export function IslandBar() {
       }
       openComposerThroughRust(() => void sendInteraction(UI.INTERACTION_TYPES_CLICK));
     },
+    // The Island's large chat is the big chat: every route that opened the
+    // chat window opens it, empty with its example prompts before any turn.
+    openFullChat: openChat,
   });
 
   // ── Controls ──
