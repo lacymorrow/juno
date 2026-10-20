@@ -71,7 +71,16 @@ export const PermissionCoach = () => {
   /** True once an event has arrived, so a late first read cannot undo it. */
   const heardFromRust = useRef(false);
 
-  useEventListener<CoachState>(EVENTS.PERMISSIONS_COACH, (payload) => {
+  useEventListener<CoachState | null>(EVENTS.PERMISSIONS_COACH, (payload) => {
+    // A null payload is Rust saying the card is down. Blank the page rather
+    // than keep the last line: the window is hidden, not closed, and `show()`
+    // presents whatever was last rendered, so holding on to "Accessibility is
+    // on" would flash that receipt under the *next* ask.
+    if (payload === null) {
+      heardFromRust.current = true;
+      setState(null);
+      return;
+    }
     if (!payload?.permission) return;
     heardFromRust.current = true;
     setState(payload);

@@ -120,4 +120,35 @@ describe("PermissionCoach", () => {
     expect(screen.getByTestId("permission-coach-arrow")).toBeInTheDocument();
     expect(screen.getByTestId("permission-coach").className).toContain("flex-row");
   });
+
+  it("goes blank when the card comes down, so the next ask cannot inherit this one's receipt", async () => {
+    // The window is hidden, never closed, and `show()` presents whatever was
+    // last rendered. A page still holding "Accessibility is on" would flash
+    // that under the next ask, telling somebody a switch is on at the moment
+    // they are being asked to turn it on.
+    render(<PermissionCoach />);
+    emit({ ...POINTING, granted: true });
+    await waitFor(() => expect(screen.getByText(POINTING.receipt)).toBeInTheDocument());
+
+    emit(null);
+    await waitFor(() => expect(screen.queryByTestId("permission-coach")).toBeNull());
+    expect(screen.queryByText(POINTING.receipt)).toBeNull();
+  });
+
+  it("stays blank if a slow first read lands after the card came down", async () => {
+    // Same race as the receipt one, in the other direction: the mount-time read
+    // resolves late, and must not resurrect a card Rust has already taken down.
+    let settle: (value: unknown) => void = () => {};
+    invoke.mockReturnValue(new Promise((resolve) => (settle = resolve)));
+
+    render(<PermissionCoach />);
+    emit(POINTING);
+    await waitFor(() => expect(screen.getByText(POINTING.headline)).toBeInTheDocument());
+
+    emit(null);
+    await waitFor(() => expect(screen.queryByTestId("permission-coach")).toBeNull());
+
+    settle(POINTING);
+    await waitFor(() => expect(screen.queryByTestId("permission-coach")).toBeNull());
+  });
 });
