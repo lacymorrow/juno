@@ -461,16 +461,42 @@ fn forget(id: u64) -> bool {
     true
 }
 
+/// Is `id` still the card that is up?
+///
+/// A follow task or a receipt timer can get one more tick in after a newer card
+/// replaced it, and at that point the window is not theirs to touch.
+fn is_current(id: u64) -> bool {
+    match LIVE.lock() {
+        Ok(live) => live.as_ref().map(|current| current.id) == Some(id),
+        // Unreadable means unknown, and unknown must not authorise touching a
+        // window that may belong to a newer card.
+        Err(_) => false,
+    }
+}
+
 /// Take down the card `id` names, if it is still the card that is up.
 fn put_away(app: &AppHandle, id: u64) {
     if !forget(id) {
         return;
     }
+    hide_card(app);
+}
+
+/// Hide the window and blank the page behind it.
+///
+/// Blanking is not tidiness. `show()` presents whatever the page last
+/// rendered, and the page is only ever told a new state *just* before the
+/// window is shown, so a card left holding "Accessibility is on" flashes that
+/// receipt as the **next** ask appears. A blank frame is honest; a stale
+/// receipt tells somebody a switch is on when they are being asked to turn it
+/// on.
+fn hide_card(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(window_labels::PERMISSION_COACH) {
         if let Err(e) = window.hide() {
             warn!("Could not put the coaching card away: {}", e);
         }
     }
+    emit_cleared(app);
 }
 
 /// Keep card `id` beside the System Settings window for as long as it belongs
@@ -482,6 +508,38 @@ fn put_away(app: &AppHandle, id: u64) {
 /// up long enough that nobody is still reading it. The fourth way out is the
 /// grant, which is [`note_granted`]'s and arrives as an event.
 async fn follow(app: AppHandle, id: u64, token: CancellationToken) {
+    // The card leaves on a `permission-granted` event and on nothing else, so
+    // something has to be watching for the flip. Arm that here rather than
+    // trust the UI to have done it: monitoring starts when `PermissionsFlow` or
+    // `Onboarding` mounts and stops when they unmount, and a card can be raised
+    // from neither (`PermissionNotice` opens the same pane). A card with no
+    // watcher goes on saying "turn its switch on" until it times out, two
+    // minutes after the person turned it on.
+    let ours = crate::commands::permissions::ensure_permissions_monitoring(&app);
+
+    follow_until_done(&app, id, token).await;
+
+    // Hand the watcher back, unless a card still needs it. A newer card that
+    // replaced this one cancelled our token, so we arrive here while it is
+    // mid-ask; stopping its watcher would leave *it* unable to leave, which is
+    // the same bug one card along. When the lock cannot be read we keep the
+    // watcher: a spare poll loop is cheaper than a card that cannot go away.
+    if ours && no_card_is_up() {
+        crate::commands::permissions::release_permissions_monitoring();
+    }
+}
+
+/// Is nothing at all up? Used only to decide whether the watcher is still owed.
+fn no_card_is_up() -> bool {
+    match LIVE.lock() {
+        Ok(live) => live.is_none(),
+        // A spare poll loop is cheaper than a card that cannot go away, so an
+        // unreadable registry keeps the watcher.
+        Err(_) => false,
+    }
+}
+
+async fn follow_until_done(app: &AppHandle, id: u64, token: CancellationToken) {
     let started = Instant::now();
     let mut ever_found = false;
     let mut interval = tokio::time::interval(FOLLOW_EVERY);
@@ -494,14 +552,14 @@ async fn follow(app: AppHandle, id: u64, token: CancellationToken) {
 
         if started.elapsed() > UP_FOR_AT_MOST {
             info!("The coaching card has been up long enough; putting it away");
-            put_away(&app, id);
+            put_away(app, id);
             return;
         }
 
         match settings_window().await {
             Some(settings) => {
                 ever_found = true;
-                if let Err(e) = show_beside(&app, id, settings) {
+                if let Err(e) = show_beside(app, id, settings) {
                     warn!("Could not place the coaching card: {}", e);
                 }
             }
@@ -509,13 +567,13 @@ async fn follow(app: AppHandle, id: u64, token: CancellationToken) {
                 // They closed System Settings. Whether or not they flipped the
                 // switch, they are done being coached.
                 info!("System Settings has gone; putting the coaching card away");
-                put_away(&app, id);
+                put_away(app, id);
                 return;
             }
             None => {
                 if started.elapsed() > WAIT_FOR_SETTINGS {
                     info!("System Settings never appeared; no coaching card");
-                    put_away(&app, id);
+                    put_away(app, id);
                     return;
                 }
             }
@@ -575,9 +633,18 @@ fn show_beside(app: &AppHandle, id: u64, settings: PointRect) -> Result<(), Stri
     let usable = usable_area_for(app, &settings);
     let Some(placement) = place(settings, usable, CARD) else {
         // System Settings fills the display. Nothing fits beside it, and over
-        // it is not an option, so say nothing.
+        // it is not an option, so say nothing *for now*.
+        //
+        // Not `put_away`: that cancels the follow and forgets the card, so one
+        // bad tick ended the coaching for good. System Settings zoomed, or
+        // opened full-screen on a small display, is a thing a person undoes a
+        // second later by dragging the window — and then there is room, and
+        // the card should come back. Keep the card registered and let the next
+        // tick place it.
         debug!("No room beside System Settings for the coaching card");
-        put_away(app, id);
+        if is_current(id) && window.is_visible().unwrap_or(false) {
+            hide_card(app);
+        }
         return Ok(());
     };
 
@@ -610,16 +677,37 @@ fn show_beside(app: &AppHandle, id: u64, settings: PointRect) -> Result<(), Stri
         .set_position(LogicalPosition::new(placement.rect.x, placement.rect.y))
         .map_err(|e| format!("Could not place the coaching card: {}", e))?;
 
-    if let Some(state) = changed_side {
+    let appearing = !window.is_visible().unwrap_or(false);
+
+    // The page is told its state when the side changes, and also whenever the
+    // window is about to appear. The second half matters because hiding blanks
+    // the page: a card that went away for want of room and is now coming back
+    // has a side that did not change and a page with nothing on it, and would
+    // otherwise appear empty.
+    let say = match changed_side {
+        Some(state) => Some(state),
+        None if appearing => current_state(id),
+        None => None,
+    };
+    if let Some(state) = say {
         emit_state(app, &state);
     }
 
-    if !window.is_visible().unwrap_or(false) {
+    if appearing {
         window
             .show()
             .map_err(|e| format!("Could not show the coaching card: {}", e))?;
     }
     Ok(())
+}
+
+/// What card `id` is currently saying, if it is still the card that is up.
+fn current_state(id: u64) -> Option<CoachState> {
+    LIVE.lock()
+        .ok()?
+        .as_ref()
+        .filter(|current| current.id == id)
+        .map(|current| current.state.clone())
 }
 
 /// The work area of the display System Settings is on, in points.
@@ -691,6 +779,16 @@ fn coach_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
 fn emit_state(app: &AppHandle, state: &CoachState) {
     if let Err(e) = app.emit(events::permissions::COACH, state) {
         warn!("Could not tell the coaching card what to say: {}", e);
+    }
+}
+
+/// Tell the page it has nothing to say. Same event, a `null` payload.
+///
+/// One event rather than two, so the page has one thing to listen to and the
+/// clear can never arrive out of order with a state.
+fn emit_cleared(app: &AppHandle) {
+    if let Err(e) = app.emit(events::permissions::COACH, Option::<CoachState>::None) {
+        warn!("Could not blank the coaching card: {}", e);
     }
 }
 
@@ -981,9 +1079,24 @@ mod tests {
     fn a_card_is_only_ever_taken_down_by_whoever_put_it_up() {
         let pane = pane_for("accessibility").expect("accessibility is coached");
 
+        // Nothing up to begin with, so nothing is owed a watcher.
+        assert!(no_card_is_up());
+
         // One ask puts a card up, pointing rather than granted.
         let (first, first_token) = register(pane).expect("the registry took the card");
         assert!(!first_token.is_cancelled());
+
+        // The card that is up is the one that may be moved or hidden, and it is
+        // the only one. `show_beside` leans on this to decide whether a tick
+        // that found no room beside System Settings is still allowed to hide
+        // the window.
+        assert!(is_current(first));
+        assert!(!no_card_is_up(), "a card is up but the watcher looks idle");
+        assert_eq!(
+            current_state(first).map(|s| s.headline),
+            Some(pane.headline.to_string()),
+            "a card coming back after there was no room would reappear blank"
+        );
 
         // A grant for something else is not this card's business.
         assert!(mark_granted("microphone").is_none());
@@ -1006,6 +1119,13 @@ mod tests {
         let (second, second_token) = register(pane).expect("the registry took the second card");
         assert_ne!(second, first, "an id was reused");
 
+        // The replaced card is current no longer, and has nothing to say. A
+        // tick of its follow that is still in flight therefore cannot hide the
+        // window the new card is using, nor re-emit the old card's words.
+        assert!(is_current(second));
+        assert!(!is_current(first));
+        assert!(current_state(first).is_none());
+
         // The first card's timer now fires. It must not touch the new card.
         assert!(
             !forget(first),
@@ -1024,6 +1144,39 @@ mod tests {
         // than a hide of whatever happens to be up.
         assert!(!forget(second));
         assert!(!forget(first));
+
+        // Nothing is up, which is the condition under which a follow that
+        // started the permission watcher is allowed to stop it again. While a
+        // card is up it must not, or that card could never leave.
+        assert!(no_card_is_up());
+        assert!(!is_current(second));
+    }
+
+    /// A source check rather than a behaviour one, deliberately: arming the
+    /// watcher needs a running Tauri app, so there is nothing to assert against
+    /// here except that the coupling is still written down.
+    ///
+    /// It is worth a test because the coupling is invisible. The card leaves on
+    /// a `permission-granted` event and on nothing else, and that event only
+    /// exists while permission monitoring runs — which is started when
+    /// `PermissionsFlow` or `Onboarding` mounts and stopped when they unmount.
+    /// A card can be raised from neither (`PermissionNotice` opens the same
+    /// pane), so the follow arms its own watcher. Delete that and nothing fails
+    /// except a stranger's card, which sits there telling them to turn on a
+    /// switch they already turned on.
+    #[test]
+    fn raising_a_card_arms_the_watcher_that_takes_it_down() {
+        let source = include_str!("permission_coach.rs");
+        assert!(
+            source.contains("ensure_permissions_monitoring(&app)"),
+            "the follow no longer arms permission monitoring, so a card raised \
+             outside PermissionsFlow or Onboarding can never leave on the grant"
+        );
+        assert!(
+            source.contains("release_permissions_monitoring()"),
+            "the follow arms monitoring and never hands it back, so one coaching \
+             card leaves a 1s native permission poll running for the life of the app"
+        );
     }
 
     #[test]
