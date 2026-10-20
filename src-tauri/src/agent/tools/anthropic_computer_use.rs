@@ -5138,7 +5138,12 @@ mod input_targeting_tests {
             .match_indices("run_background_first(\n")
             .map(|(i, _)| i)
             .collect();
-        assert!(calls.len() >= 12, "found {} call sites", calls.len());
+        // Left and double clicks go through `run_verified_click`, one call
+        // on a single line; every other action keeps its own call site.
+        assert!(calls.len() >= 9, "found {} call sites", calls.len());
+        assert!(SOURCE.contains(
+            "run_background_first(app_handle, action, target_app, window_pin, &attempt)"
+        ));
         for i in calls {
             let head: String = SOURCE[i..].chars().take(300).collect();
             assert!(
