@@ -624,8 +624,8 @@ async fn toggle_chat_from_tray(app: &AppHandle) {
     refresh_chat_toggle_label(app).await;
 }
 
-/// The tray icon's click: one rung up, from what was on screen as the pointer
-/// arrived (see `toggle_chat_from_tray`).
+/// A right click on the tray icon: one rung up, from what was on screen as
+/// the pointer arrived (see `toggle_chat_from_tray`).
 async fn climb_from_tray(app: &AppHandle) {
     let surface = {
         let manager = get_tray_icon_manager().await;
@@ -897,9 +897,11 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
     let idle_frame = FRAMES_IDLE.first().ok_or("idle tray icon has no frames")?;
     let default_icon = load_tray_icon_from_data(idle_frame)?;
 
+    // Left click opens the menu, the Mac convention for a menu bar extra;
+    // right click climbs the ladder (`handle_tray_icon_event`).
     let tray_icon = TrayIconBuilder::new()
         .menu(&tray_menu)
-        .show_menu_on_left_click(false)
+        .show_menu_on_left_click(true)
         .icon(default_icon)
         .icon_as_template(true)
         .tooltip(TrayIconState::Idle.tooltip())
@@ -907,6 +909,13 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
             handle_tray_icon_event(tray.app_handle(), event);
         })
         .build(app)?;
+    // Tauri only exposes the left-click switch. tray-icon also opens the menu
+    // on a right click by default, which would leave nothing for the climb.
+    if let Err(e) =
+        tray_icon.with_inner_tray_icon(|inner| inner.set_show_menu_on_right_click(false))
+    {
+        warn!("[TrayIcon] Could not keep the menu off the right click: {e}");
+    }
 
     // Initialize the tray icon manager
     let app_handle = app.clone();
@@ -1416,11 +1425,11 @@ pub fn handle_tray_icon_event(app_handle: &AppHandle, event: tauri::tray::TrayIc
         // release never arrives for a click posted by automation (juno-cua,
         // cliclick), which is how Juno records her own demos.
         tauri::tray::TrayIconEvent::Click {
-            button: MouseButton::Left,
+            button: MouseButton::Right,
             button_state: MouseButtonState::Down,
             ..
         } => {
-            info!("[TrayIcon] Left click detected on tray icon");
+            info!("[TrayIcon] Right click detected on tray icon");
             // One rung up the ladder per click, the same as the Dock icon:
             // hidden to the text input, the idle bar or the text input to the
             // floating chat, the floating chat to the big chat. Putting Juno
@@ -1431,12 +1440,12 @@ pub fn handle_tray_icon_event(app_handle: &AppHandle, event: tauri::tray::TrayIc
             });
         }
         tauri::tray::TrayIconEvent::Click {
-            button: MouseButton::Right,
-            button_state: MouseButtonState::Up,
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Down,
             ..
         } => {
-            info!("[TrayIcon] Right click detected on tray icon");
-            // Right click behavior is handled by menu system
+            info!("[TrayIcon] Left click detected on tray icon");
+            // The menu opens on its own (`show_menu_on_left_click`).
         }
         // The pointer has to cross the icon before it can open the menu, so
         // this is the last moment the chat row can be brought up to date. The
