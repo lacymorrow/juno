@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.232] - 2026-10-20
+
+### Fixed
+
+- **background:** the shell stops taking the screen, and a draft stops taking the front (#859) (705c3f80)
+
 ## [0.8.231] - 2026-10-20
 
 ### Fixed
@@ -1596,7 +1602,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.231...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.232...HEAD
+[0.8.232]: https://github.com/lacymorrow/juno/compare/cua-v0.8.231...v0.8.232
 [0.8.231]: https://github.com/lacymorrow/juno/compare/cua-v0.8.230...v0.8.231
 [0.8.230]: https://github.com/lacymorrow/juno/compare/cua-v0.8.229...v0.8.230
 [0.8.229]: https://github.com/lacymorrow/juno/compare/cua-v0.8.228...v0.8.229
