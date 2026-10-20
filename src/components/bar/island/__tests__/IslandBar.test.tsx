@@ -1216,14 +1216,12 @@ describe("IslandBar: Open chat from the hover capsule", () => {
     const shapeHit = (frameReport.mock.calls[frameReport.mock.calls.length - 1][1] as Array<{ width: number }>)[0];
     // Talk and Open chat.
     expect(shapeHit.width).toBe(104);
-    // No answer yet: the small surface is the composer, where a chat starts.
+    // No answer yet: the full chat, empty, without waiting on Rust to answer
+    // a click (when it did not, the button did nothing at all).
     fireEvent.click(screen.getByRole("button", { name: "Open chat" }));
-    expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(true);
-    await rustAnswers();
-    expect(face()).toBe("compose");
+    expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(false);
+    expect(face()).toBe("chat");
     expect(placeholder()).toHaveTextContent("Ask Juno");
-    await escape();
-    expect(face()).toBe("idle");
   });
 
   it("opens its tooltip from the native forwarded hover", async () => {
