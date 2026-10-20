@@ -36,6 +36,17 @@ const ESCAPABLE = new Set(["\\", "`", "*", "_", "~", "[", "]", "(", ")", "#", "-
 const WORD_CHAR = /[\p{L}\p{N}]/u;
 
 /**
+ * A file extension right after a closing `_` run, as in `__init__.py`.
+ *
+ * This is the one place the parser is deliberately stricter than markdown,
+ * which bolds the `init` there. Juno's answers name files, and a filename
+ * losing its underscores is the same bug as `snake_case_name` losing them.
+ * Prose is untouched: emphasis ending a sentence is followed by `.` and a
+ * space, not by `.` and a word.
+ */
+const FILE_EXTENSION = /^\.[\p{L}\p{N}]/u;
+
+/**
  * Block markers that open a line. After the prose is collapsed to one line
  * these are the only ones left, and they are noise in a preview rather than
  * structure it can show.
@@ -161,7 +172,7 @@ function matchEmphasis(
       i += close;
       continue;
     }
-    if (ch === "_" && WORD_CHAR.test(src[i + width] ?? "")) {
+    if (ch === "_" && (WORD_CHAR.test(src[i + width] ?? "") || FILE_EXTENSION.test(src.slice(i + width)))) {
       i += close;
       continue;
     }
