@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.226] - 2026-10-20
+
+### Fixed
+
+- **mac-apps:** attach files, close contact names, drive Spotify, press play yourself (#850) (b31fd9c3)
+
 ## [0.8.225] - 2026-10-20
 
 ### Added
@@ -1560,7 +1566,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.225...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.226...HEAD
+[0.8.226]: https://github.com/lacymorrow/juno/compare/cua-v0.8.225...v0.8.226
 [0.8.225]: https://github.com/lacymorrow/juno/compare/cua-v0.8.224...v0.8.225
 [0.8.224]: https://github.com/lacymorrow/juno/compare/cua-v0.8.223...v0.8.224
 [0.8.223]: https://github.com/lacymorrow/juno/compare/cua-v0.8.222...v0.8.223
