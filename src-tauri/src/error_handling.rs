@@ -215,7 +215,10 @@ pub mod utils {
     pub fn handle_window_error(app_handle: &AppHandle, error: &str) {
         log_and_emit_error(app_handle, "WindowSystem", "management", error, false);
 
-        // Attempt to restore main window if needed
+        // Attempt to restore main window if needed. The Island has none.
+        if crate::window_management::bar_owns_full_chat(app_handle) {
+            return;
+        }
         if let Some(main_window) =
             app_handle.get_webview_window(crate::constants::window_labels::MAIN)
         {

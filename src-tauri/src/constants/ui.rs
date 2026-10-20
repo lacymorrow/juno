@@ -159,6 +159,13 @@ pub mod bar_appearances {
     /// kept, so turning beta back on brings it back (`effective`).
     pub const BETA: &[&str] = &[ORB, REACT_ORB, NOTCH];
 
+    /// True when this look holds the whole chat itself, so there is no
+    /// full-size chat window to open beside it. The Island's large chat does
+    /// everything that window does.
+    pub fn owns_full_chat(id: &str) -> bool {
+        id == DYNAMIC
+    }
+
     /// True when this look is not offered to a person.
     pub fn is_hidden(id: &str) -> bool {
         HIDDEN.contains(&id)
@@ -193,6 +200,16 @@ pub mod bar_appearances {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn only_the_island_holds_the_big_chat_itself() {
+            assert!(owns_full_chat(DYNAMIC));
+            for look in [
+                FLOATING, APP, VOICE_AI, ORB, REACT_ORB, SHADER_ORB, PERSONA, NOTCH,
+            ] {
+                assert!(!owns_full_chat(look), "{look} has no big chat of its own");
+            }
+        }
 
         #[test]
         fn hidden_looks_are_not_offered_and_resolve_to_the_default() {
@@ -291,6 +308,9 @@ pub mod ladder_steps {
     /// One rung up from wherever the bar is: the idle bar or the text input
     /// opens the floating chat, the floating chat opens the big chat.
     pub const NEXT: &str = "next";
+    /// Open the big chat. Sent instead of opening the chat window when the
+    /// look holds the big chat itself (`bar_appearances::owns_full_chat`).
+    pub const FULL: &str = "full";
 }
 
 /// UI interaction types

@@ -700,6 +700,11 @@ export function IslandBar() {
       }
       openComposerThroughRust(() => void sendInteraction(UI.INTERACTION_TYPES_CLICK));
     },
+    // The Island's large chat is the big chat: there is no window above it.
+    openFullChat: () => {
+      if (hasTurnRef.current) openChat();
+      else openComposerThroughRust(() => void sendInteraction(UI.INTERACTION_TYPES_CLICK));
+    },
   });
 
   // ── Controls ──

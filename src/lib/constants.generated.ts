@@ -491,6 +491,7 @@ export const UI = {
   LADDER_STEPS_COMPOSER: 'composer',
   LADDER_STEPS_FLOATING: 'floating',
   LADDER_STEPS_NEXT: 'next',
+  LADDER_STEPS_FULL: 'full',
   INTERACTION_TYPES_CLICK: 'click',
   INTERACTION_TYPES_FOCUS: 'focus',
   INTERACTION_TYPES_BLUR: 'blur',
