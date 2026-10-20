@@ -78,8 +78,8 @@ import { useBarDrag } from "@/hooks/useDragWindow";
 import { AgentRosterStrip } from "./AgentRosterStrip";
 import { PillTooltip, PILL_TOOLTIP_DELAY_MS } from "@/components/bar/PillTooltip";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { shortcutCaps } from "@/components/settings/KeyCaps";
-import type { TriggerHints } from "@/components/onboarding/Onboarding";
+import { useTalkShortcut } from "@/components/bar/useTalkShortcut";
+export { hintDetail } from "@/components/bar/useTalkShortcut";
 import { useConnectivity } from "@/hooks/useConnectivity";
 import { useStartupReadiness } from "@/hooks/useStartupReadiness";
 import { takeBootBarPosition } from "@/lib/barBoot";
@@ -616,17 +616,6 @@ function AudioLevelBars({ audioLevel }: { audioLevel: number }) {
       ))}
     </div>
   );
-}
-
-/**
- * A trigger hint as tooltip detail: the gesture and the key caps, "Hold ⌃⌥".
- * Null when nothing keyboard-shaped is bound.
- */
-export function hintDetail(hint: { shortcut: string; gesture: string } | null): string | null {
-  if (!hint || !hint.shortcut.trim()) return null;
-  const caps = shortcutCaps(hint.shortcut);
-  if (caps.length === 0) return null;
-  return `${hint.gesture} ${caps.map((cap) => cap.glyph).join("")}`;
 }
 
 /** Lower-case status label for the non-input states; null when none applies. */
@@ -1204,19 +1193,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // Whether Juno can answer is Rust's to say; the dot only shows it.
   const connectivity = useConnectivity();
   const warmingUp = useStartupReadiness();
-  // The talk shortcut, named in the mic's tooltip. Read from the live trigger
-  // registry, never written here, so the tooltip cannot teach a dead key.
-  const [triggerHints, setTriggerHints] = useState<TriggerHints | null>(null);
-  const readTriggerHints = useCallback(() => {
-    invoke<TriggerHints>(COMMANDS.TRIGGERS_GET_TRIGGER_HINTS)
-      .then((hints) => setTriggerHints(hints ?? null))
-      .catch((error) => console.debug("FloatingBar: no trigger hints:", error));
-  }, []);
-  useEffect(() => {
-    readTriggerHints();
-  }, [readTriggerHints]);
-  useEventListener(EVENTS.TRIGGERS_CHANGED, readTriggerHints);
-  const talkShortcut = hintDetail(triggerHints?.agent ?? null);
+  // The talk shortcut, named in the mic's tooltip.
+  const talkShortcut = useTalkShortcut();
 
   // === THE WAKE PHRASE ===
   //
