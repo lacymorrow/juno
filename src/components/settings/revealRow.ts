@@ -71,7 +71,11 @@ export function flashRow(el: HTMLElement, ms = ROW_FLASH_MS): void {
  * it to the middle of the pane and flash it. Returns a cancel for the wait;
  * a flash already shown runs its course.
  */
-export function revealRow(rowId: string, waitMs = ROW_WAIT_MS): () => void {
+export function revealRow(
+  rowId: string,
+  waitMs = ROW_WAIT_MS,
+  onMissing?: () => void,
+): () => void {
   let cancelled = false;
   let frame = 0;
   const started = Date.now();
@@ -95,6 +99,7 @@ export function revealRow(rowId: string, waitMs = ROW_WAIT_MS): () => void {
       return;
     }
     if (Date.now() - started < waitMs) frame = requestAnimationFrame(look);
+    else onMissing?.();
   };
 
   frame = requestAnimationFrame(look);
