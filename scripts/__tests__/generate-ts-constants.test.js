@@ -279,6 +279,24 @@ describe('values the generator reads', () => {
         expect(flat.AFTER_STILL_HERE).toBe('yes');
     });
 
+    it('keeps constants declared after a doc or block comment containing braces (LAC-2987)', () => {
+        const flat = parseSources(`
+            pub mod tools {
+                /// Payload: { action, coordinate: [x, y], timestamp }.
+                pub const COMPUTER_USE_PREVIEW: &str = "computer-use-preview";
+                // stray } in a line comment
+                /* block { comment */
+                pub const AX_GROUNDING_AUDIT: &str = "ax-grounding-audit";
+            }
+            pub mod after {
+                pub const STILL_HERE: &str = "yes";
+            }
+        `);
+        expect(flat.TOOLS_COMPUTER_USE_PREVIEW).toBe('computer-use-preview');
+        expect(flat.TOOLS_AX_GROUNDING_AUDIT).toBe('ax-grounding-audit');
+        expect(flat.AFTER_STILL_HERE).toBe('yes');
+    });
+
     it('folds arithmetic with the declared type: integer division truncates', () => {
         const flat = one(`
             pub const FPS: u64 = 60;
