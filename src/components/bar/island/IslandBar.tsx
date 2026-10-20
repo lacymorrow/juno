@@ -627,6 +627,8 @@ export function IslandBar() {
    * the caret put in the box, ready to type.
    */
   const openFullChat = useCallback(() => {
+    // The Island decides this alone, so it says so in Juno's log.
+    console.info(`[Island] opening the full chat (${hasTurnRef.current ? "with" : "before"} a turn)`);
     activateWindow();
     openChat();
     requestAnimationFrame(() => focusComposer());
