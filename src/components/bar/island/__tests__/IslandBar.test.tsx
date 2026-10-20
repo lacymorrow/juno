@@ -24,6 +24,7 @@ const { invoke, emit, listenHandlers, eventHandlers, chat, focusHandlers, setFoc
     isProcessing: false,
     handleApprovalUpdate: vi.fn(),
     stop: vi.fn(async () => {}),
+    startNewChat: vi.fn(),
   },
 }));
 
@@ -1241,6 +1242,57 @@ describe("IslandBar: Open chat from the hover capsule", () => {
       vi.advanceTimersByTime(PILL_TOOLTIP_DELAY_MS + 50);
     });
     expect(screen.getAllByText("Hold ⌃⌥").length).toBeGreaterThan(0);
+  });
+});
+
+describe("IslandBar: the full chat's New chat and Settings, as the Pill pane has", () => {
+  it("New chat starts a new conversation in Rust and empties the chat", async () => {
+    standInRust();
+    renderWithAnswer();
+    await escape();
+    fireEvent.pointerEnter(stage());
+    fireEvent.click(screen.getByRole("button", { name: "Open chat" }));
+    fireEvent.click(screen.getByTestId("island-expand"));
+    expect(face()).toBe("chat");
+    invoke.mockClear();
+    chat.startNewChat.mockClear();
+    chat.stop.mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    });
+    expect(invoke).toHaveBeenCalledWith("new_conversation");
+    expect(chat.startNewChat).toHaveBeenCalledTimes(1);
+    // Nothing was arriving, so nothing was stopped.
+    expect(chat.stop).not.toHaveBeenCalled();
+  });
+
+  it("New chat stops an answer still arriving first", async () => {
+    standInRust();
+    const view = renderWithAnswer();
+    await escape();
+    fireEvent.pointerEnter(stage());
+    fireEvent.click(screen.getByRole("button", { name: "Open chat" }));
+    fireEvent.click(screen.getByTestId("island-expand"));
+    chat.isProcessing = true;
+    view.rerender(<IslandBar />);
+    expect(face()).toBe("chat");
+    chat.stop.mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    });
+    expect(chat.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("Settings opens the Settings window", async () => {
+    standInRust();
+    renderWithAnswer();
+    await escape();
+    fireEvent.pointerEnter(stage());
+    fireEvent.click(screen.getByRole("button", { name: "Open chat" }));
+    fireEvent.click(screen.getByTestId("island-expand"));
+    invoke.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(invoke).toHaveBeenCalledWith("open_settings_window");
   });
 });
 
