@@ -597,6 +597,7 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
 
     let (handle, cancellation_token) = spawn_monitor(app);
 
+    STOP_DEFERRED.store(false, Ordering::SeqCst);
     *task_guard = Some((handle, cancellation_token));
     info!("Permissions monitoring started successfully (1s interval)");
     Ok(())
@@ -684,6 +685,7 @@ pub(crate) fn ensure_permissions_monitoring(app: &AppHandle) -> bool {
                 return false;
             }
             info!("Nothing was watching for a permission flip; starting monitoring");
+            STOP_DEFERRED.store(false, Ordering::SeqCst);
             *guard = Some(spawn_monitor(app.clone()));
             true
         }
@@ -694,18 +696,16 @@ pub(crate) fn ensure_permissions_monitoring(app: &AppHandle) -> bool {
     }
 }
 
-/// Stop the watcher. Only for a caller that started one with
-/// [`ensure_permissions_monitoring`] and has established nobody still needs it.
-pub(crate) fn release_permissions_monitoring() {
-    match MONITORING_TASK.lock() {
-        Ok(mut guard) => {
-            if let Some((handle, token)) = guard.take() {
-                token.cancel();
-                handle.abort();
-                info!("Stopped the monitoring a coaching card had started");
-            }
-        }
-        Err(e) => warn!("Could not lock the monitoring task to stop it: {}", e),
+/// The last coaching card is down. Stop the watcher if this caller started it,
+/// or if somebody else's stop was deferred while the card still needed it.
+///
+/// Called only once no card is up, so both branches are safe. Without the
+/// deferred half, a stop refused during a card would never be taken and a 1s
+/// native permission poll would run for the life of the process, which is
+/// exactly the leak LAC-2070 fixed.
+pub(crate) fn release_permissions_monitoring(started_here: bool) {
+    if started_here || STOP_DEFERRED.load(Ordering::SeqCst) {
+        stop_monitoring_now();
     }
 }
 
@@ -755,24 +755,50 @@ fn emit_granted_if_flipped(
     }
 }
 
-/// Stop background permission monitoring
+/// A stop that arrived while a coaching card still needed the watcher. Honoured
+/// the moment it stops being needed, so a deferred stop cannot become a leak.
+static STOP_DEFERRED: AtomicBool = AtomicBool::new(false);
+
+/// Stop background permission monitoring.
+///
+/// Refuses while a coaching card is up, because that card is dismissed by
+/// `permission-granted` and by nothing else: stopping the poll strands it,
+/// still pointing at a switch the person may have flipped already. The stop is
+/// remembered and taken as soon as the card goes.
+///
+/// This used to be unconditional, on the premise written at its caller in
+/// `window_management::restore_after_onboarding` — that setup was the only
+/// thing wanting permissions polled every second. The coaching card made that
+/// false, and there are four callers (setup closing by any route,
+/// `PermissionsFlow` unmounting, and this command from the UI), so the check
+/// belongs here rather than at each of them.
 #[tauri::command]
 pub async fn stop_permissions_monitoring() -> Result<(), String> {
     info!("Stopping permissions monitoring");
 
-    let task_handle = MONITORING_TASK.clone();
-    let mut task_guard = task_handle
-        .lock()
-        .map_err(|e| format!("Failed to lock monitoring task: {}", e))?;
+    if crate::permission_coach::a_card_needs_the_watcher() {
+        STOP_DEFERRED.store(true, Ordering::SeqCst);
+        info!("A coaching card still needs permission monitoring; stop deferred");
+        return Ok(());
+    }
 
-    if let Some((handle, token)) = task_guard.take() {
-        token.cancel();
-        handle.abort();
-        info!("Permissions monitoring stopped");
-        Ok(())
-    } else {
-        info!("No permissions monitoring was running");
-        Ok(())
+    stop_monitoring_now();
+    Ok(())
+}
+
+/// Take the watcher down. No stakeholder check: callers have done it.
+fn stop_monitoring_now() {
+    STOP_DEFERRED.store(false, Ordering::SeqCst);
+    match MONITORING_TASK.lock() {
+        Ok(mut guard) => match guard.take() {
+            Some((handle, token)) => {
+                token.cancel();
+                handle.abort();
+                info!("Permissions monitoring stopped");
+            }
+            None => info!("No permissions monitoring was running"),
+        },
+        Err(e) => warn!("Could not lock the monitoring task to stop it: {}", e),
     }
 }
 
