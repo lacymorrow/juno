@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import type { ChatMessage } from "@/types/chat";
@@ -1327,5 +1327,133 @@ describe("IslandBar: dragging", () => {
     expect(face()).toBe("compose");
     expect(screen.getByTestId("island-composer").closest("[data-no-drag]")).toBeNull();
     expect(composer().matches("textarea")).toBe(true);
+  });
+});
+
+describe("IslandBar: a new turn never shows the last answer", () => {
+  it("talking to Juno: the last answer stays away through the final decode", async () => {
+    renderWithAnswer();
+    expect(face()).toBe("answer");
+    await send(UI.BAR_STATES_LISTENING);
+    expect(face()).toBe("compose");
+    // The mic closes; Rust decodes, and the new question is not in yet.
+    await send(UI.BAR_STATES_TRANSCRIBING, { transcriptionProvisional: false });
+    expect(face()).toBe("compose");
+    expect(screen.queryByTestId("answer")).toBeNull();
+    // The new answer opens itself.
+    chat.messages = [
+      ...ANSWER,
+      { role: "user", content: "And tomorrow?", timestamp: 3 },
+      { role: "assistant", content: "Rain.", messageId: "m2", timestamp: 4 },
+    ];
+    await send(UI.BAR_STATES_AGENT_RESPONDING);
+    expect(face()).toBe("answer");
+    expect(screen.getByTestId("answer").textContent).toBe("Rain.");
+  });
+
+  it("a typed follow-up: Sending puts the answer it follows away", async () => {
+    renderWithAnswer();
+    await send(UI.BAR_STATES_INPUT);
+    await send(UI.BAR_STATES_SUBMITTING);
+    expect(face()).toBe("compose");
+  });
+});
+
+describe("IslandBar: new chat", () => {
+  it("the tray's New Chat starts a fresh conversation with the caret in the box", async () => {
+    renderWithAnswer();
+    chat.startNewChat.mockClear();
+    await act(async () => {
+      eventHandlers.get(EVENTS.MENU_NEW_CHAT_REQUESTED)?.(null);
+    });
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "new_conversation")).toBe(true);
+    expect(chat.startNewChat).toHaveBeenCalledTimes(1);
+    expect(face()).toBe("compose");
+    expect(document.activeElement).toBe(composer());
+  });
+
+  it("leaves the conversation to the full-size window while it is up", async () => {
+    renderWithAnswer();
+    chat.startNewChat.mockClear();
+    await act(async () => {
+      eventHandlers.get(EVENTS.BAR_MAIN_WINDOW_OPENED)?.(null);
+      eventHandlers.get(EVENTS.MENU_NEW_CHAT_REQUESTED)?.(null);
+    });
+    expect(chat.startNewChat).not.toHaveBeenCalled();
+  });
+
+  it("stops an answer still arriving before it starts again", async () => {
+    renderWithAnswer();
+    await send(UI.BAR_STATES_AGENT_RESPONDING);
+    await act(async () => {
+      eventHandlers.get(EVENTS.BAR_TOGGLE_PANE)?.(null);
+    });
+    chat.stop.mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("island-new-chat"));
+    });
+    expect(chat.stop).toHaveBeenCalled();
+  });
+
+  it("the chat face has a + that keeps it the chat face", async () => {
+    renderWithAnswer();
+    await act(async () => {
+      eventHandlers.get(EVENTS.BAR_TOGGLE_PANE)?.(null);
+    });
+    expect(face()).toBe("chat");
+    chat.startNewChat.mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    });
+    expect(chat.startNewChat).toHaveBeenCalledTimes(1);
+    expect(face()).toBe("chat");
+  });
+});
+
+describe("IslandBar: out of the way when the person goes elsewhere", () => {
+  const pressOutside = () =>
+    act(async () => {
+      eventHandlers.get(EVENTS.SYSTEM_MOUSE_PRESSED_OUTSIDE)?.(null);
+    });
+
+  it("an empty composer goes back to the idle capsule on a press elsewhere", async () => {
+    render(<IslandBar />);
+    act(() => composer().focus());
+    await send(UI.BAR_STATES_INPUT);
+    expect(face()).toBe("compose");
+    await pressOutside();
+    expect(face()).toBe("idle");
+    expect(sentInteraction(UI.INTERACTION_TYPES_BLUR)).toBe(true);
+  });
+
+  it("and on the window losing focus", async () => {
+    render(<IslandBar />);
+    act(() => composer().focus());
+    await send(UI.BAR_STATES_INPUT);
+    await act(async () => {
+      focusHandlers.forEach((h) => h({ payload: false }));
+    });
+    expect(face()).toBe("idle");
+  });
+
+  it("a draft goes away with it and is kept for next time", async () => {
+    render(<IslandBar />);
+    act(() => composer().focus());
+    await send(UI.BAR_STATES_INPUT);
+    fireEvent.change(composer(), { target: { value: "half a thought" } });
+    await pressOutside();
+    expect(face()).toBe("idle");
+    expect(composer().value).toBe("half a thought");
+  });
+
+  it("an answer, or Juno at work, stays where it is", async () => {
+    renderWithAnswer();
+    await pressOutside();
+    expect(face()).toBe("answer");
+    cleanup();
+    render(<IslandBar />);
+    await send(UI.BAR_STATES_LOADING);
+    await pressOutside();
+    expect(face()).toBe("compose");
   });
 });

@@ -35,6 +35,21 @@ const BAR_NO_DRAG_SELECTOR = "input, textarea, [contenteditable], [data-no-drag]
 export const DRAG_THRESHOLD_PX = 4;
 
 /**
+ * What a right-click landed on, for the bar's native menu: a text box (Cut,
+ * Copy, Paste, Select All) or read-only text with a selection (Copy).
+ */
+export function textUnderPointer(target: EventTarget | null): { editable: boolean; hasSelection: boolean } {
+  const el = target instanceof Element ? target : null;
+  const field = el?.closest("input, textarea, [contenteditable]:not([contenteditable='false'])") ?? null;
+  if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+    const { selectionStart, selectionEnd } = field;
+    return { editable: true, hasSelection: selectionStart !== null && selectionStart !== selectionEnd };
+  }
+  const selected = (typeof window.getSelection === "function" ? window.getSelection()?.toString() : "") ?? "";
+  return { editable: field !== null, hasSelection: selected.length > 0 };
+}
+
+/**
  * Hook that returns an `onMouseDown` handler for dragging the current window.
  *
  * Tauri's `data-tauri-drag-region` attribute is unreliable on macOS when the
@@ -185,11 +200,13 @@ export function useBarDrag({
 
   // Right-click: the webview's own menu is never right on the bar, so it is
   // suppressed and Rust pops the native one at the cursor. The drag arms on
-  // the left button only, so this cannot interfere with it.
+  // the left button only, so this cannot interfere with it. What was under
+  // the pointer goes with it, so a right-click on text leads with the Mac
+  // text items (Cut, Copy, Paste, Select All, or Copy on read-only text).
   const onContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     grab.current = null;
-    void invoke(COMMANDS.BAR_SHOW_CONTEXT_MENU).catch((error) =>
+    void invoke(COMMANDS.BAR_SHOW_CONTEXT_MENU, textUnderPointer(e.target)).catch((error) =>
       console.debug("barDrag: context menu failed:", error),
     );
   }, []);

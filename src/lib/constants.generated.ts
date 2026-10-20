@@ -170,6 +170,7 @@ export const EVENTS = {
   SYSTEM_MOUSE_ENTERED_WINDOW: 'mouse-entered-window',
   SYSTEM_MOUSE_LEFT_WINDOW: 'mouse-left-window',
   SYSTEM_MOUSE_MOVED_WINDOW: 'mouse-moved-window',
+  SYSTEM_MOUSE_PRESSED_OUTSIDE: 'mouse-pressed-outside',
   SYSTEM_BACKEND_RESPONSE: 'backend-response',
   SYSTEM_PROVIDER_SETTINGS_CHANGED: 'provider_settings_changed',
   SYSTEM_CONNECTIVITY_CHANGED: 'connectivity-changed',
