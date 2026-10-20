@@ -200,7 +200,7 @@ fn emit_ladder(app: &AppHandle, to: &str) {
 
 /// Put the floating bar on screen without focusing it. It is a panel, and
 /// focusing it would pull the person out of the app they are in.
-fn show_bar(app: &AppHandle) {
+pub(crate) fn show_bar(app: &AppHandle) {
     if let Some(bar) = app.get_webview_window(window_labels::FLOATING_BAR) {
         if !bar.is_visible().unwrap_or(false) {
             if let Err(e) = bar.show() {
