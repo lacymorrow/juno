@@ -1,4 +1,5 @@
 pub mod app_observation; // What macOS says is true about an app, after Juno acted on it
+pub mod background_shell; // What a shell command may do to the screen in background mode
 pub mod core; // Core agent traits and types for orchestration
 pub mod error_recovery; // Enhanced error recovery with checkpoint and rollback
 pub mod implementations;

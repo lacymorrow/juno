@@ -1,0 +1,37 @@
+LAC-5007 — the rewrite, measured on zero, 2026-10-19
+
+The whole fix rests on one claim: `open -g -a X` does the same work as
+`open -a X` without taking the person's screen. Measured both ways against a
+running app, which is the shape of Lacy's focus theft #2 (`open -a Mail` after
+he had gone back to Notes). Frontmost app sampled every 0.4s via System Events.
+Calculator stands in for Mail so the test leaves no drafts behind.
+
+=== ALREADY RUNNING, with -g (what background mode now runs) ===
+running: yes, front: zed
+  +.4s zed
+  +.8s zed
+  +1.2s zed
+  +1.6s zed
+  +2.0s zed
+  +2.4s zed
+
+=== ALREADY RUNNING, without -g (the bug, as a control) ===
+  +.4s Calculator
+  +.8s Calculator
+  +1.2s Calculator
+
+The control takes the screen inside 400ms. The rewritten form never does.
+
+Cold launch, same result: `open -g -a Calculator` with Calculator not running
+left the front on Finder for the full 4s sampled, and `pgrep` confirmed the app
+had started. So `-g` suppresses the activation without suppressing the work,
+which is what lets the compose window appear behind what the person is typing
+in rather than on top of it.
+
+One caveat found while measuring, and the reason this file exists rather than a
+single clean run: an `open -g` issued while the same app is still shutting down
+from a previous `quit` DOES come to the front. That is a relaunch race in
+macOS, not the flag failing, and it is not a shape background mode produces.
+Let the app settle before reading the result or the measurement lies.
+
+Reproduce: scripts/watch-frontmost.sh, added in this PR.
