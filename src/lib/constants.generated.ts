@@ -192,6 +192,7 @@ export const EVENTS = {
   BAR_CONFIG_CHANGED: 'floating-bar-config-changed',
   BAR_DEBUG_MODE_CHANGED: 'bar-debug-mode-changed',
   BAR_TOGGLE_PANE: 'bar-toggle-pane',
+  BAR_PRESENTED: 'bar-presented',
   BAR_DISMISS_PANE: 'bar-dismiss-pane',
   BAR_LADDER: 'bar-ladder',
   BAR_CURSOR_DISPLAY_CHANGED: 'bar-cursor-display-changed',

@@ -86,11 +86,25 @@ vi.mock("@tauri-apps/api/window", () => ({
     ) {}
   },
 }));
-vi.mock("@/hooks/useEventListener", () => ({
-  useEventListener: (event: string, handler: (payload: unknown) => void) => {
-    eventHandlers.set(event, handler);
-  },
-}));
+// Several hooks can listen for one event (the Island and the shared Escape
+// both hear a press outside), so each name keeps one handler per caller.
+const eventCallers = vi.hoisted(() => new Map<string, Map<string, (payload: unknown) => void>>());
+vi.mock("@/hooks/useEventListener", async () => {
+  const { useId } = await import("react");
+  return {
+    useEventListener: (event: string, handler: (payload: unknown) => void) => {
+      const id = useId();
+      let callers = eventCallers.get(event);
+      if (!callers) {
+        callers = new Map();
+        eventCallers.set(event, callers);
+      }
+      callers.set(id, handler);
+      const all = callers;
+      eventHandlers.set(event, (payload) => all.forEach((h) => h(payload)));
+    },
+  };
+});
 vi.mock("@/hooks/useBarConversation", () => ({
   useBarConversation: () => chat,
 }));
@@ -243,6 +257,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  eventCallers.clear();
   vi.useRealTimers();
 });
 

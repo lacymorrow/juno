@@ -134,17 +134,26 @@ export function escapeOutcome(state: BarEscapeState): EscapeOutcome {
 export const LADDER_CHAIN_MS = 1500;
 
 /**
+ * How long after Juno comes onto the screen by herself (launch, setup ending:
+ * `bar-presented`) an Escape is taken as aimed at her. She appeared unasked
+ * and unfocused, so without this the first Escape at launch did nothing. A
+ * press elsewhere ends it sooner.
+ */
+export const PRESENTED_MS = 10_000;
+
+/**
  * Whether a press the bar had nothing else to do with takes the bar off the
  * screen: the last rung. Only on the idle bar, only when no popup owns the
  * key, and only when the press was aimed at Juno: typed into the bar itself
- * (`focused`) or continuing a walk down the ladder (`chained`).
+ * (`focused`), continuing a walk down the ladder (`chained`), or just after
+ * she came onto the screen by herself (`presented`).
  */
 export function escapeHidesBar(
   state: BarEscapeState,
-  { focused, chained }: { focused: boolean; chained: boolean },
+  { focused, chained, presented = false }: { focused: boolean; chained: boolean; presented?: boolean },
 ): boolean {
   if (state.popupOpen || barIsExpanded(state)) return false;
-  return focused || chained;
+  return focused || chained || presented;
 }
 
 /** Where the bar is asked to climb to (`ui::ladder_steps` in Rust). */
