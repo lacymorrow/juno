@@ -11,8 +11,9 @@ import { COMMANDS } from "@/lib/constants.generated";
  * that decided something on its own used to leave no trace there, so the log
  * could not show the front end and the back end disagreeing.
  *
- * Lines are batched per tick so a chatty page costs one IPC call, not one per
- * line, and a runaway page is capped rather than flooding the log.
+ * Ordinary lines are batched, so a chatty page costs one IPC call a second,
+ * not one per line, and a runaway page is capped rather than flooding the log.
+ * An error goes at once, taking whatever was queued before it.
  */
 
 type Level = "error" | "warn" | "info" | "log" | "debug";
@@ -23,8 +24,12 @@ export interface LogEntry {
 type Send = (entries: LogEntry[]) => Promise<unknown>;
 
 const LEVELS: Level[] = ["error", "warn", "info", "log", "debug"];
-/** How long lines gather before they go to Rust together. */
-export const FLUSH_MS = 200;
+/**
+ * How long ordinary lines gather before they go to Rust together. The timer
+ * runs only while something is queued, so an idle page sends nothing. Errors
+ * do not wait (see `enqueue`): they are the lines a crash would lose.
+ */
+export const FLUSH_MS = 1000;
 /** Lines kept per flush; past it a page is looping and one note says so. */
 export const MAX_PER_FLUSH = 200;
 /** Characters kept per argument (Rust caps the whole line too). */
@@ -86,7 +91,10 @@ export function installForwardLogs(send: Send = defaultSend, force = false): () 
   const enqueue = (level: Level, message: string) => {
     if (queue.length >= MAX_PER_FLUSH) dropped += 1;
     else queue.push({ level, message });
-    if (timer === null) timer = setTimeout(flush, FLUSH_MS);
+    if (level === "error") {
+      if (timer !== null) clearTimeout(timer);
+      flush();
+    } else if (timer === null) timer = setTimeout(flush, FLUSH_MS);
   };
 
   const originals = new Map<Level, (...args: unknown[]) => void>();

@@ -31,8 +31,9 @@ describe("forwardLogs", () => {
   it("sends a tick's console lines to Rust together, with their levels", () => {
     console.info("[Island] opened", { face: "chat" });
     console.warn("careful");
+    vi.advanceTimersByTime(FLUSH_MS - 1);
     expect(send).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(FLUSH_MS);
+    vi.advanceTimersByTime(1);
     expect(sent).toEqual([
       [
         { level: "info", message: '[Island] opened {"face":"chat"}' },
@@ -41,16 +42,25 @@ describe("forwardLogs", () => {
     ]);
   });
 
-  it("forwards uncaught errors and unhandled rejections", () => {
+  it("sends an error at once, with whatever was queued before it", () => {
+    console.log("before");
+    console.error("broke");
+    expect(sent).toEqual([
+      [
+        { level: "log", message: "before" },
+        { level: "error", message: "broke" },
+      ],
+    ]);
+  });
+
+  it("forwards uncaught errors and unhandled rejections without waiting", () => {
     window.dispatchEvent(new ErrorEvent("error", { message: "boom", filename: "bar.js", lineno: 3, colno: 7 }));
     const rejection = new Event("unhandledrejection") as PromiseRejectionEvent;
     Object.defineProperty(rejection, "reason", { value: new Error("nope") });
     window.dispatchEvent(rejection);
-    vi.advanceTimersByTime(FLUSH_MS);
-    const [batch] = sent;
-    expect(batch[0]).toEqual({ level: "error", message: "Uncaught boom (bar.js:3:7)" });
-    expect(batch[1].level).toBe("error");
-    expect(batch[1].message).toContain("Unhandled rejection: Error: nope");
+    expect(sent[0]).toEqual([{ level: "error", message: "Uncaught boom (bar.js:3:7)" }]);
+    expect(sent[1][0].level).toBe("error");
+    expect(sent[1][0].message).toContain("Unhandled rejection: Error: nope");
   });
 
   it("caps a runaway page and says how much it dropped", () => {
