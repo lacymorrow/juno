@@ -1052,6 +1052,221 @@ where
     })
 }
 
+// --- Verified background clicks ---
+
+/// How a click ended once it was read back.
+#[derive(Debug, Clone, Copy)]
+enum ClickDelivery {
+    /// The click reached the app, or could not be told apart from one that did.
+    Delivered(computer_use_ai_sdk::InputOutcome),
+    /// The app did nothing with the click.
+    Ignored {
+        outcome: computer_use_ai_sdk::InputOutcome,
+        /// A foreground retry ran and the app still did nothing.
+        foreground_tried: bool,
+        /// The person said no to taking the mouse (or never answered).
+        declined: bool,
+    },
+}
+
+impl ClickDelivery {
+    /// The outcome of a delivered click, or the failure response of an ignored one.
+    fn accepted(self) -> Result<computer_use_ai_sdk::InputOutcome, Value> {
+        match self {
+            Self::Delivered(outcome) => Ok(outcome),
+            Self::Ignored {
+                outcome,
+                foreground_tried,
+                declined,
+            } => Err(ignored_response(&outcome, foreground_tried, declined)),
+        }
+    }
+}
+
+/// The response for a click the app ignored: not a success, and the agent is
+/// told what to try instead.
+fn ignored_response(
+    outcome: &computer_use_ai_sdk::InputOutcome,
+    foreground_tried: bool,
+    declined: bool,
+) -> Value {
+    let hint = computer_use_ai_sdk::click_verify::ignored_hint(foreground_tried, declined);
+    with_input_tier(
+        json!({
+            "success": false,
+            "is_error": true,
+            "error": hint,
+            "ignored_in_background": !foreground_tried,
+            "hint": hint,
+        }),
+        outcome,
+    )
+}
+
+/// Reads of the window after a click, and the gaps before them. The app answers
+/// a click a beat later, so one immediate read would call a slow reaction
+/// "ignored"; the loop ends the moment the window has changed.
+const CLICK_READBACK_GAPS_MS: [u64; 4] = [50, 100, 120, 150];
+
+/// Longest wait, in 30 ms reads, for an app to become frontmost after activation.
+const ACTIVATION_READS: u32 = 10;
+
+/// The window's fingerprint, read off the async runtime's worker threads.
+async fn window_fingerprint_async(pid: i32, window_id: u32) -> Option<u64> {
+    tauri::async_runtime::spawn_blocking(move || {
+        computer_use_ai_sdk::ax_elements::window_fingerprint(pid, window_id)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// Whether the window changed after a click, read back a few times (bounded).
+async fn click_reaction(
+    target: (i32, u32),
+    before: Option<u64>,
+) -> computer_use_ai_sdk::click_verify::Verdict {
+    use computer_use_ai_sdk::click_verify::{compare, Verdict};
+    let mut verdict = Verdict::Unknown;
+    for gap in CLICK_READBACK_GAPS_MS {
+        tokio::time::sleep(std::time::Duration::from_millis(gap)).await;
+        verdict = compare(before, window_fingerprint_async(target.0, target.1).await);
+        if verdict != Verdict::Unchanged {
+            break;
+        }
+    }
+    verdict
+}
+
+/// The (process, window) whose fingerprint judges a click: never Juno's own.
+fn fingerprint_target(x: f64, y: f64, window_pin: Option<PinnedWindow>) -> Option<(i32, u32)> {
+    let (pid, window) = click_target(x, y, window_pin)?;
+    (pid != std::process::id() as i32)
+        .then_some(())
+        .and(window.map(|w| (pid, w)))
+}
+
+/// Bring an app to the front so real input reaches it.
+#[cfg(target_os = "macos")]
+fn activate_app(pid: i32) {
+    use objc::{class, msg_send, sel, sel_impl};
+    unsafe {
+        let app: *mut objc::runtime::Object =
+            msg_send![class!(NSRunningApplication), runningApplicationWithProcessIdentifier: pid];
+        if app.is_null() {
+            return;
+        }
+        // NSApplicationActivateAllWindows | NSApplicationActivateIgnoringOtherApps
+        let _: () = msg_send![app, activateWithOptions: 3u64];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn activate_app(_pid: i32) {}
+
+/// Run one click and check the app reacted.
+///
+/// The click goes the background-first way. A process-targeted click is then
+/// read back: when the target window looks exactly as it did, the app dropped
+/// it. The click is retried once in the foreground, behind the same "ask before
+/// taking the mouse" request as any other step that needs the cursor; if the
+/// person declines, or the app still does nothing, the click is reported as
+/// ignored rather than as a success.
+async fn run_verified_click<F>(
+    app_handle: &tauri::AppHandle,
+    action: &str,
+    target_app: Option<&str>,
+    window_pin: Option<PinnedWindow>,
+    target: Option<(i32, u32)>,
+    attempt: F,
+) -> Result<ClickDelivery, String>
+where
+    F: Fn(bool) -> Result<Option<computer_use_ai_sdk::InputOutcome>, String>,
+{
+    use computer_use_ai_sdk::click_verify::{needs_verification, next_step, NextStep};
+
+    let before = match target {
+        Some((pid, window)) => window_fingerprint_async(pid, window).await,
+        None => None,
+    };
+    let outcome =
+        run_background_first(app_handle, action, target_app, window_pin, &attempt).await?;
+
+    let Some(target) = target.filter(|_| before.is_some() && needs_verification(outcome.tier))
+    else {
+        return Ok(ClickDelivery::Delivered(outcome));
+    };
+    let verdict = click_reaction(target, before).await;
+    if next_step(verdict, outcome.tier, false) != NextStep::RetryForeground {
+        return Ok(ClickDelivery::Delivered(outcome));
+    }
+
+    tracing::warn!(
+        "[Click] '{}' posted to pid {} changed nothing; asking to retry in the foreground",
+        action,
+        target.0
+    );
+    use crate::input_control::{commands::describe_request, request_physical_cursor};
+    let named_app = consent_target_app(target_app);
+    let request = describe_request(action, named_app.as_deref());
+    let grant = match request_physical_cursor(app_handle, request).await {
+        Ok(grant) => grant,
+        Err(denied) => {
+            tracing::info!(
+                "[Click] foreground retry for '{}' not allowed: {:?}",
+                action,
+                denied
+            );
+            return Ok(ClickDelivery::Ignored {
+                outcome,
+                foreground_tried: false,
+                declined: true,
+            });
+        }
+    };
+
+    activate_app(target.0);
+    // Activation is an event the app answers a moment later; wait for it a
+    // bounded time so the baseline below is not the activation itself.
+    for _ in 0..ACTIVATION_READS {
+        if frontmost_app_pid() == Some(target.0) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    }
+    let baseline = window_fingerprint_async(target.0, target.1).await;
+    let retried = {
+        let _pin = computer_use_ai_sdk::window_target::pin(window_pin);
+        let _forced = computer_use_ai_sdk::window_target::force_physical();
+        attempt(true)
+    };
+    let result = match retried {
+        Ok(Some(foreground)) => {
+            let verdict = click_reaction(target, baseline).await;
+            if next_step(verdict, foreground.tier, true) == NextStep::ReportIgnored {
+                ClickDelivery::Ignored {
+                    outcome: foreground,
+                    foreground_tried: true,
+                    declined: false,
+                }
+            } else {
+                ClickDelivery::Delivered(foreground)
+            }
+        }
+        Ok(None) => ClickDelivery::Ignored {
+            outcome,
+            foreground_tried: true,
+            declined: false,
+        },
+        Err(message) => {
+            drop(grant);
+            return Err(message);
+        }
+    };
+    drop(grant);
+    Ok(result)
+}
+
 /// Add the tier that carried an action to a tool response, so the agent (and the
 /// audit trail) can see whether the user's cursor was involved.
 fn with_input_tier(mut response: Value, outcome: &computer_use_ai_sdk::InputOutcome) -> Value {
@@ -1151,27 +1366,50 @@ async fn run_element_action(
     let (center_x, center_y) = resolved.screen_center();
     ax_targeting::set_working_window(pin);
 
-    let accessibility = match action {
-        "left_click" => computer_use_ai_sdk::ax_elements::press(&resolved.element),
-        "right_click" => computer_use_ai_sdk::ax_elements::show_menu(&resolved.element),
-        // A double click means "open" to most apps, which has no reliable
-        // accessibility action; click the real centre twice instead.
-        _ => Err("double click goes to the centre".to_string()),
+    use computer_use_ai_sdk::click_verify::{ClickKind, Verdict};
+    let fingerprint_of = Some((pin.pid, pin.window_id));
+
+    // An accessibility action first, on the element or the nearest ancestor
+    // that offers one fit for this click (a row around a title). A double click
+    // means "open", which only an open-style action stands in for.
+    let accessibility: Result<&'static str, String> = match action {
+        "left_click" => {
+            computer_use_ai_sdk::ax_elements::press_nearest(&resolved.element, ClickKind::Left)
+        }
+        "right_click" => {
+            computer_use_ai_sdk::ax_elements::show_menu(&resolved.element).map(|_| "AXShowMenu")
+        }
+        _ => {
+            let before = match fingerprint_of {
+                Some((pid, window)) => window_fingerprint_async(pid, window).await,
+                None => None,
+            };
+            match computer_use_ai_sdk::ax_elements::press_nearest(
+                &resolved.element,
+                ClickKind::Double,
+            ) {
+                // An action the app accepted but did nothing with is no better
+                // than none: fall through to the click.
+                Ok(name) => {
+                    let reaction = match fingerprint_of {
+                        Some(target) => click_reaction(target, before).await,
+                        None => Verdict::Unknown,
+                    };
+                    if reaction == Verdict::Unchanged {
+                        Err(format!("{name} changed nothing"))
+                    } else {
+                        Ok(name)
+                    }
+                }
+                Err(reason) => Err(reason),
+            }
+        }
     };
 
     let mut response = match accessibility {
-        Ok(()) => {
+        Ok(method) => {
             computer_use_ai_sdk::background::remember_target_window(pin.pid, Some(pin.window_id));
-            info!(
-                "✨ AX {} on {} via accessibility",
-                action,
-                resolved.describe()
-            );
-            let method = if action == "right_click" {
-                "AXShowMenu"
-            } else {
-                "AXPress"
-            };
+            info!("✨ AX {} on {} via {}", action, resolved.describe(), method);
             json!({ "success": true, "method": method })
         }
         Err(reason) => {
@@ -1187,11 +1425,12 @@ async fn run_element_action(
             let _guard = state_manager.input_arbiter().acquire(session_id).await;
             let target_app = get_frontmost_app_name();
             let window_pin = Some(pin);
-            let outcome = match run_background_first(
+            let delivery = match run_verified_click(
                 app_handle,
                 action,
                 target_app.as_deref(),
                 window_pin,
+                fingerprint_of,
                 |allow_physical| match action {
                     "right_click" => state_manager.desktop.right_click_no_warp(
                         center_x,
@@ -1214,10 +1453,16 @@ async fn run_element_action(
             )
             .await
             {
-                Ok(outcome) => outcome,
+                Ok(delivery) => delivery,
                 Err(message) => return Ok(create_anthropic_error_response(message)),
             };
-            with_input_tier(json!({ "success": true }), &outcome)
+            match delivery.accepted() {
+                Ok(outcome) => with_input_tier(json!({ "success": true }), &outcome),
+                Err(mut failure) => {
+                    failure["pressed"] = resolved.describe();
+                    return Ok(failure);
+                }
+            }
         }
     };
     response["pressed"] = resolved.describe();
@@ -2323,12 +2568,13 @@ pub async fn execute_computer_tool(
                         // Process-targeted injection (SkyLight → CGEventPostToPid) bypasses AX
                         // and works on canvas, games, Chromium web content and non-AX apps.
                         // Only if that fails does the shared cursor come into it.
-                        outcome = Some(handle_anthropic_result!(
-                            run_background_first(
+                        let delivery = handle_anthropic_result!(
+                            run_verified_click(
                                 app_handle,
                                 action,
                                 target_app.as_deref(),
                                 window_pin,
+                                fingerprint_target(screen_x, screen_y, window_pin),
                                 |allow_physical| {
                                     state_manager.desktop.left_click_no_warp(
                                         screen_x,
@@ -2339,7 +2585,11 @@ pub async fn execute_computer_tool(
                                 },
                             )
                             .await
-                        ));
+                        );
+                        match delivery.accepted() {
+                            Ok(done) => outcome = Some(done),
+                            Err(failure) => return Ok(failure),
+                        }
                     }
 
                     let mut response =
@@ -2492,12 +2742,13 @@ pub async fn execute_computer_tool(
                         // The AX branch above takes neither this guard nor its cooldown,
                         // which is why the floor has to be unconditional up there.
                         let _guard = state_manager.input_arbiter().acquire(session_id).await;
-                        outcome = Some(handle_anthropic_result!(
-                            run_background_first(
+                        let delivery = handle_anthropic_result!(
+                            run_verified_click(
                                 app_handle,
                                 action,
                                 target_app.as_deref(),
                                 window_pin,
+                                fingerprint_target(screen_x, screen_y, window_pin),
                                 |allow_physical| {
                                     state_manager.desktop.double_click_no_warp(
                                         screen_x,
@@ -2508,7 +2759,11 @@ pub async fn execute_computer_tool(
                                 },
                             )
                             .await
-                        ));
+                        );
+                        match delivery.accepted() {
+                            Ok(done) => outcome = Some(done),
+                            Err(failure) => return Ok(failure),
+                        }
                     }
 
                     let mut response =
@@ -4892,5 +5147,43 @@ mod input_targeting_tests {
                 head
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod ignored_click_tests {
+    use super::*;
+    use computer_use_ai_sdk::InputOutcome;
+
+    #[test]
+    fn an_ignored_background_click_is_not_a_success() {
+        let outcome = InputOutcome::process_targeted("SkyLight/SLEventPostToPid");
+        let response = ignored_response(&outcome, false, false);
+        assert_eq!(response["success"], false);
+        assert_eq!(response["ignored_in_background"], true);
+        assert_eq!(response["input_tier"], "process_targeted");
+        assert!(response["hint"].as_str().is_some_and(|h| !h.is_empty()));
+        assert!(is_anthropic_error_response(&response));
+    }
+
+    #[test]
+    fn a_declined_retry_says_so() {
+        let outcome = InputOutcome::process_targeted("SkyLight/SLEventPostToPid");
+        let response = ignored_response(&outcome, false, true);
+        assert!(response["hint"]
+            .as_str()
+            .is_some_and(|h| h.contains("declined")));
+    }
+
+    #[test]
+    fn a_delivered_click_passes_through() {
+        let outcome = InputOutcome::physical_cursor("HID");
+        assert!(ClickDelivery::Delivered(outcome).accepted().is_ok());
+        let ignored = ClickDelivery::Ignored {
+            outcome,
+            foreground_tried: true,
+            declined: false,
+        };
+        assert!(ignored.accepted().is_err());
     }
 }
