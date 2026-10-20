@@ -341,31 +341,49 @@ describe("a row says how its own gesture ends", () => {
   });
 });
 
-describe("the add menu no longer offers a double tap", () => {
+describe("no gesture on the screen is a double tap", () => {
   beforeEach(() => {
     invoke.mockReset();
     mountBackend([row("row-hold", "hold", "agent", "Fn")]);
   });
 
-  it("offers Hold and Tap for each target and nothing with 'double' in it", async () => {
+  // Adding used to be a menu of every gesture crossed with every target, and
+  // this test read that menu. The menu is gone: a sentence is editable in
+  // place, so adding is one press and the gesture is chosen on the row. The
+  // thing worth pinning is unchanged, because the double-tap gestures were
+  // removed from the model in #688 and must not come back through the UI.
+  it("offers Hold and Tap on the row and nothing with 'double' in it", async () => {
     renderScreen();
     await screen.findByLabelText("Enable Hold to talk to Juno");
 
-    const trigger = screen.getByRole("button", { name: /Add shortcut/ });
-    trigger.focus();
-    fireEvent.keyDown(trigger, { key: "Enter" });
+    const word = screen.getByRole("button", { name: /^Gesture \(currently Hold\)/ });
+    word.focus();
+    fireEvent.keyDown(word, { key: "Enter" });
 
-    const items = await screen.findAllByRole("menuitem");
-    // Say is offered or not depending on advanced settings; this is about keys.
-    const names = items
-      .map((i) => i.textContent ?? "")
-      .filter((n) => !n.startsWith("Say"));
-    expect(names).toEqual([
-      "Hold to talk to Juno",
-      "Hold to dictate",
-      "Tap to talk to Juno",
-      "Tap to dictate",
-    ]);
+    const items = await screen.findAllByRole("menuitemradio");
+    expect(items.map((i) => i.textContent ?? "")).toEqual(["Hold", "Tap"]);
     expect(items.some((i) => /double/i.test(i.textContent ?? ""))).toBe(false);
+  });
+
+  it("adds a shortcut with one press, no menu to get wrong", async () => {
+    renderScreen();
+    await screen.findByLabelText("Enable Hold to talk to Juno");
+
+    fireEvent.click(screen.getByRole("button", { name: /Add shortcut/ }));
+
+    await waitFor(() => {
+      const added = invoke.mock.calls.find(
+        ([cmd]) => cmd === COMMANDS.TRIGGERS_SET_TRIGGERS,
+      );
+      expect(added).toBeTruthy();
+      // The next sentence nobody has yet: a hold already talks to Juno, so
+      // the one it adds dictates.
+      const list = (added?.[1] as { triggers: Array<Record<string, unknown>> })
+        .triggers;
+      expect(list[list.length - 1]).toMatchObject({
+        gesture: "hold",
+        target: "dictation",
+      });
+    });
   });
 });
