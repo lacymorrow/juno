@@ -203,6 +203,14 @@ pub fn handle_reopen(app: &AppHandle) {
         // The floating bar counts as a visible window, so the main window was
         // left alone above. Bring it up: opening the app is the person asking
         // to see Juno, and the notice they need is in that window.
+        // The Island holds the big chat itself: open that instead.
+        if crate::window_management::bar_owns_full_chat(&app) {
+            if let Err(e) = crate::window_management::open_main_window(app.clone()).await {
+                warn!("[DockIcon] Could not open the Island's chat: {}", e);
+            }
+            announce_reopen_attempt(&app, count);
+            return;
+        }
         if let Some(window) = app.get_webview_window(window_labels::MAIN) {
             let _ = window.show();
             let _ = window.unminimize();

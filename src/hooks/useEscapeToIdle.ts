@@ -46,6 +46,11 @@ export interface EscapeToIdleOptions extends BarEscapeState {
    * there is nothing to show yet.
    */
   climb: (to: ClimbTarget) => void;
+  /**
+   * The top rung, for a look that holds the big chat itself (the Island). A
+   * look without one gets the full-size chat window instead.
+   */
+  openFullChat?: () => void;
 }
 
 /**
@@ -197,8 +202,10 @@ export function useEscapeToIdle(options: EscapeToIdleOptions): void {
       composerOpen,
       popupOpen,
     });
-    if (target === "main") {
-      void invoke(COMMANDS.WINDOWS_OPEN_MAIN_WINDOW).catch(() => {});
+    if (target === "full") {
+      const { openFullChat } = latest.current;
+      if (openFullChat) openFullChat();
+      else void invoke(COMMANDS.WINDOWS_OPEN_MAIN_WINDOW).catch(() => {});
     } else {
       climb(target);
     }

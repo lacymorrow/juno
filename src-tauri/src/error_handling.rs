@@ -215,7 +215,15 @@ pub mod utils {
     pub fn handle_window_error(app_handle: &AppHandle, error: &str) {
         log_and_emit_error(app_handle, "WindowSystem", "management", error, false);
 
-        // Attempt to restore main window if needed
+        // Attempt to restore main window if needed. The Island holds the big
+        // chat itself, so it opens that instead (`open_main_window` decides).
+        if crate::window_management::bar_owns_full_chat(app_handle) {
+            let app = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = crate::window_management::open_main_window(app).await;
+            });
+            return;
+        }
         if let Some(main_window) =
             app_handle.get_webview_window(crate::constants::window_labels::MAIN)
         {

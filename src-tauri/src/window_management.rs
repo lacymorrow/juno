@@ -728,11 +728,28 @@ pub fn bring_onboarding_forward(app: &AppHandle) {
 /// the same thing twice. The bar collapses to its idle pill rather than
 /// hiding, which keeps the hotkey and the mic reachable while the big window
 /// is up.
+///
+/// The Island holds the big chat itself, so with it on screen this opens the
+/// Island's large chat instead. Every route to the window comes through here
+/// (the bar, the Dock, the tray, Escape's ladder, onboarding's restore), which
+/// is what makes this the one place that decision lives.
 #[tauri::command]
 pub async fn open_main_window(app: AppHandle) -> Result<(), String> {
+    if bar_owns_full_chat(&app) {
+        show_bar(&app);
+        emit_ladder(&app, constants::ui::ladder_steps::FULL);
+        return Ok(());
+    }
     WindowManager::create_or_show_window(&app, window_labels::MAIN).await?;
     announce_main_window(&app, true);
     Ok(())
+}
+
+/// Whether the look on screen holds the big chat itself, leaving no place for
+/// the full-size chat window.
+pub fn bar_owns_full_chat(app: &AppHandle) -> bool {
+    let config = crate::commands::ui_commands::bar_config_now(app);
+    constants::ui::bar_appearances::owns_full_chat(&config.bar_appearance)
 }
 
 /// Put the full-size chat window away and give the conversation back to the bar.

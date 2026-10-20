@@ -157,18 +157,20 @@ export function escapeHidesBar(
 }
 
 /** Where the bar is asked to climb to (`ui::ladder_steps` in Rust). */
-export type LadderStep = "composer" | "floating" | "next";
+export type LadderStep = "composer" | "floating" | "next" | "full";
 
 /** What a look does when asked to climb: open its text input or its chat. */
 export type ClimbTarget = "composer" | "floating";
 
 /**
  * One rung up, for a look in `state`. `next` from an open floating chat is
- * the big chat, which only Rust can open; everything else is the look's own.
+ * the big chat, as is `full`, which Rust sends to a look that holds the big
+ * chat itself. Everything below the big chat is the look's own.
  */
-export function climbTarget(step: LadderStep, state: BarEscapeState): ClimbTarget | "main" {
+export function climbTarget(step: LadderStep, state: BarEscapeState): ClimbTarget | "full" {
   if (step === UI.LADDER_STEPS_COMPOSER) return "composer";
-  if (step === UI.LADDER_STEPS_NEXT && state.overlayOpen) return "main";
+  if (step === UI.LADDER_STEPS_FULL) return "full";
+  if (step === UI.LADDER_STEPS_NEXT && state.overlayOpen) return "full";
   return "floating";
 }
 
