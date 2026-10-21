@@ -14,6 +14,7 @@ pub mod core;
 pub mod debug_utils;
 pub mod dev;
 pub mod dictation;
+pub mod frontend_log;
 pub mod safari_tools;
 pub mod starters;
 // Removed deprecated dictation_reset module

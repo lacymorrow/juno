@@ -355,6 +355,8 @@ pub mod agent_sessions {
 /// App-level commands: build info, config directory, diagnostics
 pub mod app {
     pub const GET_BUILD_INFO: &str = "get_build_info";
+    /// A page's console output and uncaught errors, into Juno's log.
+    pub const FRONTEND_LOG: &str = "frontend_log";
     /// Network and provider health, for the bar's status dot.
     pub const GET_CONNECTIVITY: &str = "get_connectivity";
     /// What is still loading after launch, for the bar's status dot.
