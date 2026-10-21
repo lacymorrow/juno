@@ -89,7 +89,6 @@ export function useMenuEvents({
 					type: "general",
 					title: "",
 					description: "",
-					email: "",
 					priority: "medium",
 				});
 				setActiveModal("feedback");
