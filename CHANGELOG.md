@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.235] - 2026-10-21
+
+### Added
+
+- **timing:** log Kokoro's device and real-time factor per synthesis (#871) (8b980df6)
+
 ## [0.8.233] - 2026-10-20
 
 ### Fixed
@@ -1608,7 +1614,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.233...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.235...HEAD
+[0.8.235]: https://github.com/lacymorrow/juno/compare/cua-v0.8.234...v0.8.235
 [0.8.233]: https://github.com/lacymorrow/juno/compare/cua-v0.8.232...v0.8.233
 [0.8.232]: https://github.com/lacymorrow/juno/compare/cua-v0.8.231...v0.8.232
 [0.8.231]: https://github.com/lacymorrow/juno/compare/cua-v0.8.230...v0.8.231
