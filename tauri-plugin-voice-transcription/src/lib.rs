@@ -5,6 +5,7 @@ use tauri::{
 };
 
 pub mod always_listening;
+pub mod caption_boilerplate;
 pub mod capture_failure;
 pub mod commands;
 pub mod config;
