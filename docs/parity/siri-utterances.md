@@ -17,7 +17,7 @@ Tiers: 0 is a local intent (no model), 1 is a typed tool the model calls, 2 is c
   | `llm_request_sent` → `llm_first_token` | the model round trip | plan lever 1, the small-turn router |
   | `llm_first_token` → `tts_open` | the model wrote something before it opened `<TTS>` | the prompt |
   | `tts_open` → `first_tts_text` | the parser waiting for a sentence it may release (`MIN_SPOKEN_CHUNK_CHARS`) | the chunking rule |
-  | `first_tts_text` → `first_audio` | the speech engine | the TTS engine |
+  | `first_tts_text` → `first_audio` | the speech engine | the TTS engine, and which engine is set decides whether this gap is 1% or all of it (see below) |
 
   A row that misses only because of the last two gaps does not need the speed slice at all, so recording them is what keeps the plan's "only if the number misses" from over-firing.
 - Recording: one clip per row in `docs/changelog/media/<PR>/`, named after the row.
@@ -46,6 +46,24 @@ Median of each gap, voice turns (gaps are measured per turn, then taken as a med
 Two things this does and does not say. The model round trip is most of the budget and has never gone under 1236 ms by voice in any logged turn, which is already 82% of the target on its own. But these are organic turns with real conversation context, not the short single-intent utterances below, so they are an upper bound and not a measurement of these rows. That is what the walkthrough is for.
 
 The 695 ms middle gap is the reason `tts_open` exists: until a row is recorded with it, that fifth of the budget cannot be attributed to either the prompt or the chunking rule.
+
+### The 47 ms above is system TTS only. Read the engine before you read the row.
+
+Kokoro became the default in #783, and the table above predates it. On the same app in the same week, with the engine as the only thing that changed:
+
+| engine | n | min | p10 | median | p90 | max |
+| --- | --- | --- | --- | --- | --- | --- |
+| system | 41 | 2 | 37 | **58** | 85 | 175 |
+| kokoro | 50 | 1271 | 1611 | **2238** | 4664 | 7260 |
+
+**47 of those 50 Kokoro turns spend the entire 1500 ms budget on synthesis alone**, before the model, the router or tier 0 contribute anything. The cause is that `tts/kokoro.rs` generates a whole chunk to a complete WAV before a sample plays, at a real-time factor near 1.0, so **the wait before the first word is roughly the spoken length of the first sentence.** A row whose answer opens with a full sentence cannot pass on Kokoro however fast the model is.
+
+So, when a row misses:
+
+- Note the engine. `grep 'Kokoro] Synthesized' <log>` gives the device, the model's own sample rate, the elapsed time and the RTF per synthesis; `Model loaded in Nms on Metal(0)/F32` gives the device the preference resolved to. Both were added for this.
+- A Kokoro row that misses on the last gap alone is LAC-5009, not a plan lever. Pulling the small-turn router or tier 0 for it optimises a term that is not the binding one.
+- The levers and their real costs are on LAC-5009. Only the first chunk is exposed: `drain_speech_queue` already renders chunk N+1 while chunk N plays, so the cost is paid once per turn rather than once per sentence.
+- To measure the rows against the plan's own target rather than against the engine, record the row on system TTS as well. Two numbers on one row is cheaper than a second walkthrough.
 
 ## Reminders, Calendar, Contacts (slice 1, LAC-4233)
 
