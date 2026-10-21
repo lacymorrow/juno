@@ -1,3 +1,4 @@
+use crate::caption_boilerplate::{self, TimedSegment};
 use crate::engine::{TranscriptionEngine, TranscriptionSession};
 use crate::utils::filter_transcription_text;
 use std::sync::Arc;
@@ -108,13 +109,32 @@ impl WhisperSession {
         }
 
         let n = state.full_n_segments().unwrap_or(0);
-        let mut text = String::new();
+        // The final pass keeps each segment's own span so the captioned-video
+        // boilerplate Whisper invents for speechless audio can be told apart
+        // from the same words actually spoken. A partial is a single
+        // no-context segment shown live and overwritten a moment later, so it
+        // is concatenated as before.
+        if !final_pass {
+            let mut text = String::new();
+            for i in 0..n {
+                if let Ok(seg) = state.full_get_segment_text(i) {
+                    text.push_str(&seg);
+                }
+            }
+            return Ok(text);
+        }
+
+        let mut segments = Vec::with_capacity(n.max(0) as usize);
         for i in 0..n {
             if let Ok(seg) = state.full_get_segment_text(i) {
-                text.push_str(&seg);
+                // A segment with no readable span gets a zero-length one,
+                // which `caption_boilerplate` keeps rather than judges.
+                let t0 = state.full_get_segment_t0(i).unwrap_or(0);
+                let t1 = state.full_get_segment_t1(i).unwrap_or(t0);
+                segments.push(TimedSegment::from_centiseconds(seg, t0, t1));
             }
         }
-        Ok(text)
+        Ok(caption_boilerplate::keep_spoken(&segments))
     }
 }
 
