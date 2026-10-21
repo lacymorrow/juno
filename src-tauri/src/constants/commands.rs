@@ -420,6 +420,11 @@ pub mod desktop {
     pub const GET_SELECTED_TEXT: &str = "get_selected_text";
 }
 
+/// Filing a bug or a feature request from inside Juno
+pub mod issue_report {
+    pub const OPEN: &str = "open_issue_report";
+}
+
 /// File access from the developer tools panel
 pub mod files {
     pub const GET_FILE_CONTENT: &str = "get_file_content";

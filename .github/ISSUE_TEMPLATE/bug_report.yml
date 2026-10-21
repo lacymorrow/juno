@@ -5,52 +5,38 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting a bug. Please fill in as much detail as you can.
-  - type: input
-    id: version
-    attributes:
-      label: Juno version
-      description: "Find this in Juno > About (e.g. v0.5.0)"
-      placeholder: "v0.5.0"
-    validations:
-      required: true
-  - type: input
-    id: macos
-    attributes:
-      label: macOS version
-      placeholder: "macOS 15.2 (Sequoia)"
-    validations:
-      required: true
+        One box is enough. Everything below it is optional, so skip whatever you don't know.
   - type: textarea
     id: what-happened
     attributes:
       label: What happened?
-      description: A clear description of the bug.
+      description: What you were doing, and what Juno did instead of what you expected.
       placeholder: "When I asked Juno to..., it instead..."
     validations:
       required: true
-  - type: textarea
-    id: expected
+  - type: input
+    id: version
     attributes:
-      label: Expected behavior
-      description: What should have happened?
-    validations:
-      required: true
+      label: Juno version
+      description: "Juno > About. Reports filed from inside Juno already have this."
+      placeholder: "v0.8.234"
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: "Apple menu > About This Mac."
+      placeholder: "26.0.1"
   - type: textarea
     id: reproduce
     attributes:
       label: Steps to reproduce
-      description: How can we reproduce this bug?
-      value: |
-        1.
-        2.
-        3.
-    validations:
-      required: true
+      description: If you can make it happen again, how?
+      placeholder: |
+        1. Open the floating bar
+        2. Say "open my calendar"
+        3. Juno ...
   - type: textarea
     id: logs
     attributes:
       label: Logs or screenshots
-      description: "Paste any relevant logs (Console.app > Juno) or screenshots."
-    validations:
-      required: false
+      description: "Logs are in Console.app under Juno, or in ~/Library/Logs/Juno."

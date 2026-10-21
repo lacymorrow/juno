@@ -1,8 +1,8 @@
-blank_issues_enabled: false
+blank_issues_enabled: true
 contact_links:
   - name: Questions & Use Cases
     url: https://github.com/lacymorrow/juno/discussions
     about: Have a question, want to share a use case, or chat with other users? Start a Discussion.
   - name: Security report
     url: https://github.com/lacymorrow/juno/security/advisories/new
-    about: Found a vulnerability? Please report it privately — do not open a public issue.
+    about: Found a vulnerability? Please report it privately. Do not open a public issue.

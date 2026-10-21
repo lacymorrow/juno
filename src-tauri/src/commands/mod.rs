@@ -37,6 +37,7 @@ pub mod error_recovery;
 pub mod escape_key_coordinator;
 pub mod filesystem;
 // floating_bar and floating_panel modules removed - functionality migrated to ui_commands
+pub mod issue_report; // "Report Issue...": the prefilled GitHub issue form (LAC-5069)
 pub mod keyboard;
 pub mod mcp;
 pub mod media; // Live player state/control for <NowPlayingCard> (no fake state)

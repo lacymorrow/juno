@@ -1,6 +1,7 @@
 import { useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { EVENTS } from "@/lib/constants.generated";
+import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 
 interface MenuEventsProps {
@@ -35,9 +36,12 @@ export function useMenuEvents({
 		let mounted = true;
 		let unlistenCallbacks: (() => void)[] = [];
 
-		const addListener = async (event: string, handler: () => void) => {
-			const unlisten = await listen(event, () => {
-				if (mounted) handler();
+		const addListener = async <T = unknown>(
+			event: string,
+			handler: (payload: T) => void,
+		) => {
+			const unlisten = await listen<T>(event, (e) => {
+				if (mounted) handler(e.payload);
 			});
 			if (mounted) unlistenCallbacks.push(unlisten);
 			else safeCleanupEventListener(unlisten);
@@ -66,13 +70,25 @@ export function useMenuEvents({
 				setActiveModal("help");
 			});
 
-			await addListener(EVENTS.MENU_SHOW_FEEDBACK, () => {
+			// The backend sends "issue" for Report Issue... and "feedback" for
+			// Send Feedback.... Report Issue... goes straight to the GitHub bug
+			// form: Juno has nothing to ask that the form does not ask better,
+			// and it fills in the version and the OS itself (LAC-5069).
+			await addListener<string>(EVENTS.MENU_SHOW_FEEDBACK, (kind) => {
+				if (kind === "issue") {
+					console.log("🐞 Menu: Opening the bug report form");
+					invoke(COMMANDS.ISSUE_REPORT_OPEN, { kind: "bug" }).catch((error) => {
+						console.error("Failed to open the bug report form:", error);
+						addSystemMessage(`Could not open the bug report form: ${error}`);
+					});
+					return;
+				}
+
 				console.log("📝 Menu: Opening feedback modal");
 				setFeedbackData({
 					type: "general",
 					title: "",
 					description: "",
-					email: "",
 					priority: "medium",
 				});
 				setActiveModal("feedback");
