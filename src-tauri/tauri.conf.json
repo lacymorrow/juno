@@ -140,6 +140,26 @@
         "focusable": false
       },
       {
+        "label": "permission-coach",
+        "create": false,
+        "url": "/permission-coach",
+        "width": 300,
+        "height": 88,
+        "x": 0,
+        "y": 0,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "visible": false,
+        "shadow": false,
+        "center": false,
+        "fullscreen": false,
+        "focus": false,
+        "focusable": false
+      },
+      {
         "label": "settings",
         "create": false,
         "title": "Juno Settings",
