@@ -67,6 +67,27 @@ describe("parseInlineMarkdown: prose that only looks like markdown", () => {
     expect(parse("it was _fine_. Then it broke")).toBe("it was em(fine). Then it broke");
   });
 
+  it("keeps the filename whole when a real mark follows it in the same line", () => {
+    // QA, LAC-5166. Each half passed alone and the mix did not: the refused
+    // `__` was re-entered one character on, so its second `_` opened against
+    // its own first and paired with the `_` after `fine`, swallowing the
+    // filename into an italic run.
+    expect(parse("__init__.py and it was _fine_.")).toBe(
+      "__init__.py and it was em(fine).",
+    );
+  });
+
+  it("treats a run that cannot open as literal in full, not character by character", () => {
+    // The general form of the defect above: whatever a refused run is, none
+    // of it may be re-read as a smaller opener.
+    expect(parse("__a_")).toBe("__a_");
+    expect(parse("a ** b ** c")).toBe("a ** b ** c");
+    expect(parse("***")).toBe("***");
+    // Marks that genuinely open are unaffected by that rule.
+    expect(parse("__a__ and __b__")).toBe("strong(a) and strong(b)");
+    expect(parse("___three___")).toBe("strong(em(three))");
+  });
+
   it("leaves a path or a URL with underscores in it alone", () => {
     expect(parse("Use src/lib/my_module.ts and other_file.ts")).toBe(
       "Use src/lib/my_module.ts and other_file.ts",

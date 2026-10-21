@@ -251,6 +251,16 @@ function parseNodes(src: string): InlineNode[] {
         i = mark.end;
         continue;
       }
+      // A run that cannot open a mark is literal, and all of it is. Stepping
+      // one character on would re-enter the same run, letting its tail open a
+      // mark against its own head: in `__init__.py and it was _fine_.` the
+      // `__` is refused (its only closer is a filename's), then the second
+      // `_` opens against the first, because `_` is punctuation rather than a
+      // word character, and pairs with the `_` after `fine` (QA, LAC-5166).
+      const run = runLength(src, i);
+      text += src.slice(i, i + run);
+      i += run;
+      continue;
     }
 
     text += ch;
