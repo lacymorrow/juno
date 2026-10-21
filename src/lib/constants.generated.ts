@@ -786,6 +786,7 @@ export const COMMANDS = {
   DESKTOP_GLOBAL_TYPE_TEXT: 'global_type_text',
   DESKTOP_GET_FOCUSED_ELEMENT_INFO: 'get_focused_element_info',
   DESKTOP_GET_SELECTED_TEXT: 'get_selected_text',
+  ISSUE_REPORT_OPEN: 'open_issue_report',
   FILES_GET_FILE_CONTENT: 'get_file_content',
   FILES_SET_FILE_CONTENT: 'set_file_content',
   FILES_LIST_FILES: 'list_files',

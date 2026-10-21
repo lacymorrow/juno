@@ -16,7 +16,9 @@ export interface FeedbackData {
   type: "issue" | "feature" | "general";
   title: string;
   description: string;
-  email?: string;
+  // No contact field: a bug or a feature goes to GitHub, which already knows
+  // who is filing, and general feedback goes out through the person's own mail
+  // client, which puts their address on it (LAC-5069).
   priority: "low" | "medium" | "high";
 }
 
@@ -92,18 +94,17 @@ export function ModalSystem({
     try {
       console.log("📝 Submitting feedback:", feedbackData);
 
-      // Create GitHub issue URL or mailto link for feedback
-      if (feedbackData.type === "issue") {
-        const title = encodeURIComponent(feedbackData.title);
-        const body = encodeURIComponent(
-          `**Priority:** ${feedbackData.priority}\n\n**Description:**\n${
-            feedbackData.description
-          }\n\n**Contact:** ${feedbackData.email || "Not provided"}`
-        );
-        const githubUrl = `https://github.com/lacymorrow/juno/issues/new?title=${title}&body=${body}`;
-
-        // Open GitHub issues page
-        await invoke(COMMANDS.DESKTOP_OPEN_URL, { url: githubUrl });
+      // A bug or a feature goes to the matching GitHub issue form, named by
+      // template so the prefills survive, with the version and the OS filled
+      // in by the backend. Priority and contact are deliberately not sent:
+      // neither has a field on the form, priority is triage's call, and
+      // GitHub already knows who is filing (LAC-5069).
+      if (feedbackData.type === "issue" || feedbackData.type === "feature") {
+        await invoke(COMMANDS.ISSUE_REPORT_OPEN, {
+          kind: feedbackData.type === "issue" ? "bug" : "feature",
+          title: feedbackData.title,
+          description: feedbackData.description,
+        });
       } else {
         // For general feedback, create mailto link
         const subject = encodeURIComponent(
@@ -117,14 +118,17 @@ export function ModalSystem({
         await invoke(COMMANDS.DESKTOP_OPEN_URL, { url: mailtoUrl });
       }
 
-      onAddSystemMessage("✅ Feedback form opened. Thank you for your input!");
+      onAddSystemMessage(
+        feedbackData.type === "general"
+          ? "✅ Feedback email opened. Thank you for your input!"
+          : "✅ GitHub form opened with your report filled in. Press Submit there to file it."
+      );
 
       // Reset form and close modal
       onFeedbackDataChange({
         type: "general",
         title: "",
         description: "",
-        email: "",
         priority: "medium",
       });
       onClose();
@@ -423,40 +427,31 @@ export function ModalSystem({
                   required
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Priority
-                </label>
-                <select
-                  value={feedbackData.priority}
-                  onChange={(e) =>
-                    onFeedbackDataChange({
-                      priority: e.target.value as "low" | "medium" | "high",
-                    })
-                  }
-                  className="w-full p-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-                >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Email (Optional)
-                </label>
-                <input
-                  type="email"
-                  value={feedbackData.email}
-                  onChange={(e) =>
-                    onFeedbackDataChange({
-                      email: e.target.value,
-                    })
-                  }
-                  className="w-full p-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-                  placeholder="your.email@example.com"
-                />
-              </div>
+              {/* Priority only goes somewhere on the general-feedback email.
+                  The GitHub forms have no priority field, and priority is
+                  triage's call anyway, so a bug or a feature is not asked
+                  (LAC-5069). A control whose value is discarded is worse than
+                  no control. */}
+              {feedbackData.type === "general" && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Priority
+                  </label>
+                  <select
+                    value={feedbackData.priority}
+                    onChange={(e) =>
+                      onFeedbackDataChange({
+                        priority: e.target.value as "low" | "medium" | "high",
+                      })
+                    }
+                    className="w-full p-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
+              )}
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"

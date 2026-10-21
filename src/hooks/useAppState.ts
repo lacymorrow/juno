@@ -37,7 +37,6 @@ const initialFeedbackData: FeedbackData = {
     type: "general",
     title: "",
     description: "",
-    email: "",
     priority: "medium",
 };
 
