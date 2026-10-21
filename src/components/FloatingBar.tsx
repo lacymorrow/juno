@@ -1542,6 +1542,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     overlayOpen: paneOpen,
     composerOpen: inputOpen,
     popupOpen: false,
+    draftPresent: localInputValue.trim() !== "" || pastedImages.length > 0,
     collapse: collapseToIdle,
     report: reportEscape,
     climb: climbLadder,
