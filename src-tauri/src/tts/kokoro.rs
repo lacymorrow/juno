@@ -244,16 +244,39 @@ pub fn load_problem() -> Option<String> {
     LOAD_PROBLEM.lock().ok().and_then(|slot| slot.clone())
 }
 
+/// How long synthesis took for each second of speech it produced.
+///
+/// Below 1.0 the model writes audio faster than the audio plays, so a longer
+/// sentence costs the listener nothing extra up front. At or above 1.0 the
+/// wait before the first word is roughly the spoken length of that first
+/// sentence, which is the shape of the Kokoro latency on LAC-5009.
+///
+/// `None` when there is no audio to divide by. An empty or failed synthesis is
+/// not an infinitely fast one, and a NaN or infinite duration must not reach
+/// the log as a factor either.
+fn real_time_factor(synthesis_ms: u128, audio_secs: f32) -> Option<f32> {
+    if !audio_secs.is_finite() || audio_secs <= 0.0 {
+        return None;
+    }
+    Some(synthesis_ms as f32 / 1000.0 / audio_secs)
+}
+
 fn load_kokoro() -> Result<KokoroModel, String> {
     info!("[Kokoro] Loading Kokoro-82M (first run downloads ~82MB from HuggingFace Hub)");
     let started = std::time::Instant::now();
     // Metal where the Mac has it, CPU otherwise. Both architectures.
     let config = any_tts::TtsConfig::new(any_tts::ModelType::Kokoro).with_preferred_runtime();
+    // Which device the preference actually resolved to. any-tts logs its own
+    // "Metal device 0 initialized" without a prefix, so from Juno's log alone
+    // there was no way to attribute it to Kokoro rather than to Parakeet,
+    // which loads through candle too.
+    let runtime = format!("{:?}/{:?}", config.device, config.dtype);
     match any_tts::load_model(config) {
         Ok(model) => {
             info!(
-                "[Kokoro] Model loaded in {}ms",
-                started.elapsed().as_millis()
+                "[Kokoro] Model loaded in {}ms on {}",
+                started.elapsed().as_millis(),
+                runtime
             );
             set_load_problem(None);
             Ok(Arc::from(model))
@@ -341,9 +364,22 @@ pub async fn invoke_kokoro_tts(text: String, voice: String, speed: f64) -> Resul
             .with_temperature(speed);
 
         info!("[Kokoro] Synthesizing with voice '{}'", voice);
+        let synthesis_started = std::time::Instant::now();
         let audio = model
             .synthesize(&request)
             .map_err(|e| format!("[Kokoro] Synthesis failed: {}", e))?;
+        let synthesis_ms = synthesis_started.elapsed().as_millis();
+        // The sample rate comes from the model rather than from an assumption,
+        // because the real-time factor is the whole point of the line and a
+        // guessed rate would move it.
+        let audio_secs = audio.duration_secs();
+        match real_time_factor(synthesis_ms, audio_secs) {
+            Some(rtf) => info!(
+                "[Kokoro] Synthesized {:.2}s of speech at {}Hz in {}ms (RTF {:.2})",
+                audio_secs, audio.sample_rate, synthesis_ms, rtf
+            ),
+            None => warn!("[Kokoro] Synthesis returned no audio in {}ms", synthesis_ms),
+        }
 
         if crate::tts::is_tts_stop_requested() {
             return Ok("TTS_STOPPED_BY_USER".to_string());
@@ -381,6 +417,26 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc;
     use std::time::Duration;
+
+    /// The number the Kokoro latency argument rests on, including the cases
+    /// where there is no number to print.
+    #[test]
+    fn the_real_time_factor_divides_by_the_speech_it_made() {
+        // 2855ms for 2.72s of speech: the measured Kokoro shape, just over 1,
+        // which is why the wait is the length of the sentence.
+        let rtf = real_time_factor(2855, 2.72).expect("real audio has a factor");
+        assert!((rtf - 1.0496).abs() < 0.001, "got {rtf}");
+        // Well under 1.0 is the system voice's shape: 58ms for a whole second.
+        let fast = real_time_factor(58, 1.0).expect("fast audio has a factor");
+        assert!((fast - 0.058).abs() < 0.0001, "got {fast}");
+        // No audio is not infinitely fast, and no non-finite duration may
+        // reach the log as a factor.
+        assert_eq!(real_time_factor(2855, 0.0), None);
+        assert_eq!(real_time_factor(2855, -1.0), None);
+        assert_eq!(real_time_factor(2855, f32::NAN), None);
+        assert_eq!(real_time_factor(2855, f32::INFINITY), None);
+        assert_eq!(real_time_factor(0, 0.0), None);
+    }
 
     #[test]
     fn preloading_twice_loads_once() {
