@@ -272,6 +272,12 @@ pub async fn load_audio_settings_from_centralized_settings(
         &audio_settings,
     ));
 
+    // From here on, a microphone or speaker coming or going reaches the
+    // windows showing the lists. Unconditional: the plugin's own watch waits
+    // for microphone permission because it rebuilds a stream, and a list of
+    // devices should not wait for permission it does not need.
+    crate::commands::audio_devices::watch_audio_hardware(app_handle);
+
     // Juno's voice, resolved and in force before anything can speak in it,
     // and the local model warming in the background if Kokoro is the engine.
     // The same function runs after a reset; see `voices::apply_stored_voice`.

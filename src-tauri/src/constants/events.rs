@@ -150,6 +150,16 @@ pub mod voice_capture {
     pub const DEVICE_SUBSTITUTED: &str = "voice-capture:device-substituted";
 }
 
+/// The Mac's audio hardware, as it is now.
+pub mod audio_devices {
+    /// A device was plugged in or unplugged, or macOS picked a different
+    /// default. The payload is the whole answer `list_audio_devices` gives,
+    /// already re-read, so a window showing the pickers draws it rather than
+    /// asking again. Emitted whatever the microphone permission is: listing
+    /// devices never opens one.
+    pub const CHANGED: &str = "audio-devices:changed";
+}
+
 /// Hearing Juno's voice before you choose it.
 ///
 /// The sample is reported rather than awaited. Choosing a voice answers
