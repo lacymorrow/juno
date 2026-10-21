@@ -19,6 +19,10 @@ title. That is wrong and HN would have caught it. Every claim now says source-av
 Humanizer: run on 2026-10-21 against ~/.agents/skills/humanizer/SKILL.md. Earlier drafts
 were written when that skill was unreachable, so the rules were approximated by hand.
 
+Line count: earlier drafts said 40k lines of Rust. Measured 2026-10-21, src-tauri/src is
+140,973 lines and the whole Rust workspace is 166,120. The copy now says about 140k, which
+is what `find src-tauri/src -name '*.rs' | xargs wc -l` returns if a reader checks.
+
 X thread: moved to LAC-4175 (under LAC-4173).
 
 ---
@@ -40,7 +44,7 @@ Show HN: Juno, voice-controlled computer use for macOS (Rust, source available)
 
 I built Juno because I wanted to say something to my Mac and have my apps respond. OpenAI just shipped "Intelligent UI" in ChatGPT, where answers come back as components you can tap. Juno's been doing that for months, with the buttons pointed somewhere else. Theirs render inside a chat window. Juno's cards have buttons that press the real controls in your apps, through the macOS accessibility APIs. Say "reschedule my 3pm" and you get a card with the event on it, and the Reschedule button fires an AXPress on Calendar.
 
-It's a Tauri v2 app. The backend is about 40k lines of Rust, and everything except the chat UI lives there: audio, screenshots, networking, accessibility, agent orchestration. The React frontend only renders what the backend hands it.
+It's a Tauri v2 app. The backend is about 140k lines of Rust, and everything except the chat UI lives there: audio, screenshots, networking, accessibility, agent orchestration. The React frontend only renders what the backend hands it.
 
 You speak (local Whisper, nothing uploaded) or you type. Juno screenshots your display, sends the image to Claude, and runs what comes back. Click, type, scroll, open apps. It loops until the task is done or you hit Escape.
 
@@ -111,6 +115,6 @@ Juno hit-tests the accessibility tree at that coordinate first. If there's an in
 
 Your cursor stays yours, too. Background mode is on by default, so Juno acts through accessibility APIs rather than your physical mouse, and you can keep working while it runs.
 
-40k+ lines of Rust, source-available under FSL-1.1-MIT and MIT in two years. Built on Tauri v2, with whisper.cpp doing voice transcription on-device. Free with your own key, free with no key at all if you already pay for Claude Max or Pro, and the first 100 founding licenses are $49 once: junebug.ai/pricing
+140k lines of Rust, source-available under FSL-1.1-MIT and MIT in two years. Built on Tauri v2, with whisper.cpp doing voice transcription on-device. Free with your own key, free with no key at all if you already pay for Claude Max or Pro, and the first 100 founding licenses are $49 once: junebug.ai/pricing
 
 github.com/lacymorrow/juno
