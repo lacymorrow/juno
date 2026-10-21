@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.236] - 2026-10-21
+
+### Added
+
+- **issues:** filing a bug takes one box, and Juno fills in the rest (#867) (ecd65d41)
+
 ## [0.8.235] - 2026-10-21
 
 ### Added
@@ -1614,7 +1620,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.235...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.236...HEAD
+[0.8.236]: https://github.com/lacymorrow/juno/compare/cua-v0.8.235...v0.8.236
 [0.8.235]: https://github.com/lacymorrow/juno/compare/cua-v0.8.234...v0.8.235
 [0.8.233]: https://github.com/lacymorrow/juno/compare/cua-v0.8.232...v0.8.233
 [0.8.232]: https://github.com/lacymorrow/juno/compare/cua-v0.8.231...v0.8.232
