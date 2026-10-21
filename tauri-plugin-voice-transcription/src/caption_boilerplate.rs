@@ -15,38 +15,58 @@
 //!
 //! 1. The segment's **whole** text, punctuation and case aside, is one of
 //!    [`STOCK_PHRASES`]. A stock phrase inside a sentence is speech.
-//! 2. Spread over that segment's own `t0..t1`, the phrase is slower than
+//! 2. The segment covers at least [`MIN_DROP_SECONDS`] of audio.
+//! 3. Spread over that span, the phrase is slower than
 //!    [`MIN_WORDS_PER_SECOND`] — slower than anyone talks. Boilerplate
 //!    invented for eight seconds of room noise is stamped across all eight
 //!    seconds; "thank you" actually spoken takes about a second.
 //!
-//! Both must hold, so a quiet speaker saying "Thank you." keeps it (their
-//! segment is short) and so does someone reading a list of thanks (their text
-//! is longer than the phrase). Anything this module cannot judge — no
-//! timestamps, a zero-length span — is kept. Only the final pass runs through
-//! here; a live partial has no trustworthy timestamps and is overwritten a
-//! moment later anyway.
+//! All three must hold, so a quiet speaker saying "Thank you." keeps it
+//! (their segment is short) and so does someone reading a list of thanks
+//! (their text is longer than the phrase). Anything this module cannot judge
+//! — no timestamps, a zero-length span — falls under the floor and is kept.
+//! Only the final pass runs through here; a live partial has no trustworthy
+//! timestamps and is overwritten a moment later anyway.
 
 use tracing::info;
 
 /// Words per second below which a stock phrase is not something anyone said.
 ///
-/// Ordinary speech runs 2 to 4 words per second, and the shortest phrase on
-/// the list is two words, so a drop needs a span of at least two seconds. That
-/// leaves better than a 2x margin under real speech while still catching the
-/// case that matters: boilerplate stretched over a multi-second hold.
+/// Ordinary speech runs 2 to 4 words per second, so this leaves better than a
+/// 2x margin under the slowest real talker.
 pub const MIN_WORDS_PER_SECOND: f32 = 1.0;
+
+/// No segment shorter than this is ever dropped, whatever its rate.
+///
+/// The rate on its own is not enough, because a one-word phrase fails it at
+/// any span over a second. whisper.cpp routinely starts its first segment at
+/// zero and runs its last one to the end of the audio, so a segment covers the
+/// thinking pause as well as the word: hold the key, pause a beat, say
+/// "Thanks." and the segment is 0..1.5 s for a 0.5 s word, which is 0.67 w/s
+/// and would be dropped. That is the exact harm this module exists to avoid.
+///
+/// With this floor, a drop needs **both** two seconds of audio and a sub-1
+/// w/s rate, for every entry on the list regardless of its length. A test
+/// asserts that invariant per entry rather than leaving it to this comment,
+/// because the comment is what was wrong (LAC-3738, code review of PR #873).
+pub const MIN_DROP_SECONDS: f32 = 2.0;
 
 /// The captioned-video sign-offs Whisper reaches for when there is no speech.
 ///
 /// Attested on the English models, in [`normalized`] form so the comparison is
 /// one string equality (a test enforces that). Kept deliberately short: every
 /// entry is a real thing someone could say, so each one is a small risk paid
-/// for by rule 2 above, and a long list is a long list of risks.
+/// for by the two rules above, and a long list is a long list of risks.
+///
+/// `thanks`, `bye`, `goodbye` and `bye bye` were on this list and were taken
+/// off. Each is a plausible whole dictation on its own ("Thanks" in a chat
+/// reply), and none of them is a dominant Whisper hallucination the way `you`
+/// and `thank you` are, so they were costing more than they returned. `you`
+/// stays: it is the commonest silence hallucination of all and essentially
+/// never a dictation someone meant to send.
 pub const STOCK_PHRASES: &[&str] = &[
     "you",
     "thank you",
-    "thanks",
     "thank you very much",
     "thanks for watching",
     "thanks for watching this video",
@@ -58,9 +78,6 @@ pub const STOCK_PHRASES: &[&str] = &[
     "please subscribe to my channel",
     "dont forget to subscribe",
     "like and subscribe",
-    "bye",
-    "goodbye",
-    "bye bye",
     "subtitles by the amaraorg community",
     "transcription by eso",
     "translation by eso",
@@ -126,14 +143,15 @@ pub fn is_stock_phrase(text: &str) -> bool {
 
 /// Is this segment boilerplate invented for audio with no speech in it?
 ///
-/// Both rules from the module docs have to hold. A segment whose span is
-/// missing or empty is kept: an unjudgeable segment is not a hallucination.
+/// All three rules from the module docs have to hold. A segment whose span is
+/// missing, empty or backwards reads as zero seconds, which is under the
+/// floor, so it is kept: an unjudgeable segment is not a hallucination.
 pub fn is_invented(segment: &TimedSegment) -> bool {
     let Some(phrase) = stock_phrase(&segment.text) else {
         return false;
     };
     let seconds = segment.duration_secs();
-    if seconds <= 0.0 {
+    if seconds < MIN_DROP_SECONDS {
         return false;
     }
     phrase.split_whitespace().count() as f32 / seconds < MIN_WORDS_PER_SECOND
@@ -233,6 +251,42 @@ mod tests {
         assert!(!is_invented(&seg(" Thank you.", 300, 480)));
         // Said at the end of a long hold, not stamped across it.
         assert!(!is_invented(&seg(" Thank you.", 740, 820)));
+    }
+
+    #[test]
+    fn no_entry_can_be_dropped_before_the_floor() {
+        // The invariant the module docs claim, asserted per entry instead of
+        // described. Before the floor existed the one-word entries broke it:
+        // "you" over 1.1s is 0.9 w/s, which dropped a word someone said.
+        let just_under = (MIN_DROP_SECONDS * 100.0) as i64 - 1;
+        for phrase in STOCK_PHRASES {
+            assert!(
+                !is_invented(&seg(phrase, 0, just_under)),
+                "{phrase:?} dropped at {:.2}s, under the {MIN_DROP_SECONDS}s floor",
+                just_under as f32 / 100.0
+            );
+        }
+    }
+
+    #[test]
+    fn a_one_word_reply_someone_meant_to_send_is_kept() {
+        // Hold the key, pause a beat to think, say it. whisper.cpp starts the
+        // first segment at zero, so the segment covers the pause as well as
+        // the word: 1.5s for a 0.5s word is 0.67 w/s, which the rate alone
+        // would drop.
+        assert!(!is_invented(&seg(" you", 0, 150)));
+        // Past the floor it is boilerplate again.
+        assert!(is_invented(&seg(" you", 0, 300)));
+    }
+
+    #[test]
+    fn the_words_people_actually_say_alone_are_not_on_the_list() {
+        // Taken off deliberately: each is a plausible whole dictation and
+        // none is a dominant hallucination.
+        for word in ["thanks", "Thanks.", "bye", "Bye!", "goodbye", "bye bye"] {
+            assert!(!is_stock_phrase(word), "{word:?} is back on the list");
+            assert!(!is_invented(&seg(word, 0, 900)), "{word:?} was dropped");
+        }
     }
 
     #[test]
