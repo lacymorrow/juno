@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.238] - 2026-10-22
+
+### Fixed
+
+- **anthropic:** drop stale thinking blocks instead of 400ing the turn (LAC-5078) (#865) (5dfa0cc6)
+
 ## [0.8.237] - 2026-10-22
 
 ### Fixed
@@ -1626,7 +1632,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.237...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.238...HEAD
+[0.8.238]: https://github.com/lacymorrow/juno/compare/cua-v0.8.237...v0.8.238
 [0.8.237]: https://github.com/lacymorrow/juno/compare/cua-v0.8.236...v0.8.237
 [0.8.236]: https://github.com/lacymorrow/juno/compare/cua-v0.8.235...v0.8.236
 [0.8.235]: https://github.com/lacymorrow/juno/compare/cua-v0.8.234...v0.8.235
