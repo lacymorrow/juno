@@ -168,3 +168,80 @@ describe("useBackendEvents: an approval question always settles", () => {
     expect(setConversationWithPruning).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The staleness this fixes.
+ *
+ * `ax-grounding-audit` and the `tool_call_result` it belongs to are joined by
+ * nothing but their order: the audit sits in a single-slot buffer until the
+ * next `computer` result consumes it. End the run in between — Escape, an
+ * error, stop-all — and the audit outlives the action it describes, so a later
+ * unrelated click is labelled with the earlier element's role and label.
+ */
+describe("useBackendEvents: an unconsumed AX audit does not outlive its run", () => {
+  beforeEach(() => {
+    handlers.clear();
+  });
+
+  const audit = {
+    action: "left_click",
+    ax_grounded: true,
+    ax_role: "AXButton",
+    ax_label: "Send",
+    screen_coordinate: [120, 240],
+    timestamp: 1,
+  };
+
+  /** Fire a `computer` result and return the row it produced. */
+  function computerResult(setConversationWithPruning: ReturnType<typeof vi.fn>) {
+    handlers.get("agent-event")?.({
+      type: "tool_call_result",
+      payload: { tool_name: "computer", success: true, content: "Clicked." },
+    });
+    const updater = setConversationWithPruning.mock.calls.at(-1)?.[0] as (
+      prev: unknown[],
+    ) => Record<string, unknown>[];
+    return updater([])[0];
+  }
+
+  // The control. Without it, every assertion below would also pass if the
+  // buffer stopped attaching audits at all.
+  it("still labels the result when the audit's own action completes", () => {
+    const { setConversationWithPruning } = renderBackendEvents();
+
+    handlers.get("ax-grounding-audit")?.(audit);
+
+    expect(computerResult(setConversationWithPruning)).toMatchObject({
+      ax_grounded: true,
+      ax_role: "AXButton",
+      ax_label: "Send",
+      ax_action: "left_click",
+      ax_screen_coordinate: [120, 240],
+    });
+  });
+
+  const stops: [string, unknown][] = [
+    ["agent-stopping", undefined],
+    [
+      "agent-error",
+      { agent_state: "Failed", error_message: "cancelled", original_query: "click send" },
+    ],
+    ["agent-stop-all", undefined],
+  ];
+
+  for (const [event, payload] of stops) {
+    it(`drops the audit on ${event}, so the next action is not mislabelled`, () => {
+      const { setConversationWithPruning } = renderBackendEvents();
+
+      handlers.get("ax-grounding-audit")?.(audit);
+      handlers.get(event)?.(payload);
+
+      const row = computerResult(setConversationWithPruning);
+      expect(row).not.toHaveProperty("ax_role");
+      expect(row).not.toHaveProperty("ax_label");
+      expect(row).not.toHaveProperty("ax_grounded");
+      expect(row).not.toHaveProperty("ax_action");
+      expect(row).not.toHaveProperty("ax_screen_coordinate");
+    });
+  }
+});
