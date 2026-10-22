@@ -85,6 +85,12 @@ pub mod beta_flags {
     /// Beta flag for the server-side `fallbacks: "default"` refusal retry
     /// (Fable / Opus 5 tier). The `"default"` scalar form requires exactly this date.
     pub const SERVER_SIDE_FALLBACK: &str = "server-side-fallback-2026-07-01";
+
+    /// Beta flag that permits `thinking.block_binding` on the request, and makes the
+    /// response carry `input_transformations`. The field is **only** accepted with this
+    /// header: sending `block_binding` without it is a 400 ending in
+    /// `block_binding: Extra inputs are not permitted`, so the two move together.
+    pub const THINKING_BINDING_CONTROLS: &str = "thinking-binding-controls-2026-08-01";
 }
 
 // Tool Version Groups (Mapping API versions to tool sets)
