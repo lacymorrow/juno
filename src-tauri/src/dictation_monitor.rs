@@ -342,8 +342,12 @@ pub async fn on_dictation_input_pressed(app_handle: &AppHandle) {
 pub async fn on_dictation_input_released(app_handle: &AppHandle) -> HoldRelease {
     let mut state = DICTATION_INPUT_STATE.lock().await;
 
-    let (outcome, duration, deferred) =
-        state.release(|id, end| hold_gate::defer(VoiceTarget::Dictation, id, end));
+    let mut swallowed = false;
+    let (outcome, duration, deferred) = state.release(|id, end| {
+        let deferral = hold_gate::defer_release(VoiceTarget::Dictation, id, end);
+        swallowed = deferral == hold_gate::Deferral::Swallowed;
+        deferral != hold_gate::Deferral::Now
+    });
     if deferred {
         // The start this hold emitted is still opening the microphone. Acting
         // now would race it: the stop or cancel would find nothing to end, and
@@ -363,7 +367,11 @@ pub async fn on_dictation_input_released(app_handle: &AppHandle) -> HoldRelease 
             // handler awaits speech-to-text finalization (seconds), and the old
             // end cue played only after that — which is exactly why stopping felt
             // unresponsive. Play it now so the user hears the release immediately.
-            crate::commands::sound::play_release_cue(app_handle, VoiceTarget::Dictation);
+            // Not for a hold whose start was refused (an agent turn held the
+            // microphone): no dictation happened, so there is nothing to end.
+            if !swallowed {
+                crate::commands::sound::play_release_cue(app_handle, VoiceTarget::Dictation);
+            }
 
             // Emit event to stop dictation normally
             if !deferred {
