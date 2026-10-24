@@ -267,12 +267,6 @@ fn schedule_hold_deadlines(app_handle: &AppHandle, generation: u64) {
             // The tap just became a hold: this is the moment the person
             // hears the start, not the press and not the microphone opening.
             crate::commands::sound::play_hold_cue(&app_handle, VoiceTarget::Dictation);
-            if let Err(e) = app_handle.emit(events::dictation::COMMITTED, ()) {
-                error!(
-                    "[DictationMonitor] Failed to emit dictation-committed: {}",
-                    e
-                );
-            }
         }
 
         // Safety net for a release that never arrives (the key went up while

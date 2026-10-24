@@ -152,18 +152,6 @@ fn setup_dictation_listeners(app: &AppHandle) {
             handle_dictation_stop(app_handle).await;
         });
     });
-
-    // Listen for force stop events
-    let app_handle_for_force_stop = app.clone();
-    app.listen(
-        constants::events::force_stop::TRANSCRIPTION,
-        move |_event| {
-            let app_handle = app_handle_for_force_stop.clone();
-            tauri::async_runtime::spawn(async move {
-                handle_force_stop_transcription(app_handle).await;
-            });
-        },
-    );
 }
 
 /// Setup timer event listeners for processing timer-expired events
@@ -912,34 +900,6 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
     // is still wanted. Not from the remembered flag alone: that is how voice
     // switched off mid-dictation came back on (see the function).
     crate::commands::triggers::resume_voice_after_dictation(&app_handle).await;
-}
-
-async fn handle_force_stop_transcription(app_handle: AppHandle) {
-    info!("[Event] Force stopping transcription");
-
-    // A force path runs precisely when the rest of the state is not to be
-    // trusted, so it is not gated on owning a session: it tears the controller
-    // down either way. It does claim the session when there is one, because
-    // this finalises the audio and an unowned transcript is dropped.
-    let app_state = app_handle.state::<state::AppState>();
-    match app_state.claim_voice_commit(SessionClaim::Current) {
-        Ok(session) => info!(
-            "[Force Stop] Finalising voice session {}",
-            session.describe()
-        ),
-        Err(rejection) => warn!(
-            "[Force Stop] Tearing down the controller with no session to claim: {}",
-            rejection.reason()
-        ),
-    }
-
-    if let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-        let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
-            app_handle.clone(),
-            controller_state,
-        )
-        .await;
-    }
 }
 
 /// Handle timer-expired events with comprehensive processing

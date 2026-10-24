@@ -370,22 +370,6 @@ fn setup_force_stop_listeners(app_handle: &AppHandle) {
             });
         },
     );
-
-    // Listen for force cleanup events (stuck state recovery)
-    let app_handle_for_force_cleanup = app_handle.clone();
-    app_handle.listen(
-        constants::events::dictation::TRANSCRIPTION_FORCE_CLEANUP,
-        move |_event| {
-            warn!(
-            "[Event] Received dictation-transcription-force-cleanup event - recovering stuck state"
-        );
-
-            let app_handle_clone = app_handle_for_force_cleanup.clone();
-            safe_spawn_async_task(move || async move {
-                handle_dictation_state_cleanup(&app_handle_clone).await;
-            });
-        },
-    );
 }
 
 /// Handle voice controller force stop with timeout protection
@@ -471,44 +455,6 @@ async fn handle_voice_controller_force_stop(app_handle: &AppHandle) {
             format_error(templates::FAILED_TO_EMIT, "dictation-active", e)
         );
     }
-}
-
-/// Handle dictation state cleanup for stuck state recovery
-async fn handle_dictation_state_cleanup(app_handle: &AppHandle) {
-    // Reset dictation input monitor state
-    crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-    // Force clean up app state
-    let app_state = app_handle.state::<state::AppState>();
-
-    // Recovering from a stuck state means nothing that was open is still
-    // wanted, so the session goes with it. Nothing here finalises audio, so
-    // there is no transcript to keep an owner for.
-    if let Ok(session) = app_state.claim_voice_discard(SessionClaim::Current) {
-        warn!(
-            "[Dictation Mode] Force cleanup is discarding voice session {}",
-            session.describe()
-        );
-    }
-    if let Err(e) = app_state.set_dictation_active(false) {
-        warn!("Failed to reset dictation active state: {}", e);
-    }
-
-    // Update floating bar manager
-    let app_handle_for_bar = app_handle.clone();
-    safe_spawn_async_task(move || async move {
-        commands::ui_commands::handle_dictation_mode_change(&app_handle_for_bar, false).await;
-    });
-
-    // Emit cleanup complete event
-    if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
-        error!(
-            "[Dictation Mode] Failed to emit dictation-active event: {}",
-            e
-        );
-    }
-
-    info!("[Dictation Mode] Force cleanup completed");
 }
 
 /// Which target the current wake-word activation should route to. Set when the

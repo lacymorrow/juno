@@ -116,11 +116,9 @@ pub mod dictation {
     pub const CANCELLED: &str = "dictation-cancelled";
     pub const TRANSCRIPTION_START: &str = "dictation-transcription-start";
     pub const TRANSCRIPTION_STOP: &str = "dictation-transcription-stop";
-    pub const COMMITTED: &str = "dictation-committed";
     pub const STOP: &str = "dictation-stop";
     pub const TRANSCRIPTION_CANCEL: &str = "dictation-cancel";
     pub const TRANSCRIPTION_FORCE_STOP: &str = "dictation-transcription-force-stop";
-    pub const TRANSCRIPTION_FORCE_CLEANUP: &str = "dictation-transcription-force-cleanup";
 }
 
 /// Voice transcription events (from plugin)
@@ -183,11 +181,6 @@ pub mod timer {
     pub const QUEUED: &str = "timer-queued";
     pub const PROCESSED: &str = "timer-processed";
     pub const STATUS_UPDATE: &str = "timer-status-update";
-}
-
-/// Force stop events
-pub mod force_stop {
-    pub const TRANSCRIPTION: &str = "force-stop-transcription";
 }
 
 /// UI and window events
