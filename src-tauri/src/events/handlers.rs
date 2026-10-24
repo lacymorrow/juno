@@ -539,27 +539,63 @@ async fn handle_dictation_transcription_start(
                 // to close, and the one just opened belongs to nobody. Close
                 // it and put the app back to rest, silently, the way the agent
                 // start already does.
-                let still_ours = app_state
-                    .current_voice_session()
-                    .is_some_and(|open| open.id == session_id);
-                if !still_ours {
-                    info!(
-                        "[Dictation Mode] Voice session {} ended while it was starting; closing the microphone it opened",
-                        session_id
-                    );
-                    crate::integration::close_unowned_audio_stream(&app_handle).await;
-                    if app_state.current_voice_session().is_none() {
-                        crate::commands::dictation::end_dictation_session(
-                            &app_handle,
-                            "ended while starting",
-                        )
-                        .await;
+                //
+                // Ours but committed is the other half: a stop (a second tap,
+                // the bar) claimed it while this start waited on microphone
+                // access or the engine. Treating that as live is what left a
+                // session Finishing forever with the microphone open behind
+                // it. Finalise what was opened instead: the engine is
+                // recording now, so the stop below emits the result the
+                // session is owed (empty if nothing was said), and if the
+                // stop that committed it already reached the engine this is a
+                // no-op. Nothing here is armed for a session that is ending.
+                match state::start_landing(app_state.current_voice_session(), session_id) {
+                    state::StartLanding::Live => {}
+                    state::StartLanding::Committed => {
+                        info!(
+                            "[Dictation Mode] Voice session {} was committed while it was starting; finalising what it opened",
+                            session_id
+                        );
+                        if let Some(controller_state) =
+                            app_handle.try_state::<Arc<Mutex<VoiceController>>>()
+                        {
+                            let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
+                                app_handle.clone(),
+                                controller_state,
+                            )
+                            .await;
+                        }
+                        return;
                     }
-                    return;
+                    state::StartLanding::Gone => {
+                        info!(
+                            "[Dictation Mode] Voice session {} ended while it was starting; closing the microphone it opened",
+                            session_id
+                        );
+                        crate::integration::close_unowned_audio_stream(&app_handle).await;
+                        if app_state.current_voice_session().is_none() {
+                            crate::commands::dictation::end_dictation_session(
+                                &app_handle,
+                                "ended while starting",
+                            )
+                            .await;
+                        }
+                        return;
+                    }
                 }
 
                 info!("[Dictation Mode] Started immediate transcription successfully");
                 crate::integration::announce_listening(&app_handle);
+
+                // Remember whether the wake-phrase engine was on before any
+                // await below, so an end that lands while this start is still
+                // arming finds it and brings the engine back.
+                let was_always_listening_active =
+                    app_state.get_always_listening_active().unwrap_or(false);
+                if let Ok(mut audio_settings) = app_state.audio_settings.lock() {
+                    audio_settings.was_always_listening_active_before_dictation =
+                        was_always_listening_active;
+                }
 
                 // Register escape key to cancel dictation
                 {
@@ -582,17 +618,14 @@ async fn handle_dictation_transcription_start(
                 // Pause always listening mode if it's active. After the
                 // dictation microphone is asked for, not before: stopping the
                 // wake-phrase engine joins its thread, and the person is
-                // already talking.
-                let was_always_listening_active =
-                    app_state.get_always_listening_active().unwrap_or(false);
-
-                // Store the state so we can restore it later
-                if let Ok(mut audio_settings) = app_state.audio_settings.lock() {
-                    audio_settings.was_always_listening_active_before_dictation =
-                        was_always_listening_active;
-                }
-
-                if was_always_listening_active {
+                // already talking. Only for a session that is still live: one
+                // that ended during the await above has already run its
+                // unwind and its resume, and nobody would resume it again.
+                let mut paused_wake = false;
+                if was_always_listening_active
+                    && state::start_landing(app_state.current_voice_session(), session_id)
+                        == state::StartLanding::Live
+                {
                     info!("[Dictation Mode] Pausing always listening mode");
                     if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(
                         app_handle.clone(),
@@ -605,6 +638,43 @@ async fn handle_dictation_transcription_start(
                             e
                         );
                     }
+                    paused_wake = true;
+                }
+
+                // Did the session end while this start was arming? Its unwind
+                // already ran, so what was armed above has nobody left to
+                // undo it: the stop-key claim would outlive the session and
+                // the wake-phrase engine would stay paused until relaunch.
+                // Undo both here. The session's own end (a stop finalising, a
+                // transcript arriving) carries on as it was.
+                if state::start_landing(app_state.current_voice_session(), session_id)
+                    != state::StartLanding::Live
+                {
+                    info!(
+                        "[Dictation Mode] Voice session {} ended while it was arming; releasing what this start took",
+                        session_id
+                    );
+                    let coordinator =
+                        crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                    if let Err(e) = coordinator
+                        .unregister_escape_user(
+                            &app_handle,
+                            crate::commands::dictation::DICTATION_ESCAPE_USER,
+                        )
+                        .await
+                    {
+                        warn!("[Dictation Mode] Could not release the stop key: {}", e);
+                    }
+                    if paused_wake {
+                        // The end's resume may already have consumed the
+                        // flag before this start paused the engine. Put it
+                        // back so the resume below re-checks the triggers.
+                        if let Ok(mut audio_settings) = app_state.audio_settings.lock() {
+                            audio_settings.was_always_listening_active_before_dictation = true;
+                        }
+                    }
+                    crate::commands::triggers::resume_voice_after_dictation(&app_handle).await;
+                    return;
                 }
 
                 // Warm Apple's on-device model now, while the person is still
@@ -754,12 +824,13 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
     // that is already gone (a key released after a cancel, a doubled stop
     // event) finds nothing to claim and does nothing at all, rather than
     // finalising and typing a session somebody else already ended.
-    match app_state.claim_voice_commit(SessionClaim::Current) {
+    let committed = match app_state.claim_voice_commit(SessionClaim::Current) {
         Ok(session) => {
             info!(
                 "[Dictation Stop] Committing voice session {}",
                 session.describe()
             );
+            session
         }
         Err(rejection) => {
             info!("[Dictation Stop] Nothing to stop: {}", rejection.reason());
@@ -779,7 +850,7 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
             }
             return;
         }
-    }
+    };
 
     // Reset visible state FIRST, before the speech-to-text finalization below.
     // `stop_dictation()` blocks for however long the final transcription takes
@@ -809,11 +880,32 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
 
     // Now finalize transcription (this is the slow part — it produces the text)
     if let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
-        let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
+        let stopped = tauri_plugin_voice_transcription::commands::stop_dictation(
             app_handle.clone(),
             controller_state,
         )
         .await;
+        // Nothing was recording: the stop landed while the start was still
+        // waiting on microphone access or the engine. No final result will
+        // ever arrive, so the committed session would stand in Finishing
+        // forever and refuse every later start. Retire it here, through the
+        // one unwind. The start then finds it gone and closes whatever it
+        // opens.
+        if matches!(stopped, Ok(false))
+            && app_state
+                .claim_voice_discard(SessionClaim::Id(committed.id))
+                .is_ok()
+        {
+            info!(
+                "[Dictation Stop] Voice session {} was not recording yet; ending it",
+                committed.id
+            );
+            crate::commands::dictation::end_dictation_session(
+                &app_handle,
+                "stopped before the microphone opened",
+            )
+            .await;
+        }
     }
 
     // Bring the wake-phrase engine back if this dictation paused it and voice

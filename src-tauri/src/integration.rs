@@ -394,16 +394,22 @@ async fn handle_voice_controller_force_stop(app_handle: &AppHandle) {
     // wrong. Claiming matters because this finalises the audio, and a
     // transcript with no session to own it is dropped rather than delivered.
     let app_state = app_handle.state::<state::AppState>();
-    match app_state.claim_voice_commit(SessionClaim::Current) {
-        Ok(session) => info!(
-            "[Dictation Mode] Force stop is finalising voice session {}",
-            session.describe()
-        ),
-        Err(rejection) => warn!(
-            "[Dictation Mode] Force stop with no session to claim: {}",
-            rejection.reason()
-        ),
-    }
+    let committed = match app_state.claim_voice_commit(SessionClaim::Current) {
+        Ok(session) => {
+            info!(
+                "[Dictation Mode] Force stop is finalising voice session {}",
+                session.describe()
+            );
+            Some(session.id)
+        }
+        Err(rejection) => {
+            warn!(
+                "[Dictation Mode] Force stop with no session to claim: {}",
+                rejection.reason()
+            );
+            None
+        }
+    };
 
     // Force stop the voice controller with timeout only if it exists
     match app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
@@ -417,8 +423,22 @@ async fn handle_voice_controller_force_stop(app_handle: &AppHandle) {
             );
 
             match stop_with_timeout.await {
-                Ok(Ok(_)) => {
+                Ok(Ok(true)) => {
                     info!("[Dictation Mode] Force stop completed successfully");
+                }
+                Ok(Ok(false)) => {
+                    // Nothing was recording, so no result is coming for the
+                    // session this claimed. Left Finishing, it would refuse
+                    // every later start.
+                    if let Some(id) = committed {
+                        if app_state.claim_voice_discard(SessionClaim::Id(id)).is_ok() {
+                            crate::commands::dictation::end_dictation_session(
+                                app_handle,
+                                "force stop found nothing recording",
+                            )
+                            .await;
+                        }
+                    }
                 }
                 Ok(Err(e)) => {
                     error!("[Dictation Mode] Force stop failed: {}", e);
