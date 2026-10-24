@@ -1153,21 +1153,10 @@ pub async fn set_stt_provider<R: tauri::Runtime>(
     let provider_name = engine.name().to_string();
     info!("[Plugin] STT engine switched to '{}'", provider_name);
 
-    // Push new engine to VoiceController
+    // Push new engine to VoiceController. A busy or recording controller
+    // takes it at its next start rather than losing it.
     if let Some(vc_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
-        match vc_state.try_lock() {
-            Ok(mut vc) => {
-                if let Err(e) = vc.update_engine(engine.clone()) {
-                    error!("[Plugin] Failed to update VoiceController engine: {}", e);
-                }
-            }
-            Err(std::sync::TryLockError::WouldBlock) => {
-                error!("[Plugin] VoiceController busy - engine swap will take effect on next recording");
-            }
-            Err(std::sync::TryLockError::Poisoned(e)) => {
-                error!("[Plugin] VoiceController mutex poisoned: {}", e);
-            }
-        }
+        crate::controller::offer_engine(&vc_state, engine.clone());
     }
 
     // Push new engine to AlwaysListeningController
