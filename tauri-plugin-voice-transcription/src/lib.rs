@@ -81,13 +81,21 @@ pub fn engine_loading() -> bool {
     ENGINE_LOADING.load(AtomicOrdering::SeqCst)
 }
 
+/// Woken once the background engine load ends, either way, so a recording
+/// asked for during it waits on the event instead of polling the flag.
+pub(crate) fn engine_settled() -> &'static tokio::sync::Notify {
+    static SETTLED: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock::new();
+    SETTLED.get_or_init(tokio::sync::Notify::new)
+}
+
 /// Clears [`ENGINE_LOADING`] however the load task ends: done, failed, or
-/// panicked.
+/// panicked, and wakes whoever is waiting on it.
 struct EngineLoadingGuard;
 
 impl Drop for EngineLoadingGuard {
     fn drop(&mut self) {
         ENGINE_LOADING.store(false, AtomicOrdering::SeqCst);
+        engine_settled().notify_waiters();
     }
 }
 
