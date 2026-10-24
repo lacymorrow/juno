@@ -15,6 +15,29 @@
 use serde_json::json;
 use tauri::{Emitter, Runtime};
 
+/// Which microphone gave up: the one a recording opened (dictation or a
+/// spoken query, both on the voice controller) or the wake-phrase engine's.
+///
+/// The event used to carry neither, so the app treated every failure as both:
+/// a dictation that could not open its microphone switched always-listening
+/// off, and a wake engine that could not open its own retired whatever
+/// recording was open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureSource {
+    Recording,
+    Wake,
+}
+
+impl CaptureSource {
+    /// The `source` field of the event payload.
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            Self::Recording => "recording",
+            Self::Wake => "wake",
+        }
+    }
+}
+
 /// Every way starting microphone capture can fail.
 ///
 /// `detail` fields hold the underlying library error. They go to the log, never
@@ -104,13 +127,15 @@ impl CaptureStartFailure {
     }
 
     /// The event payload. `listening: false` is the whole point: whatever the
-    /// UI last heard, this says the microphone is not open.
-    pub fn payload(&self) -> serde_json::Value {
+    /// UI last heard, this says the microphone is not open. `source` says
+    /// which one.
+    pub fn payload(&self, source: CaptureSource) -> serde_json::Value {
         json!({
             "code": self.code(),
             "message": self.message(),
             "device": self.device(),
             "listening": false,
+            "source": source.as_wire(),
         })
     }
 
@@ -141,7 +166,11 @@ impl CaptureStartFailure {
 /// keeps the library detail; the event carries the sentence and
 /// `listening: false`, so the app can put the switch back where it belongs and
 /// the person can read why.
-pub fn report<R: Runtime>(app_handle: &tauri::AppHandle<R>, failure: &CaptureStartFailure) {
+pub fn report<R: Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+    source: CaptureSource,
+    failure: &CaptureStartFailure,
+) {
     match failure.detail() {
         Some(detail) => tracing::error!(
             "[VoiceCapture] {} ({}): {}",
@@ -152,7 +181,10 @@ pub fn report<R: Runtime>(app_handle: &tauri::AppHandle<R>, failure: &CaptureSta
         None => tracing::error!("[VoiceCapture] {} ({})", failure.message(), failure.code()),
     }
 
-    if let Err(e) = app_handle.emit(crate::constants::voice_capture::FAILED, failure.payload()) {
+    if let Err(e) = app_handle.emit(
+        crate::constants::voice_capture::FAILED,
+        failure.payload(source),
+    ) {
         tracing::error!("[VoiceCapture] Could not report the failure to the UI: {e}");
     }
 }
@@ -218,7 +250,7 @@ mod tests {
     #[test]
     fn every_failure_says_nothing_is_listening() {
         for failure in every_failure() {
-            let payload = failure.payload();
+            let payload = failure.payload(super::CaptureSource::Recording);
             assert_eq!(
                 payload["listening"],
                 serde_json::Value::Bool(false),
@@ -226,6 +258,19 @@ mod tests {
                 failure.code()
             );
             assert_eq!(payload["code"], failure.code());
+        }
+    }
+
+    /// The app unwinds only the side that failed, so every payload says which.
+    #[test]
+    fn every_failure_names_its_source() {
+        use super::CaptureSource;
+        for failure in every_failure() {
+            assert_eq!(
+                failure.payload(CaptureSource::Recording)["source"],
+                "recording"
+            );
+            assert_eq!(failure.payload(CaptureSource::Wake)["source"], "wake");
         }
     }
 

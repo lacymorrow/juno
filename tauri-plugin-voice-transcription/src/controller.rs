@@ -709,7 +709,11 @@ impl VoiceController {
     /// unwind a session, so a capture that never started unwinds exactly like
     /// one that ended rather than leaving the UI mid-dictation forever.
     fn give_up_on_capture<R: Runtime>(app_handle: &AppHandle<R>, failure: CaptureStartFailure) {
-        capture_failure::report(app_handle, &failure);
+        capture_failure::report(
+            app_handle,
+            capture_failure::CaptureSource::Recording,
+            &failure,
+        );
         if let Err(e) = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ()) {
             tracing::error!("[AudioThread] Could not report the stop: {e}");
         }
