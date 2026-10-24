@@ -31,3 +31,22 @@ export function applyDictationForceReset(reason: unknown, target: ForceResetTarg
 	target.setDictationState("idle");
 	target.setIsDictationActive(false);
 }
+
+/** The message out of a `voice-transcription:error` payload (`{ type, message }`). */
+export function voiceErrorMessage(payload: unknown): string {
+	if (typeof payload === "string") return payload;
+	if (payload && typeof payload === "object" && "message" in payload) {
+		const { message } = payload as { message?: unknown };
+		if (typeof message === "string") return message;
+	}
+	return "Transcription failed";
+}
+
+/** The level (0 to 1) out of a `voice-transcription:audio-level` payload (`{ level }`). */
+export function audioLevelFrom(payload: unknown): number {
+	if (payload && typeof payload === "object" && "level" in payload) {
+		const { level } = payload as { level?: unknown };
+		if (typeof level === "number" && Number.isFinite(level)) return Math.min(Math.max(level, 0), 1);
+	}
+	return 0;
+}

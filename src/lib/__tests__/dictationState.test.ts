@@ -3,7 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 const toastError = vi.fn();
 vi.mock("sonner", () => ({ toast: { error: toastError, info: vi.fn() } }));
 
-import { applyDictationForceReset, dictationStateLabel } from "@/lib/dictationState";
+import {
+	applyDictationForceReset,
+	audioLevelFrom,
+	dictationStateLabel,
+	voiceErrorMessage,
+} from "@/lib/dictationState";
 
 describe("dictationStateLabel", () => {
 	it("reads the unit variants Rust sends", () => {
@@ -35,5 +40,31 @@ describe("applyDictationForceReset", () => {
 		expect(toastError).not.toHaveBeenCalled();
 		expect(log).toHaveBeenCalled();
 		log.mockRestore();
+	});
+});
+
+describe("voiceErrorMessage", () => {
+	it("reads the message out of the plugin's payload", () => {
+		expect(voiceErrorMessage({ type: "transcription_failed", message: "Final transcription failed: x" })).toBe(
+			"Final transcription failed: x",
+		);
+	});
+
+	it("never stores the payload object as the message", () => {
+		expect(voiceErrorMessage({ type: "transcription_failed" })).toBe("Transcription failed");
+		expect(voiceErrorMessage("plain")).toBe("plain");
+	});
+});
+
+describe("audioLevelFrom", () => {
+	it("reads the plugin's { level } payload", () => {
+		expect(audioLevelFrom({ level: 0.42 })).toBe(0.42);
+	});
+
+	it("is zero for anything else", () => {
+		expect(audioLevelFrom({})).toBe(0);
+		expect(audioLevelFrom({ level: Number.NaN })).toBe(0);
+		expect(audioLevelFrom(0.5)).toBe(0);
+		expect(audioLevelFrom(null)).toBe(0);
 	});
 });
