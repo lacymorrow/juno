@@ -53,8 +53,9 @@ them.
 
 That is what `src-tauri/tests/cost_telemetry_live.rs` is for: one real turn per
 provider, then the row read back out of the log. It is `#[ignore]`d (it spends
-money) and runs by hand, or in CI for Anthropic via the
-**Cost telemetry live check** workflow. Run it before any measurement round
+money) and runs by hand, or in CI via the **Cost telemetry live check**
+workflow, which covers Anthropic, OpenAI and Gemini from repo secrets. The
+Claude CLI path is local-only: no runner has a signed-in Max seat. Run it before any measurement round
 you intend to set a price from.
 
 ## Decisions baked in

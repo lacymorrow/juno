@@ -21,7 +21,8 @@
 //! ```bash
 //! export JUNO_COST_LOG_PATH="$(mktemp -t juno-cost)".ndjson
 //!
-//! # Anthropic (also runs in CI: .github/workflows/cost-telemetry-live.yml)
+//! # Anthropic, OpenAI and Gemini all run in CI too, from their repo secrets:
+//! # .github/workflows/cost-telemetry-live.yml, "all" or one provider.
 //! ANTHROPIC_API_KEY=sk-... cargo test --manifest-path src-tauri/Cargo.toml \
 //!     --test cost_telemetry_live anthropic -- --ignored --nocapture --test-threads=1
 //!

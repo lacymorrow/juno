@@ -13,23 +13,40 @@
 # Only the ones whose credential is a repository secret:
 #
 #   anthropic   ANTHROPIC_API_KEY   available
-#   openai      OPENAI_API_KEY      not a secret in this repo yet
-#   gemini      GEMINI_API_KEY      not a secret in this repo yet
+#   openai      OPENAI_API_KEY      available (LAC-5818, 2026-10-27)
+#   gemini      GEMINI_API_KEY      available (LAC-5818, 2026-10-27)
 #   claude_cli  (none)              impossible here: needs a signed-in Claude
 #                                   Max seat, which no GitHub runner has.
 #                                   Run it locally, see the test's module docs.
 #
+# `all` therefore means the three API providers, named one by one, and NOT a
+# bare `cargo test --test …` with no filter: an empty filter matches every test
+# in the file including `claude_cli`, which cannot pass on a runner and would
+# fail a job that had in fact verified everything it could.
+#
 # Asking for a provider whose credential is missing FAILS the job. A skip that
 # reports success is how an unverified acceptance criterion gets signed off.
+#
+# ## Why the secrets sit at step level
+#
+# Each key is on the one step that needs it, never on the job. The checkout,
+# toolchain, cache and Bun steps are third-party actions; a job-level secret
+# would be in their environment too, for no reason. Repo rule from LAC-5818.
 name: Cost telemetry live check
 
 on:
   workflow_dispatch:
     inputs:
       providers:
-        description: 'Test-name filter passed to cargo: "anthropic", "openai", "gemini", or "" for every live test in the file.'
+        description: Which provider paths to verify against the live API.
         required: false
-        default: anthropic
+        default: all
+        type: choice
+        options:
+          - all
+          - anthropic
+          - openai
+          - gemini
 
 permissions:
   contents: read
@@ -63,65 +80,107 @@ jobs:
 
       # Secrets cannot be read in an `if:` expression, so the presence check is
       # a step that reads them from the job environment and exits non-zero.
+      # Separate from the run step on purpose: a missing key should fail in
+      # seconds, not after a 20-minute compile.
       - name: Check the requested credentials are present
         env:
           FILTER: ${{ inputs.providers }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           set -euo pipefail
-          # An empty filter runs every live test in the file, which today means
-          # the three API providers; the repo only holds one of their keys.
-          if [ -z "${FILTER}" ] || [ "${FILTER}" = "anthropic" ]; then
-            if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-              echo "missing required secret: ANTHROPIC_API_KEY" >&2
-              exit 1
-            fi
-          fi
+
           case "${FILTER}" in
-            openai|gemini)
-              echo "no ${FILTER} key is a secret in this repo; add one before asking for it" >&2
+            all)       wanted="anthropic openai gemini" ;;
+            anthropic|openai|gemini) wanted="${FILTER}" ;;
+            claude_cli)
+              echo "the Claude CLI path needs a signed-in Max seat and cannot run on a runner;" >&2
+              echo "run it locally — see the module docs in src-tauri/tests/cost_telemetry_live.rs" >&2
               exit 1
               ;;
-            claude_cli)
-              echo "the Claude CLI path needs a signed-in Max seat and cannot run on a runner" >&2
+            *)
+              echo "unknown provider selection: ${FILTER}" >&2
               exit 1
               ;;
           esac
 
-      - name: One real turn, then read the row back
+          missing=""
+          for provider in ${wanted}; do
+            case "${provider}" in
+              anthropic) [ -n "${ANTHROPIC_API_KEY:-}" ] || missing="${missing} ANTHROPIC_API_KEY" ;;
+              openai)    [ -n "${OPENAI_API_KEY:-}" ]    || missing="${missing} OPENAI_API_KEY" ;;
+              gemini)    [ -n "${GEMINI_API_KEY:-}" ]    || missing="${missing} GEMINI_API_KEY" ;;
+            esac
+          done
+          if [ -n "${missing}" ]; then
+            echo "missing required secret(s):${missing}" >&2
+            exit 1
+          fi
+
+          echo "verifying:${wanted// / }"
+          echo "WANTED=${wanted}" >> "$GITHUB_ENV"
+
+      - name: One real turn per provider, then read the rows back
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # A scratch log, not the runner's cache directory: the test asserts on
-          # the file's contents and reads it back through `cost_log::read_log`.
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # A scratch log, not the runner's cache directory: the tests assert on
+          # the file's contents and read it back through `cost_log::read_log`.
           JUNO_COST_LOG_PATH: ${{ runner.temp }}/cost-log.ndjson
-          # Through the environment, never interpolated into the script: a
-          # workflow input pasted into a shell line is a command-injection seam.
-          FILTER: ${{ inputs.providers }}
         run: |
           set -euo pipefail
+          # ${WANTED} is this workflow's own words from the step above, never the
+          # raw input, and the filters are named one by one so `claude_cli` can
+          # never be swept in. `--test-threads=1`: the open run is process-global,
+          # so parallel tests would attribute each other's turns.
+          # shellcheck disable=SC2086
           cargo test --manifest-path src-tauri/Cargo.toml \
-            --test cost_telemetry_live "${FILTER}" \
+            --test cost_telemetry_live ${WANTED} \
             -- --ignored --nocapture --test-threads=1
 
       # The test's own assertions are one reader of this file; this is a second,
       # independent one. A test binary that exits 0 without running anything
       # (filter typo, harness change) would otherwise read as a pass.
+      #
+      # It checks the count AND the names: "at least one row" would go green on
+      # a run where two of the three providers silently wrote nothing, which is
+      # the exact failure this whole workflow exists to catch.
       - name: Count the rows independently
         env:
           JUNO_COST_LOG_PATH: ${{ runner.temp }}/cost-log.ndjson
         run: |
           set -euo pipefail
+
           if [ ! -s "${JUNO_COST_LOG_PATH}" ]; then
-            echo "the live test passed but wrote no rows — nothing was verified" >&2
+            echo "the live tests passed but wrote no rows — nothing was verified" >&2
             exit 1
           fi
+
           rows=$(grep -c . "${JUNO_COST_LOG_PATH}")
-          echo "rows written: ${rows}"
-          [ "${rows}" -ge 1 ]
+          expected=$(echo "${WANTED}" | wc -w | tr -d " ")
+          echo "rows written: ${rows}, expected: ${expected}"
+
+          failed=0
+          for provider in ${WANTED}; do
+            if ! grep -q "\"provider\":\"${provider}\"" "${JUNO_COST_LOG_PATH}"; then
+              echo "no row for ${provider} — it was asked for and did not land" >&2
+              failed=1
+            fi
+          done
+          if [ "${rows}" -ne "${expected}" ]; then
+            echo "expected exactly ${expected} row(s), found ${rows}" >&2
+            failed=1
+          fi
+          [ "${failed}" -eq 0 ]
+
           {
             echo "## Cost telemetry live check"
             echo
-            echo "Rows written: \`${rows}\`"
+            echo "Verified against the live API: \`${WANTED}\`"
+            echo
+            echo "Rows written: \`${rows}\` (expected \`${expected}\`)"
             echo
             echo '```json'
             cat "${JUNO_COST_LOG_PATH}"
