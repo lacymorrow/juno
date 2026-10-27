@@ -196,11 +196,19 @@ const JOIN_WAIT: std::time::Duration = std::time::Duration::from_secs(12);
 /// the render takes and sets the line before it lets go, so this returns the
 /// moment that render is done, or at once when there is none.
 async fn line_for(stem: &str) -> Option<Prerendered> {
-    // The behaviour under test, before the fix: a line still being rendered
-    // is reported as not ready, and the caller synthesises it again.
-    let _unused_until_the_fix = JOIN_WAIT;
-    let _unused_until_the_fix = &REFRESH;
-    loaded(stem)
+    if let Some(audio) = loaded(stem) {
+        return Some(audio);
+    }
+    match tokio::time::timeout(JOIN_WAIT, REFRESH.lock()).await {
+        Ok(_one) => loaded(stem),
+        Err(_) => {
+            debug!(
+                "[Prerender] A render was still running after {} s; speaking the line instead",
+                JOIN_WAIT.as_secs()
+            );
+            None
+        }
+    }
 }
 
 /// The line held in memory, when what is held was rendered for `stem`.
