@@ -32,7 +32,64 @@ permissions:
   contents: write
 
 jobs:
+  # A tag push used to start nothing. shipx pushed it with GITHUB_TOKEN, and
+  # GitHub starts no workflow from that token, so the `push: tags` trigger
+  # above only ever fired for a tag pushed by hand and the automated path came
+  # in through the dispatch below it.
+  #
+  # main now requires status checks, and shipx pushes through a deploy key to
+  # get past them (LAC-4625). A deploy key push *does* start workflows. So an
+  # automated release now arrives twice: once from its tag, once from
+  # release-every-merge's dispatch. The tag-triggered half is the dangerous
+  # one, because it carries no inputs: `prerelease` would default to false and
+  # publish straight to the stable channel, which is the audience that did not
+  # sign up to find the bugs.
+  #
+  # Resolved over the API rather than read from `github.event.head_commit`,
+  # which GitHub documents only as "object or null" and does not promise for
+  # tag pushes. A guess there fails towards an accidental stable release.
+  gate:
+    name: Was this tag already dispatched?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+
+          # A dispatch is always deliberate: build it.
+          if [ "$EVENT" != "push" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          tag="${REF#refs/tags/}"
+          message=$(gh api "repos/$REPO/commits/$tag" --jq '.commit.message')
+          case "$message" in
+            # shipx's own bump, the same marker release-every-merge.yml uses to
+            # break its loop. That workflow dispatches this one for the tag with
+            # prerelease=true and on main, so the Rust cache lands where the
+            # next release build can restore it.
+            release:*)
+              echo "::notice title=Skipped::$tag points at shipx's own version bump; release-every-merge.yml dispatches this build with prerelease=true."
+              echo "build=false" >> "$GITHUB_OUTPUT" ;;
+            # A tag pushed by hand still builds a full release, as documented
+            # on the trigger above.
+            *)
+              echo "build=true" >> "$GITHUB_OUTPUT" ;;
+          esac
+
   build-tauri:
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
     runs-on: macos-latest
 
     steps:
