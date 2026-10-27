@@ -128,8 +128,18 @@ only, no API surface, revoked in one call, and narrower than the personal
 access token it replaces. Its private half is the `RELEASE_SSH_KEY` secret,
 which `actions/checkout` consumes via `ssh-key:`.
 
-Forked pull requests never receive secrets, so the exposure is workflows
-running on `main`, which already hold `contents: write`.
+Forked pull requests never receive secrets. Everything else does: a push to a
+branch in this repository, and a pull request opened from one, both run with
+the full secret set. So the exposure is every non-fork run, not only the ones
+on `main`.
+
+The ruleset cannot narrow that further. GitHub accepts an `actor_id` on a
+`DeployKey` bypass actor and silently stores null, so "this one key may bypass"
+is not expressible and the grant is really *any* deploy key on the repository.
+The deploy key is still the narrowest credential available for the push; it is
+the bypass *grant* that is wider than it looks. `--check` closes the gap from
+the other side by asserting the repository has exactly one deploy key and that
+it is this one.
 
 ## The consequence that is easy to miss
 

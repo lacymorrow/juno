@@ -186,7 +186,12 @@ jobs:
           else
             echo "::warning::NPM_TOKEN is not set; juno-cua will not be published this run."
           fi
-          bunx @lacymorrow/shipx@latest patch --yes --no-tests
+          # Pinned, not @latest. This step runs with the release deploy key on
+          # the runner disk and `core.sshCommand` pointing at it, so resolving
+          # the release tool at run time means an unreviewed shipx publish can
+          # change the release path, silently, next to a live bypass credential.
+          # Bump this deliberately.
+          bunx @lacymorrow/shipx@0.1.27 patch --yes --no-tests
           version=$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)
           echo "tag=v${version}" >> "$GITHUB_OUTPUT"
 
@@ -198,13 +203,19 @@ jobs:
       - name: Start the release build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Through the environment for the same reason the gate job does it,
+          # even though neither value is attacker-controlled: `${{ }}` inside a
+          # `run:` body is the pattern, and a pattern with exceptions in it is
+          # not one anybody can check at a glance.
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.release.outputs.tag }}
         run: |
           gh workflow run release-tauri.yml \
-            --repo "${{ github.repository }}" \
+            --repo "$REPO" \
             --ref main \
-            -f tag="${{ steps.release.outputs.tag }}" \
+            -f tag="$TAG" \
             -f prerelease=true
-          echo "Requested a signed prerelease build of ${{ steps.release.outputs.tag }}."
+          echo "Requested a signed prerelease build of $TAG."
 
       # There is deliberately no "confirm juno-cua reached the registry" step.
       #
