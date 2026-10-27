@@ -22,6 +22,7 @@ const OnboardingWindow = lazy(() => import("./OnboardingWindow"));
 const DesktopCursorOverlay = lazy(() => import("./components/DesktopCursorOverlay"));
 const SnapWellsOverlay = lazy(() => import("./components/SnapWellsOverlay"));
 const ListeningGlow = lazy(() => import("./components/ListeningGlow"));
+const PermissionCoach = lazy(() => import("./components/PermissionCoach"));
 
 // Diagnostic bench for the floating bar. Lazily loaded so its Tauri stand-in is
 // installed only when the (unlinked) /__bar-harness route is opened directly,
@@ -83,6 +84,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
               <Route path="/desktop-cursor-overlay" element={<DesktopCursorOverlay />} />
               <Route path="/snap-wells-overlay" element={<SnapWellsOverlay />} />
               <Route path="/listening-overlay" element={<ListeningGlow />} />
+              <Route path="/permission-coach" element={<PermissionCoach />} />
               <Route path="/intro" element={<IntroReveal />} />
               <Route
                 path="/__bar-preview"

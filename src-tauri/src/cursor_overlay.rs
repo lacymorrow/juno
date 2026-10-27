@@ -297,7 +297,11 @@ fn show_overlay(app: &AppHandle) {
 
 #[cfg(target_os = "macos")]
 fn style_overlay(app: &AppHandle, window: &tauri::WebviewWindow) {
-    crate::platform::macos::style_cursor_overlay(app, window);
+    crate::platform::macos::style_passive_overlay(
+        app,
+        window,
+        crate::platform::macos::OVERLAY_LEVEL_ABOVE_EVERYTHING,
+    );
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -562,6 +566,12 @@ mod tests {
             );
         }
         assert!(listening.contains(crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL));
+        // Named, because the loop above derives its list from tauri.conf.json:
+        // deleting the window declaration would make it pass while the card is
+        // still broken. The coaching card is dismissed by an event and by
+        // nothing else, so a card that cannot listen is a card that never
+        // leaves the screen, covering Settings after the person has already won.
+        assert!(listening.contains(crate::constants::ui::window_labels::PERMISSION_COACH));
     }
 
     /// The overlay must be able to place itself and stay click-through, which
