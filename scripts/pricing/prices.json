@@ -1,0 +1,239 @@
+{
+  "_comment": "Price table for LAC-4124 pricing measurement. USD per million tokens.",
+  "_verified": "2026-10-16 Anthropic/OpenAI; Gemini rows re-verified 2026-10-27 against the live pricing page (all 3 match; 3.7-flash and 3.5-flash confirmed still unpublished). Fetched from live provider docs, not from a cached model catalog (LAC-3106).",
+  "_sources": {
+    "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "openai": "https://developers.openai.com/api/docs/pricing"
+  },
+  "_schema": {
+    "input": "base input tokens, per MTok",
+    "output": "output tokens, per MTok",
+    "cache_read": "cache hits and refreshes, per MTok",
+    "cache_write": "5-minute cache writes, per MTok",
+    "long_context_threshold": "optional; prompt tokens above this switch to the long_* rates",
+    "billing": "metered = per-token API billing; subscription = flat-rate seat, no marginal token cost"
+  },
+  "models": {
+    "claude-opus-5-5": {
+      "billing": "metered",
+      "input": 4.0,
+      "output": 20.0,
+      "cache_read": 0.2,
+      "cache_write": 5.0
+    },
+    "claude-opus-5": {
+      "billing": "metered",
+      "input": 5.0,
+      "output": 25.0,
+      "cache_read": 0.5,
+      "cache_write": 6.25
+    },
+    "claude-sonnet-5-5": {
+      "billing": "metered",
+      "input": 2.0,
+      "output": 10.0,
+      "cache_read": 0.1,
+      "cache_write": 2.5
+    },
+    "claude-sonnet-5": {
+      "billing": "metered",
+      "input": 2.0,
+      "output": 10.0,
+      "cache_read": 0.2,
+      "cache_write": 2.5
+    },
+    "claude-fable-5-1": {
+      "billing": "metered",
+      "input": 10.0,
+      "output": 50.0,
+      "cache_read": 0.25,
+      "cache_write": 12.5
+    },
+    "claude-haiku-5-5": {
+      "billing": "metered",
+      "input": 0.1,
+      "output": 0.5,
+      "cache_read": 0.01,
+      "cache_write": 0.125,
+      "long_context_threshold": 100000,
+      "long_input": 0.5,
+      "long_output": 2.5,
+      "long_cache_read": 0.05,
+      "long_cache_write": 0.625
+    },
+    "claude-opus-4-8": {
+      "billing": "metered",
+      "input": 5.0,
+      "output": 25.0,
+      "cache_read": 0.5,
+      "cache_write": 6.25
+    },
+    "claude-opus-4-7": {
+      "billing": "metered",
+      "input": 5.0,
+      "output": 25.0,
+      "cache_read": 0.5,
+      "cache_write": 6.25
+    },
+    "claude-opus-4-6": {
+      "billing": "metered",
+      "input": 5.0,
+      "output": 25.0,
+      "cache_read": 0.5,
+      "cache_write": 6.25
+    },
+    "claude-sonnet-4-6": {
+      "billing": "metered",
+      "input": 3.0,
+      "output": 15.0,
+      "cache_read": 0.3,
+      "cache_write": 3.75
+    },
+    "claude-fable-5": {
+      "billing": "metered",
+      "input": 10.0,
+      "output": 50.0,
+      "cache_read": 1.0,
+      "cache_write": 12.5
+    },
+    "claude-haiku-4-5-20251001": {
+      "billing": "metered",
+      "input": 1.0,
+      "output": 5.0,
+      "cache_read": 0.1,
+      "cache_write": 1.25
+    },
+    "claude-opus-4-5-20251101": {
+      "billing": "metered",
+      "input": 5.0,
+      "output": 25.0,
+      "cache_read": 0.5,
+      "cache_write": 6.25
+    },
+    "claude-sonnet-4-5-20250929": {
+      "billing": "metered",
+      "input": 3.0,
+      "output": 15.0,
+      "cache_read": 0.3,
+      "cache_write": 3.75
+    },
+    "gpt-5.5": {
+      "billing": "metered",
+      "input": 5.0,
+      "output": 30.0,
+      "cache_read": 0.5,
+      "cache_write": 0.0,
+      "long_context_threshold": 272000
+    },
+    "gpt-5.2": {
+      "billing": "metered",
+      "input": 1.75,
+      "output": 14.0,
+      "cache_read": 0.175,
+      "cache_write": 0.0
+    },
+    "gpt-5.1": {
+      "billing": "metered",
+      "input": 1.25,
+      "output": 10.0,
+      "cache_read": 0.125,
+      "cache_write": 0.0
+    },
+    "gpt-5": {
+      "billing": "metered",
+      "input": 1.25,
+      "output": 10.0,
+      "cache_read": 0.125,
+      "cache_write": 0.0
+    },
+    "gpt-5.6-sol": {
+      "billing": "metered",
+      "input": 4.0,
+      "output": 20.0,
+      "cache_read": 0.4,
+      "cache_write": 0.0
+    },
+    "gpt-5.3-codex": {
+      "billing": "metered",
+      "input": 1.75,
+      "output": 14.0,
+      "cache_read": 0.175,
+      "cache_write": 0.0
+    },
+    "gemini-3.8-flash": {
+      "billing": "metered",
+      "input": 0.75,
+      "output": 3.75,
+      "cache_read": 0.075,
+      "cache_write": 0.0
+    },
+    "gemini-3.5-flash-lite": {
+      "billing": "metered",
+      "input": 0.3,
+      "output": 2.5,
+      "cache_read": 0.03,
+      "cache_write": 0.0
+    },
+    "gemini-3-flash-preview": {
+      "billing": "metered",
+      "input": 0.5,
+      "output": 3.0,
+      "cache_read": 0.05,
+      "cache_write": 0.0
+    },
+    "claude-cli:opus": {
+      "billing": "subscription",
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "claude-cli:sonnet": {
+      "billing": "subscription",
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "claude-cli:haiku": {
+      "billing": "subscription",
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "codex-cli:gpt-6-luna": {
+      "billing": "subscription",
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "codex-cli:gpt-5.6-terra": {
+      "billing": "subscription",
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "codex-cli:gpt-5.6-luna": {
+      "billing": "subscription",
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    }
+  },
+  "_notes": [
+    "Anthropic usage reports input_tokens EXCLUDING cache_read_input_tokens and cache_creation_input_tokens, so summing all four categories does not double-count.",
+    "OpenAI reports no separate cache-write charge; cache_write is 0 and cached_tokens bill at the cache_read rate.",
+    "gpt-5.5 above 272K input tokens moves to a long-context tier not published in the short-context table; long_* rates are intentionally absent so the analyzer fails loudly rather than guessing.",
+    "Claude CLI models are billed as a Claude Max/Pro seat, not per token. Marginal cost to Juno is zero; the analyzer reports them separately instead of as $0.00 alongside metered models.",
+    "Opus 5.5 computer use requires computer_toolset_20260801, which roughly doubles per-request input overhead (4,530 vs 2,152 tokens, measured 2026-09-22). That overhead is already inside the reported input_tokens; do not add it again.",
+    "Keys are BILLING keys, matching what Juno's cost log writes as model_id (cost_log::billing_model_id). Metered API models use the wire model id; subscription paths are prefixed with the provider, so claude-cli:opus is never averaged in with metered Anthropic traffic at $0.00.",
+    "Every model in Juno's catalog is keyed here EXCEPT gemini-3.7-flash, gemini-3.5-flash and gemini-2.5-computer-use-preview-10-2025, which Google publishes no rate for. They are left out deliberately so this script raises on them rather than scoring them as free; Juno logs those turns at cost_usd 0.0 and warns.",
+    "Gemini and OpenAI report prompt tokens INCLUSIVE of cached tokens, unlike Anthropic. Juno subtracts the cached part before writing input_tokens, so the four token fields in a record never double-count on any provider.",
+    "Gemini 3.8 Flash is on PROMOTIONAL pricing that ends 2026-12-31: input 0.75 -> 1.50, output 3.75 -> 7.50, cache_read 0.075 -> 0.15 on 2027-01-01, i.e. every rate doubles. The figures here are the promotional ones, verified 2026-10-27. A trial credit or Pro allowance sized on them is wrong from January onward if Gemini 3.8 Flash is in the mix. Re-verify before quoting a price with a lifetime past 2026-12-31.",
+    "Google's output price is stated as INCLUDING thinking tokens, which is the pricing-page confirmation of the cost_log rule that output = candidatesTokenCount + thoughtsTokenCount (LAC-5822). candidatesTokenCount alone under-counts a thinking turn."
+  ]
+}

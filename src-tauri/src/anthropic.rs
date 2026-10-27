@@ -375,6 +375,13 @@ pub async fn submit_query(
         return Ok(());
     }
 
+    // One task, however many model requests its tool loop takes. Opened after
+    // the empty-query return so a no-op submit does not start a run, and
+    // deliberately not closed on the way out: the last turn of a task can land
+    // after this function returns, and a turn with no run still records under
+    // a run of its own.
+    crate::cost_log::begin_run(uuid::Uuid::new_v4().to_string());
+
     // Time a typed query like a voice turn, from the submit. A spoken query
     // arrives here too, and the voice turn already open keeps it.
     crate::turn_timing::begin_typed();

@@ -718,6 +718,52 @@ Read these files to see them:\n{list}]",
 /// (escape cancels only the FOCUSED session since LAC-1432, so the global AppState
 /// channel alone would never fire — LAC-3697); the global channel remains the
 /// fallback for legacy/headless callers that don't thread one through.
+/// Record one CLI turn's cost from its `result` frame.
+///
+/// Both CLI paths — the one-shot subprocess and the persistent session — end a
+/// turn with this frame, and both call this, so the two cannot drift into
+/// reporting different things.
+///
+/// The frame carries the CLI's own `duration_ms`, which is better than timing
+/// it from out here: it excludes process spawn and our own stream handling.
+/// It also carries the CLI's `total_cost_usd`, which is deliberately **not**
+/// used as the record's cost — this path bills against a Claude Max/Pro seat
+/// the person already pays for, so Juno's marginal cost is zero, and the
+/// catalog's `Price::Subscription` says exactly that. The CLI's notional
+/// figure stays in the log line below, where it is informative without being
+/// mistaken for money Juno spent.
+pub(crate) fn record_cli_turn_cost(model: &str, result: &Value) {
+    let usage = result
+        .get("usage")
+        .map(crate::cost_log::TokenUsage::from_anthropic_json)
+        .unwrap_or_default();
+
+    if let Some(cost) = result
+        .get("total_cost_usd")
+        .or_else(|| result.get("cost_usd"))
+        .and_then(Value::as_f64)
+    {
+        info!(
+            "Claude CLI turn would have cost ${:.4} on metered billing (seat, so $0 marginal)",
+            cost
+        );
+    }
+
+    crate::cost_log::record_turn(
+        &crate::agent::providers::types::Provider::ClaudeCli,
+        model,
+        usage,
+        result
+            .get("duration_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        result
+            .get("subtype")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown"),
+    );
+}
+
 pub struct ClaudeCliBrain {
     binary_path: PathBuf,
     model: String,
@@ -1529,15 +1575,12 @@ impl ClaudeCliBrain {
                                 final_result = Some(result_text.to_string());
                             }
 
-                            // Log cost info if available
-                            if let Some(cost) = parsed.get("cost_usd").and_then(|v| v.as_f64()) {
-                                info!("Claude CLI query cost: ${:.4}", cost);
-                            }
                             if let Some(duration) =
                                 parsed.get("duration_ms").and_then(|v| v.as_u64())
                             {
                                 info!("Claude CLI query duration: {}ms", duration);
                             }
+                            record_cli_turn_cost(&self.model, &parsed);
                         }
                         "system" => {
                             debug!(

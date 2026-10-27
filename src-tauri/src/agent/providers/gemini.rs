@@ -83,17 +83,88 @@ struct GeminiGenerationConfig {
 #[derive(Deserialize, Debug)]
 struct GeminiResponse {
     candidates: Vec<GeminiCandidate>,
-    // usage_metadata field removed - unused for performance
+    /// Token counts. Previously dropped as "unused"; the cost log reads it
+    /// (LAC-4127). Defaulted, so a response without it still parses.
+    #[serde(rename = "usageMetadata", default)]
+    usage_metadata: GeminiUsageMetadata,
 }
 
 #[derive(Deserialize, Debug)]
 struct GeminiCandidate {
     content: GeminiContent,
-    // finish_reason and safety_ratings fields removed - unused for performance
+    /// Why generation stopped (`STOP`, `MAX_TOKENS`, `SAFETY`). Recorded as
+    /// the turn's outcome in the cost log; nothing else reads it.
+    #[serde(rename = "finishReason", default)]
+    finish_reason: Option<String>,
+    // safety_ratings field removed - unused for performance
 }
 
-// Removed unused structs: GeminiUsageMetadata and GeminiSafetyRating
-// These were never accessed in the code, removing for performance
+/// Gemini's token counts.
+///
+/// `promptTokenCount` **includes** `cachedContentTokenCount`, as on OpenAI and
+/// unlike Anthropic, so the cached part is subtracted out rather than billed
+/// twice. Gemini bills cache *storage* by the hour rather than per written
+/// token, so there is no cache-write count to record.
+///
+/// **`candidatesTokenCount` does NOT include `thoughtsTokenCount`**, and
+/// thinking tokens are billed at the output rate: "response pricing is the sum
+/// of output tokens and thinking tokens". Reading candidates alone under-costs
+/// every thinking turn by the whole reasoning volume — silently, because the
+/// analyzer recomputes from these same tokens and would agree. Every field
+/// defaults: a model that is not thinking omits the field entirely, and some
+/// preview models omit it even when they are.
+#[derive(Deserialize, Debug, Default)]
+struct GeminiUsageMetadata {
+    #[serde(rename = "promptTokenCount", default)]
+    prompt_token_count: u64,
+    #[serde(rename = "candidatesTokenCount", default)]
+    candidates_token_count: u64,
+    #[serde(rename = "cachedContentTokenCount", default)]
+    cached_content_token_count: u64,
+    /// Reasoning tokens, billed at the output rate and reported apart from
+    /// `candidatesTokenCount`.
+    #[serde(rename = "thoughtsTokenCount", default)]
+    thoughts_token_count: u64,
+    /// Content a **server-side** tool pulled in on demand (search grounding,
+    /// video frames, a transcript), billed as input. Juno sends only
+    /// client-side function declarations, which ride in the ordinary prompt,
+    /// so this should be zero on every request Juno makes — see the warning
+    /// in the conversion below for what it means if it ever is not.
+    #[serde(rename = "toolUsePromptTokenCount", default)]
+    tool_use_prompt_token_count: u64,
+}
+
+impl From<&GeminiUsageMetadata> for crate::cost_log::TokenUsage {
+    fn from(usage: &GeminiUsageMetadata) -> Self {
+        // Google documents this as a bucket of its own, beside
+        // `promptTokenCount` rather than inside it, but publishes no formula
+        // tying the fields to the total. So it is added rather than ignored —
+        // under-counting a real billed category is the failure this module
+        // exists to prevent — and it says so out loud the first time it ever
+        // happens, because the alternative reading would make this a double
+        // count. It should never fire on Juno's own requests.
+        if usage.tool_use_prompt_token_count > 0 {
+            tracing::warn!(
+                target: crate::cost_log::TARGET,
+                "[CostLog] Gemini reported {} tool-use prompt tokens; counted as input. \
+                 Juno sends no server-side tools, so verify this is not already \
+                 inside promptTokenCount before trusting the figure.",
+                usage.tool_use_prompt_token_count
+            );
+        }
+        crate::cost_log::TokenUsage {
+            input: usage
+                .prompt_token_count
+                .saturating_sub(usage.cached_content_token_count)
+                .saturating_add(usage.tool_use_prompt_token_count),
+            output: usage
+                .candidates_token_count
+                .saturating_add(usage.thoughts_token_count),
+            cache_read: usage.cached_content_token_count,
+            cache_write: 0,
+        }
+    }
+}
 
 const GEMINI_API_BASE: &str = crate::constants::api::endpoints::GEMINI_API_BASE;
 
@@ -330,6 +401,8 @@ impl AgentBrain for GeminiBrain {
         // The API key goes in the x-goog-api-key header, never in the URL:
         // query strings end up in HTTP client logs, proxy logs, and error
         // messages (audit 2026-02-08 item #21).
+        // Times the request for the cost log's `duration_ms`.
+        let request_started = std::time::Instant::now();
         let response = self
             .client
             .post(&url)
@@ -351,6 +424,18 @@ impl AgentBrain for GeminiBrain {
             .json()
             .await
             .map_err(|e| AgentError::LlmError(format!("Failed to parse response: {}", e)))?;
+
+        crate::cost_log::record_turn(
+            &crate::agent::providers::types::Provider::Gemini,
+            &self.model,
+            (&gemini_response.usage_metadata).into(),
+            request_started.elapsed().as_millis() as u64,
+            gemini_response
+                .candidates
+                .first()
+                .and_then(|c| c.finish_reason.as_deref())
+                .unwrap_or("unknown"),
+        );
 
         let candidate = gemini_response
             .candidates
@@ -429,5 +514,110 @@ impl Default for GeminiBrain {
             system_prompt: None,
             temperature: 0.1,
         }
+    }
+}
+
+#[cfg(test)]
+mod usage_metadata_tests {
+    use super::*;
+    use crate::cost_log::TokenUsage;
+
+    fn usage(json: serde_json::Value) -> TokenUsage {
+        let parsed: GeminiUsageMetadata =
+            serde_json::from_value(json).expect("the fixture matches the struct");
+        (&parsed).into()
+    }
+
+    /// The regression this module's doc comment is about. Gemini reports
+    /// reasoning in `thoughtsTokenCount`, outside `candidatesTokenCount` and
+    /// billed at the output rate. Reading candidates alone under-costs the
+    /// turn by the entire thinking volume, and nothing downstream notices:
+    /// the analyzer recomputes the cost from these same understated tokens
+    /// and agrees with itself.
+    #[test]
+    fn thinking_tokens_are_output_tokens() {
+        let usage = usage(serde_json::json!({
+            "promptTokenCount": 120,
+            "candidatesTokenCount": 40,
+            "thoughtsTokenCount": 860,
+            "totalTokenCount": 1020,
+        }));
+
+        assert_eq!(
+            usage.output, 900,
+            "40 answer tokens + 860 thinking tokens, not 40"
+        );
+        assert_eq!(usage.input, 120);
+        assert_eq!(usage.cache_read, 0);
+    }
+
+    /// A thinking model that answers from thought alone still bills for it.
+    #[test]
+    fn a_turn_that_is_all_thinking_still_costs_output() {
+        let usage = usage(serde_json::json!({
+            "promptTokenCount": 10,
+            "thoughtsTokenCount": 500,
+        }));
+
+        assert_eq!(usage.output, 500);
+    }
+
+    /// Not every model reports the field — a non-thinking model omits it, and
+    /// some preview models omit it even while thinking. Absent must read as
+    /// zero rather than failing the parse and costing the turn its whole row.
+    #[test]
+    fn an_absent_thoughts_field_reads_as_zero() {
+        let usage = usage(serde_json::json!({
+            "promptTokenCount": 100,
+            "candidatesTokenCount": 25,
+        }));
+
+        assert_eq!(usage.output, 25);
+        assert_eq!(usage.input, 100);
+    }
+
+    /// `promptTokenCount` is inclusive of the cached part, so the cached
+    /// tokens are moved to `cache_read` rather than billed twice at the full
+    /// input rate. Thinking tokens are unaffected by any of that.
+    #[test]
+    fn cached_tokens_come_out_of_input_and_leave_thinking_alone() {
+        let usage = usage(serde_json::json!({
+            "promptTokenCount": 5000,
+            "cachedContentTokenCount": 4800,
+            "candidatesTokenCount": 30,
+            "thoughtsTokenCount": 200,
+        }));
+
+        assert_eq!(usage.input, 200, "5000 total prompt less 4800 cached");
+        assert_eq!(usage.cache_read, 4800);
+        assert_eq!(usage.output, 230);
+        assert_eq!(usage.cache_write, 0, "Gemini bills cache storage by time");
+    }
+
+    /// Content a server-side tool pulled in is input-side and billed, so it is
+    /// added rather than dropped. Juno sends no server-side tools, so this is
+    /// a guard against a silent under-count rather than a path in use.
+    #[test]
+    fn tool_use_prompt_tokens_are_counted_as_input() {
+        let usage = usage(serde_json::json!({
+            "promptTokenCount": 300,
+            "toolUsePromptTokenCount": 1200,
+            "candidatesTokenCount": 15,
+        }));
+
+        assert_eq!(usage.input, 1500);
+        assert_eq!(usage.output, 15);
+    }
+
+    /// Cache accounting must not underflow into a vast number when a provider
+    /// reports a cached count larger than the prompt it came from.
+    #[test]
+    fn a_cached_count_larger_than_the_prompt_saturates_at_zero() {
+        let usage = usage(serde_json::json!({
+            "promptTokenCount": 10,
+            "cachedContentTokenCount": 99,
+        }));
+
+        assert_eq!(usage.input, 0);
     }
 }

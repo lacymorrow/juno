@@ -3509,6 +3509,10 @@ pub async fn execute_computer_tool(
 
     // Get screenshot from result if applicable AND operation was successful
     let screenshot_base64 = if success && action == "screenshot" {
+        // Count it against the turn being built. Screenshots are why a
+        // computer-use turn's cache reads grow, so the cost log reports them
+        // next to the tokens rather than leaving the correlation to guesswork.
+        crate::cost_log::note_screenshot();
         match &result {
             Ok(output) => extract_screenshot_base64(output),
             Err(_) => None,

@@ -28,6 +28,7 @@ pub mod cloud_test;
 pub mod collaborative_ai_commands;
 pub mod config_file;
 pub mod conversations; // Conversation history: list/load/delete/new past chats
+pub mod cost_log; // Per-turn cost logging switch and CSV export (LAC-4127)
 pub mod debug_tools;
 pub mod dictation_state_manager;
 pub mod dock_icon; // Dock icon visibility and menu-bar-only mode recovery
