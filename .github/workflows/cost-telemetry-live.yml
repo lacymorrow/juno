@@ -1,0 +1,137 @@
+# Proves, against the real API, that a turn still writes a priced row
+# (LAC-4127). The hermetic suite in `cost_log` checks the arithmetic against
+# recorded frames; only a live request checks that the provider still puts
+# `usage` where Juno looks for it. A provider moving that block one level
+# deeper would pass every unit test and log every turn at $0.00.
+#
+# Manual, never on the PR path: it spends money (fractions of a cent per
+# provider — cheapest catalogued model, one-line prompt, 32-token ceiling) and
+# a test that bills on every push is a test people switch off.
+#
+# ## Which providers this can check
+#
+# Only the ones whose credential is a repository secret:
+#
+#   anthropic   ANTHROPIC_API_KEY   available
+#   openai      OPENAI_API_KEY      not a secret in this repo yet
+#   gemini      GEMINI_API_KEY      not a secret in this repo yet
+#   claude_cli  (none)              impossible here: needs a signed-in Claude
+#                                   Max seat, which no GitHub runner has.
+#                                   Run it locally, see the test's module docs.
+#
+# Asking for a provider whose credential is missing FAILS the job. A skip that
+# reports success is how an unverified acceptance criterion gets signed off.
+name: Cost telemetry live check
+
+on:
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: 'Test-name filter passed to cargo: "anthropic", "openai", "gemini", or "" for every live test in the file.'
+        required: false
+        default: anthropic
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: One real turn per provider
+    # macOS for the same reason as the `rust` job in ci.yml: src-tauri links
+    # Apple frameworks, so a Linux runner fails at link time.
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      # tauri-build reads `frontendDist` (../dist) at compile time.
+      - name: Build frontend for tauri-build
+        run: |
+          bun install
+          bun run build
+
+      # Secrets cannot be read in an `if:` expression, so the presence check is
+      # a step that reads them from the job environment and exits non-zero.
+      - name: Check the requested credentials are present
+        env:
+          FILTER: ${{ inputs.providers }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          # An empty filter runs every live test in the file, which today means
+          # the three API providers; the repo only holds one of their keys.
+          if [ -z "${FILTER}" ] || [ "${FILTER}" = "anthropic" ]; then
+            if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+              echo "missing required secret: ANTHROPIC_API_KEY" >&2
+              exit 1
+            fi
+          fi
+          case "${FILTER}" in
+            openai|gemini)
+              echo "no ${FILTER} key is a secret in this repo; add one before asking for it" >&2
+              exit 1
+              ;;
+            claude_cli)
+              echo "the Claude CLI path needs a signed-in Max seat and cannot run on a runner" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: One real turn, then read the row back
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # A scratch log, not the runner's cache directory: the test asserts on
+          # the file's contents and reads it back through `cost_log::read_log`.
+          JUNO_COST_LOG_PATH: ${{ runner.temp }}/cost-log.ndjson
+          # Through the environment, never interpolated into the script: a
+          # workflow input pasted into a shell line is a command-injection seam.
+          FILTER: ${{ inputs.providers }}
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path src-tauri/Cargo.toml \
+            --test cost_telemetry_live "${FILTER}" \
+            -- --ignored --nocapture --test-threads=1
+
+      # The test's own assertions are one reader of this file; this is a second,
+      # independent one. A test binary that exits 0 without running anything
+      # (filter typo, harness change) would otherwise read as a pass.
+      - name: Count the rows independently
+        env:
+          JUNO_COST_LOG_PATH: ${{ runner.temp }}/cost-log.ndjson
+        run: |
+          set -euo pipefail
+          if [ ! -s "${JUNO_COST_LOG_PATH}" ]; then
+            echo "the live test passed but wrote no rows — nothing was verified" >&2
+            exit 1
+          fi
+          rows=$(grep -c . "${JUNO_COST_LOG_PATH}")
+          echo "rows written: ${rows}"
+          [ "${rows}" -ge 1 ]
+          {
+            echo "## Cost telemetry live check"
+            echo
+            echo "Rows written: \`${rows}\`"
+            echo
+            echo '```json'
+            cat "${JUNO_COST_LOG_PATH}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attach the log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cost-log
+          path: ${{ runner.temp }}/cost-log.ndjson
+          if-no-files-found: warn

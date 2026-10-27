@@ -69,6 +69,12 @@ pub const LOG_FILE_NAME: &str = "cost-log.ndjson";
 /// outside the UI, and those paths have no `AppHandle` to read a setting with.
 pub const ENV_FLAG: &str = "JUNO_COST_LOG";
 
+/// Sends the log somewhere other than the cache directory. Exported by the
+/// caller before Juno starts — a measurement run that wants one file per
+/// batch, or the live test, which must not append to the person's own log.
+/// Read, never set: `std::env::set_var` is unsafe in a multithreaded process.
+pub const ENV_LOG_PATH: &str = "JUNO_COST_LOG_PATH";
+
 /// The column order of the CSV export, and the field order of each NDJSON
 /// record. Fixed: it is a consumed contract, not a display choice.
 pub const COLUMNS: [&str; 13] = [
@@ -413,9 +419,22 @@ fn warn_unpriced(provider: &Provider, model: &str, price: Option<&Price>) {
 
 /// Where the log lives. `dirs::cache_dir` rather than Tauri's `app_cache_dir`
 /// so the headless paths (`juno-cua`, the batch runner) write to the same file
-/// without an `AppHandle`.
+/// without an `AppHandle`. [`ENV_LOG_PATH`] overrides it.
 pub fn log_path() -> Option<PathBuf> {
-    Some(dirs::cache_dir()?.join("Juno").join(LOG_FILE_NAME))
+    resolve_log_path(
+        std::env::var(ENV_LOG_PATH).ok().as_deref(),
+        dirs::cache_dir(),
+    )
+}
+
+/// The path decision on its own, so it is testable without touching the
+/// process environment. A blank override is treated as unset rather than as a
+/// request to write to the empty path.
+fn resolve_log_path(override_path: Option<&str>, cache_dir: Option<PathBuf>) -> Option<PathBuf> {
+    match override_path.map(str::trim) {
+        Some(p) if !p.is_empty() => Some(PathBuf::from(p)),
+        _ => Some(cache_dir?.join("Juno").join(LOG_FILE_NAME)),
+    }
 }
 
 fn append(record: &CostRecord) {
@@ -894,5 +913,50 @@ mod tests {
                 }
             }
         }
+    }
+
+    // --- Where the log is written ---
+
+    /// The measurement harness points this at one file per batch, and the
+    /// live wire test points it at a scratch file so it never appends to the
+    /// person's own log.
+    #[test]
+    fn an_override_path_wins_over_the_cache_directory() {
+        let resolved = resolve_log_path(
+            Some("/tmp/batch-7.ndjson"),
+            Some(PathBuf::from("/Users/someone/Library/Caches")),
+        );
+        assert_eq!(resolved, Some(PathBuf::from("/tmp/batch-7.ndjson")));
+    }
+
+    /// An exported-but-empty variable is how a shell passes "unset", and
+    /// writing to the empty path would lose the whole measurement.
+    #[test]
+    fn a_blank_override_falls_back_rather_than_writing_to_nowhere() {
+        for blank in ["", "   "] {
+            let resolved =
+                resolve_log_path(Some(blank), Some(PathBuf::from("/Users/someone/Caches")));
+            assert_eq!(
+                resolved,
+                Some(PathBuf::from("/Users/someone/Caches/Juno/cost-log.ndjson")),
+                "{blank:?} should read as unset"
+            );
+        }
+    }
+
+    #[test]
+    fn with_no_override_the_log_sits_under_the_cache_directory() {
+        let resolved = resolve_log_path(None, Some(PathBuf::from("/Users/someone/Caches")));
+        assert_eq!(
+            resolved,
+            Some(PathBuf::from("/Users/someone/Caches/Juno/cost-log.ndjson"))
+        );
+    }
+
+    /// No cache directory and no override means there is nowhere to write;
+    /// `append` warns and drops the record rather than failing the turn.
+    #[test]
+    fn no_cache_directory_and_no_override_resolves_to_nothing() {
+        assert_eq!(resolve_log_path(None, None), None);
     }
 }

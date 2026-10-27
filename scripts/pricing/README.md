@@ -27,6 +27,36 @@ timestamp, run_id, turn_index, provider, model_id, input_tokens, output_tokens,
 cache_read_tokens, cache_write_tokens, screenshots, duration_ms, outcome, cost_usd
 ```
 
+## Producing the log
+
+Recording is off by default. Switch it on for a measurement run in one of
+three ways, in order of convenience:
+
+| Where | How |
+|---|---|
+| In the app | Settings → Advanced → cost logging, or `set_cost_logging_enabled` |
+| Headless (`juno-cua`, batch runner, CI) | export `JUNO_COST_LOG=1` |
+| A run of its own | also export `JUNO_COST_LOG_PATH=/path/to/batch-7.ndjson` |
+
+`JUNO_COST_LOG_PATH` moves the log off the default
+`~/Library/Caches/Juno/cost-log.ndjson`, which is what you want when a batch
+should not mix with earlier turns. It is read, never written, by Juno: export
+it before launching.
+
+## Is the telemetry still reading the right field?
+
+Every rate here is cross-checked against Juno's own table by a Rust test, and
+the arithmetic is covered by the hermetic suite in `src-tauri/src/cost_log.rs`.
+Neither of those can tell you that a provider still reports `usage` where Juno
+looks for it — a moved field would log every turn at $0.00 and pass all of
+them.
+
+That is what `src-tauri/tests/cost_telemetry_live.rs` is for: one real turn per
+provider, then the row read back out of the log. It is `#[ignore]`d (it spends
+money) and runs by hand, or in CI for Anthropic via the
+**Cost telemetry live check** workflow. Run it before any measurement round
+you intend to set a price from.
+
 ## Decisions baked in
 
 A task is one `run_id`; its turns are summed. A task succeeded if its last
