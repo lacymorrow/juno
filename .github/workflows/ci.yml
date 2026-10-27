@@ -6,9 +6,17 @@ on:
   push:
     branches: [main]
 
-# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
+# Supersede a PR's own earlier runs. Never supersede a commit on `main`.
+#
+# Grouping by `github.ref` put every push to main in one group, so a second
+# merge cancelled the first merge's CI: three of the twelve main runs before
+# 2026-10-17 ended `cancelled`, and each of those commits still cut a release
+# from a tree nothing had checked (LAC-4625). Keyed by PR number, a PR still
+# cancels its own stale runs; keyed by SHA, each commit on main gets a group
+# of one and so always reaches a verdict. `release-every-merge.yml` is that
+# verdict's only reader, and a cancelled run would silently stop releases.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 permissions:
