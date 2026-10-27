@@ -27,11 +27,11 @@ name: Release every merge
 # makes green a precondition of the event rather than something to sit and wait
 # for, so the job stays short and the queue stays honest.
 #
-# `main` now also carries a ruleset requiring CI's three jobs, so a pull request
+# `main` now also carries a ruleset requiring CI's Rust job, so a pull request
 # cannot merge red (LAC-4625). This is the second line of defence that ruleset
-# cannot be: it grants repository admins and github-actions a bypass, the latter
-# because shipx pushes the `release:` bump straight to main, and a bypassed push
-# is exactly the hole those two releases fell through.
+# cannot be: it grants the repository admin role and a deploy key a bypass, the
+# latter because shipx pushes the `release:` bump straight to main, and a
+# bypassed push is exactly the hole those two releases fell through.
 #
 # Accepted trade: two merges landing inside one CI cycle now share one version
 # instead of getting one each, because the earlier merge's release is skipped

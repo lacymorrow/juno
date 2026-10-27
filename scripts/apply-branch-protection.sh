@@ -40,8 +40,27 @@ live_id() {
 
 # Only the fields this repository owns. GitHub decorates a ruleset with an id,
 # timestamps, a node_id and _links, none of which belong in a diff.
+#
+# It also returns the arrays in an order of its own choosing, which is not the
+# order they were sent in: POST a bypass_actors of [RepositoryRole, DeployKey]
+# and every later GET answers [DeployKey, RepositoryRole] (measured against
+# this repository, 2026-10-27). `jq -S` sorts object keys recursively and
+# leaves array order alone, so comparing the arrays as returned would report
+# drift forever on a ruleset that matches the file exactly. Canonicalise both
+# sides instead of trusting either order.
 mine() {
-  jq -S '{name, target, enforcement, conditions, bypass_actors, rules}'
+  jq -S '
+    {name, target, enforcement, conditions, bypass_actors, rules}
+    | .bypass_actors |= sort_by(.actor_type, (.actor_id // 0), .bypass_mode)
+    | .rules |= (
+        sort_by(.type)
+        | map(
+            if .type == "required_status_checks"
+            then .parameters.required_status_checks |= sort_by(.context)
+            else . end
+          )
+      )
+  '
 }
 
 check() {

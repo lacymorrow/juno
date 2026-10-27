@@ -13,6 +13,11 @@
       "actor_id": null,
       "actor_type": "DeployKey",
       "bypass_mode": "always"
+    },
+    {
+      "actor_id": 5,
+      "actor_type": "RepositoryRole",
+      "bypass_mode": "always"
     }
   ],
   "rules": [
@@ -22,9 +27,7 @@
         "strict_required_status_checks_policy": false,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
-          { "context": "Frontend (typecheck + build)" },
-          { "context": "Rust (fmt + clippy + test)" },
-          { "context": "Rust (x86_64 check)" }
+          { "context": "Rust (fmt + clippy + test)" }
         ]
       }
     }

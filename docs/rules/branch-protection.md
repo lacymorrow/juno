@@ -30,11 +30,24 @@ with `GITHUB_TOKEN` and nothing has granted that a bypass.
 
 ## What it requires
 
-The three jobs in `ci.yml`, matched by name:
+One job in `ci.yml`, matched by name:
 
-- `Frontend (typecheck + build)`
 - `Rust (fmt + clippy + test)`
-- `Rust (x86_64 check)`
+
+That is the board's decision of 2026-10-25, and it is the check that would have
+stopped the incident. On `#825` this job failed and the other two passed, so
+requiring it alone is enough to have blocked `cb8542b5`.
+
+The other two jobs in `ci.yml` stay optional on purpose. `Frontend (typecheck +
+build)` runs the vitest suite, and the board ruled frontend tests a candidate
+rather than a defect: nothing has merged red through them. `Rust (x86_64 check)`
+is a `cargo check` that proves the Intel target still compiles; it has not been
+the thing that broke. Each is one line in `.github/rulesets/main.json` plus one
+apply, whenever one of them does become a defect.
+
+Keeping the required set small is not only deference. Every required check gates
+pushes as well as merges (see below), so each one widens what the release
+credential has to bypass, and the `Rust` job already takes some twenty minutes.
 
 GitHub matches required checks as strings, so renaming a job in `ci.yml` without
 renaming it here blocks every merge forever. The apply script refuses to run
@@ -60,27 +73,48 @@ The protection was missing invisibly. Nothing in the repository stated what
 `main` required, so nothing could notice that it required nothing. That is why
 the rule is committed here rather than clicked into a settings page.
 
-## Nobody is exempt, and that is the point, not an oversight
+## Repository admins bypass, by decision, with the counter-argument on record
 
-The original suggestion was to leave admins unenforced so a red check would not
-block the owner. That rested on there being a separate agent identity to gate.
-There is not. `lacymorrow` is the only collaborator on the repository and
-merged every recent pull request, the red `#825` included; the fleet's agents
-act with those credentials. An admin bypass would therefore exempt one hundred
-percent of merges and the rule would stop nothing at all.
+`bypass_actors` names the repository admin role, which is the ruleset spelling
+of the old `enforce_admins: false`. Decided by the board on 2026-10-25.
 
-So `bypass_actors` names no human and no role. A red pull request cannot be
-merged by anyone, owner included. The escape hatch is not a bypass: it is
-disabling the ruleset, which takes one call and leaves a record.
+The reasoning given: the defect is agent pull requests merging red, and
+requiring the check fixes that. Turning it on for admins also gates the one
+human who cuts releases, on a one-person release cadence. Wrong trade today,
+and a one-line flip whenever it stops being.
 
-## The one bypass actor is a deploy key, and why it has to be
+The counter-argument this overrules, kept because it is the thing to re-read
+when the trade changes: `lacymorrow` is the only collaborator on the
+repository and merged every recent pull request, the red `#825` included, and
+the fleet's agents act with those credentials. An admin bypass is therefore
+capable of exempting every merge, including the agent merges it is meant to
+stop. What makes it an acceptable trade rather than a hole is that a bypass is
+*available*, not automatic: GitHub's merge button still refuses a red pull
+request and has to be deliberately overridden, which is a different act from
+not being asked at all.
+
+To reverse it, drop the `RepositoryRole` entry from
+`.github/rulesets/main.json` and re-apply. One call, either direction.
+
+## Two bypass actors: the admin role above, and a deploy key
 
 Two measured facts shape this.
 
-**Required status checks gate pushes, not only merges.** Pushing a commit that
-has no checks is rejected with `GH013 ... Required status check "..." is
-expected`, and that happens to a repository admin as readily as to anyone else.
-Verified directly against this repository on a throwaway branch and ruleset.
+**Required status checks gate pushes, not only merges.** Writing a commit that
+has no checks is rejected: over git with `GH013 ... Required status check "..."
+is expected`, over the API with `409 Repository rule violations found\n\nRequired
+status check "Rust (fmt + clippy + test)" is expected`. Verified directly
+against this repository on a throwaway branch and ruleset, twice: once on
+2026-10-17 and again on 2026-10-27 with the admin bypass added and then removed
+as a control. With the bypass present the admin write succeeded; with it
+removed, the identical write was refused. That is what makes the admin entry
+above a real grant rather than a no-op.
+
+**The admin bypass does not cover the release bot, which is why a second actor
+is still needed.** `release-every-merge.yml` pushes as `github-actions[bot]`
+holding `GITHUB_TOKEN`, which carries write permission, not the admin role, so
+the `RepositoryRole` entry does nothing for it. Reading "admins bypass" as
+"no bypass credential needed" is the easy mistake here.
 
 **On a user-owned repository, GitHub Actions cannot be a bypass actor.** Adding
 it is rejected: `Actor GitHub Actions integration must be part of the ruleset
@@ -89,7 +123,7 @@ source or owner organization`. `lacymorrow/juno` has no owning organization.
 `release-every-merge.yml` runs shipx, which commits the version bump and pushes
 it to `main`. With protection on and no bypass, that push is rejected and the
 release cadence stops. So the push needs a credential that *can* be a bypass
-actor. A deploy key is the narrowest one available: a single repository, git
+actor and is not the admin role. A deploy key is the narrowest one available: a single repository, git
 only, no API surface, revoked in one call, and narrower than the personal
 access token it replaces. Its private half is the `RELEASE_SSH_KEY` secret,
 which `actions/checkout` consumes via `ssh-key:`.
