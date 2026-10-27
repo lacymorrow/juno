@@ -1500,6 +1500,7 @@ mod tests {
         let with_tool = Launch {
             mcp: Some(juno_mcp::Endpoint {
                 url: "http://127.0.0.1:1/mcp".to_string(),
+                hook_url: "http://127.0.0.1:1/hook/pretooluse".to_string(),
                 token: "t".to_string(),
             }),
             ..bare.clone()
