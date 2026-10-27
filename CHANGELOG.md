@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.241] - 2026-10-27
+
+### Added
+
+- **cost:** per-turn token and cost telemetry (LAC-4127) (#826) (7081e855)
+
 ## [0.8.239] - 2026-10-27
 
 ### Fixed
@@ -1638,7 +1644,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.239...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.241...HEAD
+[0.8.241]: https://github.com/lacymorrow/juno/compare/cua-v0.8.240...v0.8.241
 [0.8.239]: https://github.com/lacymorrow/juno/compare/cua-v0.8.238...v0.8.239
 [0.8.238]: https://github.com/lacymorrow/juno/compare/cua-v0.8.237...v0.8.238
 [0.8.237]: https://github.com/lacymorrow/juno/compare/cua-v0.8.236...v0.8.237
