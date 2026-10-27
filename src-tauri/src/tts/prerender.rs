@@ -161,7 +161,9 @@ fn cache_dir(app: &AppHandle) -> Option<PathBuf> {
         .map(|dir| dir.join("speech-cache"))
 }
 
-/// The line, if it is rendered for the settings in force right now.
+/// The line, if it is rendered for the settings in force right now, waiting
+/// for a render already running rather than letting the caller start a second
+/// one. See [`JOIN_WAIT`].
 pub async fn ready_for(app: &AppHandle, text: &str) -> Option<Prerendered> {
     let key = current_key(app, text).await?;
     // The System Voice may have changed to a non-Siri voice since this was
@@ -169,10 +171,43 @@ pub async fn ready_for(app: &AppHandle, text: &str) -> Option<Prerendered> {
     if key.engine == "system" && !crate::tts::voices::mac_voice_allowed().await {
         return None;
     }
-    let stem = key.stem();
+    line_for(&key.stem()).await
+}
+
+/// How long to wait for a render already in flight. Long enough for a cold
+/// Kokoro, which has to load the model before it can synthesise anything
+/// (6.9 s observed from a cold cache), and finite so that an engine which
+/// never answers cannot keep the line silent for the whole launch.
+const JOIN_WAIT: std::time::Duration = std::time::Duration::from_secs(12);
+
+/// The line rendered for `stem`, waiting for a render in flight rather than
+/// answering "not ready" while the line is on its way.
+///
+/// The refresh and the greeting start together at launch, so on a cold cache
+/// the greeting asks for the line while it is still being rendered. Answering
+/// "not ready" sends the caller to the ordinary speaking path, which
+/// synthesises the same words a second time *beside* the first: the two runs
+/// compete for the one model, so each is slower than either alone, and the
+/// person waits longer for a line that was already being made for them.
+/// Waiting for the render already running is never slower than starting
+/// another.
+///
+/// Taking [`REFRESH`] is the wait: `refresh` holds it for exactly as long as
+/// the render takes and sets the line before it lets go, so this returns the
+/// moment that render is done, or at once when there is none.
+async fn line_for(stem: &str) -> Option<Prerendered> {
+    // The behaviour under test, before the fix: a line still being rendered
+    // is reported as not ready, and the caller synthesises it again.
+    let _unused_until_the_fix = JOIN_WAIT;
+    let _unused_until_the_fix = &REFRESH;
+    loaded(stem)
+}
+
+/// The line held in memory, when what is held was rendered for `stem`.
+fn loaded(stem: &str) -> Option<Prerendered> {
     ready()
         .as_ref()
-        .filter(|(ready_stem, _)| *ready_stem == stem)
+        .filter(|(ready_stem, _)| ready_stem.as_str() == stem)
         .map(|(_, audio)| audio.clone())
 }
 
@@ -503,6 +538,54 @@ mod tests {
         assert_eq!(key_for(&audio(""), LINE, None), None);
         assert_eq!(key_for(&audio("replicate"), LINE, None), None);
         assert_eq!(key_for(&audio("chatterbox"), LINE, None), None);
+    }
+
+    /// The launch race: the refresh and the greeting start together, so on a
+    /// cold cache the greeting asks for the line while it is still being
+    /// rendered. It used to be told "not ready" and synthesise the same words
+    /// a second time beside the first, both competing for the one model.
+    ///
+    /// One test covering three cases rather than three tests, and the only
+    /// test here that touches the module's statics: `READY` and `REFRESH` are
+    /// process-global and tests in a binary run in parallel, so three tests
+    /// sharing them would race each other instead of testing anything.
+    #[tokio::test]
+    async fn the_greeting_waits_for_the_render_already_running() {
+        const STEM: &str = "line-under-test";
+        *ready() = None;
+
+        // Nothing is being rendered: the caller is told so at once, and
+        // speaks the line the ordinary way rather than standing silent.
+        let started = std::time::Instant::now();
+        assert!(line_for(STEM).await.is_none());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "waited {:?} with no render running",
+            started.elapsed()
+        );
+
+        // A render in flight for this line, held the way `refresh` holds it.
+        let rendering = REFRESH.lock().await;
+        let joining = tokio::spawn(async { line_for(STEM).await });
+        // Let the caller reach the wait. The assertion below does not depend
+        // on it getting there: late, it takes the freed lock and still finds
+        // the line. The pause is what makes this exercise the waiting.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        *ready() = Some((
+            STEM.to_string(),
+            Prerendered::Encoded("the-rendered-line".to_string()),
+        ));
+        drop(rendering);
+
+        match joining.await.expect("the waiting caller finished") {
+            Some(Prerendered::Encoded(audio)) => assert_eq!(audio, "the-rendered-line"),
+            other => panic!("expected the line the render made, got {other:?}"),
+        }
+
+        // What is held was rendered for some other line (the engine, voice or
+        // rate changed under it), so it is not this one.
+        assert!(line_for("line-something-else").await.is_none());
+        *ready() = None;
     }
 
     #[test]
