@@ -106,6 +106,7 @@ pub async fn ensure_running(app: &tauri::AppHandle) -> Result<Endpoint, AgentErr
 
     let router = Router::new()
         .route("/mcp", post(handle_rpc))
+        .route(HOOK_ROUTE, post(handle_shell_screen_hook))
         .with_state(state);
 
     // Port 0: the OS picks a free one. A fixed port would collide with a second
@@ -153,10 +154,67 @@ pub fn mcp_config(endpoint: &Endpoint) -> Value {
     })
 }
 
+/// How long the hook waits for Juno before giving up on it.
+///
+/// The answer is a pure function and a cached atomic read, so a healthy Juno
+/// replies in under a millisecond. The limit is here for an unhealthy one:
+/// curl writes nothing and exits non-zero, which Claude Code reads as "carry
+/// on", so a wedged Juno costs the person five seconds per shell call rather
+/// than their whole turn. Measured on `claude` 2.1.311.
+const HOOK_TIMEOUT_SECS: u32 = 5;
+
 /// The `--settings` contents that keep the CLI's own shell off the person's
 /// screen while background mode is on (LAC-5010).
-pub fn shell_screen_settings(_endpoint: &Endpoint) -> Value {
-    json!({})
+///
+/// Passed only on the spawn that skips permissions, where `approve` is
+/// unreachable and a hook is the one thing that still runs. Claude Code merges
+/// settings sources rather than replacing them, so the person's own hooks in
+/// `~/.claude/settings.json` and in the project still fire alongside this one;
+/// verified on 2.1.311.
+///
+/// The token rides in the file rather than on the command line, for the same
+/// reason [`crate::agent::providers::claude_cli`] writes the MCP config to a
+/// file: every `ps` on the machine can read a command line.
+///
+/// `curl` by absolute path: the hook runs through the person's shell, and a
+/// `curl` shadowed on their `PATH` would turn the screen off silently.
+pub fn shell_screen_settings(endpoint: &Endpoint) -> Value {
+    json!({
+        "hooks": {
+            "PreToolUse": [{
+                "matcher": cli_approval::BASH_TOOL,
+                "hooks": [{
+                    "type": "command",
+                    "command": format!(
+                        "/usr/bin/curl -s --max-time {HOOK_TIMEOUT_SECS} -X POST \
+                         -H 'Authorization: Bearer {}' \
+                         -H 'Content-Type: application/json' \
+                         --data-binary @- '{}'",
+                        endpoint.token, endpoint.hook_url
+                    ),
+                }],
+            }],
+        }
+    })
+}
+
+/// Read one of the CLI's own shell calls before it runs (LAC-5010).
+///
+/// Neither MCP nor JSON-RPC: the body in is Claude Code's `PreToolUse`
+/// payload and the body out is its hook answer. It is on this server because
+/// the verdict needs the live app, the token boundary already exists here, and
+/// one more route is cheaper than one more listener.
+async fn handle_shell_screen_hook(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
+    if !authorized(&headers, &state.token) {
+        warn!("[JunoMCP] Rejected a shell screen hook with no valid token");
+        return (StatusCode::UNAUTHORIZED, Json(json!({}))).into_response();
+    }
+    let answer = cli_approval::background_shell_hook_answer(&state.app, &payload).await;
+    (StatusCode::OK, Json(answer)).into_response()
 }
 
 async fn handle_rpc(
