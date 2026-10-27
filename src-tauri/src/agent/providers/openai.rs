@@ -101,13 +101,62 @@ struct OpenAIToolFunction {
 #[derive(Serialize, Deserialize, Debug)]
 struct OpenAIResponse {
     choices: Vec<OpenAIChoice>,
+    /// What the request billed. Defaulted rather than required: a shape change
+    /// must cost the measurement, never the person's answer.
+    #[serde(default)]
+    usage: OpenAIUsage,
     // Unused fields from API response - using serde(skip) for performance
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct OpenAIChoice {
     message: OpenAIMessage,
-    // Unused fields (index, finish_reason) removed for performance
+    /// Why the model stopped (`stop`, `tool_calls`, `length`). Recorded as the
+    /// turn's outcome in the cost log; nothing else reads it.
+    #[serde(default)]
+    finish_reason: Option<String>,
+    // Unused field (index) removed for performance
+}
+
+/// The `usage` block on a chat-completions response.
+///
+/// **`prompt_tokens` includes the cached ones**, which is the opposite of
+/// Anthropic, where `input_tokens` excludes them. Subtracting is therefore
+/// required: billing both in full would double the largest part of an agentic
+/// prompt and overstate every cost this log produces.
+#[derive(Serialize, Deserialize, Debug, Default)]
+struct OpenAIUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
+    #[serde(default)]
+    prompt_tokens_details: Option<OpenAIPromptTokensDetails>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+struct OpenAIPromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: u64,
+}
+
+impl From<&OpenAIUsage> for crate::cost_log::TokenUsage {
+    fn from(usage: &OpenAIUsage) -> Self {
+        let cached = usage
+            .prompt_tokens_details
+            .as_ref()
+            .map(|d| d.cached_tokens)
+            .unwrap_or(0);
+        crate::cost_log::TokenUsage {
+            // Saturating, so a provider that ever reports more cached than
+            // prompt tokens yields zero rather than wrapping to u64::MAX.
+            input: usage.prompt_tokens.saturating_sub(cached),
+            output: usage.completion_tokens,
+            cache_read: cached,
+            // OpenAI charges nothing to write the cache; there is no field.
+            cache_write: 0,
+        }
+    }
 }
 
 // --- OpenAIBrain Implementation --- //
@@ -361,6 +410,8 @@ impl AgentBrain for OpenAIBrain {
         }
 
         // Make the API call to OpenAI
+        // Times the request for the cost log's `duration_ms`.
+        let request_started = std::time::Instant::now();
         let response = self
             .client
             .post(OPENAI_API_URL)
@@ -394,6 +445,18 @@ impl AgentBrain for OpenAIBrain {
         log::debug!(
             "Received response from OpenAI: {:?}",
             Self::sanitize_response_for_logging(&response_body)
+        );
+
+        crate::cost_log::record_turn(
+            &crate::agent::providers::types::Provider::OpenAI,
+            &self.model,
+            (&response_body.usage).into(),
+            request_started.elapsed().as_millis() as u64,
+            response_body
+                .choices
+                .first()
+                .and_then(|c| c.finish_reason.as_deref())
+                .unwrap_or("unknown"),
         );
 
         if response_body.choices.is_empty() {

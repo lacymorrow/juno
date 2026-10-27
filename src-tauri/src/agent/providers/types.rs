@@ -71,6 +71,97 @@ pub mod model_ids {
     pub const GEMINI_2_5_COMPUTER_USE_PREVIEW: &str = "gemini-2.5-computer-use-preview-10-2025";
 }
 
+/// USD per million tokens, by token category.
+///
+/// The four categories are billed at different rates and a turn uses all four,
+/// so a single "input price" cannot cost an agentic turn. Cache reads dominate
+/// computer use — the system prompt and screenshot history are replayed every
+/// turn — so `cache_read` is the load-bearing number here, not `input`.
+///
+/// `long_context`, when present, replaces all four rates once a request's
+/// prompt tokens pass its threshold.
+#[derive(Debug, Clone)]
+pub struct Rates {
+    pub input: f64,
+    pub output: f64,
+    /// Cache hits and refreshes.
+    pub cache_read: f64,
+    /// 5-minute cache writes. Juno never requests the 1-hour TTL.
+    pub cache_write: f64,
+    pub long_context: Option<LongContext>,
+}
+
+/// The rates that replace [`Rates`] above `threshold_tokens` prompt tokens.
+#[derive(Debug, Clone)]
+pub struct LongContext {
+    pub threshold_tokens: u64,
+    pub input: f64,
+    pub output: f64,
+    pub cache_read: f64,
+    pub cache_write: f64,
+}
+
+/// What one model's tokens cost Juno.
+///
+/// Three cases, kept apart on purpose. Collapsing `Subscription` and
+/// `Unpublished` into "$0.00" is how a price gets undersized: the first is
+/// genuinely free at the margin, the second is a number nobody has looked up.
+#[derive(Debug, Clone)]
+pub enum Price {
+    /// Per-token API billing.
+    Metered(Rates),
+    /// Flat-rate seat the person already pays for (Claude Max/Pro, a ChatGPT
+    /// plan). Marginal cost to Juno is zero, which is what makes a
+    /// bring-your-own-plan tier viable — not the same thing as free.
+    Subscription,
+    /// The provider publishes no rate for this model. Costs nothing *known*,
+    /// which is not the same as costing nothing.
+    Unpublished,
+}
+
+impl Price {
+    /// A metered model with no long-context tier. Every argument is USD per
+    /// million tokens, in the order the pricing table lists them.
+    pub const fn per_mtok(input: f64, output: f64, cache_read: f64, cache_write: f64) -> Self {
+        Price::Metered(Rates {
+            input,
+            output,
+            cache_read,
+            cache_write,
+            long_context: None,
+        })
+    }
+
+    /// [`per_mtok`](Self::per_mtok) plus the tier that takes over above
+    /// `threshold_tokens` prompt tokens.
+    #[allow(clippy::too_many_arguments)]
+    pub const fn per_mtok_tiered(
+        input: f64,
+        output: f64,
+        cache_read: f64,
+        cache_write: f64,
+        threshold_tokens: u64,
+        long_input: f64,
+        long_output: f64,
+        long_cache_read: f64,
+        long_cache_write: f64,
+    ) -> Self {
+        Price::Metered(Rates {
+            input,
+            output,
+            cache_read,
+            cache_write,
+            long_context: Some(LongContext {
+                threshold_tokens,
+                input: long_input,
+                output: long_output,
+                cache_read: long_cache_read,
+                cache_write: long_cache_write,
+            }),
+        })
+    }
+}
+
 /// Model categories based on capabilities
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum ModelCategory {
@@ -218,6 +309,14 @@ pub struct ModelDefinition {
     /// model per provider holds each role; `router::` reads the table to find
     /// them, so no call site keeps its own model list.
     pub router_role: Option<RouterRole>,
+    /// What this model's tokens cost, USD per million. Read by `cost_log` to
+    /// price a turn; nothing else may keep its own rates.
+    ///
+    /// Verify against the LIVE pricing page, never a cached model catalog. A
+    /// catalog bundled with a tool had Sonnet 5.5 cache reads at $0.20/MTok
+    /// when the published rate is $0.10 — a 2x error on the rate that dominates
+    /// computer-use turns (LAC-3106, LAC-4127).
+    pub price: Price,
 }
 
 /// A job a model does for the smart-routing beta (`agent::router`).
@@ -320,6 +419,22 @@ impl Provider {
             "claude_cli" | "claude-cli" | "claudecli" => Some(Provider::ClaudeCli),
             "codex_cli" | "codex-cli" | "codexcli" => Some(Provider::CodexCli),
             _ => None,
+        }
+    }
+
+    /// The provider's canonical identifier — the exact inverse of
+    /// [`from_str`](Self::from_str), which also accepts other spellings.
+    ///
+    /// This is the machine-readable name (`claude_cli`), not the human one;
+    /// use [`display_name`](Self::display_name) for anything a person reads.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Provider::Anthropic => "anthropic",
+            Provider::OpenAI => "openai",
+            Provider::Rig => "rig",
+            Provider::Gemini => "gemini",
+            Provider::ClaudeCli => "claude_cli",
+            Provider::CodexCli => "codex_cli",
         }
     }
 
@@ -451,11 +566,16 @@ impl Provider {
 
         match self {
             Provider::Anthropic => {
-                &[
+                // A named `const` rather than a bare `&[..]`: implicit static
+                // promotion does not cover `const fn` calls, and every row now
+                // calls `Price::per_mtok`. Naming the constant makes the
+                // `'static` explicit instead of hoping promotion applies.
+                const MODELS: &[ModelDefinition] = &[
                     // --- Current lineup (models overview "Compare models") ---
                     ModelDefinition {
                         id: model_ids::CLAUDE_FABLE_5_1,
                         name: "Claude Fable 5.1",
+                        price: Price::per_mtok(10.0, 50.0, 0.25, 12.50),
                         computer_use: CU_20251124,
                         availability: Availability::Current,
                         toolset_ga: true,
@@ -469,6 +589,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_5_5,
                         name: "Claude Opus 5.5",
+                        price: Price::per_mtok(4.0, 20.0, 0.20, 5.0),
                         // Toolset-only on the Claude API: a `computer_20251124`
                         // tool returns a 400. Juno now sends the toolset, so
                         // this model drives the computer like any other.
@@ -484,6 +605,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_SONNET_5_5,
                         name: "Claude Sonnet 5.5",
+                        price: Price::per_mtok(2.0, 10.0, 0.10, 2.50),
                         // Toolset-only on the Claude API, exactly like Opus 5.5:
                         // "Claude 5.5 and later models support computer use only
                         // through the computer_toolset_20260801 toolset and
@@ -512,6 +634,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_HAIKU_4_5,
                         name: "Claude Haiku 4.5",
+                        price: Price::per_mtok(1.0, 5.0, 0.10, 1.25),
                         computer_use: CU_20250124,
                         availability: Availability::Current,
                         toolset_ga: false,
@@ -528,6 +651,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_FABLE_5,
                         name: "Claude Fable 5",
+                        price: Price::per_mtok(10.0, 50.0, 1.0, 12.50),
                         computer_use: CU_20251124,
                         availability: Availability::Legacy,
                         toolset_ga: true,
@@ -540,6 +664,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_5,
                         name: "Claude Opus 5",
+                        price: Price::per_mtok(5.0, 25.0, 0.50, 6.25),
                         computer_use: CU_20251124,
                         availability: Availability::Legacy,
                         toolset_ga: true,
@@ -552,6 +677,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_8,
                         name: "Claude Opus 4.8",
+                        price: Price::per_mtok(5.0, 25.0, 0.50, 6.25),
                         computer_use: CU_20251124,
                         availability: Availability::Legacy,
                         toolset_ga: true,
@@ -566,6 +692,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_7,
                         name: "Claude Opus 4.7",
+                        price: Price::per_mtok(5.0, 25.0, 0.50, 6.25),
                         computer_use: CU_20251124,
                         availability: Availability::Legacy,
                         toolset_ga: false,
@@ -578,6 +705,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_6,
                         name: "Claude Opus 4.6",
+                        price: Price::per_mtok(5.0, 25.0, 0.50, 6.25),
                         computer_use: CU_20251124,
                         availability: Availability::Legacy,
                         toolset_ga: false,
@@ -595,6 +723,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_SONNET_5,
                         name: "Claude Sonnet 5",
+                        price: Price::per_mtok(2.0, 10.0, 0.20, 2.50),
                         computer_use: CU_20251124,
                         availability: Availability::Legacy,
                         toolset_ga: true,
@@ -607,6 +736,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_SONNET_4_6,
                         name: "Claude Sonnet 4.6",
+                        price: Price::per_mtok(3.0, 15.0, 0.30, 3.75),
                         computer_use: CU_20251124,
                         availability: Availability::Legacy,
                         toolset_ga: false,
@@ -619,6 +749,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_OPUS_4_5,
                         name: "Claude Opus 4.5",
+                        price: Price::per_mtok(5.0, 25.0, 0.50, 6.25),
                         computer_use: CU_20251124,
                         availability: Availability::Legacy,
                         toolset_ga: false,
@@ -634,6 +765,7 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::CLAUDE_SONNET_4_5,
                         name: "Claude Sonnet 4.5",
+                        price: Price::per_mtok(3.0, 15.0, 0.30, 3.75),
                         computer_use: CU_20250124,
                         availability: Availability::Legacy,
                         toolset_ga: false,
@@ -643,16 +775,49 @@ impl Provider {
                         is_recommended: false,
                         router_role: None,
                     },
-                ]
+                ];
+                MODELS
             }
             // Juno drives OpenAI and Gemini with its own function tools and
             // screenshots rather than those providers' native computer tools,
             // so what a model needs here is image input plus function calling.
             // No Anthropic tool version or image tier applies.
-            Provider::OpenAI => &[
-                ModelDefinition {
+            Provider::OpenAI => {
+                const MODELS: &[ModelDefinition] = &[
+                    ModelDefinition {
+                        id: model_ids::OPENAI_SOL_5_6,
+                        name: "GPT-5.6 Sol",
+                        price: Price::per_mtok(4.0, 20.0, 0.40, 0.0),
+                        computer_use: ComputerUse::FunctionTools,
+                        availability: Availability::Current,
+                        toolset_ga: false,
+                        image_tier: ImageTier::Standard,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: true,
+                        router_role: None,
+                    },
+                    ModelDefinition {
+                        id: model_ids::OPENAI_CODEX_5_3,
+                        name: "GPT-5.3 Codex",
+                        price: Price::per_mtok(1.75, 14.0, 0.175, 0.0),
+                        computer_use: ComputerUse::FunctionTools,
+                        availability: Availability::Current,
+                        toolset_ga: false,
+                        image_tier: ImageTier::Standard,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                ];
+                MODELS
+            }
+            Provider::Rig => {
+                const MODELS: &[ModelDefinition] = &[ModelDefinition {
                     id: model_ids::OPENAI_SOL_5_6,
-                    name: "GPT-5.6 Sol",
+                    name: "GPT-5.6 Sol via Rig",
+                    price: Price::per_mtok(4.0, 20.0, 0.40, 0.0),
                     computer_use: ComputerUse::FunctionTools,
                     availability: Availability::Current,
                     toolset_ga: false,
@@ -661,150 +826,142 @@ impl Provider {
                     server_side_fallback: false,
                     is_recommended: true,
                     router_role: None,
-                },
-                ModelDefinition {
-                    id: model_ids::OPENAI_CODEX_5_3,
-                    name: "GPT-5.3 Codex",
-                    computer_use: ComputerUse::FunctionTools,
-                    availability: Availability::Current,
-                    toolset_ga: false,
-                    image_tier: ImageTier::Standard,
-                    adaptive_thinking: false,
-                    server_side_fallback: false,
-                    is_recommended: false,
-                    router_role: None,
-                },
-            ],
-            Provider::Rig => &[ModelDefinition {
-                id: model_ids::OPENAI_SOL_5_6,
-                name: "GPT-5.6 Sol via Rig",
-                computer_use: ComputerUse::FunctionTools,
-                availability: Availability::Current,
-                toolset_ga: false,
-                image_tier: ImageTier::Standard,
-                adaptive_thinking: false,
-                server_side_fallback: false,
-                is_recommended: true,
-                router_role: None,
-            }],
-            Provider::Gemini => &[
-                ModelDefinition {
-                    id: model_ids::GEMINI_3_8_FLASH,
-                    name: "Gemini 3.8 Flash",
-                    computer_use: ComputerUse::FunctionTools,
-                    availability: Availability::Current,
-                    toolset_ga: false,
-                    image_tier: ImageTier::Standard,
-                    adaptive_thinking: false,
-                    server_side_fallback: false,
-                    is_recommended: true,
-                    router_role: None,
-                },
-                ModelDefinition {
-                    id: model_ids::GEMINI_3_7_FLASH,
-                    name: "Gemini 3.7 Flash",
-                    computer_use: ComputerUse::FunctionTools,
-                    availability: Availability::Current,
-                    toolset_ga: false,
-                    image_tier: ImageTier::Standard,
-                    adaptive_thinking: false,
-                    server_side_fallback: false,
-                    is_recommended: false,
-                    router_role: None,
-                },
-                ModelDefinition {
-                    id: model_ids::GEMINI_3_5_FLASH,
-                    name: "Gemini 3.5 Flash",
-                    computer_use: ComputerUse::FunctionTools,
-                    availability: Availability::Current,
-                    toolset_ga: false,
-                    image_tier: ImageTier::Standard,
-                    adaptive_thinking: false,
-                    server_side_fallback: false,
-                    is_recommended: false,
-                    router_role: None,
-                },
-                ModelDefinition {
-                    id: model_ids::GEMINI_3_5_FLASH_LITE,
-                    name: "Gemini 3.5 Flash-Lite",
-                    computer_use: ComputerUse::FunctionTools,
-                    availability: Availability::Current,
-                    toolset_ga: false,
-                    image_tier: ImageTier::Standard,
-                    adaptive_thinking: false,
-                    server_side_fallback: false,
-                    is_recommended: false,
-                    router_role: None,
-                },
-                ModelDefinition {
-                    id: model_ids::GEMINI_3_FLASH_PREVIEW,
-                    name: "Gemini 3 Flash Preview",
-                    computer_use: ComputerUse::FunctionTools,
-                    availability: Availability::Current,
-                    toolset_ga: false,
-                    image_tier: ImageTier::Standard,
-                    adaptive_thinking: false,
-                    server_side_fallback: false,
-                    is_recommended: false,
-                    router_role: None,
-                },
-                // Google labels this one "Legacy Preview".
-                ModelDefinition {
-                    id: model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
-                    name: "Gemini 2.5 Computer Use (Legacy Preview)",
-                    computer_use: ComputerUse::FunctionTools,
-                    availability: Availability::Legacy,
-                    toolset_ga: false,
-                    image_tier: ImageTier::Standard,
-                    adaptive_thinking: false,
-                    server_side_fallback: false,
-                    is_recommended: false,
-                    router_role: None,
-                },
-            ],
+                }];
+                MODELS
+            }
+            Provider::Gemini => {
+                const MODELS: &[ModelDefinition] = &[
+                    ModelDefinition {
+                        id: model_ids::GEMINI_3_8_FLASH,
+                        name: "Gemini 3.8 Flash",
+                        price: Price::per_mtok(0.75, 3.75, 0.075, 0.0),
+                        computer_use: ComputerUse::FunctionTools,
+                        availability: Availability::Current,
+                        toolset_ga: false,
+                        image_tier: ImageTier::Standard,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: true,
+                        router_role: None,
+                    },
+                    ModelDefinition {
+                        id: model_ids::GEMINI_3_7_FLASH,
+                        name: "Gemini 3.7 Flash",
+                        price: Price::Unpublished,
+                        computer_use: ComputerUse::FunctionTools,
+                        availability: Availability::Current,
+                        toolset_ga: false,
+                        image_tier: ImageTier::Standard,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                    ModelDefinition {
+                        id: model_ids::GEMINI_3_5_FLASH,
+                        name: "Gemini 3.5 Flash",
+                        price: Price::Unpublished,
+                        computer_use: ComputerUse::FunctionTools,
+                        availability: Availability::Current,
+                        toolset_ga: false,
+                        image_tier: ImageTier::Standard,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                    ModelDefinition {
+                        id: model_ids::GEMINI_3_5_FLASH_LITE,
+                        name: "Gemini 3.5 Flash-Lite",
+                        price: Price::per_mtok(0.30, 2.50, 0.03, 0.0),
+                        computer_use: ComputerUse::FunctionTools,
+                        availability: Availability::Current,
+                        toolset_ga: false,
+                        image_tier: ImageTier::Standard,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                    ModelDefinition {
+                        id: model_ids::GEMINI_3_FLASH_PREVIEW,
+                        name: "Gemini 3 Flash Preview",
+                        price: Price::per_mtok(0.50, 3.0, 0.05, 0.0),
+                        computer_use: ComputerUse::FunctionTools,
+                        availability: Availability::Current,
+                        toolset_ga: false,
+                        image_tier: ImageTier::Standard,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                    // Google labels this one "Legacy Preview".
+                    ModelDefinition {
+                        id: model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
+                        name: "Gemini 2.5 Computer Use (Legacy Preview)",
+                        price: Price::Unpublished,
+                        computer_use: ComputerUse::FunctionTools,
+                        availability: Availability::Legacy,
+                        toolset_ga: false,
+                        image_tier: ImageTier::Standard,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                ];
+                MODELS
+            }
             // The CLI drives the desktop through Juno's own in-process MCP
             // server rather than Anthropic's built-in computer tool, so it
             // picks its own tool versions and Juno sends no Anthropic beta
             // flag. The aliases track the current generation, which is the
             // high-resolution image tier.
-            Provider::ClaudeCli => &[
-                ModelDefinition {
-                    id: "sonnet",
-                    name: "Claude Sonnet (via CLI)",
-                    computer_use: ComputerUse::FunctionTools,
-                    availability: Availability::Current,
-                    toolset_ga: false,
-                    image_tier: ImageTier::HighResolution,
-                    adaptive_thinking: false,
-                    server_side_fallback: false,
-                    is_recommended: true,
-                    router_role: None,
-                },
-                ModelDefinition {
-                    id: "opus",
-                    name: "Claude Opus (via CLI)",
-                    computer_use: ComputerUse::FunctionTools,
-                    availability: Availability::Current,
-                    toolset_ga: false,
-                    image_tier: ImageTier::HighResolution,
-                    adaptive_thinking: false,
-                    server_side_fallback: false,
-                    is_recommended: false,
-                    router_role: None,
-                },
-                ModelDefinition {
-                    id: "haiku",
-                    name: "Claude Haiku (via CLI)",
-                    computer_use: ComputerUse::FunctionTools,
-                    availability: Availability::Current,
-                    toolset_ga: false,
-                    image_tier: ImageTier::Standard,
-                    adaptive_thinking: false,
-                    server_side_fallback: false,
-                    is_recommended: false,
-                    router_role: None,
-                },
-            ],
+            Provider::ClaudeCli => {
+                const MODELS: &[ModelDefinition] = &[
+                    ModelDefinition {
+                        id: "sonnet",
+                        name: "Claude Sonnet (via CLI)",
+                        price: Price::Subscription,
+                        computer_use: ComputerUse::FunctionTools,
+                        availability: Availability::Current,
+                        toolset_ga: false,
+                        image_tier: ImageTier::HighResolution,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: true,
+                        router_role: None,
+                    },
+                    ModelDefinition {
+                        id: "opus",
+                        name: "Claude Opus (via CLI)",
+                        price: Price::Subscription,
+                        computer_use: ComputerUse::FunctionTools,
+                        availability: Availability::Current,
+                        toolset_ga: false,
+                        image_tier: ImageTier::HighResolution,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                    ModelDefinition {
+                        id: "haiku",
+                        name: "Claude Haiku (via CLI)",
+                        price: Price::Subscription,
+                        computer_use: ComputerUse::FunctionTools,
+                        availability: Availability::Current,
+                        toolset_ga: false,
+                        image_tier: ImageTier::Standard,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                ];
+                MODELS
+            }
             // Codex CLI: the person's ChatGPT plan. Drives the desktop through
             // Juno's own in-process MCP server (`codex_session::mcp_config_args`),
             // like the Claude CLI, so no Anthropic tool version applies. IDs are
@@ -812,44 +969,50 @@ impl Provider {
             // on 2026-10-07 (codex-cli 0.159.0); `gpt-5-codex` and `gpt-5` are
             // refused with a 400 on ChatGPT accounts. The plan's catalog moves,
             // so re-check with `model/list` rather than from memory.
-            Provider::CodexCli => &[
-                ModelDefinition {
-                    id: "gpt-6-luna",
-                    name: "GPT-6 Luna (via Codex)",
-                    computer_use: ComputerUse::FunctionTools,
-                    availability: Availability::Current,
-                    toolset_ga: false,
-                    image_tier: ImageTier::Standard,
-                    adaptive_thinking: false,
-                    server_side_fallback: false,
-                    is_recommended: true,
-                    router_role: None,
-                },
-                ModelDefinition {
-                    id: "gpt-5.6-terra",
-                    name: "GPT-5.6 Terra (via Codex)",
-                    computer_use: ComputerUse::FunctionTools,
-                    availability: Availability::Current,
-                    toolset_ga: false,
-                    image_tier: ImageTier::Standard,
-                    adaptive_thinking: false,
-                    server_side_fallback: false,
-                    is_recommended: false,
-                    router_role: None,
-                },
-                ModelDefinition {
-                    id: "gpt-5.6-luna",
-                    name: "GPT-5.6 Luna (via Codex)",
-                    computer_use: ComputerUse::FunctionTools,
-                    availability: Availability::Current,
-                    toolset_ga: false,
-                    image_tier: ImageTier::Standard,
-                    adaptive_thinking: false,
-                    server_side_fallback: false,
-                    is_recommended: false,
-                    router_role: None,
-                },
-            ],
+            Provider::CodexCli => {
+                const MODELS: &[ModelDefinition] = &[
+                    ModelDefinition {
+                        id: "gpt-6-luna",
+                        name: "GPT-6 Luna (via Codex)",
+                        price: Price::Subscription,
+                        computer_use: ComputerUse::FunctionTools,
+                        availability: Availability::Current,
+                        toolset_ga: false,
+                        image_tier: ImageTier::Standard,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: true,
+                        router_role: None,
+                    },
+                    ModelDefinition {
+                        id: "gpt-5.6-terra",
+                        name: "GPT-5.6 Terra (via Codex)",
+                        price: Price::Subscription,
+                        computer_use: ComputerUse::FunctionTools,
+                        availability: Availability::Current,
+                        toolset_ga: false,
+                        image_tier: ImageTier::Standard,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                    ModelDefinition {
+                        id: "gpt-5.6-luna",
+                        name: "GPT-5.6 Luna (via Codex)",
+                        price: Price::Subscription,
+                        computer_use: ComputerUse::FunctionTools,
+                        availability: Availability::Current,
+                        toolset_ga: false,
+                        image_tier: ImageTier::Standard,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                ];
+                MODELS
+            }
         }
     }
 

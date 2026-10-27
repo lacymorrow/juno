@@ -348,6 +348,10 @@ struct CliSession {
     /// The effort the process is running at now: born with `--effort`, then
     /// whatever the last [`effort_request`] set.
     live_effort: std::sync::Mutex<String>,
+    /// The model this process was spawned with. Spawn-time like the rest of
+    /// the signature, so it cannot change under a live process. Needed to
+    /// price a turn Claude starts on its own, which has no `TurnRequest`.
+    model: String,
 }
 
 impl CliSession {
@@ -1024,6 +1028,7 @@ fn spawn_session(
         turns_waiting: AtomicUsize::new(0),
         turn_wanted: Notify::new(),
         live_effort: std::sync::Mutex::new(launch.effort.clone()),
+        model: launch.model.clone(),
     })
 }
 
@@ -1338,6 +1343,10 @@ struct TurnRenderer {
     /// The person asked the turn to stop. Nothing more reaches the screen or
     /// the speaker; tool indicators still come down.
     muted: bool,
+    /// Which model this turn ran on, for the cost log. Empty when the renderer
+    /// was built without one, in which case the turn is not priced — better a
+    /// missing row than one attributed to the wrong model.
+    model: String,
 }
 
 impl TurnRenderer {
@@ -1356,7 +1365,14 @@ impl TurnRenderer {
             tts: crate::agent::tts_tags::TtsTagStream::new(),
             spoken: Vec::new(),
             muted: false,
+            model: String::new(),
         }
+    }
+
+    /// Name the model this turn runs on, so its `result` frame can be priced.
+    fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
     }
 
     /// Render one frame. Returns how the turn ended when `frame` is its `result`.
@@ -1445,8 +1461,8 @@ impl TurnRenderer {
                 if let Some(ms) = frame.get("duration_ms").and_then(Value::as_u64) {
                     info!("[CliSession] Turn duration: {ms}ms");
                 }
-                if let Some(cost) = frame.get("total_cost_usd").and_then(Value::as_f64) {
-                    info!("[CliSession] Turn cost: ${cost:.4}");
+                if !self.model.is_empty() {
+                    super::claude_cli::record_cli_turn_cost(&self.model, frame);
                 }
                 // `terminal_reason` is a closed protocol field, not an error
                 // message (LAC-3697).
@@ -1528,7 +1544,12 @@ struct OwnTurn {
 }
 
 impl OwnTurn {
-    async fn begin(app: &tauri::AppHandle, conversation_id: &str, nested: bool) -> Self {
+    async fn begin(
+        app: &tauri::AppHandle,
+        conversation_id: &str,
+        nested: bool,
+        model: &str,
+    ) -> Self {
         let stage = Stage::begin(app, conversation_id, nested).await;
         let msg_id = uuid::Uuid::new_v4().to_string();
         // Off screen the bubble is not opened: the chat on screen belongs to
@@ -1538,7 +1559,7 @@ impl OwnTurn {
         surface.open();
         Self {
             stage,
-            renderer: TurnRenderer::new(Some(app.clone()), msg_id),
+            renderer: TurnRenderer::new(Some(app.clone()), msg_id).with_model(model),
             surface,
         }
     }
@@ -1647,7 +1668,7 @@ async fn run_own_turn(
     conversation_id: &str,
     first: Value,
 ) {
-    let mut turn = OwnTurn::begin(app, conversation_id, false).await;
+    let mut turn = OwnTurn::begin(app, conversation_id, false, &session.model).await;
 
     // The roster row's stop (Escape on the focused row), and the global stop
     // for when there is no row. A never-firing channel stands in for either.
@@ -1796,7 +1817,8 @@ async fn stream_turn(
     // The bubble. Opened only at our `started` frame, and closed however this
     // function is left once it is open, including a process that dies mid-turn.
     let mut surface = TurnSurface::new(req.app_handle, msg_id.clone(), true);
-    let mut renderer = TurnRenderer::new(Some(req.app_handle.clone()), msg_id);
+    let mut renderer =
+        TurnRenderer::new(Some(req.app_handle.clone()), msg_id).with_model(&req.launch.model);
     let mut correlator = Correlator::new(command_uuid);
     // A turn Claude started on its own, in progress ahead of ours.
     let mut own: Option<OwnTurn> = None;
@@ -1943,7 +1965,13 @@ async fn stream_turn(
                     }
                     // Inside our turn: it already owns the bar and Escape, and
                     // its conversation owns this process.
-                    let mut turn = OwnTurn::begin(req.app_handle, req.conversation_id, true).await;
+                    let mut turn = OwnTurn::begin(
+                        req.app_handle,
+                        req.conversation_id,
+                        true,
+                        &req.launch.model,
+                    )
+                    .await;
                     turn.renderer.muted = cancel_deadline.is_some();
                     own = Some(turn);
                 }
@@ -2289,6 +2317,7 @@ mod tests {
             turns_waiting: AtomicUsize::new(0),
             turn_wanted: Notify::new(),
             live_effort: std::sync::Mutex::new("high".to_string()),
+            model: "opus".to_string(),
         })
     }
 
@@ -2687,6 +2716,7 @@ mod tests {
             turns_waiting: AtomicUsize::new(0),
             turn_wanted: Notify::new(),
             live_effort: std::sync::Mutex::new("high".to_string()),
+            model: "opus".to_string(),
         };
         // Same effort as the process was born with: nothing is written.
         align_effort(&session, "high");
