@@ -869,6 +869,7 @@ impl ClaudeCliBrain {
         args.extend(cli_approval::permission_args(
             ask_before_send,
             mcp_config.is_some(),
+            None,
         ));
 
         // Continue the session this conversation is already running in. The

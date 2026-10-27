@@ -1076,6 +1076,7 @@ fn spawn_args(launch: &LaunchConfig, session_id: &str, session_is_new: bool) -> 
     args.extend(super::cli_approval::permission_args(
         launch.ask_before_send,
         launch.mcp_config.is_some(),
+        None,
     ));
 
     // A fresh id is pinned; one that already exists must be resumed. Getting this

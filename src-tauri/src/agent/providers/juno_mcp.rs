@@ -55,6 +55,10 @@ use crate::state::ToolApprovalRequest;
 /// The MCP protocol revision this server speaks.
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
+/// Where the shell screen's `PreToolUse` hook posts (LAC-5010). Off the
+/// `/mcp` route because the body is Claude Code's hook payload, not JSON-RPC.
+const HOOK_ROUTE: &str = "/hook/pretooluse";
+
 /// The overlay cursor identity for work the Claude CLI drives.
 ///
 /// One identity, because the CLI is one agent however many turns it takes.
@@ -70,6 +74,10 @@ const CLI_CURSOR_COLOR: &str = crate::constants::ui::agent_session_colors::SLOT_
 #[derive(Clone, Debug)]
 pub struct Endpoint {
     pub url: String,
+    /// Where the CLI's own `Bash` calls are read before they run (LAC-5010).
+    /// Same server, same token, a different route: this one speaks Claude
+    /// Code's `PreToolUse` hook shape rather than MCP.
+    pub hook_url: String,
     pub token: String,
 }
 
@@ -120,6 +128,7 @@ pub async fn ensure_running(app: &tauri::AppHandle) -> Result<Endpoint, AgentErr
 
     let endpoint = Endpoint {
         url: format!("http://{addr}/mcp"),
+        hook_url: format!("http://{addr}{HOOK_ROUTE}"),
         token,
     };
     info!("[JunoMCP] Serving Juno's computer tool at {}", endpoint.url);
@@ -142,6 +151,12 @@ pub fn mcp_config(endpoint: &Endpoint) -> Value {
             }
         }
     })
+}
+
+/// The `--settings` contents that keep the CLI's own shell off the person's
+/// screen while background mode is on (LAC-5010).
+pub fn shell_screen_settings(_endpoint: &Endpoint) -> Value {
+    json!({})
 }
 
 async fn handle_rpc(
@@ -806,12 +821,45 @@ mod tests {
         assert_eq!(result["content"][0]["text"], "Reminders is off.");
     }
 
+    fn test_endpoint() -> Endpoint {
+        Endpoint {
+            url: "http://127.0.0.1:51234/mcp".to_string(),
+            hook_url: "http://127.0.0.1:51234/hook/pretooluse".to_string(),
+            token: "secret".to_string(),
+        }
+    }
+
+    /// LAC-5010. With "Ask before Juno sends" off the CLI spawns with
+    /// `--dangerously-skip-permissions`, so `approve` is never called and a
+    /// `PreToolUse` hook is the only thing left that still runs. These are the
+    /// settings that install it.
+    ///
+    /// The token rides in the file rather than on the command line, for the
+    /// same reason the MCP config does: every `ps` on the machine can read a
+    /// command line.
+    #[test]
+    fn the_shell_screen_settings_point_at_the_hook_route_with_the_token() {
+        let settings = shell_screen_settings(&test_endpoint());
+        let entry = &settings["hooks"]["PreToolUse"][0];
+        assert_eq!(entry["matcher"], "Bash");
+
+        let hook = &entry["hooks"][0];
+        assert_eq!(hook["type"], "command");
+        let command = hook["command"].as_str().unwrap_or_default();
+        assert!(
+            command.contains("http://127.0.0.1:51234/hook/pretooluse"),
+            "{command}"
+        );
+        assert!(command.contains("Bearer secret"), "{command}");
+        // A dead server must not block the person's shell: curl writes
+        // nothing on failure and exits non-zero, which the CLI reads as
+        // "carry on". Measured on claude 2.1.311.
+        assert!(command.contains("--max-time"), "{command}");
+    }
+
     #[test]
     fn the_config_points_at_the_server_and_carries_the_token() {
-        let endpoint = Endpoint {
-            url: "http://127.0.0.1:51234/mcp".to_string(),
-            token: "secret".to_string(),
-        };
+        let endpoint = test_endpoint();
         let config = mcp_config(&endpoint);
         let server = &config["mcpServers"]["juno"];
         assert_eq!(server["type"], "http");
