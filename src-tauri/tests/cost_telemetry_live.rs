@@ -42,8 +42,11 @@
 //!
 //! ## What they cost
 //!
-//! The cheapest catalogued model per provider, a one-line prompt and a 32-token
-//! ceiling: fractions of a cent per provider, per run. They are not on the PR
+//! The cheapest catalogued model per provider that Juno can actually reach, a
+//! one-line prompt and a 32-token ceiling: fractions of a cent per provider,
+//! per run. "Reach" is not a formality — see `openai_turn_writes_a_priced_row`,
+//! where the cheapest entry in the catalog is one Juno's own endpoint cannot
+//! call. They are not on the PR
 //! path for that reason all the same — a test that spends money on every push
 //! is a test people turn off.
 //!
@@ -241,7 +244,16 @@ async fn anthropic_turn_writes_a_priced_row() {
 async fn openai_turn_writes_a_priced_row() {
     scratch_log();
     let key = credential("OPENAI_API_KEY");
-    let model = model_ids::OPENAI_CODEX_5_3;
+    // NOT the cheapest catalogued model, which is the rule everywhere else in
+    // this file. `gpt-5.3-codex` is cheaper and Juno cannot call it at all:
+    // OpenAI serves the codex line only from `v1/responses`, and Juno's one
+    // OpenAI endpoint is `v1/chat/completions` (`constants::api`), which
+    // answers `404 … Use the v1/responses endpoint instead` before it looks at
+    // the request. Wire-verified 2026-10-27 (LAC-5816); the catalog offering a
+    // model no code path can reach is tracked separately. `gpt-5.6-sol` is the
+    // default and the recommended entry, so it is also the price LAC-4124
+    // actually sizes the trial credit off.
+    let model = model_ids::OPENAI_SOL_5_6;
 
     let brain = OpenAIBrain::new(key, Some(model.to_string()), Some(MAX_TOKENS), None, None)
         .expect("brain construction only builds an HTTP client");

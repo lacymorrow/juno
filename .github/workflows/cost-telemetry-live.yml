@@ -5,27 +5,36 @@
 # deeper would pass every unit test and log every turn at $0.00.
 #
 # Manual, never on the PR path: it spends money (fractions of a cent per
-# provider — cheapest catalogued model, one-line prompt, 32-token ceiling) and
+# provider — cheapest catalogued model Juno can reach, one-line prompt,
+# 32-token ceiling) and
 # a test that bills on every push is a test people switch off.
 #
 # ## Which providers this can check
 #
-# Only the ones whose credential is a repository secret:
+# Only the ones whose credential is a repository secret AND works. Those are
+# two questions, and on 2026-10-27 all three API providers passed the first
+# and failed the second (LAC-5816):
 #
-#   anthropic   ANTHROPIC_API_KEY   available
-#   openai      OPENAI_API_KEY      available (LAC-5818, 2026-10-27)
-#   gemini      GEMINI_API_KEY      available (LAC-5818, 2026-10-27)
+#   anthropic   ANTHROPIC_API_KEY   secret present, 401 invalid x-api-key.
+#                                   Last set 2026-05-15. Revoked or rotated.
+#   openai      OPENAI_API_KEY      secret present, authenticates, 429
+#                                   credit_balance_exhausted: no credits.
+#   gemini      GEMINI_API_KEY      secret present, 400 API_KEY_INVALID.
 #   claude_cli  (none)              impossible here: needs a signed-in Claude
 #                                   Max seat, which no GitHub runner has.
 #                                   Run it locally, see the test's module docs.
+#
+# Fix the key, then re-dispatch. The liveness step below says which of the
+# three failures you have in about ten seconds, before anything compiles.
 #
 # `all` therefore means the three API providers, named one by one, and NOT a
 # bare `cargo test --test …` with no filter: an empty filter matches every test
 # in the file including `claude_cli`, which cannot pass on a runner and would
 # fail a job that had in fact verified everything it could.
 #
-# Asking for a provider whose credential is missing FAILS the job. A skip that
-# reports success is how an unverified acceptance criterion gets signed off.
+# Asking for a provider whose credential is missing, revoked, or out of credit
+# FAILS the job. A skip that reports success is how an unverified acceptance
+# criterion gets signed off.
 #
 # ## Why the secrets sit at step level
 #
@@ -78,10 +87,10 @@ jobs:
           bun install
           bun run build
 
-      # Secrets cannot be read in an `if:` expression, so the presence check is
-      # a step that reads them from the job environment and exits non-zero.
-      # Separate from the run step on purpose: a missing key should fail in
-      # seconds, not after a 20-minute compile.
+      # Secrets cannot be read in an `if:` expression, so the credential check
+      # is a step that reads them from the job environment and exits non-zero.
+      # Separate from the run step on purpose: a bad key should fail in seconds,
+      # not after a 20-minute compile.
       - name: Check the requested credentials are present
         env:
           FILTER: ${{ inputs.providers }}
@@ -120,6 +129,116 @@ jobs:
 
           echo "verifying:${wanted// / }"
           echo "WANTED=${wanted}" >> "$GITHUB_ENV"
+
+      # Presence is not liveness, and the difference cost 29 minutes of macOS
+      # CI on 2026-10-27 (LAC-5816): two runs compiled the crate for 13 and 16
+      # minutes and then died on the first request, one to a key that had been
+      # revoked and one to an account with no credits. The step above would
+      # have called both of them present.
+      #
+      # So: one minimal real request per wanted provider, on the exact endpoint
+      # and model the test will use, before anything is compiled. `max_tokens`
+      # is 1, so this costs materially less than the test it guards.
+      #
+      # It must be a BILLABLE call. A free endpoint is a false green: this same
+      # OpenAI key answered `200` on `GET /v1/models` with 136 models while
+      # `POST /v1/chat/completions` answered `429 credit_balance_exhausted`.
+      # Listing models proves authentication; only spending proves spending.
+      #
+      # Endpoints and model ids are read out of the Rust sources rather than
+      # written here, because a model list in a second place is the drift the
+      # catalog in `providers/types.rs` exists to prevent. A rename makes the
+      # extraction empty and the step fails; it cannot pass on a stale value.
+      - name: Check the requested credentials actually work
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          api=src-tauri/src/constants/api.rs
+          types=src-tauri/src/agent/providers/types.rs
+
+          # `const NAME: &str = "value";` -> value. Empty means renamed.
+          rust_const() {
+            value=$(sed -n "s/.*const $2: &str = \"\([^\"]*\)\";.*/\1/p" "$1" | head -1)
+            if [ -z "${value}" ]; then
+              echo "could not read $2 out of $1 — it was renamed or moved;" >&2
+              echo "this probe must not run on a guessed value" >&2
+              exit 1
+            fi
+            printf '%s' "${value}"
+          }
+
+          # Reports the HTTP status, and the body only when it is not 2xx. The
+          # body of a failure is the whole diagnosis (401 vs 429 vs 404 are
+          # three different people's problems); the body of a success is a
+          # billed completion nobody needs in a public log.
+          probe() {
+            name=$1
+            code=$(curl -sS -o /tmp/probe-body -w '%{http_code}' -K - || echo 000)
+            case "${code}" in
+              2??) echo "  ${name}: ${code} ok" ;;
+              *)
+                echo "  ${name}: ${code}" >&2
+                sed -e 's/^/    /' /tmp/probe-body >&2 || true
+                echo >&2
+                return 1
+                ;;
+            esac
+          }
+
+          echo "probing: ${WANTED}"
+          failed=0
+
+          for provider in ${WANTED}; do
+            case "${provider}" in
+              anthropic)
+                url=$(rust_const "$api" ANTHROPIC_API_URL)
+                model=$(rust_const "$types" CLAUDE_HAIKU_4_5)
+                # -K reads the config from stdin, so the key is never in argv.
+                probe anthropic <<CFG || failed=1
+          url = "${url}"
+          request = "POST"
+          header = "x-api-key: ${ANTHROPIC_API_KEY}"
+          header = "anthropic-version: 2023-06-01"
+          header = "content-type: application/json"
+          data = "{\"model\":\"${model}\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
+          CFG
+                ;;
+              openai)
+                url=$(rust_const "$api" OPENAI_API_URL)
+                model=$(rust_const "$types" OPENAI_SOL_5_6)
+                probe openai <<CFG || failed=1
+          url = "${url}"
+          request = "POST"
+          header = "authorization: Bearer ${OPENAI_API_KEY}"
+          header = "content-type: application/json"
+          data = "{\"model\":\"${model}\",\"max_completion_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
+          CFG
+                ;;
+              gemini)
+                base=$(rust_const "$api" GEMINI_API_BASE)
+                model=$(rust_const "$types" GEMINI_3_5_FLASH_LITE)
+                probe gemini <<CFG || failed=1
+          url = "${base}/${model}:generateContent"
+          request = "POST"
+          header = "x-goog-api-key: ${GEMINI_API_KEY}"
+          header = "content-type: application/json"
+          data = "{\"contents\":[{\"parts\":[{\"text\":\"hi\"}]}],\"generationConfig\":{\"maxOutputTokens\":1}}"
+          CFG
+                ;;
+            esac
+          done
+
+          if [ "${failed}" -ne 0 ]; then
+            echo "a requested credential does not work — see the status above." >&2
+            echo "401/403: the key is wrong or revoked. 429: the account cannot" >&2
+            echo "spend. 404 on a model: the endpoint does not serve it." >&2
+            echo "Nothing was compiled; fix the credential and re-dispatch." >&2
+            exit 1
+          fi
 
       - name: One real turn per provider, then read the rows back
         env:
