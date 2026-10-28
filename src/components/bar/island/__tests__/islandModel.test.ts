@@ -3,6 +3,9 @@ import { UI } from "@/lib/constants.generated";
 import type { ChatMessage } from "@/types/chat";
 import {
   COMPACT_COMPOSE_WIDTH,
+  MINI_SHAPE,
+  miniShapeFor,
+  miniVoiceFor,
   composeIsCompact,
   COMPOSER_LINE_PX,
   COMPOSER_MAX_TEXT_PX,
@@ -535,5 +538,27 @@ describe("latestTurn", () => {
     const b = latestTurn([user("Go"), assistant("Hello", { messageId: "m" })]);
     expect(answerKey(a)).toBe(answerKey(b));
     expect(answerKey(latestTurn([]))).toBe("");
+  });
+});
+
+describe("the mini voice capsule", () => {
+  const base = { face: "compose" as const, compact: true };
+  it("is listening or transcribing in the small bar, and nothing else", () => {
+    expect(miniVoiceFor({ ...base, state: UI.BAR_STATES_LISTENING })).toBe("listening");
+    expect(miniVoiceFor({ ...base, state: UI.BAR_STATES_DICTATING })).toBe("listening");
+    expect(miniVoiceFor({ ...base, state: UI.BAR_STATES_TRANSCRIBING, provisional: true })).toBe("listening");
+    expect(miniVoiceFor({ ...base, state: UI.BAR_STATES_TRANSCRIBING })).toBe("transcribing");
+    expect(miniVoiceFor({ ...base, state: UI.BAR_STATES_LOADING })).toBeNull();
+    expect(miniVoiceFor({ ...base, state: UI.BAR_STATES_ERROR })).toBeNull();
+    expect(miniVoiceFor({ ...base, compact: false, state: UI.BAR_STATES_LISTENING })).toBeNull();
+    expect(miniVoiceFor({ face: "chat", compact: true, state: UI.BAR_STATES_LISTENING })).toBeNull();
+  });
+  it("is smaller than the small bar at rest, and grows only for its controls", () => {
+    const rest = shapeFor("compose", { hovered: false, compact: true, composerHeight: 36, contentHeight: 0, mini: { revealed: false, buttons: 2 } });
+    expect(rest).toEqual(MINI_SHAPE);
+    expect(rest.width).toBeLessThan(COMPACT_COMPOSE_WIDTH);
+    expect(miniShapeFor(true, 2).width).toBeGreaterThan(MINI_SHAPE.width);
+    expect(miniShapeFor(true, 2).width).toBeLessThan(COMPACT_COMPOSE_WIDTH);
+    expect(miniShapeFor(true, 0)).toEqual(MINI_SHAPE);
   });
 });
