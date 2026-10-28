@@ -104,10 +104,7 @@ async fn show_live_microphone(app_handle: &AppHandle) {
         session.describe()
     );
 
-    crate::commands::sound::play_cue(
-        app_handle,
-        crate::commands::sound::SoundType::NotificationAmbient,
-    );
+    crate::commands::sound::play_cue(app_handle, crate::commands::sound::Cue::Listening);
 
     // If it's dictation mode, set the flag in floating bar manager first
     if app_state.is_dictation_active() {
@@ -609,7 +606,7 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
             // model: acknowledge, then capture).
             crate::commands::sound::play_cue(
                 &app_handle_clone,
-                crate::commands::sound::SoundType::NotificationAmbient,
+                crate::commands::sound::Cue::Listening,
             );
 
             let app_state = app_handle_clone.state::<state::AppState>();
@@ -1368,6 +1365,10 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
                 "[Agent Mode] Committing voice session {}",
                 session.describe()
             );
+            // The same "got it" a dictation release plays, here because every
+            // way an agent session is sent (key release, second tap, the
+            // bar's Send) lands on this claim, and only a real one does.
+            crate::commands::sound::play_cue(app_handle, crate::commands::sound::Cue::GotIt);
             session.id
         }
         Err(rejection) => {
