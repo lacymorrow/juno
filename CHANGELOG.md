@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.242] - 2026-10-28
+
+### Added
+
+- **dictation:** time the press to first sample window (LAC-5281) (#901) (3da9657a)
+
 ## [0.8.241] - 2026-10-27
 
 ### Added
@@ -1644,7 +1650,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.241...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.242...HEAD
+[0.8.242]: https://github.com/lacymorrow/juno/compare/cua-v0.8.241...v0.8.242
 [0.8.241]: https://github.com/lacymorrow/juno/compare/cua-v0.8.240...v0.8.241
 [0.8.239]: https://github.com/lacymorrow/juno/compare/cua-v0.8.238...v0.8.239
 [0.8.238]: https://github.com/lacymorrow/juno/compare/cua-v0.8.237...v0.8.238
