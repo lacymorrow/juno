@@ -461,8 +461,10 @@ pub fn run() {
             // mouse_move → computer tool with action: "mouse_move"
             // This eliminates redundancy and ensures 100% compliance with the official specification.
 
-            // Production shell function with debug capabilities
-            bash_command,
+            // `bash_command` is deliberately not registered. The agent and the
+            // cloud path call it as a Rust function behind the approval gate;
+            // no window calls it, and exposed over IPC it was a shell any
+            // webview could reach with no gate at all.
             // Production filesystem functions with debug capabilities
             list_files,
             get_file_content,
