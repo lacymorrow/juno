@@ -1525,6 +1525,7 @@ mod tests {
             WHISPER_SAMPLE_RATE,
             1,
             Instant::now(),
+            None,
         )
         .expect("start");
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -1579,6 +1580,7 @@ mod tests {
             WHISPER_SAMPLE_RATE,
             1,
             Instant::now(),
+            None,
         )
         .expect("start");
         assert!(c.cancel_dictation().is_ok());
@@ -1736,6 +1738,7 @@ mod tests {
                 16000,
                 1,
                 Instant::now(),
+                None,
             )
             .expect("start");
             let deadline = Instant::now() + Duration::from_secs(5);
@@ -1763,6 +1766,7 @@ mod tests {
                 16000,
                 1,
                 Instant::now(),
+                None,
             )
             .expect("start");
             entered_rx
@@ -1800,6 +1804,7 @@ mod tests {
                 16000,
                 1,
                 Instant::now(),
+                None,
             )
             .expect("start");
             let releaser = thread::spawn(move || {
@@ -1855,6 +1860,7 @@ mod tests {
             16000,
             1,
             Instant::now(),
+            None,
         )
         .expect("start");
         wait_until(|| announced.lock().unwrap().len() == 2);
@@ -1902,6 +1908,7 @@ mod tests {
             WHISPER_SAMPLE_RATE,
             1,
             Instant::now(),
+            None,
         )
         .expect("start");
         wait_until(|| stopped.load(Ordering::SeqCst) > 0);
@@ -1924,6 +1931,7 @@ mod tests {
                 16000,
                 1,
                 Instant::now(),
+                None,
             )
             .expect("start");
             let deadline = Instant::now() + Duration::from_secs(5);
