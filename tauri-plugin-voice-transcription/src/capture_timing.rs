@@ -34,10 +34,23 @@
 //!
 //! Measured on an M1 MacBook Air (2026-10-28, LAC-5281), the last two gaps
 //! together are 40-58 ms with the stream already built and stopped, while the
-//! press-to-live total in the running app was 87-254 ms. The line exists to say
-//! which gap holds that difference, because nothing recorded it before: the
-//! only timing log on this path fired when the device start returned, so Juno
-//! never saw when audio actually began.
+//! running app took 87-254 ms (median ~125) to reach `live`. Attributed
+//! carefully, because the obvious reading is wrong: that figure comes from the
+//! one pre-existing log line on this path, which measures from `requested` at
+//! the top of `VoiceController::start_dictation`. `Locked` is marked
+//! immediately before the call that sets it, so the 87-254 ms is `locked` to
+//! `live`, and press to `live` is at least that rather than exactly it.
+//!
+//! Reading the code accounts for only 40-65 ms of it: the permission check is
+//! a cached atomic, the device preference an in-memory read, `claim_warm_input`
+//! atomics plus at worst two HAL queries, and `WarmInput::resume` a sink-mutex
+//! write plus the device start, with no stream rebuild. So the residual is in a
+//! stage that costs more inside Juno than the same call does measured alone,
+//! which a standalone probe cannot show: it opens one CoreAudio client, and
+//! Juno runs several in one process. The line exists to say which gap holds
+//! that difference, because nothing recorded it before: the only timing log on
+//! this path fired when the device start returned, so Juno never saw when
+//! audio actually began.
 //!
 //! The tracker is passive. A press opens a capture ([`press`]), each stage
 //! records the first time it is reached ([`mark`]), and the line goes out once:
