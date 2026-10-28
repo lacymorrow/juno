@@ -160,8 +160,14 @@ jobs:
           api=src-tauri/src/constants/api.rs
           types=src-tauri/src/agent/providers/types.rs
 
+          body=$(mktemp)
+          trap 'rm -f "${body}"' EXIT
+
           # `const NAME: &str = "value";` -> value. Empty means renamed.
+          # `exit` inside a command substitution exits the subshell, but the
+          # assignment that wraps it then fails and `set -e` aborts the step.
           rust_const() {
+            local value
             value=$(sed -n "s/.*const $2: &str = \"\([^\"]*\)\";.*/\1/p" "$1" | head -1)
             if [ -z "${value}" ]; then
               echo "could not read $2 out of $1 — it was renamed or moved;" >&2
@@ -176,13 +182,16 @@ jobs:
           # three different people's problems); the body of a success is a
           # billed completion nobody needs in a public log.
           probe() {
+            local name code
             name=$1
-            code=$(curl -sS -o /tmp/probe-body -w '%{http_code}' -K - || echo 000)
+            # A connection failure prints its own 000 and exits non-zero, which
+            # the `||` turns into a non-2xx code rather than an aborted step.
+            code=$(curl -sS -o "${body}" -w '%{http_code}' -K - || echo 000)
             case "${code}" in
               2??) echo "  ${name}: ${code} ok" ;;
               *)
                 echo "  ${name}: ${code}" >&2
-                sed -e 's/^/    /' /tmp/probe-body >&2 || true
+                sed -e 's/^/    /' "${body}" >&2 || true
                 echo >&2
                 return 1
                 ;;
