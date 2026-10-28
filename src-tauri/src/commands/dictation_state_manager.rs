@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::commands::dictation::EndStep;
 use crate::constants::events;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{Mutex, RwLock};
@@ -587,59 +588,86 @@ pub async fn transition_dictation_state(
 }
 
 /// Force stop dictation (convenience function for stop operations)
+/// The order a forced stop (Escape or Stop with a voice session open) ends
+/// it in. The same order as `dictation::END_STEPS`, for the same reason.
+pub const FORCE_STOP_STEPS: [EndStep; 4] = [
+    EndStep::Retire,
+    EndStep::Unwind,
+    EndStep::CloseAudio,
+    EndStep::ReleaseStopKey,
+];
+
 pub async fn force_stop_dictation(app_handle: &AppHandle) -> Result<(), String> {
     info!("[DictationStateManager] Force stopping dictation");
 
     let manager = get_state_manager();
-
-    // Direct reset without recursive call to avoid infinite recursion
-    let voice_reset_result = manager.reset_voice_controller(app_handle).await;
-
-    // Reset dictation monitor
-    crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-    // Reset app state
     let app_state = app_handle.state::<crate::state::AppState>();
-    if let Err(e) = app_state.set_dictation_active(false) {
-        warn!("Failed to reset dictation active state: {}", e);
+    let mut voice_reset_result = Ok(());
+
+    // The same order a dictation's own end uses (`dictation::END_STEPS`).
+    // This is the path Escape takes for a voice turn to the agent, and it
+    // used to close the audio first: a cancel after release waits for the
+    // final decode already running, so the bar kept saying "transcribing"
+    // for seconds after the press. The stop key is released by the
+    // coordinated stop after this returns, i.e. after the audio is closed.
+    for step in FORCE_STOP_STEPS {
+        match step {
+            EndStep::Retire => {
+                if let Ok(session) =
+                    app_state.claim_voice_discard(crate::state::SessionClaim::Current)
+                {
+                    info!(
+                        "[DictationStateManager] Discarding voice session {}",
+                        session.describe()
+                    );
+                }
+            }
+            EndStep::Unwind => {
+                crate::dictation_monitor::force_reset_dictation_input_state().await;
+                if let Err(e) = app_state.set_dictation_active(false) {
+                    warn!("Failed to reset dictation active state: {}", e);
+                }
+                // Takes the bar out of dictation, transcribing included.
+                crate::commands::ui_commands::handle_dictation_mode_change(app_handle, false).await;
+                *manager.component_states.write().await = ComponentStates {
+                    app_state_active: false,
+                    voice_controller_active: false,
+                    monitor_state_active: false,
+                    floating_bar_state: "default".to_string(),
+                    last_updated: crate::utils::current_timestamp_ms(),
+                };
+                if let Err(e) = app_handle.emit(events::dictation::ACTIVE, false) {
+                    error!(
+                        "[DictationStateManager] Failed to emit dictation-active event: {}",
+                        e
+                    );
+                }
+                if let Err(e) =
+                    app_handle.emit(events::dictation_state::FORCE_RESET, "Force stop dictation")
+                {
+                    error!(
+                        "[DictationStateManager] Failed to emit force reset event: {}",
+                        e
+                    );
+                }
+            }
+            // Direct reset without recursive call to avoid infinite recursion.
+            EndStep::CloseAudio => {
+                voice_reset_result = manager.reset_voice_controller(app_handle).await;
+            }
+            // Releases this manager's own stop-key claim (`dictation_state`).
+            EndStep::ReleaseStopKey => {
+                manager
+                    .transition_to_state(
+                        DictationState::Idle,
+                        "Force stop completed".to_string(),
+                        "force_stop_dictation".to_string(),
+                        app_handle,
+                    )
+                    .await?;
+            }
+        }
     }
-
-    // Reset floating bar with proper dictation mode change
-    crate::commands::ui_commands::handle_dictation_mode_change(app_handle, false).await;
-
-    // Reset manager's internal component states
-    *manager.component_states.write().await = ComponentStates {
-        app_state_active: false,
-        voice_controller_active: false,
-        monitor_state_active: false,
-        floating_bar_state: "default".to_string(),
-        last_updated: crate::utils::current_timestamp_ms(),
-    };
-
-    // Emit comprehensive reset events
-    if let Err(e) = app_handle.emit(events::dictation::ACTIVE, false) {
-        error!(
-            "[DictationStateManager] Failed to emit dictation-active event: {}",
-            e
-        );
-    }
-
-    if let Err(e) = app_handle.emit(events::dictation_state::FORCE_RESET, "Force stop dictation") {
-        error!(
-            "[DictationStateManager] Failed to emit force reset event: {}",
-            e
-        );
-    }
-
-    // Transition to idle state
-    manager
-        .transition_to_state(
-            DictationState::Idle,
-            "Force stop completed".to_string(),
-            "force_stop_dictation".to_string(),
-            app_handle,
-        )
-        .await?;
 
     if let Err(e) = voice_reset_result {
         warn!(
@@ -676,6 +704,31 @@ pub async fn sync_dictation_state(active: bool) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A voice turn to the agent that is still transcribing is ended by the
+    /// coordinated stop through here. The bar has to leave "transcribing"
+    /// before the wait on the audio thread, or one Escape looks ignored.
+    #[test]
+    fn a_forced_stop_shows_it_ended_before_waiting_on_the_audio() {
+        let at = |step: EndStep| {
+            FORCE_STOP_STEPS
+                .iter()
+                .position(|s| *s == step)
+                .expect("every step runs")
+        };
+        assert_eq!(
+            at(EndStep::Retire),
+            0,
+            "nothing is typed or sent once it starts"
+        );
+        assert!(at(EndStep::Unwind) < at(EndStep::CloseAudio));
+        assert!(at(EndStep::CloseAudio) < at(EndStep::ReleaseStopKey));
+        assert_eq!(
+            FORCE_STOP_STEPS,
+            crate::commands::dictation::END_STEPS,
+            "a forced stop and a dictation's own end agree on the order"
+        );
+    }
 
     fn manager() -> DictationStateManager {
         DictationStateManager::new()
