@@ -28,13 +28,27 @@ type ControllerResult<T> = Result<T, AgentError>;
 /// caller-supplied timeout.
 const SELECTOR_POLL_INTERVAL_MS: u64 = 100;
 
+/// The longest a caller-supplied `timeout` may hold the page. Every browser
+/// tool keeps the page lock for its whole run, so a model that sends
+/// `timeout: 1e12` would otherwise park the tab (and app shutdown, which needs
+/// the same lock) behind a selector that never appears.
+const MAX_CALLER_TIMEOUT_MS: u64 = 120_000;
+
+/// Prefix of the throwaway profile directories this controller launches into.
+/// The rest of the name is the owning Juno process id.
+const TEMP_PROFILE_PREFIX: &str = "juno-browser-";
+
 /// Drive the CDP connection.
 ///
 /// chromiumoxide returns a `Handler` alongside the `Browser`; nothing happens on
 /// the connection unless that handler is continuously polled. We must use
 /// `tauri::async_runtime::spawn` here — `tokio::spawn` panics with "no reactor
 /// running" inside the Tauri context.
-fn spawn_cdp_handler(mut handler: Handler) -> JoinHandle<()> {
+///
+/// `closed` is raised when the pump ends. The pump ends when the websocket
+/// does, which is how Chrome quitting or crashing is observed: an event, not a
+/// probe. Whoever holds the controller reads it through `is_connected`.
+fn spawn_cdp_handler(mut handler: Handler, closed: Arc<AtomicBool>) -> JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
         while let Some(event) = handler.next().await {
             if event.is_err() {
@@ -42,6 +56,7 @@ fn spawn_cdp_handler(mut handler: Handler) -> JoinHandle<()> {
                 break;
             }
         }
+        closed.store(true, Ordering::SeqCst);
     })
 }
 
@@ -61,9 +76,19 @@ pub struct BrowserController {
     // the user opened destroys their work, but never closing one leaks a tab per
     // session.
     owns_page: Arc<AtomicBool>,
+    // Raised by the CDP pump when the connection to the browser is gone. A
+    // controller whose browser quit can never recover; the owner drops it and
+    // builds a new one (see `AppState::get_or_init_browser_controller`).
+    connection_closed: Arc<AtomicBool>,
 }
 
 impl BrowserController {
+    /// False once the browser this controller drives has gone away (quit,
+    /// crash, or the debugging socket dropped).
+    pub fn is_connected(&self) -> bool {
+        !self.connection_closed.load(Ordering::SeqCst)
+    }
+
     pub async fn new() -> ControllerResult<Self> {
         // chromiumoxide builds a reqwest client with rustls but no bundled
         // crypto provider, and such a client *panics* on construction unless a
@@ -113,12 +138,13 @@ impl BrowserController {
     /// rounded, because `as_u64()` returns `None` for `2500.5` and would have
     /// discarded a fractional request without saying so. Non-finite and
     /// non-positive values are treated as absent for the same reason a zero
-    /// timeout is meaningless: there is nothing useful to honour.
+    /// timeout is meaningless: there is nothing useful to honour. A request
+    /// longer than `MAX_CALLER_TIMEOUT_MS` is shortened to it.
     fn optional_timeout_ms(args: &Value) -> Option<u64> {
         args.get("timeout")
             .and_then(Value::as_f64)
             .filter(|ms| ms.is_finite() && *ms > 0.0)
-            .map(|ms| ms.round() as u64)
+            .map(|ms| (ms.round() as u64).min(MAX_CALLER_TIMEOUT_MS))
     }
 
     /// Poll for `selector` until it matches an element or `timeout_ms` elapses.
@@ -176,7 +202,8 @@ impl BrowserController {
         handler: Handler,
         connection_method: String,
     ) -> ControllerResult<Self> {
-        let task = spawn_cdp_handler(handler);
+        let connection_closed = Arc::new(AtomicBool::new(false));
+        let task = spawn_cdp_handler(handler, connection_closed.clone());
 
         // Prefer an already-open page so we attach to what the user is looking at.
         let mut owns_page = false;
@@ -203,6 +230,7 @@ impl BrowserController {
             connection_method,
             handler_task: Arc::new(Mutex::new(Some(task))),
             owns_page: Arc::new(AtomicBool::new(owns_page)),
+            connection_closed,
         })
     }
 
@@ -378,7 +406,7 @@ impl BrowserController {
 
         // Create a temporary directory for the browser profile
         let temp_dir = std::env::temp_dir();
-        let temp_profile = temp_dir.join(format!("juno-browser-{}", std::process::id()));
+        let temp_profile = temp_dir.join(format!("{}{}", TEMP_PROFILE_PREFIX, std::process::id()));
 
         // Create the temporary profile directory
         if let Err(e) = std::fs::create_dir_all(&temp_profile) {
@@ -655,7 +683,8 @@ impl BrowserController {
         };
 
         // The CDP handler must be pumped before any page work can succeed.
-        let handler_task = spawn_cdp_handler(handler);
+        let connection_closed = Arc::new(AtomicBool::new(false));
+        let handler_task = spawn_cdp_handler(handler, connection_closed.clone());
 
         // Create a test page to verify everything is working - retry multiple times if needed
         log::info!("Creating test page to verify browser setup...");
@@ -713,6 +742,7 @@ impl BrowserController {
             handler_task: Arc::new(Mutex::new(Some(handler_task))),
             // We launched this browser and opened this page; both are ours.
             owns_page: Arc::new(AtomicBool::new(true)),
+            connection_closed,
         })
     }
 
@@ -944,6 +974,15 @@ impl BrowserController {
 
     // Helper to get or create a page, with enhanced error handling and recovery
     async fn ensure_page_exists(&self) -> ControllerResult<()> {
+        // A browser that quit takes every page with it, and no retry here can
+        // bring it back. Say so at once instead of spending the retry budget;
+        // the next tool call builds a fresh controller.
+        if !self.is_connected() {
+            return Err(AgentError::ToolError(
+                "The browser was closed. The next browser action opens a new one.".to_string(),
+            ));
+        }
+
         // First attempt to work with the current page
         {
             let mut page_guard = self.page.lock().await;
@@ -1315,16 +1354,25 @@ impl BrowserController {
                         const element = document.querySelector({});
                         if (!element) return false;
 
-                        // Clear the field first
-                        element.value = "";
-
-                        // Then set the value and trigger events
-                        element.value = {};
+                        // Go through the prototype's setter: React and Vue track an
+                        // input's value there, and a plain `element.value = x` on the
+                        // instance leaves the page's own state on the old text.
+                        const descriptor = Object.getOwnPropertyDescriptor(
+                            Object.getPrototypeOf(element), 'value');
+                        if (descriptor && descriptor.set) {{
+                            descriptor.set.call(element, {});
+                        }} else if (element.isContentEditable) {{
+                            element.textContent = {};
+                        }} else {{
+                            element.value = {};
+                        }}
                         element.dispatchEvent(new Event('input', {{ bubbles: true }}));
                         element.dispatchEvent(new Event('change', {{ bubbles: true }}));
                         return true;
                     }}"#,
                     Self::js_string_literal(selector),
+                    Self::js_string_literal(value),
+                    Self::js_string_literal(value),
                     Self::js_string_literal(value)
                 );
 
@@ -1664,11 +1712,56 @@ impl BrowserController {
         }
     }
 
-    /// Sweeps the system temp directory for orphaned `juno-browser-*` profile
-    /// directories left by previous sessions that crashed before cleanup.
+    /// The process id encoded in a `juno-browser-<pid>` directory name.
+    fn temp_profile_owner(dir_name: &str) -> Option<u32> {
+        dir_name.strip_prefix(TEMP_PROFILE_PREFIX)?.parse().ok()
+    }
+
+    /// Whether a process with this id exists. Signal 0 sends nothing; it only
+    /// asks the kernel. `EPERM` means it exists but belongs to someone else.
+    #[cfg(unix)]
+    fn process_alive(pid: u32) -> bool {
+        // SAFETY: kill(2) with signal 0 has no effect on the target process.
+        let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
+        result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+
+    #[cfg(not(unix))]
+    fn process_alive(_pid: u32) -> bool {
+        false
+    }
+
+    /// Stop any browser still running out of `profile`. A Juno that crashed
+    /// (or was force-quit) leaves the Chrome it launched behind, still holding
+    /// the profile open, so deleting the directory alone would pull it out
+    /// from under a live browser and leave the process itself running.
+    async fn stop_browser_using_profile(profile: &std::path::Path) {
+        #[cfg(unix)]
+        {
+            let pattern = format!("user-data-dir={}", profile.display());
+            // pkill exits 1 when nothing matched, which is the usual case.
+            if let Err(e) = tokio::process::Command::new("pkill")
+                .arg("-f")
+                .arg(&pattern)
+                .status()
+                .await
+            {
+                log::debug!("pkill for orphaned browser failed: {}", e);
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = profile;
+        }
+    }
+
+    /// Sweeps the system temp directory for `juno-browser-*` profile
+    /// directories left by Juno processes that are no longer running (they
+    /// crashed or were killed before cleanup), along with any browser still
+    /// using them. A profile whose owner is alive, including another Juno
+    /// instance running side by side, is left alone.
     pub async fn cleanup_orphaned_temp_profiles() {
         let temp_dir = std::env::temp_dir();
-        let current_profile_name = format!("juno-browser-{}", std::process::id());
 
         let entries = match std::fs::read_dir(&temp_dir) {
             Ok(e) => e,
@@ -1681,14 +1774,18 @@ impl BrowserController {
         for entry in entries.flatten() {
             let file_name = entry.file_name();
             let name = file_name.to_string_lossy();
-            // Skip the current process's own profile and any non-Juno directories
-            if name.starts_with("juno-browser-") && name != current_profile_name.as_str() {
-                let path = entry.path();
-                if path.is_dir() {
-                    log::info!("Removing orphaned temp browser profile: {:?}", path);
-                    if let Err(e) = std::fs::remove_dir_all(&path) {
-                        log::warn!("Failed to remove orphaned profile {:?}: {}", path, e);
-                    }
+            let Some(owner) = Self::temp_profile_owner(&name) else {
+                continue;
+            };
+            if owner == std::process::id() || Self::process_alive(owner) {
+                continue;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                log::info!("Removing orphaned temp browser profile: {:?}", path);
+                Self::stop_browser_using_profile(&path).await;
+                if let Err(e) = std::fs::remove_dir_all(&path) {
+                    log::warn!("Failed to remove orphaned profile {:?}: {}", path, e);
                 }
             }
         }
@@ -1779,7 +1876,29 @@ impl Drop for BrowserController {
 
 #[cfg(test)]
 mod tests {
-    use super::BrowserController;
+    use super::{BrowserController, MAX_CALLER_TIMEOUT_MS};
+
+    #[test]
+    fn a_profile_directory_names_its_owning_process() {
+        assert_eq!(
+            BrowserController::temp_profile_owner("juno-browser-4242"),
+            Some(4242)
+        );
+        assert_eq!(BrowserController::temp_profile_owner("juno-browser-"), None);
+        assert_eq!(
+            BrowserController::temp_profile_owner("juno-browser-abc"),
+            None
+        );
+        assert_eq!(BrowserController::temp_profile_owner("other-4242"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn this_process_is_alive_and_an_unused_id_is_not() {
+        assert!(BrowserController::process_alive(std::process::id()));
+        // Above any pid macOS or Linux hands out (kern.maxproc, pid_max).
+        assert!(!BrowserController::process_alive(0x7fff_fff0));
+    }
 
     #[test]
     fn js_string_literal_wraps_plain_text_in_quotes() {
@@ -1865,6 +1984,18 @@ mod tests {
     }
 
     #[test]
+    fn a_long_timeout_cannot_hold_the_page_for_more_than_the_ceiling() {
+        // Every tool keeps the page lock while it waits.
+        let args = serde_json::json!({ "timeout": 3_600_000 });
+        assert_eq!(
+            BrowserController::optional_timeout_ms(&args),
+            Some(MAX_CALLER_TIMEOUT_MS)
+        );
+        let under = serde_json::json!({ "timeout": 90_000 });
+        assert_eq!(BrowserController::optional_timeout_ms(&under), Some(90_000));
+    }
+
+    #[test]
     fn zero_and_negative_timeouts_are_treated_as_absent() {
         for value in [0, -1] {
             let args = serde_json::json!({ "timeout": value });
@@ -1883,7 +2014,7 @@ mod tests {
         let huge = serde_json::json!({ "timeout": f64::MAX });
         assert_eq!(
             BrowserController::optional_timeout_ms(&huge),
-            Some(u64::MAX)
+            Some(MAX_CALLER_TIMEOUT_MS)
         );
     }
 }
