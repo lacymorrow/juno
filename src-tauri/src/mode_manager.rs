@@ -232,9 +232,12 @@ impl ModeManager {
         
         // Start voice transcription for agent
         if let Some(controller) = app_handle.try_state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+            // `None`: a mode switch is not a dictation key press, so it
+            // records no capture timing. See `capture_timing`.
             tauri_plugin_voice_transcription::commands::start_dictation(
                 app_handle.clone(),
                 controller,
+                None,
             ).await.map_err(|e| format!("Failed to start voice transcription: {}", e))?;
         }
         
@@ -274,9 +277,12 @@ impl ModeManager {
         
         // Start voice transcription for dictation
         if let Some(controller) = app_handle.try_state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+            // `None`: a mode switch is not a dictation key press, so it
+            // records no capture timing. See `capture_timing`.
             tauri_plugin_voice_transcription::commands::start_dictation(
                 app_handle.clone(),
                 controller,
+                None,
             ).await.map_err(|e| format!("Failed to start dictation: {}", e))?;
         }
         

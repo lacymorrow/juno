@@ -226,11 +226,17 @@ fn emit_start_if_due(app_handle: &AppHandle, state: &mut DictationInputMonitorSt
         // only ever watches a held key or button, so the session it opens is
         // a push-to-talk one and says so rather than leaving the start
         // handler to work it out.
+        // The capture this press opened, carried the same way the hold id is,
+        // so every stage the start records lands on this press's line and not
+        // on a later press's. A start that arrives without one records no
+        // timing at all rather than guessing. See `capture_timing`.
+        let capture = tauri_plugin_voice_transcription::capture_timing::open_id();
         if let Err(e) = app_handle.emit(
             events::dictation::TRANSCRIPTION_START,
             serde_json::json!({
                 "method": VoiceStartMethod::PushToTalk.as_wire(),
                 "hold": hold,
+                "capture": capture,
             }),
         ) {
             error!(

@@ -15,6 +15,7 @@ use tracing::info;
 
 use crate::always_listening::CaptureGuard;
 use crate::capture_failure::{self, CaptureStartFailure};
+use crate::capture_timing;
 use crate::devices;
 use crate::error::{Error, Result};
 use crate::streaming_commit::{self, CommitPlanner, SegmentCommitter};
@@ -495,6 +496,7 @@ impl VoiceController {
     pub fn start_dictation<R: Runtime + 'static>(
         &mut self,
         app_handle: &AppHandle<R>,
+        capture_id: Option<u64>,
     ) -> Result<()> {
         // The press, as near as the plugin sees it: the log line that says
         // when the microphone went live measures from here.
@@ -541,6 +543,10 @@ impl VoiceController {
         }
 
         let preferred = devices::preferred_input_device();
+        // The microphone choice is read; everything after this talks to
+        // CoreAudio. Marked separately from `Claimed` so the HAL call can be
+        // blamed on its own rather than as part of a span (LAC-6118).
+        capture_timing::mark_for(capture_id, capture_timing::Stage::Preferred);
 
         // The microphone, built before the press and waiting. Starting it
         // takes milliseconds; resolving and building one took up to three
@@ -548,14 +554,24 @@ impl VoiceController {
         if let Some(warm) = devices::claim_warm_input(preferred.as_ref()) {
             let actual_rate = warm.sample_rate();
             let channels = warm.channels();
+            capture_timing::note_device_for(capture_id, warm.name(), actual_rate, true);
+            capture_timing::mark_for(capture_id, capture_timing::Stage::Claimed);
             self.set_recording_rate(actual_rate);
             let open: CaptureOpen = Box::new(move |audio_data_tx: Sender<Vec<f32>>| {
                 let name = warm.name().to_string();
+                capture_timing::mark_for(capture_id, capture_timing::Stage::Opening);
                 let stream = warm.resume(audio_data_tx)?;
                 info!("[AudioThread] Audio stream resumed on {name}.");
                 Ok(Box::new(stream) as Box<dyn std::any::Any>)
             });
-            return self.spawn_audio_worker(app_handle, open, actual_rate, channels, requested);
+            return self.spawn_audio_worker(
+                app_handle,
+                open,
+                actual_rate,
+                channels,
+                requested,
+                capture_id,
+            );
         }
 
         // The microphone the person picked, or the system's, or the system's
@@ -582,10 +598,13 @@ impl VoiceController {
         let actual_rate = config.sample_rate.0;
         let channels = config.channels;
 
+        capture_timing::note_device_for(capture_id, &device_name, actual_rate, false);
+        capture_timing::mark_for(capture_id, capture_timing::Stage::Claimed);
         self.set_recording_rate(actual_rate);
 
         let open: CaptureOpen = Box::new(move |audio_data_tx: Sender<Vec<f32>>| {
             let name = device_name.clone();
+            capture_timing::mark_for(capture_id, capture_timing::Stage::Opening);
             let stream = devices::start_warm_stream(
                 device,
                 device_name,
@@ -597,7 +616,14 @@ impl VoiceController {
             Ok(Box::new(stream) as Box<dyn std::any::Any>)
         });
 
-        self.spawn_audio_worker(app_handle, open, actual_rate, channels, requested)
+        self.spawn_audio_worker(
+            app_handle,
+            open,
+            actual_rate,
+            channels,
+            requested,
+            capture_id,
+        )
     }
 
     /// The rate the microphone records at, for the final decode to resample
@@ -623,6 +649,7 @@ impl VoiceController {
         actual_rate: u32,
         channels: u16,
         requested: Instant,
+        capture_id: Option<u64>,
     ) -> Result<()> {
         let (control_tx, control_rx) = channel::<AudioThreadMessage>();
         let (audio_data_tx, audio_data_rx) = channel::<Vec<f32>>();
@@ -650,6 +677,7 @@ impl VoiceController {
                 audio_data_rx,
                 open,
                 requested,
+                capture_id,
                 live_partial_for_thread,
                 live_captures_for_thread,
             );
@@ -723,6 +751,7 @@ impl VoiceController {
         audio_data_rx: std::sync::mpsc::Receiver<Vec<f32>>,
         open: CaptureOpen,
         requested: Instant,
+        capture_id: Option<u64>,
         live_partial: PartialGate,
         live_captures: Arc<AtomicUsize>,
     ) {
@@ -732,6 +761,7 @@ impl VoiceController {
             engine_name,
             live_partial.is_open()
         );
+        capture_timing::mark_for(capture_id, capture_timing::Stage::Thread);
 
         // A stop or cancel that is already waiting (a quick press whose release
         // beat this thread here) is honoured before any input is opened.
@@ -743,16 +773,19 @@ impl VoiceController {
                 if let Ok(mut buffer_guard) = last_buffer_arc.lock() {
                     *buffer_guard = Some(Vec::new());
                 }
+                capture_timing::finish_for(capture_id, "stopped_before_open");
                 Self::emit_empty_result(&app_handle);
                 return;
             }
             Ok(AudioThreadMessage::Discard) => {
                 info!("[AudioThread] Cancelled before the microphone opened.");
+                capture_timing::finish_for(capture_id, "cancelled_before_open");
                 let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
                 return;
             }
             Err(TryRecvError::Disconnected) => {
                 info!("[AudioThread] Control channel gone before the microphone opened.");
+                capture_timing::finish_for(capture_id, "control_gone_before_open");
                 return;
             }
             Err(TryRecvError::Empty) => {}
@@ -772,6 +805,7 @@ impl VoiceController {
                 // On macOS a refused stream is usually microphone access, and
                 // the cached answer is now stale.
                 crate::mic_permissions::invalidate_permission_cache();
+                capture_timing::finish_for(capture_id, "device_would_not_open");
                 Self::give_up_on_capture(&app_handle, failure);
                 return;
             }
@@ -783,7 +817,12 @@ impl VoiceController {
         // microphone is released first and the worker (at most one segment in
         // flight) is joined after. Every exit from the loop is a `break` for
         // that reason; an early return would drop the worker first.
+        // `capture` here is the open-microphone guard, which is why the
+        // timing id is `capture_id` throughout this file: naming it
+        // `capture` shadows this binding, and `drop(capture)` below still
+        // has to reach the guard.
         let capture = CaptureGuard::new(keepalive, live_captures);
+        capture_timing::mark_for(capture_id, capture_timing::Stage::Live);
         info!(
             "[AudioThread] Microphone live {} ms after start_dictation",
             requested.elapsed().as_millis()
@@ -796,6 +835,7 @@ impl VoiceController {
                 tracing::error!(
                     "[AudioThread] The {engine_name} engine could not open a session: {e}"
                 );
+                capture_timing::finish_for(capture_id, "engine_unavailable");
                 Self::give_up_on_capture(
                     &app_handle,
                     CaptureStartFailure::EngineUnavailable {
@@ -815,6 +855,12 @@ impl VoiceController {
               actual_rate, channels, WHISPER_SAMPLE_RATE);
 
         let mut raw_full_session_audio: Vec<f32> = Vec::new();
+
+        // The first buffer the device delivers closes the capture timing line.
+        // A flag rather than letting `mark` decide, so the rest of the
+        // recording does not take a lock per chunk for a stage already
+        // recorded.
+        let mut first_sample_seen = false;
 
         // Audio level emission: throttled to ~70ms to match Clicky's sampling rate
         let level_emit_interval = Duration::from_millis(70);
@@ -886,6 +932,10 @@ impl VoiceController {
 
             // Process audio data
             if let Ok(audio_chunk) = audio_data_rx.recv_timeout(Duration::from_millis(100)) {
+                if !first_sample_seen {
+                    first_sample_seen = true;
+                    capture_timing::mark_for(capture_id, capture_timing::Stage::FirstSample);
+                }
                 raw_full_session_audio.extend_from_slice(&audio_chunk);
                 planner.push(&audio_chunk);
                 if let Some(segment) = planner.next_commit() {
@@ -1143,7 +1193,8 @@ impl VoiceController {
             self.stop_dictation()?;
             Ok(false)
         } else {
-            self.start_dictation(&app_handle)?;
+            // Not a key press, so it records no timing.
+            self.start_dictation(&app_handle, None)?;
             Ok(true)
         }
     }
@@ -1474,6 +1525,7 @@ mod tests {
             WHISPER_SAMPLE_RATE,
             1,
             Instant::now(),
+            None,
         )
         .expect("start");
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -1528,6 +1580,7 @@ mod tests {
             WHISPER_SAMPLE_RATE,
             1,
             Instant::now(),
+            None,
         )
         .expect("start");
         assert!(c.cancel_dictation().is_ok());
@@ -1685,6 +1738,7 @@ mod tests {
                 16000,
                 1,
                 Instant::now(),
+                None,
             )
             .expect("start");
             let deadline = Instant::now() + Duration::from_secs(5);
@@ -1712,6 +1766,7 @@ mod tests {
                 16000,
                 1,
                 Instant::now(),
+                None,
             )
             .expect("start");
             entered_rx
@@ -1749,6 +1804,7 @@ mod tests {
                 16000,
                 1,
                 Instant::now(),
+                None,
             )
             .expect("start");
             let releaser = thread::spawn(move || {
@@ -1804,6 +1860,7 @@ mod tests {
             16000,
             1,
             Instant::now(),
+            None,
         )
         .expect("start");
         wait_until(|| announced.lock().unwrap().len() == 2);
@@ -1851,6 +1908,7 @@ mod tests {
             WHISPER_SAMPLE_RATE,
             1,
             Instant::now(),
+            None,
         )
         .expect("start");
         wait_until(|| stopped.load(Ordering::SeqCst) > 0);
@@ -1873,6 +1931,7 @@ mod tests {
                 16000,
                 1,
                 Instant::now(),
+                None,
             )
             .expect("start");
             let deadline = Instant::now() + Duration::from_secs(5);

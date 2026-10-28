@@ -1129,9 +1129,12 @@ async fn handle_agent_transcription_start(
             last_error = "Voice controller disappeared unexpectedly".to_string();
             break;
         };
+        // `None`: the agent's microphone is not a dictation key press, so it
+        // records no capture timing. See `capture_timing`.
         match tauri_plugin_voice_transcription::commands::start_dictation(
             app_handle.clone(),
             controller_state,
+            None,
         )
         .await
         {

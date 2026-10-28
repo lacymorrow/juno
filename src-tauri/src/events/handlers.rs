@@ -115,13 +115,19 @@ fn setup_dictation_listeners(app: &AppHandle) {
             // arrived while the microphone was still opening (see
             // `hold_gate`).
             let hold = crate::hold_gate::hold_from_payload(event.payload());
+            // Which capture's timing line this start belongs to, carried
+            // beside the hold id. Absent for anything that is not a dictation
+            // key press (a tap, the agent, the mode manager), and absent means
+            // this start records no timing rather than writing its stages into
+            // some other press's line. See `capture_timing`.
+            let capture = capture_from_payload(event.payload());
             tauri::async_runtime::spawn(async move {
                 let _settle = crate::hold_gate::SettleOnDrop::new(
                     app_handle.clone(),
                     VoiceTarget::Dictation,
                     hold,
                 );
-                handle_dictation_transcription_start(app_handle, method, hold).await;
+                handle_dictation_transcription_start(app_handle, method, hold, capture).await;
             });
         },
     );
@@ -448,10 +454,23 @@ async fn handle_voice_transcription_error(app_handle: AppHandle) {
     }
 }
 
+/// The capture id a dictation start carries, if a key press opened one.
+///
+/// Mirrors `hold_gate::hold_from_payload`: same payload, same shape, and the
+/// same reason for being an `Option` rather than a default. A start with no
+/// capture records no timing at all.
+fn capture_from_payload(payload: &str) -> Option<u64> {
+    serde_json::from_str::<serde_json::Value>(payload)
+        .ok()?
+        .get("capture")?
+        .as_u64()
+}
+
 async fn handle_dictation_transcription_start(
     app_handle: AppHandle,
     method: VoiceStartMethod,
     hold: Option<crate::hold_gate::HoldId>,
+    capture: Option<u64>,
 ) {
     let app_state = app_handle.state::<state::AppState>();
 
@@ -507,6 +526,7 @@ async fn handle_dictation_transcription_start(
         match tauri_plugin_voice_transcription::commands::start_dictation(
             app_handle.clone(),
             controller_state,
+            capture,
         )
         .await
         {
