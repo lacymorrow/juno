@@ -59,10 +59,34 @@ describe("useBackendEvents: unified submission state", () => {
 
     handlers.get("agent-active")?.(false);
     expect(setIsProcessing).toHaveBeenCalledWith(false);
+  });
 
-    setIsProcessing.mockClear();
+  it("switches processing back on when the next run starts", () => {
+    const { setIsProcessing } = renderBackendEvents();
+
+    // A query sent mid-run: the old run's end lands after the new query
+    // switched processing on, so the new run's start has to switch it back.
+    handlers.get("user-message-submitted")?.({ content: "do this instead", timestamp: 1 });
+    handlers.get("agent-active")?.(false);
     handlers.get("agent-active")?.(true);
+    expect(setIsProcessing).toHaveBeenLastCalledWith(true);
+  });
+
+  it("stays working when a stream ends before a tool call", () => {
+    const { setIsProcessing } = renderBackendEvents();
+
+    // A tool-using turn closes its text bubble before every tool call. That
+    // is not the run ending, so the chat must not go idle while tools run.
+    handlers.get("agent-stream-end")?.({ message_id: "m1", complete_text: "Opening Safari." });
     expect(setIsProcessing).not.toHaveBeenCalled();
+
+    // A reply that carries its final state does end it.
+    handlers.get("agent-stream-end")?.({
+      message_id: "m2",
+      complete_text: "No connection.",
+      agent_state: "Finished",
+    });
+    expect(setIsProcessing).toHaveBeenCalledWith(false);
   });
 
   it("does not settle when the microphone closes: capture is not the run", () => {

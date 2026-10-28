@@ -520,7 +520,14 @@ export function useBackendEvents({
 				})
 			);
 
-			setIsProcessing(false);
+			// A stream end closes one message, not the run. A tool-using turn
+			// ends a stream before every tool call, and settling here showed the
+			// chat idle (input open, no stop button) while the tools ran. Only a
+			// reply that carries its final state also ends the run; every run
+			// end is announced on `agent-active` below.
+			if (agent_state) {
+				setIsProcessing(false);
+			}
 		}
 	);
 
@@ -718,10 +725,12 @@ export function useBackendEvents({
 	// arriving mid-run switched the chat surface out of "working" while the
 	// agent kept going. The microphone now announces itself on
 	// `agent-capture-active`, which this hook deliberately does not listen to.
+	//
+	// The start counts too. A query sent while a run is going ends that run,
+	// and its `false` lands after the new query switched processing on; the
+	// new run's `true` is what puts the chat back to working.
 	useEventListener<boolean>(EVENTS.AGENT_ACTIVE, (active) => {
-		if (!active) {
-			setIsProcessing(false);
-		}
+		setIsProcessing(active);
 	});
 }
 

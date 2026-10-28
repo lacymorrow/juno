@@ -21,27 +21,37 @@ use crate::agent::traits::{AgentRunnable, MemoryManager, ToolProvider};
 use crate::constants::{agent, events};
 use crate::persistent_memory::PersistentMemoryStore;
 use crate::state::AppState;
-use crate::utils::atomic_state::{AtomicExecutionCoordinator, AtomicQueue};
+use crate::utils::atomic_state::{AtomicExecutionCoordinator, StartOutcome};
 use crate::utils::{format_system_context_for_agent, gather_system_context};
 // TARS Integration: Import event types
 // TODO: Implement event system - currently disabled due to incomplete implementation
 // use crate::agent::events::JunoAgentEvent;
 
-/// Agent execution queue system to prevent concurrent execution
+/// How long a new query waits for the run before it to stop.
+///
+/// Every wait inside a run honours the cancel it was sent, so a run normally
+/// hands over within moments. This is a backstop for one wedged somewhere
+/// that does not, so the new query reports a failure instead of waiting
+/// forever. It is not a pace: the wait ends the moment the run does.
+const TURN_HANDOVER_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// One agent run at a time, and the newest query wins.
+///
+/// A query that arrives while a run is going cancels that run and waits for
+/// it to end. A query that is itself replaced by a newer one while waiting
+/// never runs.
 struct AgentExecutionQueue {
-    /// Atomic execution coordinator to prevent race conditions
     coordinator: Arc<AtomicExecutionCoordinator>,
-    /// Thread-safe queue of pending queries
-    pending_queries: Arc<AtomicQueue<QueuedQuery>>,
 }
 
 #[derive(Debug, Clone)]
 struct QueuedQuery {
     id: String,
+    /// Its place in line; only the newest ticket may start.
+    ticket: u64,
     query: String,
     /// Images attached to this query, as data URLs.
     images: Option<Vec<String>>,
-    _queued_at: std::time::Instant,
     app_handle: tauri::AppHandle,
     /// The smart-routing decision for this query, if the router ran.
     route: Option<crate::agent::router::RoutePlan>,
@@ -51,87 +61,62 @@ impl AgentExecutionQueue {
     fn new() -> Self {
         Self {
             coordinator: Arc::new(AtomicExecutionCoordinator::new()),
-            pending_queries: Arc::new(AtomicQueue::new(10)), // Max 10 pending queries
         }
     }
 
-    /// Queue a new query for execution, cancelling any existing execution
+    /// Take this query's place in line and ask the running agent, if any, to
+    /// stop. Taking a place also replaces any query still waiting.
     async fn queue_query(
         &self,
         query: String,
         images: Option<Vec<String>>,
         route: Option<crate::agent::router::RoutePlan>,
         app_handle: tauri::AppHandle,
-        state: tauri::State<'_, AppState>,
-    ) -> Result<String, String> {
-        let query_id = uuid::Uuid::new_v4().to_string();
-        let queued_query = QueuedQuery {
-            id: query_id.clone(),
-            query,
-            images,
-            _queued_at: std::time::Instant::now(),
-            app_handle,
-            route,
-        };
-
-        // Cancel current execution if any
-        self.cancel_current_execution(state).await;
-
-        // Clear pending queue and add new query atomically
-        self.pending_queries.clear().await;
-        self.pending_queries.push(queued_query).await?;
-
-        info!("Queued new agent query with ID: {}", query_id);
-        Ok(query_id)
-    }
-
-    /// Cancel the currently executing agent
-    async fn cancel_current_execution(&self, state: tauri::State<'_, AppState>) {
+        state: &tauri::State<'_, AppState>,
+    ) -> QueuedQuery {
+        let ticket = self.coordinator.claim_latest();
         if let Some(execution_id) = self.coordinator.get_current_execution_id().await {
             info!("Cancelling current agent execution: {}", execution_id);
             state.signal_cancel();
-            info!("Signalled cancellation for existing agent execution");
-
-            // Wait for the agent to honour the cancel signal. 500ms was too short for
-            // slow tools (browser navigation, network requests). 3s covers the common
-            // case while still being responsive; tool executors use select! so they
-            // should exit well within this window.
-            const CANCEL_TIMEOUT_MS: u128 = 3000;
-            let start = std::time::Instant::now();
-            while self.coordinator.is_executing().await
-                && start.elapsed().as_millis() < CANCEL_TIMEOUT_MS
-            {
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-            }
-
-            if self.coordinator.is_executing().await {
-                warn!(
-                    "Agent execution '{}' did not stop within {}ms after cancel signal — proceeding with next execution anyway",
-                    execution_id, CANCEL_TIMEOUT_MS
-                );
-            } else {
-                info!(
-                    "Agent execution '{}' stopped after {}ms",
-                    execution_id,
-                    start.elapsed().as_millis()
-                );
-            }
         }
+        let queued = QueuedQuery {
+            id: uuid::Uuid::new_v4().to_string(),
+            ticket,
+            query,
+            images,
+            app_handle,
+            route,
+        };
+        info!("Queued new agent query with ID: {}", queued.id);
+        queued
     }
 
-    /// Execute the next queued query atomically
-    async fn execute_next_query(&self, state: tauri::State<'_, AppState>) -> Option<QueuedQuery> {
-        // Get next query from queue
-        let query = self.pending_queries.pop().await?;
-
-        // Try to start execution atomically
-        let guard = match self.coordinator.try_start_execution(query.id.clone()).await {
-            Ok(guard) => guard,
-            Err(e) => {
-                warn!("Failed to start execution: {}", e);
-                // Re-queue the query
-                let _ = self.pending_queries.push(query).await;
-                return None;
+    /// Run the query once the run before it has ended, unless a newer query
+    /// replaced it while it waited.
+    async fn execute_query(
+        &self,
+        query: QueuedQuery,
+        state: tauri::State<'_, AppState>,
+    ) -> Result<(), String> {
+        let guard = match self
+            .coordinator
+            .start_latest(query.ticket, query.id.clone(), TURN_HANDOVER_WAIT)
+            .await
+        {
+            StartOutcome::Started(guard) => guard,
+            StartOutcome::Superseded => {
+                info!(
+                    "Query {} was replaced by a newer one before it started",
+                    query.id
+                );
+                return Ok(());
+            }
+            StartOutcome::TimedOut => {
+                warn!(
+                    "Query {} gave up: the previous agent run did not stop within {:?}",
+                    query.id, TURN_HANDOVER_WAIT
+                );
+                return Err("The previous task did not stop in time".to_string());
             }
         };
         info!("Starting atomic agent execution for query ID: {}", query.id);
@@ -166,7 +151,7 @@ impl AgentExecutionQueue {
             }
         }
 
-        Some(query)
+        Ok(())
     }
 }
 
@@ -515,29 +500,23 @@ pub async fn submit_query(
 
     // Use the queue system to ensure only one agent runs at a time
     let queue = get_agent_execution_queue();
-    let _query_id = match queue
+    let queued = queue
         .queue_query(
             trimmed_query.to_string(),
             images,
             route,
             app_handle.clone(),
-            state.clone(),
+            &state,
         )
-        .await
-    {
-        Ok(id) => id,
-        Err(e) => {
-            let message = format!("Failed to queue query: {}", e);
-            if !crate::cli::headless::is_headless_mode() {
-                report_submission_failure(&app_handle, trimmed_query, &message).await;
-            }
-            return Err(message);
-        }
-    };
+        .await;
 
-    // Execute the next queued query (will be the one we just queued)
-    if queue.execute_next_query(state.clone()).await.is_none() {
-        warn!("execute_next_query returned None despite having a queued query - execution may have been blocked by a concurrent run");
+    // Runs once the previous run (if any) has stopped, or not at all when a
+    // newer query replaced this one while it waited.
+    if let Err(e) = queue.execute_query(queued, state.clone()).await {
+        if !crate::cli::headless::is_headless_mode() {
+            report_submission_failure(&app_handle, trimmed_query, &e).await;
+        }
+        return Err(e);
     }
 
     Ok(())
