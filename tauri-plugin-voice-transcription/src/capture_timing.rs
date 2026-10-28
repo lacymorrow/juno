@@ -8,7 +8,7 @@
 //! from the press:
 //!
 //! ```text
-//! [CaptureTiming] capture=4 outcome=first_sample press=0 start_cmd=3 mic_ready=3 engine_ready=3 locked=4 claimed=9 thread=9 opening=10 live=42 first_sample=53 warm=yes rate=48000 device="MacBook Air Microphone"
+//! [CaptureTiming] capture=4 outcome=first_sample press=0 start_cmd=3 mic_ready=3 engine_ready=3 locked=4 preferred=4 claimed=9 thread=9 opening=10 live=42 first_sample=53 warm=yes rate=48000 device="MacBook Air Microphone"
 //! ```
 //!
 //! A stage the press never reached prints as `-`. Grep `[CaptureTiming]` in the
@@ -19,6 +19,11 @@
 //! spoken audio, this one starts at the key *press* and ends at the first
 //! recorded sample. Together they cover a whole voice turn.
 //!
+//! The critical section is small but not free: the line is formatted under the
+//! lock, which is about a dozen allocations and no syscall. Bounded and
+//! microseconds, so it is not a dropout risk, but it is more than a field
+//! write and worth knowing before anything else is added to it.
+//!
 //! Reading the gaps matters more than the total, because each one has a
 //! different owner:
 //!
@@ -27,7 +32,8 @@
 //! | `press` to `start_cmd` | the hold-edge queue and the event hop out of the recognizer |
 //! | `start_cmd` to `engine_ready` | permission check, then waiting for a speech engine still loading |
 //! | `engine_ready` to `locked` | another dictation still starting or stopping |
-//! | `locked` to `claimed` | resolving the microphone, and the staleness check on the warm stream |
+//! | `locked` to `preferred` | reading which microphone the person chose (in memory) |
+//! | `preferred` to `claimed` | the first CoreAudio call: claiming the warm stream, and the staleness check on it |
 //! | `claimed` to `opening` | spawning the audio thread and getting it scheduled |
 //! | `opening` to `live` | CoreAudio starting the device |
 //! | `live` to `first_sample` | the device's first buffer period |
@@ -53,11 +59,29 @@
 //! audio actually began.
 //!
 //! The tracker is passive. A press opens a capture ([`press`]), each stage
-//! records the first time it is reached ([`mark`]), and the line goes out once:
-//! when the first sample lands, when the press ends without one ([`finish`]),
-//! or when the next press supersedes it. Marks with no open capture are
-//! ignored, so always-listening and the wake word pay nothing but one
-//! uncontended lock.
+//! records the first time it is reached ([`mark_for`]), and the line goes out
+//! once: when the first sample lands, when the press ends without one
+//! ([`finish_for`]), or when the next press supersedes it.
+//!
+//! **Every stage and every close is scoped to the capture it belongs to.**
+//! A start carries its capture id as an `Option<u64>` from the press that
+//! began it, threaded through the `TRANSCRIPTION_START` payload beside the
+//! hold id. `None` means "this start did not come from a dictation key press"
+//! and records nothing at all, so `toggle_dictation`, the agent paths and the
+//! mode manager stay silent rather than writing their stages into a press's
+//! line. `Some(id)` records only while that capture is still open.
+//!
+//! That scoping is load-bearing, not tidiness. `ENGINE_WAIT` is 15 s, so a
+//! press made while the speech engine is still loading sits in
+//! `wait_for_engine` long enough for several later presses to open captures of
+//! their own; unscoped, its eventual `controller_busy` would close the live
+//! one and the press that actually recorded would never log its own first
+//! sample. A line reported under the wrong id is worse than no line, because
+//! the next change spends these numbers (LAC-6118).
+//!
+//! Always-listening and the wake word do not share this path at all - they have
+//! their own capture loop and call nothing here - so they pay nothing, not even
+//! a lock.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -65,7 +89,13 @@ use std::time::{Duration, Instant};
 
 use tracing::info;
 
-/// Log target, so the line can be filtered on its own with `RUST_LOG`.
+/// Log target, so the line can be raised above `info` with `RUST_LOG`.
+///
+/// It cannot be *isolated* that way: `init_tracing` adds an unconditional
+/// global `info` directive, so this target is always enabled at `info` no
+/// matter what `RUST_LOG` selects. Grep `[CaptureTiming]`, which is in the
+/// message body rather than the target, so `with_target(false)` does not hide
+/// it either.
 pub const TARGET: &str = "juno::capture_timing";
 
 /// The stages between the press and the first sample, in the order they
@@ -80,6 +110,12 @@ pub enum Stage {
     EngineReady,
     /// The controller lock was taken, so no other recording was in the way.
     Locked,
+    /// The microphone choice was read, so the next thing to happen is the
+    /// first call that talks to CoreAudio. Split out from [`Stage::Claimed`]
+    /// deliberately: that gap used to fuse an in-memory read with a HAL
+    /// round trip, and the HAL is the suspect, so fusing them would localise
+    /// the cost to a span and still not name the call (LAC-6118).
+    Preferred,
     /// A microphone was settled on: the warm stream claimed, or a device
     /// resolved and configured for this press to open itself.
     Claimed,
@@ -95,11 +131,12 @@ pub enum Stage {
 }
 
 impl Stage {
-    pub const ALL: [Stage; 9] = [
+    pub const ALL: [Stage; 10] = [
         Stage::StartCmd,
         Stage::MicReady,
         Stage::EngineReady,
         Stage::Locked,
+        Stage::Preferred,
         Stage::Claimed,
         Stage::Thread,
         Stage::Opening,
@@ -113,6 +150,7 @@ impl Stage {
             Stage::MicReady => "mic_ready",
             Stage::EngineReady => "engine_ready",
             Stage::Locked => "locked",
+            Stage::Preferred => "preferred",
             Stage::Claimed => "claimed",
             Stage::Thread => "thread",
             Stage::Opening => "opening",
@@ -127,11 +165,12 @@ impl Stage {
             Stage::MicReady => 1,
             Stage::EngineReady => 2,
             Stage::Locked => 3,
-            Stage::Claimed => 4,
-            Stage::Thread => 5,
-            Stage::Opening => 6,
-            Stage::Live => 7,
-            Stage::FirstSample => 8,
+            Stage::Preferred => 4,
+            Stage::Claimed => 5,
+            Stage::Thread => 6,
+            Stage::Opening => 7,
+            Stage::Live => 8,
+            Stage::FirstSample => 9,
         }
     }
 }
@@ -249,9 +288,27 @@ impl Tracker {
         None
     }
 
+    /// Record a stage, but only on the capture `id` names. A start still in
+    /// flight from an earlier press reaches here after a later press has
+    /// opened its own capture; without the id its stages would be written
+    /// into that capture and reported under its number.
+    pub fn mark_at_for(&mut self, id: u64, stage: Stage, at: Instant) -> Option<String> {
+        if self.current.as_ref()?.id() != id {
+            return None;
+        }
+        self.mark_at(stage, at)
+    }
+
     pub fn note_device(&mut self, device: &str, rate: u32, warm: bool) {
         if let Some(timer) = self.current.as_mut() {
             timer.note_device(device, rate, warm);
+        }
+    }
+
+    /// Which microphone, but only on the capture `id` names.
+    pub fn note_device_for(&mut self, id: u64, device: &str, rate: u32, warm: bool) {
+        if self.current.as_ref().is_some_and(|t| t.id() == id) {
+            self.note_device(device, rate, warm);
         }
     }
 
@@ -270,9 +327,16 @@ impl Tracker {
         self.current.take().map(|t| t.line(outcome))
     }
 
-    /// The open capture's id, for [`finish`].
+    /// The open capture's id, for [`Tracker::finish`].
     pub fn open_id(&self) -> Option<u64> {
         self.current.as_ref().map(CaptureTimer::id)
+    }
+
+    /// A stage off the open capture. Test-only: production code never reads a
+    /// stage back, it only reports them.
+    #[cfg(test)]
+    fn offset_of_open(&self, stage: Stage) -> Option<Duration> {
+        self.current.as_ref()?.offset(stage)
     }
 }
 
@@ -305,21 +369,40 @@ pub fn press() -> u64 {
     id
 }
 
-/// Record that the open capture reached `stage` now. A no-op with no open
-/// capture, which is every recording that did not start from a key press.
-pub fn mark(stage: Stage) {
-    emit(with_tracker(|t| t.mark_at(stage, Instant::now())));
+/// Record that the capture `capture` names reached `stage` now.
+///
+/// `None` records nothing. That is what every start Juno did not begin from a
+/// dictation key press passes - `toggle_dictation`, the agent paths, the mode
+/// manager, tests - so none of them can write a stage into a press's line.
+/// `Some(id)` records only while that capture is still the open one, so a
+/// start left behind by an earlier press cannot report under a later one.
+pub fn mark_for(capture: Option<u64>, stage: Stage) {
+    let Some(id) = capture else { return };
+    emit(with_tracker(|t| t.mark_at_for(id, stage, Instant::now())));
 }
 
-/// Which microphone the open capture settled on. A no-op with no open capture.
-pub fn note_device(device: &str, rate: u32, warm: bool) {
-    with_tracker(|t| t.note_device(device, rate, warm));
+/// Which microphone the capture `capture` names settled on. `None` records
+/// nothing, like [`mark_for`].
+pub fn note_device_for(capture: Option<u64>, device: &str, rate: u32, warm: bool) {
+    let Some(id) = capture else { return };
+    with_tracker(|t| t.note_device_for(id, device, rate, warm));
 }
 
-/// Close the open capture without a first sample, saying why. With `id`, only
-/// that capture.
-pub fn finish(id: Option<u64>, outcome: &str) {
-    emit(with_tracker(|t| t.finish(id, outcome)));
+/// Close the capture `capture` names without a first sample, saying why.
+/// `None` closes nothing, like [`mark_for`]: a start that was never bound to a
+/// press must not be able to end one.
+pub fn finish_for(capture: Option<u64>, outcome: &str) {
+    let Some(id) = capture else { return };
+    emit(with_tracker(|t| t.finish(Some(id), outcome)));
+}
+
+/// Close whatever capture is open, whichever press it belongs to.
+///
+/// One caller, and it wants exactly this: an agent hold opens a microphone of
+/// its own, so a dictation press still waiting for one is over however far it
+/// had got. Everywhere else, use [`finish_for`].
+pub fn finish_any(outcome: &str) {
+    emit(with_tracker(|t| t.finish(None, outcome)));
 }
 
 /// The open capture's id, if a press is still waiting for its microphone.
@@ -431,6 +514,69 @@ mod tests {
 
         let line = tracker.finish(Some(2), "cancelled").expect("its own id");
         assert!(line.contains("capture=2 outcome=cancelled"));
+    }
+
+    #[test]
+    fn a_stalled_start_cannot_mark_or_close_a_later_press() {
+        // The LAC-6118 regression. `ENGINE_WAIT` is 15 s, so a press made
+        // while the speech engine loads sits in `wait_for_engine` long enough
+        // for later presses to open captures of their own. When it finally
+        // resumes, every stage it reports and every close it performs must
+        // land on nothing, not on the press that is actually recording.
+        let base = Instant::now();
+        let mut tracker = Tracker::default();
+        tracker.press(|| 1, base); // the press that stalls on the engine
+        tracker.press(|| 2, at(base, 4_000)); // the press that records
+
+        assert!(
+            tracker
+                .mark_at_for(1, Stage::Locked, at(base, 15_000))
+                .is_none(),
+            "the stalled start's stage must not be written into capture 2"
+        );
+        assert_eq!(
+            tracker.offset_of_open(Stage::Locked),
+            None,
+            "capture 2 never reached `locked`, so it must not claim to have"
+        );
+
+        tracker.note_device_for(1, "Some Other Microphone", 44_100, false);
+
+        assert!(
+            tracker.finish(Some(1), "controller_busy").is_none(),
+            "the stalled start must not close the press that is recording"
+        );
+        assert_eq!(tracker.open_id(), Some(2));
+
+        // Capture 2 still owns its own line, device included.
+        tracker.note_device_for(2, "MacBook Air Microphone", 48_000, true);
+        let line = tracker
+            .mark_at_for(2, Stage::FirstSample, at(base, 4_050))
+            .expect("capture 2 closes on its own first sample");
+        assert!(line.contains("capture=2 outcome=first_sample"));
+        assert!(line.contains(" locked=-"), "no borrowed stage: {line}");
+        assert!(line.contains(" device=\"MacBook Air Microphone\""));
+    }
+
+    #[test]
+    fn the_preferred_split_is_reported_between_locked_and_claimed() {
+        // `locked`->`claimed` used to fuse an in-memory read with the first
+        // CoreAudio call. The HAL is the suspect, so the two are separable or
+        // the measurement has to be taken twice.
+        let base = Instant::now();
+        let mut timer = CaptureTimer::new(1, base);
+        timer.mark_at(Stage::Locked, at(base, 4));
+        timer.mark_at(Stage::Preferred, at(base, 4));
+        timer.mark_at(Stage::Claimed, at(base, 61));
+
+        let line = timer.line("first_sample");
+        let locked = line.find(" locked=").expect("locked is reported");
+        let preferred = line.find(" preferred=").expect("preferred is reported");
+        let claimed = line.find(" claimed=").expect("claimed is reported");
+        assert!(
+            locked < preferred && preferred < claimed,
+            "stages read in the order they happen: {line}"
+        );
     }
 
     #[test]

@@ -629,9 +629,10 @@ fn start_hold(app: &AppHandle, target: TriggerTarget) {
         }
         // The agent hold opens a microphone too, and it is not what this
         // measures. Close any press still waiting so its stages cannot be
-        // credited to this one.
+        // credited to this one. The only caller that wants "whichever capture
+        // is open": this press does not know the id of the one it ends.
         TriggerTarget::Agent => {
-            tauri_plugin_voice_transcription::capture_timing::finish(None, "agent_press")
+            tauri_plugin_voice_transcription::capture_timing::finish_any("agent_press")
         }
     }
     hold_edges::enqueue(app, hold_edges::HoldEdge::Press(target));

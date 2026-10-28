@@ -135,23 +135,46 @@ async fn wait_for_engine(controller: &Arc<Mutex<VoiceController>>) {
     }
 }
 
+/// Which refusal closed the capture, in one word for the timing line.
+///
+/// `VoiceController::start_dictation` has five exits before the microphone
+/// opens and they are not interchangeable: `already_dictating` is the double
+/// press, `mic_permission_denied` is a person who has not granted access, and
+/// `no_input_device` is a microphone that went away. One close site, but the
+/// line still says which.
+fn refusal_outcome(e: &Error) -> &'static str {
+    match e {
+        Error::NotInitialized | Error::InitializationError(_) => "controller_not_initialized",
+        Error::AlreadyDictating => "already_dictating",
+        Error::MicrophonePermissionDenied => "mic_permission_denied",
+        Error::AudioDevice(_) => "no_input_device",
+        _ => "start_refused",
+    }
+}
+
 #[tauri::command]
 pub async fn start_dictation<R: tauri::Runtime + 'static>(
     app: AppHandle<R>,
     controller: State<'_, Arc<Mutex<VoiceController>>>,
+    capture: Option<u64>,
 ) -> Result<(), Error> {
     info!("[Plugin] start_dictation command called");
-    capture_timing::mark(capture_timing::Stage::StartCmd);
+    // `capture` says which press's timing line this start belongs to, or
+    // `None` for a start no dictation key press began. Every mark and close
+    // below is scoped to it, because this function can still be inside
+    // `wait_for_engine` (up to 15 s) while later presses open captures of
+    // their own. See `capture_timing`.
+    capture_timing::mark_for(capture, capture_timing::Stage::StartCmd);
 
     // Check microphone permissions first
     match crate::mic_permissions::ensure_microphone_ready().await {
         Ok(()) => {
             info!("[Plugin] Microphone permissions verified");
-            capture_timing::mark(capture_timing::Stage::MicReady);
+            capture_timing::mark_for(capture, capture_timing::Stage::MicReady);
         }
         Err(e) => {
             error!("[Plugin] Microphone permission check failed: {}", e);
-            capture_timing::finish(None, "permission_denied");
+            capture_timing::finish_for(capture, "permission_denied");
             return Err(Error::PermissionError(e));
         }
     }
@@ -159,29 +182,32 @@ pub async fn start_dictation<R: tauri::Runtime + 'static>(
     // The engine loads in the background at launch, off the path to the
     // first pixel. A recording asked for in that window waits for it.
     wait_for_engine(&controller).await;
-    capture_timing::mark(capture_timing::Stage::EngineReady);
+    capture_timing::mark_for(capture, capture_timing::Stage::EngineReady);
 
     // Check initialization status before proceeding
-    check_voice_controller_availability(&app)?;
+    if let Err(e) = check_voice_controller_availability(&app) {
+        capture_timing::finish_for(capture, "controller_unavailable");
+        return Err(e);
+    }
 
     // Use try_lock to avoid blocking if another operation is in progress
     let mut voice_controller = match controller.try_lock() {
         Ok(guard) => {
-            capture_timing::mark(capture_timing::Stage::Locked);
+            capture_timing::mark_for(capture, capture_timing::Stage::Locked);
             guard
         }
         Err(std::sync::TryLockError::WouldBlock) => {
             info!(
                 "[Plugin] VoiceController is busy - dictation may already be starting or stopping"
             );
-            capture_timing::finish(None, "controller_busy");
+            capture_timing::finish_for(capture, "controller_busy");
             return Err(Error::LockError(
                 "VoiceController is busy - please try again".to_string(),
             ));
         }
         Err(std::sync::TryLockError::Poisoned(e)) => {
             error!("[Plugin] VoiceController mutex is poisoned: {}", e);
-            capture_timing::finish(None, "controller_poisoned");
+            capture_timing::finish_for(capture, "controller_poisoned");
             return Err(Error::LockError(format!(
                 "VoiceController mutex is poisoned: {}",
                 e
@@ -189,7 +215,14 @@ pub async fn start_dictation<R: tauri::Runtime + 'static>(
         }
     };
 
-    voice_controller.start_dictation(&app)?;
+    // One close for every refusal inside `VoiceController::start_dictation`,
+    // which is five of them and includes `AlreadyDictating` - the double press.
+    // Without this the press stayed open and the next one reported it as
+    // `superseded`, which reads like a race rather than a refusal.
+    if let Err(e) = voice_controller.start_dictation(&app, capture) {
+        capture_timing::finish_for(capture, refusal_outcome(&e));
+        return Err(e);
+    }
 
     // The started events come from the audio thread once the microphone is
     // actually running, not from here: this returns while it is still opening.
@@ -382,7 +415,11 @@ pub async fn toggle_dictation<R: tauri::Runtime + 'static>(
         };
 
         // Announced by the audio thread once the microphone is running.
-        voice_controller.start_dictation(&app)?;
+        //
+        // `None`: a toggle is not a dictation key press, so it records no
+        // timing. Passing a capture here would write this start's stages into
+        // the line of a press that is still waiting for its microphone.
+        voice_controller.start_dictation(&app, None)?;
         Ok(true)
     }
 }
