@@ -8,8 +8,10 @@
 //!   2. open the exact Settings pane via deep link (no osascript, no admin),
 //!   3. wait for the System Settings window to be reachable over AX,
 //!   4. walk the AX tree collecting every switch that names Juno (a stale row
-//!      from an older build can sit next to the real one), press the OFF ones
-//!      one at a time — AXPress first (no cursor movement), then AXValue, then
+//!      from an older build can sit next to the real one), press the one OFF
+//!      switch (two OFF rows of the same name are ambiguous, since any app
+//!      can call itself Juno, so that permission falls back to the manual
+//!      step) — AXPress first (no cursor movement), then AXValue, then
 //!      an element click as fallbacks,
 //!   5. dismiss the "quit and reopen" sheet with "Later" so onboarding keeps
 //!      running, and
@@ -464,6 +466,17 @@ async fn auto_grant_one(
         .iter()
         .map(|t| (t.label.clone(), t.value.clone()))
         .collect();
+    if off_rows_are_ambiguous(&rows, &app_name) {
+        // A label is all the pane exposes, and any app can call itself Juno.
+        // With two switched-off rows of that name Juno cannot tell which is
+        // its own, and pressing both would hand Screen Recording or Input
+        // Monitoring to whatever the other one is. The person can tell, so
+        // this row falls back to the guided manual step.
+        return Err(format!(
+            "More than one switched-off '{}' row in the pane; leaving the choice to the person",
+            app_name
+        ));
+    }
     let order = pick_toggle_candidates(&rows, &app_name);
     let mut pressed = 0usize;
     for idx in order {
@@ -620,6 +633,22 @@ pub(crate) fn pick_toggle_candidates(
         .into_iter()
         .partition(|&i| toggle_is_on(rows[i].1.as_deref()));
     off.into_iter().chain(on).collect()
+}
+
+/// Whether more than one switched-off row carries this app's name.
+///
+/// Auto-grant presses only switched-off rows, and it can only tell rows apart
+/// by their label. One off row is Juno's (a stale row from an older build is
+/// the on one, which is never pressed). Two off rows means one of them may
+/// belong to a different app that named itself the same, and pressing it would
+/// grant that app the permission.
+pub(crate) fn off_rows_are_ambiguous(rows: &[(String, Option<String>)], app_name: &str) -> bool {
+    rows.iter()
+        .filter(|(label, value)| {
+            label_names_app(label, app_name) && !toggle_is_on(value.as_deref())
+        })
+        .count()
+        > 1
 }
 
 async fn is_granted(app: &AppHandle, perm: &str) -> Result<bool, String> {
@@ -973,6 +1002,38 @@ mod tests {
             row("", Some("0")),
         ];
         assert!(pick_toggle_candidates(&rows, "Juno").is_empty());
+    }
+
+    // ── off_rows_are_ambiguous ──────────────────────────────────────────────
+
+    #[test]
+    fn two_switched_off_rows_named_juno_are_left_to_the_person() {
+        // Any app can call itself Juno. With two off rows of that name one of
+        // them may be another app, and pressing it would grant that app
+        // Screen Recording.
+        let rows = vec![
+            row("Juno", Some("0")),
+            row("Google Chrome", Some("0")),
+            row("Juno", Some("0")),
+        ];
+        assert!(off_rows_are_ambiguous(&rows, "Juno"));
+        // `None` renders as off, so it counts too.
+        let rows = vec![row("Juno", None), row("Juno.app", Some("0"))];
+        assert!(off_rows_are_ambiguous(&rows, "Juno"));
+    }
+
+    #[test]
+    fn a_stale_on_row_beside_the_fresh_off_row_is_not_ambiguous() {
+        // The 0.7.0 hardware layout still auto-grants: the on rows are never
+        // pressed, so only one row is a candidate.
+        let rows = vec![
+            row("juno", Some("1")),
+            row("Juno.app", Some("1")),
+            row("Google Chrome", Some("0")),
+            row("Juno", Some("0")),
+        ];
+        assert!(!off_rows_are_ambiguous(&rows, "Juno"));
+        assert!(!off_rows_are_ambiguous(&[], "Juno"));
     }
 
     #[test]

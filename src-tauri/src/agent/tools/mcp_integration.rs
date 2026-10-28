@@ -55,6 +55,16 @@ impl MCPServerConfig {
         }
     }
 
+    /// Whether `other` would start exactly the process this config starts.
+    /// What an approval covers: the name, timeouts and toggles can change
+    /// without it, the command line cannot.
+    pub fn spawns_same_process(&self, other: &MCPServerConfig) -> bool {
+        self.command == other.command
+            && self.args == other.args
+            && self.working_directory == other.working_directory
+            && self.environment_variables == other.environment_variables
+    }
+
     pub fn with_description(mut self, description: String) -> Self {
         self.description = Some(description);
         self
