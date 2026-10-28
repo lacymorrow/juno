@@ -6,6 +6,7 @@ use tauri::{
 
 pub mod always_listening;
 pub mod capture_failure;
+pub mod capture_timing;
 pub mod commands;
 pub mod config;
 pub mod constants;
