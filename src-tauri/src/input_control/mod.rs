@@ -379,11 +379,18 @@ pub async fn request_physical_cursor(
 
 /// Tell the person Juno is waiting on them, in case nothing is on screen.
 fn notify_consent_request(app_handle: &AppHandle, request: &PhysicalCursorRequest) {
-    let body = match request.target_app.as_deref() {
-        Some(app_name) => format!("Juno wants to {} in {}.", request.reason, app_name),
-        None => format!("Juno wants to {}.", request.reason),
-    };
+    let body = consent_notification_body(request);
     crate::commands::notifications::notify(app_handle, "Juno needs your mouse", &body);
+}
+
+/// The notification line. `reason` is already a whole sentence ("This drag
+/// cannot be done without moving the real pointer."), so it is shown as one,
+/// not spliced into "Juno wants to ...".
+fn consent_notification_body(request: &PhysicalCursorRequest) -> String {
+    match request.target_app.as_deref() {
+        Some(app_name) => format!("{}: {}", app_name, request.reason),
+        None => request.reason.clone(),
+    }
 }
 
 async fn wait_for_decision(request_id: &str) -> Option<InputControlDecision> {
@@ -446,6 +453,19 @@ mod tests {
         assert!(!should_offer_to_stop_asking("ask", true, false));
         assert!(!should_offer_to_stop_asking("ask", false, true));
         assert!(!should_offer_to_stop_asking("always", false, false));
+    }
+
+    #[test]
+    fn the_notification_reads_as_a_sentence() {
+        let request = commands::describe_request("left_click_drag", Some("Finder"));
+        assert_eq!(
+            consent_notification_body(&request),
+            "Finder: This drag cannot be done without moving the real pointer."
+        );
+        let request = commands::describe_request("scroll", None);
+        let body = consent_notification_body(&request);
+        assert!(!body.contains("wants to This"));
+        assert!(body.ends_with('.'));
     }
 
     #[test]
