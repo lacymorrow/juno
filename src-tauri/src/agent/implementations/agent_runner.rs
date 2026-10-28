@@ -2390,7 +2390,7 @@ mod tests {
 #[cfg(test)]
 mod batch_halt_tests {
     use super::*;
-    use crate::agent::core::ToolResult;
+    use crate::agent::core::{ToolCall, ToolResult};
 
     fn ok_result(output: serde_json::Value) -> Result<ToolResult, AgentError> {
         Ok(ToolResult {

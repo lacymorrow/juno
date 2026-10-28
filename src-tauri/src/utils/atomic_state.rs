@@ -272,24 +272,31 @@ impl Drop for ExecutionGuard {
 
         // Clear it now when the lock is free, so the next turn never finds
         // this one's id still set; otherwise clear it async.
-        if let Ok(mut current) = current_id.try_write() {
-            if current.as_ref() == Some(&execution_id) {
-                *current = None;
-                debug!("Cleared execution ID on guard drop: {}", execution_id);
-            }
-        } else if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
-                let mut current = current_id.write().await;
+        let cleared_now = match current_id.try_write() {
+            Ok(mut current) => {
                 if current.as_ref() == Some(&execution_id) {
                     *current = None;
                     debug!("Cleared execution ID on guard drop: {}", execution_id);
                 }
-            });
-        } else {
-            warn!(
-                "Dropped outside Tokio runtime - async cleanup skipped for execution ID: {}",
-                execution_id
-            );
+                true
+            }
+            Err(_) => false,
+        };
+        if !cleared_now {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let mut current = current_id.write().await;
+                    if current.as_ref() == Some(&execution_id) {
+                        *current = None;
+                        debug!("Cleared execution ID on guard drop: {}", execution_id);
+                    }
+                });
+            } else {
+                warn!(
+                    "Dropped outside Tokio runtime - async cleanup skipped for execution ID: {}",
+                    execution_id
+                );
+            }
         }
 
         // Permit drops automatically, releasing semaphore
