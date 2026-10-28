@@ -15,6 +15,7 @@ use tracing::info;
 
 use crate::always_listening::CaptureGuard;
 use crate::capture_failure::{self, CaptureStartFailure};
+use crate::capture_timing;
 use crate::devices;
 use crate::error::{Error, Result};
 use crate::streaming_commit::{self, CommitPlanner, SegmentCommitter};
@@ -548,9 +549,12 @@ impl VoiceController {
         if let Some(warm) = devices::claim_warm_input(preferred.as_ref()) {
             let actual_rate = warm.sample_rate();
             let channels = warm.channels();
+            capture_timing::note_device(warm.name(), actual_rate, true);
+            capture_timing::mark(capture_timing::Stage::Claimed);
             self.set_recording_rate(actual_rate);
             let open: CaptureOpen = Box::new(move |audio_data_tx: Sender<Vec<f32>>| {
                 let name = warm.name().to_string();
+                capture_timing::mark(capture_timing::Stage::Opening);
                 let stream = warm.resume(audio_data_tx)?;
                 info!("[AudioThread] Audio stream resumed on {name}.");
                 Ok(Box::new(stream) as Box<dyn std::any::Any>)
@@ -582,10 +586,13 @@ impl VoiceController {
         let actual_rate = config.sample_rate.0;
         let channels = config.channels;
 
+        capture_timing::note_device(&device_name, actual_rate, false);
+        capture_timing::mark(capture_timing::Stage::Claimed);
         self.set_recording_rate(actual_rate);
 
         let open: CaptureOpen = Box::new(move |audio_data_tx: Sender<Vec<f32>>| {
             let name = device_name.clone();
+            capture_timing::mark(capture_timing::Stage::Opening);
             let stream = devices::start_warm_stream(
                 device,
                 device_name,
@@ -732,6 +739,7 @@ impl VoiceController {
             engine_name,
             live_partial.is_open()
         );
+        capture_timing::mark(capture_timing::Stage::Thread);
 
         // A stop or cancel that is already waiting (a quick press whose release
         // beat this thread here) is honoured before any input is opened.
@@ -743,16 +751,19 @@ impl VoiceController {
                 if let Ok(mut buffer_guard) = last_buffer_arc.lock() {
                     *buffer_guard = Some(Vec::new());
                 }
+                capture_timing::finish(None, "stopped_before_open");
                 Self::emit_empty_result(&app_handle);
                 return;
             }
             Ok(AudioThreadMessage::Discard) => {
                 info!("[AudioThread] Cancelled before the microphone opened.");
+                capture_timing::finish(None, "cancelled_before_open");
                 let _ = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ());
                 return;
             }
             Err(TryRecvError::Disconnected) => {
                 info!("[AudioThread] Control channel gone before the microphone opened.");
+                capture_timing::finish(None, "control_gone_before_open");
                 return;
             }
             Err(TryRecvError::Empty) => {}
@@ -772,6 +783,7 @@ impl VoiceController {
                 // On macOS a refused stream is usually microphone access, and
                 // the cached answer is now stale.
                 crate::mic_permissions::invalidate_permission_cache();
+                capture_timing::finish(None, "device_would_not_open");
                 Self::give_up_on_capture(&app_handle, failure);
                 return;
             }
@@ -784,6 +796,7 @@ impl VoiceController {
         // flight) is joined after. Every exit from the loop is a `break` for
         // that reason; an early return would drop the worker first.
         let capture = CaptureGuard::new(keepalive, live_captures);
+        capture_timing::mark(capture_timing::Stage::Live);
         info!(
             "[AudioThread] Microphone live {} ms after start_dictation",
             requested.elapsed().as_millis()
@@ -796,6 +809,7 @@ impl VoiceController {
                 tracing::error!(
                     "[AudioThread] The {engine_name} engine could not open a session: {e}"
                 );
+                capture_timing::finish(None, "engine_unavailable");
                 Self::give_up_on_capture(
                     &app_handle,
                     CaptureStartFailure::EngineUnavailable {
@@ -815,6 +829,12 @@ impl VoiceController {
               actual_rate, channels, WHISPER_SAMPLE_RATE);
 
         let mut raw_full_session_audio: Vec<f32> = Vec::new();
+
+        // The first buffer the device delivers closes the capture timing line.
+        // A flag rather than letting `mark` decide, so the rest of the
+        // recording does not take a lock per chunk for a stage already
+        // recorded.
+        let mut first_sample_seen = false;
 
         // Audio level emission: throttled to ~70ms to match Clicky's sampling rate
         let level_emit_interval = Duration::from_millis(70);
@@ -886,6 +906,10 @@ impl VoiceController {
 
             // Process audio data
             if let Ok(audio_chunk) = audio_data_rx.recv_timeout(Duration::from_millis(100)) {
+                if !first_sample_seen {
+                    first_sample_seen = true;
+                    capture_timing::mark(capture_timing::Stage::FirstSample);
+                }
                 raw_full_session_audio.extend_from_slice(&audio_chunk);
                 planner.push(&audio_chunk);
                 if let Some(segment) = planner.next_commit() {

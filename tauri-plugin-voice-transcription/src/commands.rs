@@ -1,4 +1,5 @@
 use crate::always_listening::AlwaysListeningController;
+use crate::capture_timing;
 use crate::config::VoiceTranscriptionConfig;
 use crate::constants;
 use crate::controller::VoiceController;
@@ -140,14 +141,17 @@ pub async fn start_dictation<R: tauri::Runtime + 'static>(
     controller: State<'_, Arc<Mutex<VoiceController>>>,
 ) -> Result<(), Error> {
     info!("[Plugin] start_dictation command called");
+    capture_timing::mark(capture_timing::Stage::StartCmd);
 
     // Check microphone permissions first
     match crate::mic_permissions::ensure_microphone_ready().await {
         Ok(()) => {
             info!("[Plugin] Microphone permissions verified");
+            capture_timing::mark(capture_timing::Stage::MicReady);
         }
         Err(e) => {
             error!("[Plugin] Microphone permission check failed: {}", e);
+            capture_timing::finish(None, "permission_denied");
             return Err(Error::PermissionError(e));
         }
     }
@@ -155,23 +159,29 @@ pub async fn start_dictation<R: tauri::Runtime + 'static>(
     // The engine loads in the background at launch, off the path to the
     // first pixel. A recording asked for in that window waits for it.
     wait_for_engine(&controller).await;
+    capture_timing::mark(capture_timing::Stage::EngineReady);
 
     // Check initialization status before proceeding
     check_voice_controller_availability(&app)?;
 
     // Use try_lock to avoid blocking if another operation is in progress
     let mut voice_controller = match controller.try_lock() {
-        Ok(guard) => guard,
+        Ok(guard) => {
+            capture_timing::mark(capture_timing::Stage::Locked);
+            guard
+        }
         Err(std::sync::TryLockError::WouldBlock) => {
             info!(
                 "[Plugin] VoiceController is busy - dictation may already be starting or stopping"
             );
+            capture_timing::finish(None, "controller_busy");
             return Err(Error::LockError(
                 "VoiceController is busy - please try again".to_string(),
             ));
         }
         Err(std::sync::TryLockError::Poisoned(e)) => {
             error!("[Plugin] VoiceController mutex is poisoned: {}", e);
+            capture_timing::finish(None, "controller_poisoned");
             return Err(Error::LockError(format!(
                 "VoiceController mutex is poisoned: {}",
                 e

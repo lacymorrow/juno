@@ -619,6 +619,21 @@ fn perform(app: &AppHandle, decision: recognizer::Decision) {
 }
 
 fn start_hold(app: &AppHandle, target: TriggerTarget) {
+    // The press, as early as Juno can see it: before the hold-edge queue, so
+    // the queue's own hop is inside the measurement rather than ahead of it.
+    // Every stage after this is timed from here (see
+    // `tauri_plugin_voice_transcription::capture_timing`).
+    match target {
+        TriggerTarget::Dictation => {
+            tauri_plugin_voice_transcription::capture_timing::press();
+        }
+        // The agent hold opens a microphone too, and it is not what this
+        // measures. Close any press still waiting so its stages cannot be
+        // credited to this one.
+        TriggerTarget::Agent => {
+            tauri_plugin_voice_transcription::capture_timing::finish(None, "agent_press")
+        }
+    }
     hold_edges::enqueue(app, hold_edges::HoldEdge::Press(target));
 }
 
