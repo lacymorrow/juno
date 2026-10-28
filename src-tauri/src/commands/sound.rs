@@ -415,19 +415,12 @@ pub async fn set_sound_enabled(
     let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
         .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
-    let mut audio_settings = settings_manager
-        .get_audio_settings()
-        .await
-        .map_err(|e| format!("Failed to load audio settings: {}", e))?;
-
-    audio_settings.sound_enabled = enabled;
-
     settings_manager
-        .set_audio_settings(&audio_settings)
+        .update_audio_settings(|audio| audio.sound_enabled = enabled)
         .await
         .map_err(|e| format!("Failed to save audio settings: {}", e))?;
 
-    // Update state for backward compatibility
+    // The cues read the switch from memory, so it is set here as well as saved
     state
         .set_sound_enabled(enabled)
         .map_err(|e| format!("Failed to set sound_enabled: {}", e))?;

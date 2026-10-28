@@ -402,9 +402,11 @@ async fn persist_mouse_control(app_handle: &AppHandle, value: &str) -> Result<()
     let manager = app_handle
         .try_state::<SettingsManager>()
         .ok_or_else(|| "Settings manager is not available".to_string())?;
-    let mut settings = manager.get_agent_settings().await?;
-    settings.mouse_control = value.to_string();
-    manager.set_agent_settings(&settings).await
+    let value = value.to_string();
+    manager
+        .update_agent_settings(|settings| settings.mouse_control = value)
+        .await
+        .map(|_| ())
 }
 
 #[cfg(test)]

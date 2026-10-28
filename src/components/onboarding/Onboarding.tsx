@@ -870,6 +870,10 @@ export default function OnboardingFlow({
   const phaseEnteredAtMsRef = useRef<number>(Date.now());
   const recordedStepIdsRef = useRef<Set<string>>(new Set());
   const completedRecordedRef = useRef<boolean>(false);
+  // Setup is finished once. Enter finishes the last screen as well as its
+  // button, the window outlives the first press by a beat, and a second press
+  // (or a held key) used to finish it again: Juno introduced herself twice.
+  const finishedRef = useRef<boolean>(false);
   // Tracks which optional permissions were never granted by the time the user
   // advanced past the permissions step — emitted as `onboarding_permission_skipped`.
   const previouslyGrantedRef = useRef<{ accessibility: boolean; screen_recording: boolean; microphone: boolean; input_monitoring: boolean }>(
@@ -1684,6 +1688,8 @@ export default function OnboardingFlow({
     if (currentStep < onboardingSteps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
+      if (finishedRef.current) return;
+      finishedRef.current = true;
       if (!completedRecordedRef.current) {
         completedRecordedRef.current = true;
         recordEvent("onboarding_completed", {
@@ -1704,6 +1710,8 @@ export default function OnboardingFlow({
 
   const handleSkip = () => {
     // Skip the current step by jumping to the end
+    if (finishedRef.current) return;
+    finishedRef.current = true;
     if (!completedRecordedRef.current) {
       completedRecordedRef.current = true;
       recordEvent("onboarding_completed", {
@@ -1744,6 +1752,8 @@ export default function OnboardingFlow({
       setCurrentStep(currentStep + 1);
     } else {
       // If this is the last step, complete onboarding
+      if (finishedRef.current) return;
+      finishedRef.current = true;
       if (!completedRecordedRef.current) {
         completedRecordedRef.current = true;
         recordEvent("onboarding_completed", {
@@ -1795,11 +1805,15 @@ export default function OnboardingFlow({
     .join(" and ");
 
   const handleRelaunch = async () => {
-    // Record completion first: a restart must not reopen setup.
-    try {
-      await onComplete();
-    } catch (error) {
-      console.warn("[Onboarding] could not record completion before restart:", error);
+    // Record completion first: a restart must not reopen setup. Once: a second
+    // press only retries the restart.
+    if (!finishedRef.current) {
+      finishedRef.current = true;
+      try {
+        await onComplete();
+      } catch (error) {
+        console.warn("[Onboarding] could not record completion before restart:", error);
+      }
     }
     try {
       await invoke(COMMANDS.PERMISSIONS_RESTART_AFTER_PERMISSIONS);
