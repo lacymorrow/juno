@@ -339,7 +339,60 @@ export function composeIsCompact({ face, state, provisional, composerActive, liv
   return true;
 }
 
+// === THE MINI VOICE CAPSULE ===
+
+/** The mini capsule at rest: room for the level bars and nothing else. */
+export const MINI_SHAPE: ShapeSize = { width: 56, height: IDLE_SHAPE.height, radius: IDLE_SHAPE.radius };
+
+/** What the mini capsule is showing: the mic is open, or the words are being decoded. */
+export type MiniVoice = "listening" | "transcribing";
+
+/** The words a screen reader gets for the mini capsule, which shows none. */
+export const MINI_LABELS: Record<MiniVoice, string> = {
+  listening: "Listening",
+  transcribing: "Transcribing",
+};
+
+/**
+ * Listening or transcribing in the small compose bar is a capsule with a
+ * level indicator and no words (Superwhisper's shape). Anything the person is
+ * writing, or live words they asked to read, is the full bar instead, and so
+ * is every other state (Working, an error, a reply being spoken), which has
+ * something to say.
+ */
+export function miniVoiceFor({
+  face,
+  compact,
+  state,
+  provisional,
+}: {
+  face: Face;
+  compact: boolean;
+  state: string;
+  provisional?: boolean;
+}): MiniVoice | null {
+  if (face !== "compose" || !compact) return null;
+  if (isRecording(state, provisional)) return "listening";
+  return state === UI.BAR_STATES_TRANSCRIBING ? "transcribing" : null;
+}
+
+/** One reveal control and the gap after it, as on the hover capsule. */
+const MINI_BUTTON_PX = 26;
+/** The level mark and the pad around the revealed controls. */
+const MINI_FRAME_PX = 32;
+
+/**
+ * The mini capsule: the resting mark, or, when hovered or focused, wide
+ * enough for its controls (Send and Cancel while listening, Stop after).
+ */
+export function miniShapeFor(revealed: boolean, buttons: number): ShapeSize {
+  if (!revealed || buttons <= 0) return { ...MINI_SHAPE };
+  return { ...MINI_SHAPE, width: Math.max(MINI_SHAPE.width, MINI_FRAME_PX + buttons * MINI_BUTTON_PX) };
+}
+
 export interface ShapeInput {
+  /** The mini voice capsule (`miniVoiceFor`) and how much of it shows. */
+  mini?: { revealed: boolean; buttons: number } | null;
   hovered: boolean;
   /** Controls on the hover capsule (`hoverShapeFor`). */
   hoverButtons?: number;
@@ -356,7 +409,7 @@ export interface ShapeInput {
 /** The shape's size for a face. */
 export function shapeFor(
   face: Face,
-  { hovered, hoverButtons = 2, chat, composerHeight, compact = false, contentHeight }: ShapeInput,
+  { hovered, hoverButtons = 2, chat, composerHeight, compact = false, contentHeight, mini = null }: ShapeInput,
 ): ShapeSize {
   if (face === "idle") return hovered ? hoverShapeFor(hoverButtons) : { ...IDLE_SHAPE };
   if (face === "chat") {
@@ -364,6 +417,7 @@ export function shapeFor(
     return { width: size.width, height: Math.max(size.height, composerHeight), radius: 22 };
   }
   if (face === "compose") {
+    if (mini) return miniShapeFor(mini.revealed, mini.buttons);
     return { width: compact ? COMPACT_COMPOSE_WIDTH : ISLAND_WIDTH, height: composerHeight, radius: 18 };
   }
   const height = Math.min(SHAPE_MAX_HEIGHT, Math.ceil(composerHeight + Math.max(0, contentHeight)));

@@ -91,6 +91,8 @@ import {
   isRecording,
   isRestingState,
   isWorkingState,
+  miniVoiceFor,
+  MINI_LABELS,
   latestTurn,
   lingerShouldRun,
   shapeFor,
@@ -247,6 +249,21 @@ function LevelBars({ level }: { level: number }) {
           key={i}
           className="block w-[2px] rounded-full bg-white/80"
           style={{ height: 3 + Math.round(11 * l * w), transition: "height 90ms linear" }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Three dots breathing in turn: Juno is working on it, and says nothing. Still under reduced motion. */
+function QuietWork() {
+  return (
+    <div className="flex h-6 w-6 shrink-0 items-center justify-center gap-[3px]" aria-hidden="true" data-testid="island-quiet-work">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="block size-[3px] rounded-full bg-white/70 motion-safe:animate-pulse"
+          style={{ animationDelay: `${i * 160}ms` }}
         />
       ))}
     </div>
@@ -770,6 +787,15 @@ export function IslandBar() {
     livePartials,
   });
 
+  // Listening or transcribing in the small bar: a capsule with a level
+  // indicator and no words. Its controls show on hover or keyboard focus.
+  const miniVoice = miniVoiceFor({
+    face,
+    compact,
+    state: bar.barState,
+    provisional: bar.transcriptionProvisional,
+  });
+
   // ── Size ──
   const [measureEl, setMeasureEl] = useState<HTMLDivElement | null>(null);
   const [bodyH, setBodyH] = useState(0);
@@ -803,9 +829,11 @@ export function IslandBar() {
     hoverButtons,
     chat: chatSizeInWindow(layout.size, roomForContent(layout)),
     compact,
+    mini: miniVoice ? { revealed: hovered || focusWithin, buttons: (recording ? 1 : 0) + (stopKind ? 1 : 0) } : null,
     composerHeight: composerH,
     contentHeight: HEADER_H + bodyH + BODY_PAD_BOTTOM,
   });
+  const miniHidden = !!miniVoice && !(hovered || focusWithin);
 
   // ── Where it is drawn, and what takes the mouse ──
   const suggestionsH =
@@ -1204,14 +1232,15 @@ export function IslandBar() {
             : { duration: 0.18, delay: 0.06, ease: "easeOut" }
       }
       className={cn(
-        "absolute inset-x-0 flex flex-col pl-4 pr-2.5",
+        "absolute inset-x-0 flex flex-col",
+        miniVoice ? "justify-center px-1.5" : "pl-4 pr-2.5",
         idle && "pointer-events-none",
         beside && "border-t",
         "border-white/[0.08]",
       )}
       style={{
-        height: composerH,
-        paddingTop: pasted.images.length ? COMPOSER_PAD_Y : (textBlockH - composer.height) / 2,
+        height: miniVoice ? shape.height : composerH,
+        paddingTop: miniVoice ? 0 : pasted.images.length ? COMPOSER_PAD_Y : (textBlockH - composer.height) / 2,
         bottom: 0,
       }}
       onClick={(e) => e.stopPropagation()}
@@ -1242,13 +1271,19 @@ export function IslandBar() {
           ))}
         </div>
       )}
-      <div className="flex items-start gap-2">
-        <div className="relative min-w-0 flex-1">
+      {miniVoice && (
+        // The capsule shows no words; this is what a screen reader hears.
+        <span role="status" aria-live="polite" className="sr-only" data-testid="island-mini-status">
+          {MINI_LABELS[miniVoice]}
+        </span>
+      )}
+      <div className={cn("flex gap-2", miniVoice ? "h-full items-center justify-center" : "items-start")}>
+        <div className={cn("relative min-w-0 flex-1", miniVoice && "pointer-events-none absolute size-px flex-none overflow-hidden opacity-0")}>
           <textarea
             ref={composer.attach}
             rows={1}
             value={draft}
-            tabIndex={idle ? -1 : 0}
+            tabIndex={idle || miniVoice ? -1 : 0}
             onChange={(e) => {
               engage();
               changeDraft(e.target.value);
@@ -1286,7 +1321,7 @@ export function IslandBar() {
               "text-[13px] leading-[18px] tracking-[-0.01em] text-white/90",
             )}
           />
-          {draft === "" && (
+          {draft === "" && !miniVoice && (
             <div className="pointer-events-none absolute inset-x-0 top-0 flex" aria-hidden="true" data-testid="island-placeholder">
               <IslandWords words={placeholder} className="h-[18px] leading-[18px]" />
             </div>
@@ -1298,10 +1333,16 @@ export function IslandBar() {
             ghostClassName="text-white/25"
           />
         </div>
-        <div className="flex h-[18px] shrink-0 items-center gap-1">
+        <div
+          className={cn("flex shrink-0 items-center gap-1", miniVoice ? "h-full" : "h-[18px]")}
+          data-testid={miniVoice ? "island-mini" : undefined}
+          data-mini={miniVoice ?? undefined}
+        >
           {recording ? (
             <LevelBars level={bar.audioLevel} />
-          ) : working ? null : (
+          ) : working ? (
+            miniVoice ? <QuietWork /> : null
+          ) : (
             tip(
               "compose-mic",
               "Talk to Juno",
@@ -1311,6 +1352,7 @@ export function IslandBar() {
               talkShortcut,
             )
           )}
+          <span className={cn("flex items-center gap-1", miniHidden && "pointer-events-none absolute right-1.5 opacity-0")}>
           {recording
             ? tip(
                 "send",
@@ -1361,6 +1403,7 @@ export function IslandBar() {
                 {stopKind === "stop" ? <Square className="size-2.5 fill-current" /> : <X className="size-3" />}
               </button>,
             )}
+          </span>
         </div>
       </div>
     </motion.div>
