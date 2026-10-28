@@ -1720,7 +1720,10 @@ mod tests {
         let reply = state.get_system_voice().unwrap();
         assert_eq!(greeting, None);
         assert_eq!(reply, None);
-        assert_eq!(crate::tts::system::say_arguments("hi", None), vec!["hi"]);
+        assert_eq!(
+            crate::tts::system::say_arguments("hi", None),
+            vec!["--", "hi"]
+        );
     }
 
     // -- reading the System Voice ------------------------------------------
