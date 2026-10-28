@@ -65,6 +65,19 @@ const FIRST_CHECK_DELAY: Duration = Duration::from_secs(20);
 /// and a release cadence of several per day. A check costs one small GET.
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
+/// The longest the feed read may take. A connection that hangs (a network that
+/// dropped mid-request, a Mac waking onto a dead socket) never errors on its
+/// own, and the check would sit in `Checking` for good.
+const FEED_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The longest a whole check, download included, may take before it is given
+/// up as failed. Generous because the download is the bulk of it.
+const CHECK_DEADLINE: Duration = Duration::from_secs(30 * 60);
+
+/// The UI hears about download progress at most this often, in bytes. Chunks
+/// are small; one event per chunk is thousands of events for one download.
+const PROGRESS_STEP: u64 = 512 * 1024;
+
 /// Which builds this install accepts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -181,6 +194,29 @@ fn status_cell() -> &'static Mutex<UpdateStatus> {
 /// start a second download of the same bytes.
 static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
+/// Holds the one-check-at-a-time flag and gives it back when dropped, on every
+/// path out including a panic. Clearing it by hand at the end of the check
+/// left it set for good if the check ever unwound, and every later check,
+/// scheduled or pressed, then returned "already running" without doing
+/// anything.
+struct InFlightClaim<'a>(&'a AtomicBool);
+
+impl<'a> InFlightClaim<'a> {
+    fn take(flag: &'a AtomicBool) -> Option<Self> {
+        if flag.swap(true, Ordering::SeqCst) {
+            None
+        } else {
+            Some(Self(flag))
+        }
+    }
+}
+
+impl Drop for InFlightClaim<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 /// A downloaded, signature-verified update waiting for Juno to quit.
 struct PendingInstall {
     update: Update,
@@ -250,19 +286,32 @@ pub fn current_status() -> UpdateStatus {
     }
 }
 
-/// Apply `mutate` to the status and tell the UI, in that order.
-fn update_status<F: FnOnce(&mut UpdateStatus)>(app: &AppHandle, mutate: F) {
-    let snapshot = {
-        let mut guard = match status_cell().lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        mutate(&mut guard);
-        guard.clone()
+/// Apply `mutate` to the status without telling anyone. Returns the result.
+fn mutate_status<F: FnOnce(&mut UpdateStatus)>(mutate: F) -> UpdateStatus {
+    let mut guard = match status_cell().lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
     };
-    if let Err(e) = app.emit(events::updates::STATUS, &snapshot) {
+    mutate(&mut guard);
+    guard.clone()
+}
+
+fn announce_status(app: &AppHandle, snapshot: &UpdateStatus) {
+    if let Err(e) = app.emit(events::updates::STATUS, snapshot) {
         debug!("[Updater] no listener for the status event: {e}");
     }
+}
+
+/// Apply `mutate` to the status and tell the UI, in that order.
+fn update_status<F: FnOnce(&mut UpdateStatus)>(app: &AppHandle, mutate: F) {
+    let snapshot = mutate_status(mutate);
+    announce_status(app, &snapshot);
+}
+
+/// Whether enough of the download has arrived since the UI last heard to be
+/// worth another event. The last bytes always are.
+fn progress_worth_announcing(seen: u64, announced: u64, total: Option<u64>) -> bool {
+    seen.saturating_sub(announced) >= PROGRESS_STEP || total.is_some_and(|total| seen >= total)
 }
 
 /// Look for a newer build, and download it if there is one. It installs when
@@ -272,12 +321,21 @@ fn update_status<F: FnOnce(&mut UpdateStatus)>(app: &AppHandle, mutate: F) {
 /// immediately rather than queueing. Errors land in the status rather than
 /// propagating, because most callers are timers with nobody to tell.
 pub async fn check_and_install(app: &AppHandle, channel: UpdateChannel) {
-    if IN_FLIGHT.swap(true, Ordering::SeqCst) {
+    let Some(_claim) = InFlightClaim::take(&IN_FLIGHT) else {
         debug!("[Updater] a check is already running; skipping this one");
         return;
-    }
+    };
 
-    let outcome = run_check(app, channel).await;
+    // A check that never answers must not hold the slot: it ends as a failure
+    // and the next one, scheduled or pressed, gets to run.
+    let outcome = match tokio::time::timeout(CHECK_DEADLINE, run_check(app, channel)).await {
+        Ok(outcome) => outcome,
+        Err(_) => Err(format!(
+            "the {} check did not finish in {} minutes",
+            channel.as_str(),
+            CHECK_DEADLINE.as_secs() / 60
+        )),
+    };
 
     if let Err(message) = outcome {
         warn!("[Updater] {message}");
@@ -286,8 +344,6 @@ pub async fn check_and_install(app: &AppHandle, channel: UpdateChannel) {
             status.error = Some(failure_line(&message).to_string());
         });
     }
-
-    IN_FLIGHT.store(false, Ordering::SeqCst);
 }
 
 /// What Settings shows after a check that did not finish. The raw reason
@@ -330,9 +386,15 @@ async fn run_check(app: &AppHandle, channel: UpdateChannel) -> Result<(), String
         .build()
         .map_err(|e| format!("could not build the updater: {e}"))?;
 
-    let found = updater
-        .check()
+    let found = tokio::time::timeout(FEED_TIMEOUT, updater.check())
         .await
+        .map_err(|_| {
+            format!(
+                "the {} feed did not answer in {}s",
+                channel.as_str(),
+                FEED_TIMEOUT.as_secs()
+            )
+        })?
         .map_err(|e| format!("could not read the {} feed: {e}", channel.as_str()))?;
 
     let Some(update) = found else {
@@ -377,15 +439,23 @@ async fn run_check(app: &AppHandle, channel: UpdateChannel) -> Result<(), String
 
     // `on_chunk` is called per chunk with the chunk's length, so the running
     // total is ours to keep. The closure is synchronous and must stay cheap:
-    // it runs between reads of the socket.
+    // it runs between reads of the socket. The status always holds the true
+    // count; the UI is told every `PROGRESS_STEP` bytes.
     let progress_app = app.clone();
+    let mut seen: u64 = 0;
+    let mut announced: u64 = 0;
     let bytes = update
         .download(
             move |chunk, total| {
-                update_status(&progress_app, |status| {
-                    status.downloaded_bytes += chunk as u64;
+                seen += chunk as u64;
+                let snapshot = mutate_status(|status| {
+                    status.downloaded_bytes = seen;
                     status.total_bytes = total;
                 });
+                if progress_worth_announcing(seen, announced, total) {
+                    announced = seen;
+                    announce_status(&progress_app, &snapshot);
+                }
             },
             || debug!("[Updater] download finished and verified"),
         )
@@ -556,6 +626,56 @@ mod tests {
             "{endpoint}"
         );
         assert!(!endpoint.contains("/releases/latest/"), "{endpoint}");
+    }
+
+    #[test]
+    fn one_check_at_a_time_and_the_slot_comes_back_when_it_ends() {
+        let flag = AtomicBool::new(false);
+        let first = InFlightClaim::take(&flag);
+        assert!(first.is_some());
+        assert!(InFlightClaim::take(&flag).is_none(), "a second check waits");
+        drop(first);
+        assert!(
+            InFlightClaim::take(&flag).is_some(),
+            "the slot is free again"
+        );
+    }
+
+    #[test]
+    fn the_slot_comes_back_when_a_check_panics() {
+        let flag = AtomicBool::new(false);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _claim = InFlightClaim::take(&flag);
+            panic!("the check blew up");
+        }));
+        assert!(result.is_err());
+        assert!(
+            InFlightClaim::take(&flag).is_some(),
+            "a panic must not strand every later check as already running"
+        );
+    }
+
+    #[test]
+    fn download_progress_is_announced_in_steps_and_at_the_end() {
+        assert!(!progress_worth_announcing(16 * 1024, 0, Some(50_000_000)));
+        assert!(progress_worth_announcing(
+            PROGRESS_STEP,
+            0,
+            Some(50_000_000)
+        ));
+        assert!(!progress_worth_announcing(
+            PROGRESS_STEP + 10,
+            PROGRESS_STEP,
+            None
+        ));
+        // The last chunk is announced however small.
+        assert!(progress_worth_announcing(1_000, 900, Some(1_000)));
+    }
+
+    #[test]
+    fn a_hung_check_is_bounded() {
+        assert!(FEED_TIMEOUT < CHECK_DEADLINE);
+        assert!(CHECK_DEADLINE < CHECK_INTERVAL);
     }
 
     #[test]
