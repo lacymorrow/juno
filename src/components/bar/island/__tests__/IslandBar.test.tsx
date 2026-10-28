@@ -1200,6 +1200,10 @@ describe("IslandBar: Open chat from the hover capsule", () => {
     expect(face()).toBe("answer");
     // Not also a click on the capsule, which would open the composer.
     expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(false);
+    // The caret is in the box under the answer, and the window is key.
+    expect(document.activeElement).toBe(composer());
+    expect(setFocus).toHaveBeenCalled();
+    expect(screen.getByTestId("answer")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("island-expand"));
     expect(face()).toBe("chat");
     await escape();

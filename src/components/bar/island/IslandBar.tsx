@@ -636,7 +636,7 @@ export function IslandBar() {
   // Show/Hide Chat (the bar's right-click menu): the chat face, or back to
   // the capsule.
   useEventListener(EVENTS.BAR_TOGGLE_PANE, () => {
-    if (faceRef.current === "chat") settle();
+    if (faceRef.current === "chat") putAway();
     else openFullChat();
   });
 
@@ -722,18 +722,22 @@ export function IslandBar() {
     );
   }, []);
   // The hover expand climbs one size: the small chat (the last answer), whose
-  // own expand opens the full chat. Before any turn there is no answer to
-  // show, so it opens the full chat, empty, with its example prompts.
+  // own expand opens the full chat. Either way the window is made key and the
+  // caret is in the box, with the last answer showing above it. Before any
+  // turn there is no answer to show, so it opens the full chat, empty, with
+  // its example prompts.
   const expandFromHover = useCallback(
     (e: ReactMouseEvent) => {
       e.stopPropagation();
       if (hasTurnRef.current) {
         openAnswer();
+        activateWindow();
+        focusComposer();
         return;
       }
       openFullChat();
     },
-    [openAnswer, openFullChat],
+    [openAnswer, openFullChat, focusComposer],
   );
   const stopKind = stopControl({
     face,
