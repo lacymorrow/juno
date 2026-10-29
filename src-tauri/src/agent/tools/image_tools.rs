@@ -567,6 +567,18 @@ mod tests {
     use super::*;
     use crate::agent::providers::config::ProviderConfig;
 
+    /// The three `select_provider_*` tests set and clear the same process
+    /// environment variables, and tests run in parallel: one clearing
+    /// `OPENAI_API_KEY` while another relied on it failed CI at random. They
+    /// take turns. A failed test poisons the lock; the next one still runs.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn empty_cfg() -> ProviderConfig {
         ProviderConfig::default()
     }
@@ -589,6 +601,7 @@ mod tests {
 
     #[test]
     fn select_provider_is_none_when_no_keys_set() {
+        let _env = env_lock();
         // Environment may bleed from the host shell in CI. Scrub to simulate
         // a Claude-login-only user.
         let gemini = std::env::var("GEMINI_API_KEY").ok();
@@ -609,6 +622,7 @@ mod tests {
 
     #[test]
     fn select_provider_prefers_gemini_over_openai() {
+        let _env = env_lock();
         let prior_g = std::env::var("GEMINI_API_KEY").ok();
         let prior_o = std::env::var("OPENAI_API_KEY").ok();
         std::env::set_var("GEMINI_API_KEY", "test-g");
@@ -629,6 +643,7 @@ mod tests {
 
     #[test]
     fn select_provider_falls_back_to_openai() {
+        let _env = env_lock();
         let prior_g = std::env::var("GEMINI_API_KEY").ok();
         let prior_o = std::env::var("OPENAI_API_KEY").ok();
         std::env::remove_var("GEMINI_API_KEY");
