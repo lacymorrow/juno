@@ -78,32 +78,42 @@ pub fn setup_application_integration(app: &tauri::App) -> Result<(), Box<dyn std
     Ok(())
 }
 
-/// The microphone is running: now, and only now, the person is shown and told.
+/// A voice session's start has asked for the microphone: show it, now.
 ///
-/// The plugin sends its started event from the audio thread once the device
-/// is open, so this is the first moment Juno is really listening. Everything
-/// a start shows follows it, for dictation and for Talk to Juno alike: the
-/// bar (dictation mode, then listening), the tray and the `dictation-active` /
-/// capture announcements. Before, the bar expanded on the press, and the
-/// microphone came up most of a second later, so the first words were spoken
-/// into a pill that looked ready and was not.
+/// Called by both start handlers the moment `start_dictation` returns, which
+/// is after the audio thread has been told to open the device and before it
+/// has. The microphone goes first and the rest runs beside it, on its own
+/// task, so nothing here holds the device up: the bar (dictation mode, then
+/// listening), the tray and the `dictation-active` / capture announcements.
+///
+/// It used to wait for the audio thread's started event, so the pill never
+/// said "listening" before the device was open. That put every surface
+/// 0.2 to 0.5 s behind the key, which reads as lag, not honesty. The device
+/// is open within that window (80 to 300 ms measured), before a person who
+/// just pressed a key starts talking, and a device that never opens ends the
+/// session through `voice_capture::FAILED`, which takes all of this down
+/// again (see `setup_capture_failure_listener`).
 ///
 /// The start cue is not here. It belongs to the gesture (see
-/// `commands::sound`): it plays on the tap or at the hold threshold, and a
-/// cue that waited for the device landed too late to sound like the key.
+/// `commands::sound`): it plays on the tap or at the hold threshold.
 ///
 /// Only for a session still open and recording. A start whose session was
-/// ended while the microphone opened (a quick tap, the stop key) gets nothing:
-/// its start handler closes the microphone, and a cue or a pill for it would
-/// be announcing a recording that is already over.
-async fn show_live_microphone(app_handle: &AppHandle) {
+/// already ended (a quick tap, the stop key) gets nothing.
+pub(crate) fn announce_listening(app_handle: &AppHandle) {
+    let app_handle = app_handle.clone();
+    safe_spawn_async_task(move || async move {
+        show_listening(&app_handle).await;
+    });
+}
+
+async fn show_listening(app_handle: &AppHandle) {
     let app_state = app_handle.state::<state::AppState>();
     let Some(session) = app_state.current_voice_session().filter(|s| s.is_live()) else {
-        info!("[Voice] The microphone is live but no session is waiting for it; showing nothing");
+        info!("[Voice] Nothing is listening any more; showing nothing");
         return;
     };
     info!(
-        "[Voice] Microphone live for voice session {}",
+        "[Voice] Showing voice session {} as listening",
         session.describe()
     );
 
@@ -163,19 +173,6 @@ async fn show_live_microphone(app_handle: &AppHandle) {
 
 /// Setup voice transcription event listeners for specialized behavior
 fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
-    // Listen for voice transcription start events
-    let app_handle_for_listener = app_handle.clone();
-    app_handle.listen(
-        constants::events::voice_transcription::DICTATION_STARTED,
-        move |_event| {
-            info!("[Event] Received voice-transcription:started event");
-            let app_handle_clone = app_handle_for_listener.clone();
-            safe_spawn_async_task(move || async move {
-                show_live_microphone(&app_handle_clone).await;
-            });
-        },
-    );
-
     // Listen for app-dictation-finished events to trigger the agent (legacy UI path)
     let app_handle_for_agent_listener = app_handle.clone();
     app_handle.listen(constants::events::dictation::FINISHED, move |event| {
@@ -539,6 +536,13 @@ fn setup_capture_failure_listener(app_handle: &AppHandle) {
         safe_spawn_async_task(move || async move {
             let app_state = app_handle_clone.state::<state::AppState>();
 
+            // The bar showed this session as listening when it started, not
+            // when the device opened (`announce_listening`), so a Talk to
+            // Juno capture has its own phase to take down as well.
+            let was_agent = app_state
+                .current_voice_session()
+                .is_some_and(|s| s.target == VoiceTarget::Agent);
+
             // A dictation whose microphone never opened leaves the controller
             // believing it is recording, and the next attempt is refused with
             // "already dictating". Ending it here is what keeps one failure
@@ -558,6 +562,18 @@ fn setup_capture_failure_listener(app_handle: &AppHandle) {
                 "the microphone never opened",
             )
             .await;
+
+            if was_agent {
+                if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
+                    &app_handle_clone,
+                    false,
+                    CaptureBar::Follows,
+                )
+                .await
+                {
+                    error!("[VoiceCapture] Could not close the capture phase: {e}");
+                }
+            }
 
             if let Err(e) = app_state.set_always_listening_active(false) {
                 error!("[VoiceCapture] Could not clear the listening flag: {e}");
@@ -1168,6 +1184,9 @@ async fn handle_agent_transcription_start(
                     return;
                 }
 
+                // The microphone has been asked for; show it now, beside it.
+                announce_listening(app_handle);
+
                 if attempt > 0 {
                     info!(
                         "[Agent Mode] Started agent transcription on retry {}",
@@ -1189,10 +1208,6 @@ async fn handle_agent_transcription_start(
                     warn!("[Agent Mode] Failed to register escape key for agent transcription: {} - continuing anyway", e);
                 }
 
-                // The capture phase (bar, tray, `agent-capture-active`) and
-                // the start cue are announced once the microphone is actually
-                // running, by `show_live_microphone`, not here: this returns
-                // while the device is still opening.
                 return;
             }
             Err(e) => {

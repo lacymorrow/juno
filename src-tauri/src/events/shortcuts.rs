@@ -794,9 +794,6 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
     } else {
         info!("[Dictation Input Shortcut] Tap mode - starting dictation mode transcription");
 
-        // The start cue follows the live microphone (`show_live_microphone`
-        // in integration.rs), not this tap: the microphone starts first.
-
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             // Emit dictation transcription start event instead of active event

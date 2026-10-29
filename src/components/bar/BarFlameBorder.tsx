@@ -36,8 +36,12 @@ function hexToRgb(hex: string): RGB {
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
-/** Per-frame ease toward the target (~350ms to settle at 60fps). */
-const APPROACH = 0.16;
+/**
+ * Per-frame ease toward the target (~150ms to settle at 60fps). The bar's
+ * state changes on the key; the colour only softens that change, it never
+ * holds it back.
+ */
+const APPROACH = 0.28;
 const EPS = 0.0015;
 const approach = (a: number, b: number) => a + (b - a) * APPROACH;
 
@@ -59,7 +63,9 @@ export interface BarFlameBorderProps {
 export function BarFlameBorder({ color, intensity, radius, pulse = false }: BarFlameBorderProps) {
   // Live, eased values the flame renders with (in a ref so the loop never
   // stales on a captured value).
-  const cur = useRef<{ c: RGB; i: number }>({ c: hexToRgb(color), i: intensity });
+  // Mounted the moment the bar goes active: start dark and fade up, so the
+  // glow arrives with the state rather than popping in at full strength.
+  const cur = useRef<{ c: RGB; i: number }>({ c: hexToRgb(color), i: 0 });
   const startedAt = useRef(performance.now());
   const [, rerender] = useReducer((x: number) => x + 1, 0);
 

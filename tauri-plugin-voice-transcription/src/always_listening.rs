@@ -214,7 +214,9 @@ fn open_capture_stream(
     )?;
 
     Ok(OpenCapture {
-        keepalive: Box::new((stream, resolved.device)),
+        // Dropped in order: the stream stops, then the waiting dictation
+        // stream is told the wake microphone is gone.
+        keepalive: Box::new((stream, resolved.device, devices::WakeMicHeld::new())),
         sample_rate,
         device_name: resolved.name,
         substituted_for: resolved.substituted_for,
