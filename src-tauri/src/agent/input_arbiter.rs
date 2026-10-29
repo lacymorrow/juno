@@ -1,5 +1,8 @@
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+// tokio's clock, which is the system clock in the app and can be paused in a
+// test, so the timing tests below measure the arbiter and not the runner.
+use tokio::time::Instant;
 
 use tokio::sync::{Mutex as TokioMutex, OwnedMutexGuard};
 use tracing::{debug, trace};
@@ -241,7 +244,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    // Paused time: the clock moves only when every task is waiting on it, so
+    // what is measured is exactly the sleeps, never a busy runner.
+    #[tokio::test(start_paused = true)]
     async fn enforces_cooldown_between_actions() {
         let cooldown = Duration::from_millis(30);
         let arbiter = InputArbiter::new(cooldown);
@@ -317,7 +322,9 @@ mod tests {
     /// If this ever fails, someone changed a reference point — most likely by
     /// recording a timestamp before the action instead of after it — and the
     /// two waits really have started stacking.
-    #[tokio::test]
+    // Paused time: the clock moves only when every task is waiting on it, so
+    // what is measured is exactly the sleeps, never a busy runner.
+    #[tokio::test(start_paused = true)]
     async fn action_floor_and_cooldown_overlap_rather_than_stack() {
         let cooldown = Duration::from_millis(60);
         // Stand-in for ACTION_COOLDOWN_MS, scaled down like `cooldown` is.
@@ -364,7 +371,9 @@ mod tests {
     /// floor must stay: it is the only spacing an AX-path action ever gets,
     /// and the only spacing between an AX action and the physical action
     /// after it.
-    #[tokio::test]
+    // Paused time: the clock moves only when every task is waiting on it, so
+    // what is measured is exactly the sleeps, never a busy runner.
+    #[tokio::test(start_paused = true)]
     async fn arbiter_imposes_nothing_after_ax_only_work() {
         // The cooldown is deliberately far larger than any plausible
         // scheduling delay. This test can only distinguish "the arbiter slept"
