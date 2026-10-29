@@ -1400,7 +1400,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // follows the focused session so parallel agents read apart.
   const focusedSessionColor =
     agentSessions.find((s) => s.focused)?.display_color ?? "#0A84FF";
-  const flame = flameForState(currentUiState, isWorking, focusedSessionColor);
+  const flame = flameForState(
+    currentUiState,
+    isWorking,
+    focusedSessionColor,
+    barState.isDictationMode,
+  );
 
   const showGlowBorder = useShowGlowBorder();
 
