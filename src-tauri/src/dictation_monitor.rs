@@ -369,10 +369,7 @@ pub async fn on_dictation_input_released(app_handle: &AppHandle) -> HoldRelease 
             // handler awaits speech-to-text finalization (seconds), and the old
             // end cue played only after that — which is exactly why stopping felt
             // unresponsive. Play it now so the user hears the release immediately.
-            crate::commands::sound::play_cue(
-                app_handle,
-                crate::commands::sound::Cue::GotIt(VoiceTarget::Dictation),
-            );
+            crate::commands::sound::play_release_cue(app_handle, VoiceTarget::Dictation);
 
             // Emit event to stop dictation normally
             if !deferred {
