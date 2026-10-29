@@ -89,7 +89,6 @@ import {
   faceFor,
   isInputState,
   isRecording,
-  isRestingState,
   isWorkingState,
   latestTurn,
   lingerShouldRun,
@@ -487,8 +486,6 @@ export function IslandBar() {
         sendInteraction(UI.INTERACTION_TYPES_BLUR),
       );
   }, [settle, composer.ref]);
-  const putAwayRef = useRef(putAway);
-  putAwayRef.current = putAway;
   /** A component's X: step back to the composer, the draft and caret kept. */
   const stepBack = useCallback(() => {
     setSteppedBack(key);
@@ -553,20 +550,9 @@ export function IslandBar() {
   // Only losing focus is reported. A press on the capsule makes the window
   // key, and reporting that would turn every drag into "open the composer".
   //
-  // Going somewhere else (another app, the desktop, another Juno window) puts
-  // a composer nobody is using away: the island is the idle capsule again.
-  // Rust's press-outside event covers the case where no focus change reaches
-  // the page (the box was opened without the window ever becoming key). An
-  // answer, a component, the chat or anything Juno is doing stays: those are
-  // being shown, and the ring or Escape puts them away.
-  const leftForElsewhere = useCallback(() => {
-    if (faceRef.current !== "compose") return;
-    const state = barRef.current.barState;
-    if (!isInputState(state) && !isRestingState(state)) return;
-    // A draft is kept, out of sight, the same as Escape.
-    putAwayRef.current();
-  }, []);
-  useEventListener(EVENTS.SYSTEM_MOUSE_PRESSED_OUTSIDE, leftForElsewhere);
+  // A click somewhere else is the shared ladder's (`useEscapeToIdle`): the
+  // chat stays once while a draft is in the box, then the capsule, then
+  // hidden. Focus loss only folds a composer with nothing typed in it.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let mounted = true;
@@ -577,7 +563,6 @@ export function IslandBar() {
         // after a step back folds away.
         if (!draftRef.current.trim()) setComposerHeld(false);
         void sendInteraction(UI.INTERACTION_TYPES_BLUR);
-        leftForElsewhere();
       })
       .then((fn) => {
         if (mounted) unlisten = fn;
@@ -694,6 +679,8 @@ export function IslandBar() {
     overlayOpen: face === "answer" || face === "component" || face === "chat",
     composerOpen: face === "compose",
     popupOpen: skill.open,
+    draftPresent: draft.trim() !== "" || pasted.images.length > 0,
+    putAway,
     collapse: collapseOneRung,
     report: reportEscape,
     climb: (to: ClimbTarget) => {
