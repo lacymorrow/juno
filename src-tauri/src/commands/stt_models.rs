@@ -946,20 +946,10 @@ pub async fn cancel_stt_model_download(app: AppHandle) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 fn apply_engine_to_controllers(app: &AppHandle, engine: Arc<dyn TranscriptionEngine>) {
+    // A busy or recording controller takes it at its next start, never by
+    // ending the recording in progress.
     if let Some(vc_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
-        match vc_state.try_lock() {
-            Ok(mut vc) => {
-                if let Err(e) = vc.update_engine(engine.clone()) {
-                    warn!("[SttModels] VoiceController engine swap failed: {}", e);
-                }
-            }
-            Err(std::sync::TryLockError::WouldBlock) => {
-                warn!("[SttModels] VoiceController busy; new engine applies on next recording");
-            }
-            Err(std::sync::TryLockError::Poisoned(e)) => {
-                error!("[SttModels] VoiceController mutex poisoned: {}", e);
-            }
-        }
+        tauri_plugin_voice_transcription::controller::offer_engine(&vc_state, engine.clone());
     }
     if let Some(al_state) = app.try_state::<Arc<Mutex<AlwaysListeningController>>>() {
         match al_state.try_lock() {

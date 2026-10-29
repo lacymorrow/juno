@@ -4,6 +4,10 @@ import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 import { stopTTS } from "@/lib/ttsService";
+import {
+  applyDictationForceReset,
+  dictationStateLabel,
+} from "@/lib/dictationState";
 import type { ChatMessage, ResponseExportInput } from "@/types/chat";
 
 import { AppHeader } from "@/components/AppHeader";
@@ -44,7 +48,6 @@ import { useUpdater } from "@/hooks/useUpdater";
  */
 const TOAST_IDS = {
   agentMode: "agent-mode",
-  dictationReset: "dictation-reset",
 } as const;
 
 function App() {
@@ -279,24 +282,19 @@ function App() {
     onStateChanged: useCallback(
       (event: any) => {
         console.log("Dictation state changed:", event);
-        setDictationState(event.new_state);
-
-        // Update UI based on dictation state changes
-        if (event.new_state === "active") {
-          setIsDictationActive(true);
-        } else if (event.new_state === "idle") {
-          setIsDictationActive(false);
-        }
+        // Whether dictation is on is `dictation-active`'s to say (below);
+        // this only records the state for display.
+        setDictationState(dictationStateLabel(event.new_state));
       },
-      [setDictationState, setIsDictationActive],
+      [setDictationState],
     ),
+    // Every coordinated stop (Escape, the Stop button) resets dictation,
+    // dictating or not. Routine, so it is logged and never shown.
     onForceReset: useCallback(
       (reason: any) => {
-        console.log("Dictation force reset:", reason);
-        setDictationState("idle");
-        setIsDictationActive(false);
-        toast.error(`Dictation reset: ${reason}`, {
-          id: TOAST_IDS.dictationReset,
+        applyDictationForceReset(reason, {
+          setDictationState,
+          setIsDictationActive,
         });
       },
       [setDictationState, setIsDictationActive],

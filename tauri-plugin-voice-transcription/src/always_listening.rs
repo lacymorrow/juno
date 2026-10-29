@@ -407,6 +407,7 @@ impl AlwaysListeningController {
             Err(e) => {
                 capture_failure::report(
                     &app_handle,
+                    capture_failure::CaptureSource::Wake,
                     &CaptureStartFailure::EngineUnavailable {
                         detail: e.to_string(),
                     },
@@ -423,7 +424,11 @@ impl AlwaysListeningController {
         let opened = match capture_opener(audio_data_tx) {
             Ok(opened) => opened,
             Err(failure) => {
-                capture_failure::report(&app_handle, &failure);
+                capture_failure::report(
+                    &app_handle,
+                    capture_failure::CaptureSource::Wake,
+                    &failure,
+                );
                 return;
             }
         };

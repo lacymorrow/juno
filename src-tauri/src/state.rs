@@ -18,8 +18,9 @@ pub mod voice_session;
 use crate::commands::shell::ShellSessions;
 pub use desktop_wrapper::DesktopWrapper;
 pub use voice_session::{
-    dictation_tap_means_stop, ClaimRejection, SessionClaim, StartRefused, VoicePhase, VoiceSession,
-    VoiceSessionId, VoiceSessionRegistry, VoiceStartMethod, VoiceTarget,
+    dictation_tap_means_stop, start_landing, ClaimRejection, SessionClaim, StartLanding,
+    StartRefused, VoicePhase, VoiceSession, VoiceSessionId, VoiceSessionRegistry, VoiceStartMethod,
+    VoiceTarget,
 };
 
 // Import the BrowserController for persistent storage

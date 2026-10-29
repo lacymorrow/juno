@@ -370,22 +370,6 @@ fn setup_force_stop_listeners(app_handle: &AppHandle) {
             });
         },
     );
-
-    // Listen for force cleanup events (stuck state recovery)
-    let app_handle_for_force_cleanup = app_handle.clone();
-    app_handle.listen(
-        constants::events::dictation::TRANSCRIPTION_FORCE_CLEANUP,
-        move |_event| {
-            warn!(
-            "[Event] Received dictation-transcription-force-cleanup event - recovering stuck state"
-        );
-
-            let app_handle_clone = app_handle_for_force_cleanup.clone();
-            safe_spawn_async_task(move || async move {
-                handle_dictation_state_cleanup(&app_handle_clone).await;
-            });
-        },
-    );
 }
 
 /// Handle voice controller force stop with timeout protection
@@ -394,16 +378,22 @@ async fn handle_voice_controller_force_stop(app_handle: &AppHandle) {
     // wrong. Claiming matters because this finalises the audio, and a
     // transcript with no session to own it is dropped rather than delivered.
     let app_state = app_handle.state::<state::AppState>();
-    match app_state.claim_voice_commit(SessionClaim::Current) {
-        Ok(session) => info!(
-            "[Dictation Mode] Force stop is finalising voice session {}",
-            session.describe()
-        ),
-        Err(rejection) => warn!(
-            "[Dictation Mode] Force stop with no session to claim: {}",
-            rejection.reason()
-        ),
-    }
+    let committed = match app_state.claim_voice_commit(SessionClaim::Current) {
+        Ok(session) => {
+            info!(
+                "[Dictation Mode] Force stop is finalising voice session {}",
+                session.describe()
+            );
+            Some(session.id)
+        }
+        Err(rejection) => {
+            warn!(
+                "[Dictation Mode] Force stop with no session to claim: {}",
+                rejection.reason()
+            );
+            None
+        }
+    };
 
     // Force stop the voice controller with timeout only if it exists
     match app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
@@ -417,8 +407,22 @@ async fn handle_voice_controller_force_stop(app_handle: &AppHandle) {
             );
 
             match stop_with_timeout.await {
-                Ok(Ok(_)) => {
+                Ok(Ok(true)) => {
                     info!("[Dictation Mode] Force stop completed successfully");
+                }
+                Ok(Ok(false)) => {
+                    // Nothing was recording, so no result is coming for the
+                    // session this claimed. Left Finishing, it would refuse
+                    // every later start.
+                    if let Some(id) = committed {
+                        if app_state.claim_voice_discard(SessionClaim::Id(id)).is_ok() {
+                            crate::commands::dictation::end_dictation_session(
+                                app_handle,
+                                "force stop found nothing recording",
+                            )
+                            .await;
+                        }
+                    }
                 }
                 Ok(Err(e)) => {
                     error!("[Dictation Mode] Force stop failed: {}", e);
@@ -453,44 +457,6 @@ async fn handle_voice_controller_force_stop(app_handle: &AppHandle) {
     }
 }
 
-/// Handle dictation state cleanup for stuck state recovery
-async fn handle_dictation_state_cleanup(app_handle: &AppHandle) {
-    // Reset dictation input monitor state
-    crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-    // Force clean up app state
-    let app_state = app_handle.state::<state::AppState>();
-
-    // Recovering from a stuck state means nothing that was open is still
-    // wanted, so the session goes with it. Nothing here finalises audio, so
-    // there is no transcript to keep an owner for.
-    if let Ok(session) = app_state.claim_voice_discard(SessionClaim::Current) {
-        warn!(
-            "[Dictation Mode] Force cleanup is discarding voice session {}",
-            session.describe()
-        );
-    }
-    if let Err(e) = app_state.set_dictation_active(false) {
-        warn!("Failed to reset dictation active state: {}", e);
-    }
-
-    // Update floating bar manager
-    let app_handle_for_bar = app_handle.clone();
-    safe_spawn_async_task(move || async move {
-        commands::ui_commands::handle_dictation_mode_change(&app_handle_for_bar, false).await;
-    });
-
-    // Emit cleanup complete event
-    if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
-        error!(
-            "[Dictation Mode] Failed to emit dictation-active event: {}",
-            e
-        );
-    }
-
-    info!("[Dictation Mode] Force cleanup completed");
-}
-
 /// Which target the current wake-word activation should route to. Set when the
 /// always-listening engine reports a matched phrase, read when the follow-up
 /// transcription arrives. Defaults to the agent.
@@ -518,6 +484,43 @@ fn voice_target_for_phrase(
         .unwrap_or(crate::triggers::TriggerTarget::Agent)
 }
 
+/// What a `voice-capture:failed` has to unwind, read from its `source`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CaptureFailureScope {
+    /// A recording's microphone (dictation or a spoken query) never opened.
+    recording: bool,
+    /// The wake-phrase engine's microphone never opened.
+    wake: bool,
+}
+
+/// Read the scope out of the event payload. A payload that does not say is
+/// treated as both, which is what every failure meant before it could say.
+fn capture_failure_scope(payload: &str) -> CaptureFailureScope {
+    let parsed = serde_json::from_str::<serde_json::Value>(payload).ok();
+    let source = parsed
+        .as_ref()
+        .and_then(|value| value.get("source"))
+        .and_then(|value| value.as_str());
+    match source {
+        Some("recording") => CaptureFailureScope {
+            recording: true,
+            wake: false,
+        },
+        Some("wake") => CaptureFailureScope {
+            recording: false,
+            wake: true,
+        },
+        _ => CaptureFailureScope {
+            recording: true,
+            wake: true,
+        },
+    }
+}
+
+/// The line for a microphone that would not open, when the plugin sent none.
+const MIC_FAILED_LINE: &str =
+    "Juno couldn't use the microphone. Check it's connected, then try again.";
+
 /// Stop claiming Juno is listening when the microphone never opened.
 ///
 /// The capture threads used to log an error and end, which left
@@ -525,15 +528,18 @@ fn voice_target_for_phrase(
 /// settings window: a switch on over a thread that no longer existed. The
 /// plugin now reports the failure, and this is what acts on it. The UI needs
 /// no change for the switch to go off: it reads the same state this corrects.
-/// The line for a microphone that would not open, when the plugin sent none.
-const MIC_FAILED_LINE: &str =
-    "Juno couldn't use the microphone. Check it's connected, then try again.";
-
+///
+/// Only the side that failed is unwound. A dictation whose microphone would
+/// not open used to switch the wake phrase off too (while its own end was
+/// re-arming it), and a wake engine that would not open retired whatever
+/// recording was open, agent turns included.
 fn setup_capture_failure_listener(app_handle: &AppHandle) {
     let app_handle_for_failure = app_handle.clone();
     app_handle.listen(constants::events::voice_capture::FAILED, move |event| {
+        let scope = capture_failure_scope(event.payload());
         warn!(
-            "[VoiceCapture] Capture failed, switching listening off: {}",
+            "[VoiceCapture] Capture failed ({:?}): {}",
+            scope,
             event.payload()
         );
         // Written for a person by the plugin (`CaptureStartFailure::message`).
@@ -547,56 +553,53 @@ fn setup_capture_failure_listener(app_handle: &AppHandle) {
             // The bar showed this session as listening when it started, not
             // when the device opened (`announce_listening`), so a Talk to
             // Juno capture has its own phase to take down as well.
-            let session = app_state.current_voice_session();
+            let session = app_state
+                .current_voice_session()
+                .filter(|_| scope.recording);
             let was_agent = session.is_some_and(|s| s.target == VoiceTarget::Agent);
 
             // A dictation whose microphone never opened leaves the controller
             // believing it is recording, and the next attempt is refused with
-            // "already dictating". Ending it here is what keeps one failure
-            // from costing every dictation after it. The thread has already
-            // exited, so this neither blocks nor transcribes anything.
-            //
-            // This used to cancel the controller and clear the dictation flag
-            // and stop there, which was half the list. The session itself
-            // stayed registered, and `begin` refuses while a session stands —
-            // so one microphone that would not open killed every later
-            // dictation for the life of the process, behind a bar still drawn
-            // in dictation mode, with Escape declining to help because nothing
-            // looked live. `end_dictation_session` is the whole list, in one
-            // place, for every exit path.
-            crate::commands::dictation::end_dictation_session(
-                &app_handle_clone,
-                "the microphone never opened",
-            )
-            .await;
-
-            if was_agent {
-                if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
+            // "already dictating". `end_dictation_session` is the whole list,
+            // in one place, for every exit path.
+            if scope.recording {
+                crate::commands::dictation::end_dictation_session(
                     &app_handle_clone,
-                    false,
-                    CaptureBar::Follows,
+                    "the microphone never opened",
                 )
-                .await
-                {
-                    error!("[VoiceCapture] Could not close the capture phase: {e}");
+                .await;
+
+                if was_agent {
+                    if let Err(e) = crate::state_management::handle_agent_capture_state_transition(
+                        &app_handle_clone,
+                        false,
+                        CaptureBar::Follows,
+                    )
+                    .await
+                    {
+                        error!("[VoiceCapture] Could not close the capture phase: {e}");
+                    }
                 }
             }
 
-            if let Err(e) = app_state.set_always_listening_active(false) {
-                error!("[VoiceCapture] Could not clear the listening flag: {e}");
+            if scope.wake {
+                if let Err(e) = app_state.set_always_listening_active(false) {
+                    error!("[VoiceCapture] Could not clear the listening flag: {e}");
+                }
+                if let Err(e) = crate::commands::save_audio_settings_to_centralized_settings(
+                    &app_handle_clone,
+                    &app_state,
+                )
+                .await
+                {
+                    error!("[VoiceCapture] Could not persist the listening flag: {e}");
+                }
+                // The bar's dot and the triggers pane both read this, so one
+                // honest event is enough to stop every surface saying "listening".
+                crate::commands::triggers::emit_listening_outcome(&app_handle_clone, false);
+                commands::ui_commands::handle_always_listening_change(&app_handle_clone, false)
+                    .await;
             }
-            if let Err(e) = crate::commands::save_audio_settings_to_centralized_settings(
-                &app_handle_clone,
-                &app_state,
-            )
-            .await
-            {
-                error!("[VoiceCapture] Could not persist the listening flag: {e}");
-            }
-            // The bar's dot and the triggers pane both read this, so one
-            // honest event is enough to stop every surface saying "listening".
-            crate::commands::triggers::emit_listening_outcome(&app_handle_clone, false);
-            commands::ui_commands::handle_always_listening_change(&app_handle_clone, false).await;
 
             // Say why. Someone pressed a key and heard "listening": without
             // this the bar just dropped, and the press looked ignored. The one
@@ -1946,5 +1949,42 @@ pub mod utils {
         );
 
         Ok(serde_json::Value::Object(health_report))
+    }
+}
+
+#[cfg(test)]
+mod capture_failure_scope_tests {
+    use super::{capture_failure_scope, CaptureFailureScope};
+
+    #[test]
+    fn a_recording_failure_leaves_the_wake_phrase_alone() {
+        assert_eq!(
+            capture_failure_scope(r#"{"code":"stream_start_failed","source":"recording"}"#),
+            CaptureFailureScope {
+                recording: true,
+                wake: false
+            }
+        );
+    }
+
+    #[test]
+    fn a_wake_failure_leaves_the_open_recording_alone() {
+        assert_eq!(
+            capture_failure_scope(r#"{"code":"engine_unavailable","source":"wake"}"#),
+            CaptureFailureScope {
+                recording: false,
+                wake: true
+            }
+        );
+    }
+
+    #[test]
+    fn a_failure_that_does_not_say_unwinds_both() {
+        let both = CaptureFailureScope {
+            recording: true,
+            wake: true,
+        };
+        assert_eq!(capture_failure_scope(r#"{"code":"x"}"#), both);
+        assert_eq!(capture_failure_scope("not json"), both);
     }
 }

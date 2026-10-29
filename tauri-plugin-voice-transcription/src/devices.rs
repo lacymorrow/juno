@@ -560,6 +560,11 @@ pub struct WarmInput {
     /// rebuilt before the next press rather than during it. Without it a
     /// rate change would go unheard, so the press checks the rate itself.
     rate_watch: Option<watch::RateWatch>,
+    /// The chosen microphone this stream stands in for, when that one was not
+    /// plugged in and the system default was built instead. Without it the
+    /// press compared the stream against the chosen device, never matched,
+    /// and opened the default itself, listing every device on the way.
+    stands_in_for: Option<DeviceChoice>,
 }
 
 static WARM_INPUT: Mutex<Option<WarmInput>> = Mutex::new(None);
@@ -742,7 +747,12 @@ pub fn claim_warm_input(preferred: Option<&DeviceChoice>) -> Option<WarmInput> {
     // now, compared by CoreAudio id: two microphones can share a name. A
     // fresh stream was built for that default after the last change to it.
     let wanted = match named(preferred) {
-        Some(wanted) => wanted.matches(&warm.device_ref()),
+        Some(wanted) => named_choice_is_served(
+            wanted,
+            &warm.device_ref(),
+            warm.stands_in_for.as_ref(),
+            fresh,
+        ),
         None if fresh => true,
         None => cpal::default_host()
             .default_input_device()
@@ -759,6 +769,21 @@ pub fn claim_warm_input(preferred: Option<&DeviceChoice>) -> Option<WarmInput> {
         return None;
     }
     Some(warm)
+}
+
+/// Is a waiting stream the one a press needs, when a microphone is chosen?
+///
+/// The chosen device itself, or, while nothing changed since the warmer built
+/// it, the default standing in for this same choice because the chosen one is
+/// unplugged. Plugging it back in is a change, so a stand-in is never taken
+/// over the real thing.
+fn named_choice_is_served(
+    wanted: &DeviceChoice,
+    warm: &DeviceRef,
+    stands_in_for: Option<&DeviceChoice>,
+    fresh: bool,
+) -> bool {
+    wanted.matches(warm) || (fresh && stands_in_for == Some(wanted))
 }
 
 /// Whether the stream waiting for the press was checked against the Mac's
@@ -860,6 +885,7 @@ fn build_warm(
 
     Ok(WarmInput {
         rate_watch: watch::RateWatch::new(&device),
+        stands_in_for: None,
         id: device_uid(&device),
         device,
         name: device_name,
@@ -994,7 +1020,8 @@ fn ensure_warm() {
     // newer than what it records.
     let generation = FRESHNESS.generation();
     let began = std::time::Instant::now();
-    let resolved = match resolve_input_device(preferred_input_device().as_ref()) {
+    let preferred = preferred_input_device();
+    let resolved = match resolve_input_device(preferred.as_ref()) {
         Ok(resolved) => resolved,
         Err(failure) => {
             tracing::info!("[VoiceDevices] Nothing to get ready: {}", failure.message());
@@ -1005,13 +1032,21 @@ fn ensure_warm() {
         }
     };
 
-    if let Ok(slot) = WARM_INPUT.lock() {
-        if let Some(waiting) = slot.as_ref() {
+    // Which choice the stream serves when it is a stand-in: the same device
+    // can stand in for a different choice after the person picks again.
+    let stands_in_for = resolved
+        .substituted_for
+        .as_ref()
+        .and(named(preferred.as_ref()).cloned());
+
+    if let Ok(mut slot) = WARM_INPUT.lock() {
+        if let Some(waiting) = slot.as_mut() {
             if waiting.id == resolved.id
                 && watch::same_device(&waiting.device, &resolved.device)
                 && !waiting.broken.load(Ordering::SeqCst)
                 && waiting.rate_is_current()
             {
+                waiting.stands_in_for = stands_in_for;
                 FRESHNESS.verified_at(generation);
                 return;
             }
@@ -1022,7 +1057,8 @@ fn ensure_warm() {
         build_warm(resolved.device, resolved.name.clone(), config, format)
     });
     match built {
-        Ok(warm) => {
+        Ok(mut warm) => {
+            warm.stands_in_for = stands_in_for;
             tracing::info!(
                 "[VoiceDevices] {} is ready for the next press at {} Hz ({} ms)",
                 warm.name,
@@ -1462,5 +1498,74 @@ mod freshness_tests {
         assert!(f.is_current());
         f.changed();
         assert!(!f.is_current());
+    }
+}
+
+#[cfg(test)]
+mod warm_claim_tests {
+    use super::named_choice_is_served;
+    use crate::device_identity::{DeviceChoice, DeviceRef};
+
+    fn shure() -> DeviceChoice {
+        DeviceChoice {
+            uid: Some("shure-uid".to_string()),
+            name: "Shure MV7".to_string(),
+        }
+    }
+
+    fn laptop() -> DeviceRef {
+        DeviceRef {
+            id: "builtin-uid".to_string(),
+            name: "MacBook Pro Microphone".to_string(),
+        }
+    }
+
+    #[test]
+    fn the_chosen_microphone_is_served_by_its_own_stream() {
+        let device = DeviceRef {
+            id: "shure-uid".to_string(),
+            name: "Shure MV7".to_string(),
+        };
+        assert!(named_choice_is_served(&shure(), &device, None, false));
+    }
+
+    #[test]
+    fn a_stand_in_for_an_unplugged_choice_is_taken_while_fresh() {
+        // M1: the chosen mic is unplugged, the warmer built the laptop mic in
+        // its place, and every press used to throw that away and enumerate
+        // every device on the press path.
+        assert!(named_choice_is_served(
+            &shure(),
+            &laptop(),
+            Some(&shure()),
+            true
+        ));
+    }
+
+    #[test]
+    fn a_stand_in_is_rechecked_after_any_change() {
+        // Plugging the chosen mic back in is a change: the press must not
+        // record on the stand-in.
+        assert!(!named_choice_is_served(
+            &shure(),
+            &laptop(),
+            Some(&shure()),
+            false
+        ));
+    }
+
+    #[test]
+    fn a_stand_in_for_another_choice_is_not_taken() {
+        let other = DeviceChoice {
+            uid: Some("rode-uid".to_string()),
+            name: "RODE NT-USB".to_string(),
+        };
+        assert!(!named_choice_is_served(
+            &shure(),
+            &laptop(),
+            Some(&other),
+            true
+        ));
+        assert!(!named_choice_is_served(&shure(), &laptop(), None, true));
     }
 }

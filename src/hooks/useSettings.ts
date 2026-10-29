@@ -123,6 +123,8 @@ export interface CaptureFailure {
 	message: string;
 	device: string | null;
 	listening: boolean;
+	/** Which microphone gave up: a recording's or the wake phrase's. */
+	source?: "recording" | "wake";
 }
 
 // Global cache to prevent duplicate API calls during startup
@@ -837,11 +839,15 @@ export function useSettings() {
 	// The microphone never opened. Rust has already switched listening off in
 	// the store and in its own state; this is what stops the window saying
 	// otherwise, and puts the reason where the microphone is chosen.
+	// A recording's microphone failing leaves the wake phrase as it was, so
+	// only a wake failure (or one that does not say) turns the switch off.
 	useEventListener<CaptureFailure>(EVENTS.VOICE_CAPTURE_FAILED, (payload) => {
 		if (!payload) return;
 		setCaptureFailure(payload);
-		setAlwaysListeningActive(false);
-		invalidateCache("alwaysListeningActive");
+		if (payload.source !== "recording") {
+			setAlwaysListeningActive(false);
+			invalidateCache("alwaysListeningActive");
+		}
 		void loadAudioDevices();
 	});
 

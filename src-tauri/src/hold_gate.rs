@@ -41,6 +41,18 @@ pub enum HoldEnd {
     Cancel,
 }
 
+/// What a release has to do, now that the key is up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Deferral {
+    /// The start has landed: act on the release now.
+    Now,
+    /// The start is still landing: [`StartGate::settle`] performs the release.
+    Later,
+    /// The start was disowned: this hold opened nothing and its release ends
+    /// nothing, so nothing is heard or sent for it either.
+    Swallowed,
+}
+
 /// An entry whose start handler never reported back is forgotten after this
 /// long. Nothing in the start path takes anywhere near it; it only bounds the
 /// bookkeeping if a handler was never registered to settle it.
@@ -90,15 +102,26 @@ impl StartGate {
     /// release is recorded and [`StartGate::settle`] hands it back once the
     /// start is done, or the start was disowned and the release is swallowed.
     pub fn defer(&mut self, id: HoldId, end: HoldEnd) -> bool {
+        self.defer_release(id, end) != Deferral::Now
+    }
+
+    /// [`StartGate::defer`], saying which of the two reasons not to act it
+    /// was. A swallowed release is one whose start never opened anything, so
+    /// the monitor plays no stop cue for it.
+    pub fn defer_release(&mut self, id: HoldId, end: HoldEnd) -> Deferral {
         if let Some(entry) = self.in_flight.iter_mut().find(|entry| entry.id == id) {
             entry.release = Some(end);
-            return true;
+            return if entry.disowned {
+                Deferral::Swallowed
+            } else {
+                Deferral::Later
+            };
         }
         if let Some(index) = self.disowned.iter().position(|&held| held == id) {
             self.disowned.remove(index);
-            return true;
+            return Deferral::Swallowed;
         }
-        false
+        Deferral::Now
     }
 
     /// The start was refused because the *other* trigger's session holds the
@@ -172,6 +195,11 @@ pub fn open(target: VoiceTarget) -> HoldId {
 /// See [`StartGate::defer`].
 pub fn defer(target: VoiceTarget, id: HoldId, end: HoldEnd) -> bool {
     with(target, |gate| gate.defer(id, end))
+}
+
+/// See [`StartGate::defer_release`].
+pub fn defer_release(target: VoiceTarget, id: HoldId, end: HoldEnd) -> Deferral {
+    with(target, |gate| gate.defer_release(id, end))
 }
 
 /// See [`StartGate::settle`].
@@ -257,6 +285,41 @@ impl Drop for SettleOnDrop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_disowned_release_says_it_was_swallowed() {
+        // L5: the dictation stop cue played for a hold whose start was refused
+        // because an agent turn held the microphone. The release has to say
+        // it ended nothing, whichever side of the settle it lands on.
+        let mut gate = StartGate::default();
+        let early = gate.open();
+        gate.disown(early);
+        assert_eq!(
+            gate.defer_release(early, HoldEnd::Commit),
+            Deferral::Swallowed,
+            "released while the refused start was still settling"
+        );
+
+        let late = gate.open();
+        gate.disown(late);
+        assert_eq!(gate.settle(late), None);
+        assert_eq!(
+            gate.defer_release(late, HoldEnd::Commit),
+            Deferral::Swallowed,
+            "released after the refused start settled"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_release_waits_or_acts() {
+        let mut gate = StartGate::default();
+        let id = gate.open();
+        assert_eq!(gate.defer_release(id, HoldEnd::Commit), Deferral::Later);
+        assert_eq!(gate.settle(id), Some(HoldEnd::Commit));
+        let next = gate.open();
+        assert_eq!(gate.settle(next), None);
+        assert_eq!(gate.defer_release(next, HoldEnd::Commit), Deferral::Now);
+    }
 
     #[test]
     fn the_agent_key_tapped_during_a_dictation_does_not_cancel_it() {
