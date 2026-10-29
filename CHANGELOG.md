@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.247] - 2026-10-29
+
+### Fixed
+
+- **dictation:** audit pilot fixes, stuck tap session, 30s hold cap, stop toast + 8 more (#877) (16a8b1f8)
+
 ## [0.8.246] - 2026-10-29
 
 ### Fixed
@@ -1685,7 +1691,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.246...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.247...HEAD
+[0.8.247]: https://github.com/lacymorrow/juno/compare/cua-v0.8.246...v0.8.247
 [0.8.246]: https://github.com/lacymorrow/juno/compare/cua-v0.8.245...v0.8.246
 [0.8.245]: https://github.com/lacymorrow/juno/compare/cua-v0.8.244...v0.8.245
 [0.8.244]: https://github.com/lacymorrow/juno/compare/cua-v0.8.243...v0.8.244
