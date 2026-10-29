@@ -479,7 +479,10 @@ async fn handle_dictation_transcription_start(
     // listening pause, the bar's dictation mode) describes a session that would
     // never exist.
     let session = match app_state.begin_voice_session(VoiceTarget::Dictation, method) {
-        Ok(session) => session,
+        Ok(session) => {
+            crate::commands::sound::play_start_cue(&app_handle, session);
+            session
+        }
         Err(refused) => {
             info!(
                 "[Dictation Mode] Ignoring a dictation start: {}",

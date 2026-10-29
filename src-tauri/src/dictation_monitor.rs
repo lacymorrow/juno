@@ -265,6 +265,9 @@ fn schedule_hold_deadlines(app_handle: &AppHandle, generation: u64) {
                 // release has already settled this hold.
                 return;
             }
+            // The tap just became a hold: this is the moment the person
+            // hears the start, not the press and not the microphone opening.
+            crate::commands::sound::play_hold_cue(&app_handle, VoiceTarget::Dictation);
             if let Err(e) = app_handle.emit(events::dictation::COMMITTED, ()) {
                 error!(
                     "[DictationMonitor] Failed to emit dictation-committed: {}",
@@ -314,10 +317,9 @@ pub async fn on_dictation_input_pressed(app_handle: &AppHandle) {
     info!("[DictationMonitor] Acquired lock, calling start_hold");
     let started = state.start_hold();
     if started {
-        // No start cue here. The press starts the microphone; the cue, like
-        // the pill, follows the event that says it is running
-        // (`show_live_microphone` in integration.rs), so nothing is heard
-        // before the recording is.
+        // No start cue here. The press starts the microphone, but a press
+        // shorter than the hold threshold is a tap, so the cue plays when the
+        // threshold is crossed (`schedule_hold_deadlines`).
         info!("[DictationMonitor] Dictation input pressed down - starting immediate tracking");
         // The microphone opens on the press; the threshold and the max
         // session length are deadlines from it.
@@ -355,7 +357,10 @@ pub async fn on_dictation_input_released(app_handle: &AppHandle) -> HoldRelease 
             // handler awaits speech-to-text finalization (seconds), and the old
             // end cue played only after that — which is exactly why stopping felt
             // unresponsive. Play it now so the user hears the release immediately.
-            crate::commands::sound::play_cue(app_handle, crate::commands::sound::Cue::GotIt);
+            crate::commands::sound::play_cue(
+                app_handle,
+                crate::commands::sound::Cue::GotIt(VoiceTarget::Dictation),
+            );
 
             // Emit event to stop dictation normally
             if !deferred {

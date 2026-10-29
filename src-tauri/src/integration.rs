@@ -83,11 +83,14 @@ pub fn setup_application_integration(app: &tauri::App) -> Result<(), Box<dyn std
 /// The plugin sends its started event from the audio thread once the device
 /// is open, so this is the first moment Juno is really listening. Everything
 /// a start shows follows it, for dictation and for Talk to Juno alike: the
-/// start cue, the bar (dictation mode, then listening), the tray and the
-/// `dictation-active` / capture announcements. Before, the bar expanded and
-/// the cue played on the press, and the microphone came up most of a second
-/// later, so the first words were spoken into a pill that looked ready and
-/// was not.
+/// bar (dictation mode, then listening), the tray and the `dictation-active` /
+/// capture announcements. Before, the bar expanded on the press, and the
+/// microphone came up most of a second later, so the first words were spoken
+/// into a pill that looked ready and was not.
+///
+/// The start cue is not here. It belongs to the gesture (see
+/// `commands::sound`): it plays on the tap or at the hold threshold, and a
+/// cue that waited for the device landed too late to sound like the key.
 ///
 /// Only for a session still open and recording. A start whose session was
 /// ended while the microphone opened (a quick tap, the stop key) gets nothing:
@@ -103,8 +106,6 @@ async fn show_live_microphone(app_handle: &AppHandle) {
         "[Voice] Microphone live for voice session {}",
         session.describe()
     );
-
-    crate::commands::sound::play_cue(app_handle, crate::commands::sound::Cue::Listening);
 
     // If it's dictation mode, set the flag in floating bar manager first
     if app_state.is_dictation_active() {
@@ -601,16 +602,20 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
 
         let app_handle_clone = app_handle_for_wake_word.clone();
         safe_spawn_async_task(move || async move {
-            // A gentle chime the moment the wake phrase lands, so Juno answers
-            // "I'm listening" before a word of the request is spoken (Siri's
-            // model: acknowledge, then capture).
-            crate::commands::sound::play_cue(
-                &app_handle_clone,
-                crate::commands::sound::Cue::Listening,
-            );
-
             let app_state = app_handle_clone.state::<state::AppState>();
             let target = voice_target_for_phrase(&app_state, &matched_phrase);
+
+            // A chime the moment the wake phrase lands, so Juno answers "I'm
+            // listening" before a word of the request is spoken (Siri's model:
+            // acknowledge, then capture). The phrase's own target's chime, so
+            // a dictation phrase ticks and a Juno phrase chimes.
+            crate::commands::sound::play_cue(
+                &app_handle_clone,
+                crate::commands::sound::Cue::Listening(match target {
+                    crate::triggers::TriggerTarget::Agent => VoiceTarget::Agent,
+                    crate::triggers::TriggerTarget::Dictation => VoiceTarget::Dictation,
+                }),
+            );
             if let Ok(mut pending) = PENDING_VOICE_TARGET.lock() {
                 *pending = Some(target);
             }
@@ -1017,7 +1022,10 @@ async fn handle_agent_transcription_start(
     // to rest while the first session's microphone was still open.
     let app_state = app_handle.state::<state::AppState>();
     let session = match app_state.begin_voice_session(VoiceTarget::Agent, method) {
-        Ok(session) => session,
+        Ok(session) => {
+            crate::commands::sound::play_start_cue(app_handle, session);
+            session
+        }
         Err(refused) => {
             // A no-op, deliberately. The microphone is already open and a
             // second press of the same control means "I am already talking".
@@ -1365,10 +1373,13 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
                 "[Agent Mode] Committing voice session {}",
                 session.describe()
             );
-            // The same "got it" a dictation release plays, here because every
-            // way an agent session is sent (key release, second tap, the
-            // bar's Send) lands on this claim, and only a real one does.
-            crate::commands::sound::play_cue(app_handle, crate::commands::sound::Cue::GotIt);
+            // Here because every way an agent session is sent (key release,
+            // second tap, the bar's Send) lands on this claim, and only a real
+            // one does.
+            crate::commands::sound::play_cue(
+                app_handle,
+                crate::commands::sound::Cue::GotIt(VoiceTarget::Agent),
+            );
             session.id
         }
         Err(rejection) => {
