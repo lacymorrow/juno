@@ -32,6 +32,7 @@ import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
 import { openComposerThroughRust, useEscapeToIdle, type ClimbTarget } from "@/hooks/useEscapeToIdle";
 import { useBarConversation } from "@/hooks/useBarConversation";
+import { useBarChatOpen } from "@/hooks/useBarChatOpen";
 import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
 import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { SkillGhostText, SkillSuggestionList } from "@/components/SkillAutocomplete";
@@ -682,6 +683,8 @@ export function IslandBar() {
     else if (to === "compose") stepBack();
     else putAway();
   }, [leaveChat, stepBack, putAway]);
+
+  useBarChatOpen(face === "chat");
 
   // Escape: one behaviour, shared by every appearance (src/lib/barEscape.ts).
   // A component steps back to the composer; anything else settles.

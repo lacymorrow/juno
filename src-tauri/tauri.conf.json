@@ -29,6 +29,7 @@
       },
       {
         "label": "floating-panel",
+        "title": "Juno",
         "create": false,
         "url": "/floating-panel",
         "width": 180,
@@ -47,6 +48,7 @@
       },
       {
         "label": "floating-bar",
+        "title": "Juno",
         "create": false,
         "url": "/floating-bar",
         "width": 88,
