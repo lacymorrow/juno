@@ -536,6 +536,15 @@ pub async fn set_bar_over_menu_bar(app_handle: AppHandle, over: bool) -> Result<
     Ok(())
 }
 
+/// The bar is showing its own chat (the Pill's pane, the Island's chat face),
+/// or has put it away. `crate::bar_stacking` drops the bar to the normal level
+/// while it is, so screen-share pickers offer it like any chat window.
+#[command]
+pub async fn set_bar_chat_open(app_handle: AppHandle, open: bool) -> Result<(), String> {
+    crate::bar_stacking::note_bar_chat_open(&app_handle, open);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

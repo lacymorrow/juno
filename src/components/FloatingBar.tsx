@@ -42,6 +42,7 @@ import { useWakePhrase } from "@/hooks/useWakePhrase";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useEventListener } from "@/hooks/useEventListener";
 import { useEscapeToIdle, type ClimbTarget } from "@/hooks/useEscapeToIdle";
+import { useBarChatOpen } from "@/hooks/useBarChatOpen";
 import { BarFlameBorder } from "@/components/bar/BarFlameBorder";
 import { flameForState, useShowGlowBorder } from "@/components/bar/barFlame";
 
@@ -1541,6 +1542,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     },
     [reopenPane, openInput],
   );
+  useBarChatOpen(paneOpen);
   useEscapeToIdle({
     barState: currentUiState,
     working: isWorking,

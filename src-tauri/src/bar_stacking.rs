@@ -159,6 +159,12 @@ pub struct BarSituation {
     /// is the state readout and the brake, so it stays where it can be seen
     /// and pressed.
     pub agent_driving: bool,
+    /// The bar itself is holding the conversation: the Pill's chat pane, the
+    /// Island's chat face. It is then a chat window in its own right, and a
+    /// chat window has to be one a screen share can pick. Every picker (the
+    /// macOS one, Zoom, Chrome's WebRTC window list) only offers windows at the
+    /// normal level, so a floating bar was shaded on hover and never offered.
+    pub bar_chat_open: bool,
 }
 
 /// Decide where the bar belongs. The whole rule, in one pure function.
@@ -171,6 +177,7 @@ pub struct BarSituation {
 /// | the chat window is in front and the agent is idle | `BelowFront` |
 /// | the chat window is in front and the agent is driving | `Floating` |
 /// | the agent is driving, no Juno window in front | `Floating` |
+/// | the bar's own chat is open and the agent is idle | `Normal` |
 /// | nothing in particular | `Floating` |
 ///
 /// The two rows worth defending: settings is `BelowFront` whatever else is
@@ -178,11 +185,13 @@ pub struct BarSituation {
 /// to kill; and the chat window is the one front window the agent can
 /// override, because while the agent is driving another app the bar is the only
 /// place the work shows and the only place it can be stopped, and the chat
-/// window is already showing the same conversation underneath.
+/// window is already showing the same conversation underneath. The bar's own
+/// chat gives way to the agent for the same reason.
 pub fn stacking_for(situation: BarSituation) -> BarStacking {
     let step_aside = situation.system_prompt_expected
         || situation.front == FrontWindow::Reading
-        || (situation.front == FrontWindow::Chat && !situation.agent_driving);
+        || (situation.front == FrontWindow::Chat && !situation.agent_driving)
+        || (situation.bar_chat_open && !situation.agent_driving);
 
     if !step_aside {
         return BarStacking::Floating;
@@ -209,6 +218,8 @@ struct Observed {
     /// The look in the bar sits flush with the top of the display, over the
     /// menu bar (the Notch). Reported by the look itself as it mounts.
     over_menu_bar: bool,
+    /// The bar is showing its own chat (see [`BarSituation::bar_chat_open`]).
+    bar_chat_open: bool,
     /// What was last handed to AppKit, so repeated reports cost nothing. The
     /// agent-driving fact arrives on every mouse action during computer use.
     applied: Option<(BarStacking, Option<&'static str>, bool)>,
@@ -219,6 +230,7 @@ static OBSERVED: Mutex<Observed> = Mutex::new(Observed {
     front: None,
     agent_driving: false,
     over_menu_bar: false,
+    bar_chat_open: false,
     applied: None,
 });
 
@@ -228,6 +240,7 @@ impl Observed {
             system_prompt_expected: self.prompt_holds > 0,
             front: self.front.map(front_window_for).unwrap_or_default(),
             agent_driving: self.agent_driving,
+            bar_chat_open: self.bar_chat_open,
         }
     }
 }
@@ -328,6 +341,21 @@ pub fn note_over_menu_bar(app: &AppHandle, over: bool) {
     apply(app);
 }
 
+/// Record whether the bar is showing its own chat. The Pill reports its chat
+/// pane and the Island its chat face, as they open and close.
+pub fn note_bar_chat_open(app: &AppHandle, open: bool) {
+    {
+        let Ok(mut observed) = OBSERVED.lock() else {
+            return;
+        };
+        if observed.bar_chat_open == open {
+            return;
+        }
+        observed.bar_chat_open = open;
+    }
+    apply(app);
+}
+
 /// Stand down while macOS is expected to raise a dialog on Juno's behalf.
 ///
 /// Balanced by [`release_system_prompt_hold`] (one prompt answered or timed
@@ -404,11 +432,12 @@ pub fn apply(app: &AppHandle) {
     };
 
     info!(
-        "Floating bar stacking: {:?} (prompt expected: {}, front window: {}, agent driving: {}, over menu bar: {})",
+        "Floating bar stacking: {:?} (prompt expected: {}, front window: {}, agent driving: {}, bar chat open: {}, over menu bar: {})",
         stacking,
         situation.system_prompt_expected,
         front.unwrap_or("none"),
         situation.agent_driving,
+        situation.bar_chat_open,
         over_menu_bar
     );
 
@@ -481,6 +510,7 @@ mod tests {
                     system_prompt_expected,
                     front: FrontWindow::Reading,
                     agent_driving,
+                    ..situation()
                 });
                 assert_eq!(
                     decided,
@@ -516,6 +546,31 @@ mod tests {
     }
 
     #[test]
+    fn the_bars_own_chat_sits_at_the_normal_level_so_a_screen_share_can_pick_it() {
+        let decided = stacking_for(BarSituation {
+            bar_chat_open: true,
+            ..situation()
+        });
+        assert_eq!(decided, BarStacking::Normal);
+        assert_eq!(decided.ns_window_level(), 0);
+        // Nothing of Juno's to duck under: it is the window the person is in.
+        assert!(!decided.orders_below_front());
+    }
+
+    #[test]
+    fn the_bars_own_chat_floats_while_the_agent_drives() {
+        // The bar is the readout and the brake while another app is driven.
+        assert_eq!(
+            stacking_for(BarSituation {
+                bar_chat_open: true,
+                agent_driving: true,
+                ..situation()
+            }),
+            BarStacking::Floating
+        );
+    }
+
+    #[test]
     fn driving_another_app_keeps_the_bar_on_top() {
         assert_eq!(
             stacking_for(BarSituation {
@@ -534,6 +589,7 @@ mod tests {
             system_prompt_expected: true,
             front: FrontWindow::None,
             agent_driving: true,
+            ..situation()
         });
         assert_eq!(decided, BarStacking::Normal);
         assert_eq!(decided.ns_window_level(), 0);
