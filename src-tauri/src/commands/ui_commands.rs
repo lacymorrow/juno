@@ -630,14 +630,17 @@ impl UIManager {
                     let _ = app_handle.emit(events::bar::COMPLETE_TRANSITION, transition_id_clone);
                 });
             }
-            ui::agent_status::FAILED | ui::agent_status::CANCELLED | ui::agent_status::OFFLINE => {
-                self.current_error = Some(if agent_state == ui::agent_status::CANCELLED {
-                    "Agent execution was cancelled".to_string()
-                } else if agent_state == ui::agent_status::OFFLINE {
-                    "Connection unavailable".to_string()
-                } else {
-                    format!("Agent failed: {}", response_text.unwrap_or_default())
-                });
+            // A cancel was asked for and an offline turn already answered in
+            // words; neither is an error. They fall through to rest below.
+            ui::agent_status::FAILED => {
+                // The caller's own line, already written for a person (see
+                // `FAILED_REPLY` in anthropic.rs). Never wrapped in "Agent
+                // failed:", which put raw provider errors on the bar.
+                self.current_error = Some(
+                    response_text
+                        .filter(|text| !text.trim().is_empty())
+                        .unwrap_or_else(|| "Something went wrong. Try again.".to_string()),
+                );
                 self.set_bar_state(BarState::Error).await;
 
                 let app_handle = self.app_handle.clone();

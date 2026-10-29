@@ -525,6 +525,10 @@ fn voice_target_for_phrase(
 /// settings window: a switch on over a thread that no longer existed. The
 /// plugin now reports the failure, and this is what acts on it. The UI needs
 /// no change for the switch to go off: it reads the same state this corrects.
+/// The line for a microphone that would not open, when the plugin sent none.
+const MIC_FAILED_LINE: &str =
+    "Juno couldn't use the microphone. Check it's connected, then try again.";
+
 fn setup_capture_failure_listener(app_handle: &AppHandle) {
     let app_handle_for_failure = app_handle.clone();
     app_handle.listen(constants::events::voice_capture::FAILED, move |event| {
@@ -532,6 +536,10 @@ fn setup_capture_failure_listener(app_handle: &AppHandle) {
             "[VoiceCapture] Capture failed, switching listening off: {}",
             event.payload()
         );
+        // Written for a person by the plugin (`CaptureStartFailure::message`).
+        let message = serde_json::from_str::<serde_json::Value>(event.payload())
+            .ok()
+            .and_then(|v| v.get("message")?.as_str().map(str::to_string));
         let app_handle_clone = app_handle_for_failure.clone();
         safe_spawn_async_task(move || async move {
             let app_state = app_handle_clone.state::<state::AppState>();
@@ -539,9 +547,8 @@ fn setup_capture_failure_listener(app_handle: &AppHandle) {
             // The bar showed this session as listening when it started, not
             // when the device opened (`announce_listening`), so a Talk to
             // Juno capture has its own phase to take down as well.
-            let was_agent = app_state
-                .current_voice_session()
-                .is_some_and(|s| s.target == VoiceTarget::Agent);
+            let session = app_state.current_voice_session();
+            let was_agent = session.is_some_and(|s| s.target == VoiceTarget::Agent);
 
             // A dictation whose microphone never opened leaves the controller
             // believing it is recording, and the next attempt is refused with
@@ -590,6 +597,23 @@ fn setup_capture_failure_listener(app_handle: &AppHandle) {
             // honest event is enough to stop every surface saying "listening".
             crate::commands::triggers::emit_listening_outcome(&app_handle_clone, false);
             commands::ui_commands::handle_always_listening_change(&app_handle_clone, false).await;
+
+            // Say why. Someone pressed a key and heard "listening": without
+            // this the bar just dropped, and the press looked ignored. The one
+            // failure sound only for that press; a wake engine that could not
+            // start on its own gets the line without the alarm.
+            if session.is_some() {
+                crate::commands::sound::play_cue(
+                    &app_handle_clone,
+                    crate::commands::sound::Cue::Failed,
+                );
+            }
+            commands::ui_commands::handle_backend_response(
+                &app_handle_clone,
+                Some(message.unwrap_or_else(|| MIC_FAILED_LINE.to_string())),
+                constants::ui::agent_status::FAILED.to_string(),
+            )
+            .await;
         });
     });
 }

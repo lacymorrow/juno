@@ -262,6 +262,28 @@ pub fn blocked_reply(blocked: Blocked, query: &str, had_images: bool) -> Reply {
     }
 }
 
+pub fn signed_out_reply_line(answerer: Answerer) -> String {
+    format!(
+        "You're not signed in to {}, so I can't answer that. Sign in, then ask again.",
+        answerer.name()
+    )
+}
+
+/// The reply for a turn the provider refused because nobody is signed in:
+/// something the person can fix, so it says how, with the button that does.
+pub fn signed_out_reply(health: &Health) -> Reply {
+    let line = signed_out_reply_line(health.answerer);
+    Reply::card(
+        format!("{line}\n\n<OpenButton url=\"juno://settings/ai\" label=\"Sign in\" primary />"),
+        line,
+    )
+}
+
+/// Whether the person is signed in to the provider, as far as Juno knows.
+pub fn signed_out() -> bool {
+    current().status() == Status::SignedOut
+}
+
 /// The reply for a turn a lost connection ended partway.
 pub fn lost_mid_turn_reply(health: &Health, query: &str, had_images: bool) -> Reply {
     if health.network_up() {
@@ -536,6 +558,19 @@ mod tests {
         assert_eq!(health.status(), Status::SignedOut);
         assert_eq!(health.snapshot().label, "Not signed in to OpenAI");
         assert_eq!(health.blocked(), None);
+    }
+
+    #[test]
+    fn signed_out_says_how_to_fix_it() {
+        let mut health = Health::default();
+        health.provider_changed(Answerer::OpenAi, false);
+        let reply = signed_out_reply(&health);
+        assert_eq!(
+            reply.spoken,
+            "You're not signed in to OpenAI, so I can't answer that. Sign in, then ask again."
+        );
+        assert!(reply.display.contains("juno://settings/ai"));
+        assert!(!reply.failed, "being signed out is not a failure");
     }
 
     #[test]
