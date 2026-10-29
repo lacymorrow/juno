@@ -10,6 +10,7 @@ import {
 } from "react";
 import { EVENTS, UI } from "@/lib/constants.generated";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
+import { audioLevelFrom, voiceErrorMessage } from "@/lib/dictationState";
 
 export interface VoiceState {
   mode:
@@ -21,6 +22,7 @@ export interface VoiceState {
   isSpeaking: boolean;
   transcriptionText?: string;
   error?: string;
+  /** Microphone level, 0 to 100, while a recording is open. */
   audioLevel: number;
 }
 
@@ -163,27 +165,26 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
         ]);
       });
 
-      // Audio level updates
-      await addListener<number>("audio-level", (event) => {
+      // Microphone level. The plugin sends `{ level }` (0 to 1) on its own
+      // event; this used to listen to a bare "audio-level" nothing emits, so
+      // the meter sat at zero.
+      await addListener<unknown>(EVENTS.VOICE_TRANSCRIPTION_AUDIO_LEVEL, (event) => {
         setVoiceState((prev) => ({
           ...prev,
-          audioLevel: event.payload,
+          audioLevel: audioLevelFrom(event.payload) * 100,
         }));
       });
 
-      // Error handling - using voice transcription error event
-      await addListener<string>(EVENTS.VOICE_TRANSCRIPTION_ERROR, (event) => {
-        const error = event.payload;
+      // A recording's decode failed. The payload is `{ type, message }`. It
+      // says nothing about the agent, so the agent's state is left alone, and
+      // the dictation-stopped that follows clears it (fail silently).
+      await addListener<unknown>(EVENTS.VOICE_TRANSCRIPTION_ERROR, (event) => {
+        const error = voiceErrorMessage(event.payload);
         setVoiceState((prev) => ({
           ...prev,
           error,
           isListening: false,
           isTranscribing: false,
-        }));
-        setAgentState((prev) => ({
-          ...prev,
-          status: UI.AGENT_STATUS_ERROR,
-          error,
         }));
       });
 
@@ -280,6 +281,7 @@ export function VoiceProvider({ children }: VoiceProviderProps) {
           ...prev,
           isListening: false,
           mode: UI.VOICE_MODES_IDLE,
+          error: undefined,
         }));
       });
 

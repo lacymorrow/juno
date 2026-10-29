@@ -110,28 +110,32 @@ pub async fn get_initialization_status(
 /// How long a recording started at launch waits for the speech engine before
 /// it gives up and reports the engine missing, as it always did.
 const ENGINE_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
-const ENGINE_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// Wait while the launch-time engine load is still running and the controller
 /// has no engine yet. Returns at once in every other case: an engine that is
-/// ready, or a load that already ended without one. No lock is held across a
-/// sleep.
+/// ready, or a load that already ended without one.
+///
+/// Woken by the load ending ([`crate::engine_settled`]), not by a 50 ms poll
+/// of the flag. The wait is registered before the flag is read, so a load
+/// that ends in between still wakes it.
 async fn wait_for_engine(controller: &Arc<Mutex<VoiceController>>) {
-    let deadline = std::time::Instant::now() + ENGINE_WAIT;
-    let mut said = false;
-    while crate::engine_loading() && std::time::Instant::now() < deadline {
-        let ready = controller
-            .try_lock()
-            .map(|c| c.is_initialized())
-            .unwrap_or(false);
-        if ready {
-            return;
-        }
-        if !said {
-            info!("[Plugin] Speech engine still loading; the recording waits for it");
-            said = true;
-        }
-        tokio::time::sleep(ENGINE_POLL).await;
+    let settled = crate::engine_settled().notified();
+    tokio::pin!(settled);
+    settled.as_mut().enable();
+
+    if !crate::engine_loading() {
+        return;
+    }
+    let ready = controller
+        .try_lock()
+        .map(|c| c.is_initialized())
+        .unwrap_or(false);
+    if ready {
+        return;
+    }
+    info!("[Plugin] Speech engine still loading; the recording waits for it");
+    if tokio::time::timeout(ENGINE_WAIT, settled).await.is_err() {
+        info!("[Plugin] Speech engine still loading after {ENGINE_WAIT:?}; going ahead without it");
     }
 }
 
@@ -1153,21 +1157,10 @@ pub async fn set_stt_provider<R: tauri::Runtime>(
     let provider_name = engine.name().to_string();
     info!("[Plugin] STT engine switched to '{}'", provider_name);
 
-    // Push new engine to VoiceController
+    // Push new engine to VoiceController. A busy or recording controller
+    // takes it at its next start rather than losing it.
     if let Some(vc_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
-        match vc_state.try_lock() {
-            Ok(mut vc) => {
-                if let Err(e) = vc.update_engine(engine.clone()) {
-                    error!("[Plugin] Failed to update VoiceController engine: {}", e);
-                }
-            }
-            Err(std::sync::TryLockError::WouldBlock) => {
-                error!("[Plugin] VoiceController busy - engine swap will take effect on next recording");
-            }
-            Err(std::sync::TryLockError::Poisoned(e)) => {
-                error!("[Plugin] VoiceController mutex poisoned: {}", e);
-            }
-        }
+        crate::controller::offer_engine(&vc_state, engine.clone());
     }
 
     // Push new engine to AlwaysListeningController

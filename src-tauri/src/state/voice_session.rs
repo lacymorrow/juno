@@ -406,6 +406,35 @@ pub fn dictation_tap_means_stop(open: Option<VoiceSession>, dictation_flag_up: b
     }
 }
 
+/// Where a dictation start's own session stands once the microphone call it
+/// awaited has returned.
+///
+/// The start awaits microphone access and, right after launch, the speech
+/// engine, which can take seconds. Any end can land in that window. Asking only
+/// "is the open session still mine" missed one of them: a stop that committed
+/// the session leaves it registered, so the start went on as if it were live,
+/// opened the microphone, and nothing ever finalised it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartLanding {
+    /// Still open and still live: the start carries on.
+    Live,
+    /// A stop committed it while the microphone was opening. The start must
+    /// not arm anything; it finalises what it opened so the session gets the
+    /// result it is owed.
+    Committed,
+    /// Ended (cancelled, failed, its transcript already taken) or never ours.
+    Gone,
+}
+
+/// Decide [`StartLanding`] for the start that minted `id`.
+pub fn start_landing(open: Option<VoiceSession>, id: VoiceSessionId) -> StartLanding {
+    match open {
+        Some(session) if session.id == id && session.is_live() => StartLanding::Live,
+        Some(session) if session.id == id => StartLanding::Committed,
+        _ => StartLanding::Gone,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -857,5 +886,62 @@ mod tests {
             Some(live(VoiceTarget::Agent)),
             true
         ));
+    }
+
+    #[test]
+    fn a_stop_landing_before_the_microphone_opened_leaves_no_session_standing() {
+        // H1: tap 1 opens a session and its start waits on microphone access
+        // or the engine; tap 2 commits it before the engine is recording. The
+        // engine reports nothing was recording, so no final result is coming.
+        let mut reg = registry();
+        let session = open(&mut reg, VoiceTarget::Dictation, VoiceStartMethod::Toggle);
+        reg.claim_commit(SessionClaim::Current)
+            .expect("the stop owns it");
+        reg.claim_discard(SessionClaim::Id(session.id))
+            .expect("the stop retires what it committed");
+
+        // The start then returns: it owns nothing, so it closes what it opened.
+        assert_eq!(start_landing(reg.current(), session.id), StartLanding::Gone);
+        // Exactly one terminal outcome: no transcript owner is left behind.
+        assert!(reg.take_transcript_owner().is_none());
+        // And the next press can start.
+        assert!(reg
+            .begin(VoiceTarget::Dictation, VoiceStartMethod::Toggle)
+            .is_ok());
+    }
+
+    #[test]
+    fn a_stop_landing_after_the_microphone_opened_gets_exactly_one_result() {
+        // The other order: the engine was recording when the stop reached it,
+        // so the final result is coming. The start sees a committed session and
+        // must not treat it as live.
+        let mut reg = registry();
+        let session = open(&mut reg, VoiceTarget::Dictation, VoiceStartMethod::Toggle);
+        reg.claim_commit(SessionClaim::Current)
+            .expect("the stop owns it");
+        assert_eq!(
+            start_landing(reg.current(), session.id),
+            StartLanding::Committed
+        );
+
+        assert_eq!(reg.take_transcript_owner().map(|s| s.id), Some(session.id));
+        assert!(reg.take_transcript_owner().is_none(), "owned once");
+        assert_eq!(start_landing(reg.current(), session.id), StartLanding::Gone);
+        assert!(reg
+            .begin(VoiceTarget::Dictation, VoiceStartMethod::Toggle)
+            .is_ok());
+    }
+
+    #[test]
+    fn a_start_only_carries_on_for_its_own_live_session() {
+        let mut reg = registry();
+        let session = open(&mut reg, VoiceTarget::Dictation, VoiceStartMethod::Toggle);
+        assert_eq!(start_landing(reg.current(), session.id), StartLanding::Live);
+        assert_eq!(
+            start_landing(reg.current(), session.id + 1),
+            StartLanding::Gone,
+            "somebody else's session is never the start's to arm"
+        );
+        assert_eq!(start_landing(None, session.id), StartLanding::Gone);
     }
 }

@@ -403,19 +403,30 @@ impl VoiceController {
     }
 
     /// Swap the active STT engine without restarting the controller.
+    ///
+    /// Never ends a recording to do it. This used to stop a live dictation
+    /// inline, which finalised and typed whatever had been said so far because
+    /// a model download finished. A recording keeps the engine it started
+    /// with; the new one is held and installed by the next start.
     pub fn update_engine(&mut self, engine: Arc<dyn TranscriptionEngine>) -> Result<()> {
-        info!("[VoiceController] Updating engine to '{}'", engine.name());
-        let was_dictating = self.is_dictating;
-        if was_dictating {
-            self.stop_dictation()?;
+        if self.is_dictating {
+            info!(
+                "[VoiceController] Recording in progress; '{}' applies from the next one",
+                engine.name()
+            );
+            set_pending_engine(Some(engine));
+            return Ok(());
         }
+        set_pending_engine(None);
+        self.install_engine(engine);
+        Ok(())
+    }
+
+    fn install_engine(&mut self, engine: Arc<dyn TranscriptionEngine>) {
+        info!("[VoiceController] Updating engine to '{}'", engine.name());
         self.engine = Some(engine);
         self.is_initialized = true;
         self.initialization_error = None;
-        if was_dictating {
-            info!("[VoiceController] Stopped before engine swap - caller should restart if needed");
-        }
-        Ok(())
     }
 
     /// Helper method to check initialization before performing operations
@@ -506,6 +517,14 @@ impl VoiceController {
         // The press, as near as the plugin sees it: the log line that says
         // when the microphone went live measures from here.
         let requested = Instant::now();
+
+        // An engine chosen while the controller was busy lands here, before
+        // anything reads it.
+        if !self.is_dictating {
+            if let Some(engine) = take_pending_engine() {
+                self.install_engine(engine);
+            }
+        }
 
         // Check if controller is initialized before starting dictation
         self.ensure_initialized()?;
@@ -709,7 +728,11 @@ impl VoiceController {
     /// unwind a session, so a capture that never started unwinds exactly like
     /// one that ended rather than leaving the UI mid-dictation forever.
     fn give_up_on_capture<R: Runtime>(app_handle: &AppHandle<R>, failure: CaptureStartFailure) {
-        capture_failure::report(app_handle, &failure);
+        capture_failure::report(
+            app_handle,
+            capture_failure::CaptureSource::Recording,
+            &failure,
+        );
         if let Err(e) = app_handle.emit(constants::voice_transcription::DICTATION_STOPPED, ()) {
             tracing::error!("[AudioThread] Could not report the stop: {e}");
         }
@@ -1220,6 +1243,44 @@ impl VoiceController {
         let buffer = self.last_processed_audio_buffer.lock().ok()?.clone()?;
         let rate = (*self.actual_recording_sample_rate.lock().ok()?)?;
         Some((buffer, rate))
+    }
+}
+
+/// An engine chosen while the controller could not take it: busy (a final
+/// decode holds the lock through the join) or recording. The log used to say
+/// "applies on next recording" and nothing stored it, so the old engine stayed
+/// until relaunch. The next start installs it.
+static PENDING_ENGINE: Mutex<Option<Arc<dyn TranscriptionEngine>>> = Mutex::new(None);
+
+fn set_pending_engine(engine: Option<Arc<dyn TranscriptionEngine>>) {
+    *PENDING_ENGINE.lock().unwrap_or_else(|p| p.into_inner()) = engine;
+}
+
+fn take_pending_engine() -> Option<Arc<dyn TranscriptionEngine>> {
+    PENDING_ENGINE
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .take()
+}
+
+/// Hand the dictation controller a new engine without waiting for it and
+/// without ending a recording. Installed now when the controller is free and
+/// idle, otherwise by the next start.
+pub fn offer_engine(controller: &Mutex<VoiceController>, engine: Arc<dyn TranscriptionEngine>) {
+    match controller.try_lock() {
+        Ok(mut vc) => {
+            let _ = vc.update_engine(engine);
+        }
+        Err(std::sync::TryLockError::WouldBlock) => {
+            info!(
+                "[VoiceController] Busy; '{}' applies from the next recording",
+                engine.name()
+            );
+            set_pending_engine(Some(engine));
+        }
+        Err(std::sync::TryLockError::Poisoned(p)) => {
+            let _ = p.into_inner().update_engine(engine);
+        }
     }
 }
 
