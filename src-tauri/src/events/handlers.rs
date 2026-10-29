@@ -445,8 +445,14 @@ async fn handle_voice_transcription_error(app_handle: AppHandle) {
         }
     }
 
-    // What was said is lost, and nothing on screen says so yet.
+    // What was said is lost: the one failure sound, and one line saying so.
     crate::commands::sound::play_cue(&app_handle, crate::commands::sound::Cue::Failed);
+    crate::commands::ui_commands::handle_backend_response(
+        &app_handle,
+        Some("Juno couldn't make out what you said. Try again.".to_string()),
+        constants::ui::agent_status::FAILED.to_string(),
+    )
+    .await;
 }
 
 /// The capture id a dictation start carries, if a key press opened one.
@@ -605,10 +611,6 @@ async fn handle_dictation_transcription_start(
                 // talking, so the release only pays for generation. No-op
                 // where it cannot run.
                 crate::dictation_cleanup::prewarm(&app_handle);
-
-                // The start cue is not played here, nor on the key-down edge:
-                // it follows the live microphone, with the bar (see the
-                // started listener in integration.rs).
             }
             Err(e) => {
                 error!("[Dictation Mode] Failed to start dictation: {}", e);
@@ -639,6 +641,20 @@ async fn handle_dictation_transcription_start(
                     "dictation failed to start",
                 )
                 .await;
+
+                // A start refused because Juno may not use the microphone is
+                // something the person can fix: ask, with the button, the way
+                // Talk to Juno does before it starts. Asked only here, after a
+                // failure, so a press never waits on the check.
+                if let Err(message) = crate::permission_gate::require_for_user(
+                    &app_handle,
+                    crate::permission_gate::Capability::Microphone,
+                    "dictation",
+                )
+                .await
+                {
+                    info!("[Dictation Mode] {}", message);
+                }
             }
         }
     } else {

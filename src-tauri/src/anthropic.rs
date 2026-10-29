@@ -572,6 +572,14 @@ async fn announce_query_submission(
 
 /// Surface a submission that failed before the agent could run.
 ///
+/// What a person sees when a run fails for a reason of Juno's own. The error
+/// itself is logged; its text never reaches the bar or the chat.
+const FAILED_REPLY: &str = "Something went wrong, so I stopped. Try again.";
+
+/// What a person sees when a run hit Juno's step limit.
+const MAX_STEPS_REPLY: &str =
+    "I stopped before finishing because it was taking too many steps. Ask me to keep going.";
+
 /// Emits `agent-error` so chat surfaces show the failure and clear their
 /// processing state, and returns the floating bar to a non-working state.
 async fn report_submission_failure(app_handle: &tauri::AppHandle, query: &str, message: &str) {
@@ -1634,10 +1642,7 @@ async fn execute_agent_internal(
                             crate::commands::sound::Cue::Failed,
                         );
                     }
-                    (
-                        "Failed".to_string(),
-                        "Agent reached maximum steps.".to_string(),
-                    )
+                    ("Failed".to_string(), MAX_STEPS_REPLY.to_string())
                 }
                 AgentError::LlmError(_) if is_network_error => {
                     // A lost connection is not a failure. End the turn with a
@@ -1664,14 +1669,37 @@ async fn execute_agent_internal(
                         spoken,
                     )
                 }
-                _ => {
-                    if !crate::cli::headless::is_headless_mode() {
-                        crate::commands::sound::play_cue(
-                            &app_handle,
-                            crate::commands::sound::Cue::Failed,
-                        );
-                    }
+                // Headless callers (the CLI, scripts) read the error itself.
+                _ if crate::cli::headless::is_headless_mode() => {
                     ("Failed".to_string(), format!("Agent error: {}", e))
+                }
+                _ if crate::connectivity::signed_out() => {
+                    // Not a failure either: the person isn't signed in, which
+                    // they can fix. Say so plainly, with the button, no alarm.
+                    warn!("Agent run refused while signed out: {}", e);
+                    let reply =
+                        crate::connectivity::signed_out_reply(&crate::connectivity::current());
+                    let spoken = reply.spoken.clone();
+                    crate::agent::local_intents::emit_reply_message(
+                        &app_handle,
+                        reply,
+                        crate::constants::ui::agent_status::FINISHED,
+                    );
+                    (
+                        crate::constants::ui::agent_status::FINISHED.to_string(),
+                        spoken,
+                    )
+                }
+                _ => {
+                    // Juno's own failure. The error goes to the log; the person
+                    // gets one plain line and the one sound, never the error's
+                    // text (a provider status, a stack of causes).
+                    error!("Agent run failed: {}", e);
+                    crate::commands::sound::play_cue(
+                        &app_handle,
+                        crate::commands::sound::Cue::Failed,
+                    );
+                    ("Failed".to_string(), FAILED_REPLY.to_string())
                 }
             };
 
