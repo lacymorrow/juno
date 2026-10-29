@@ -22,6 +22,8 @@ pub mod desktop_points;
 pub mod file_panels;
 /// Whether a connected keyboard has a globe (Fn) key, from IOKit HID.
 pub mod fn_key_detection;
+/// Whether the key that started a hold is still physically down.
+pub mod held_input;
 /// Input Monitoring (TCC ListenEvent) check + request over IOKit; stubs elsewhere.
 pub mod input_monitoring;
 pub mod modifier_key_monitor;

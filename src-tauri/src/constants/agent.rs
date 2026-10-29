@@ -301,10 +301,11 @@ pub mod monitor_sessions {
     /// the press itself; a tap is sorted out on release by `HOLD_DURATION_MS`.
     pub const IMMEDIATE_START_MS: u64 = 0;
 
-    // Max durations: a deadline scheduled on the press force-stops a hold
-    // still open this long after it (a release that never arrived).
-    pub const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds
-    pub const MAX_AGENT_DURATION_MS: u64 = 180_000; // 3 minutes
+    /// How often a hold asks the hardware whether its key is still down
+    /// (`platform::held_input`). Held, it keeps recording for as long as it
+    /// is held; up, its release was lost and it is stopped. No hold is ended
+    /// for its length.
+    pub const KEY_CHECK_INTERVAL_MS: u64 = 30_000;
 
     pub const COOLDOWN_AFTER_CANCEL_MS: u64 = 150; // 150ms
 }
