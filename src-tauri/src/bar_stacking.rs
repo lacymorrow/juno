@@ -326,6 +326,15 @@ pub fn note_agent_driving(app: &AppHandle, driving: bool) {
     apply(app);
 }
 
+/// Whether the agent is driving another application right now. The bar's
+/// press-outside watch reads it: the presses then are Juno's, not the person's.
+pub fn agent_driving() -> bool {
+    OBSERVED
+        .lock()
+        .map(|observed| observed.agent_driving)
+        .unwrap_or(false)
+}
+
 /// Record whether the look in the bar lives over the menu bar. The Notch says
 /// yes as it mounts and no as it unmounts; every other look never says.
 pub fn note_over_menu_bar(app: &AppHandle, over: bool) {

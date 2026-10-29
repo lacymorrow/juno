@@ -319,6 +319,9 @@ describe("useEscapeToIdle: just after Juno appears by herself", () => {
 
       presented();
       act(() => void handlers.get("mouse-pressed-outside")?.(null));
+      // The click itself is the last rung of the click ladder; what matters
+      // here is that it ends the window, so a later Escape is not aimed at her.
+      invoke.mockClear();
       backendDismiss();
       expect(called(HIDE_BAR)).toBe(0);
     } finally {

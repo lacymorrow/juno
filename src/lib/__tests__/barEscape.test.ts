@@ -8,6 +8,7 @@ import {
   escapeHidesBar,
   escapeOutcome,
   isRestingState,
+  outsidePressStep,
   type BarEscapeState,
   type LadderStep,
 } from "@/lib/barEscape";
@@ -165,5 +166,41 @@ describe("barEscape: the visibility ladder", () => {
     expect(climbTarget(UI.LADDER_STEPS_FLOATING as LadderStep, rest)).toBe("floating");
     // Rust asks a look that holds the big chat itself for it by name.
     expect(climbTarget(UI.LADDER_STEPS_FULL as LadderStep, rest)).toBe("full");
+  });
+});
+
+describe("barEscape: a press outside the bar", () => {
+  const rest: BarEscapeState = {
+    barState: UI.BAR_STATES_DEFAULT,
+    working: false,
+    overlayOpen: false,
+    composerOpen: false,
+    popupOpen: false,
+  };
+  const chat = { ...rest, overlayOpen: true };
+  const fresh = { draftPresent: false, spared: false };
+
+  it("walks a draft-holding chat down in three clicks: stay, idle, hidden", () => {
+    expect(outsidePressStep(chat, { draftPresent: true, spared: false })).toBe("spare");
+    expect(outsidePressStep(chat, { draftPresent: true, spared: true })).toBe("collapse");
+    expect(outsidePressStep(rest, { draftPresent: true, spared: true })).toBe("hide");
+  });
+
+  it("walks an empty chat or composer down in two", () => {
+    expect(outsidePressStep(chat, fresh)).toBe("collapse");
+    expect(outsidePressStep({ ...rest, composerOpen: true }, fresh)).toBe("collapse");
+    expect(outsidePressStep(rest, fresh)).toBe("hide");
+  });
+
+  it("puts the chat away while Juno works, but never hides the brake", () => {
+    expect(outsidePressStep({ ...chat, working: true }, fresh)).toBe("collapse");
+    expect(outsidePressStep({ ...rest, working: true }, fresh)).toBe("nothing");
+    expect(outsidePressStep({ ...rest, barState: UI.BAR_STATES_LISTENING }, fresh)).toBe(
+      "nothing",
+    );
+  });
+
+  it("leaves a popup to close itself", () => {
+    expect(outsidePressStep({ ...chat, popupOpen: true }, fresh)).toBe("nothing");
   });
 });

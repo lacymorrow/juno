@@ -180,6 +180,31 @@ export function escapeHandled(outcome: EscapeOutcome): boolean {
 }
 
 /**
+ * What one press of the mouse outside the bar does: the same ladder Escape
+ * walks (chat, idle bar, hidden), except that a click never stops Juno's work.
+ *
+ * - `spare`: nothing yet. Someone typing a draft who clicks away (to copy
+ *   something, to look) keeps the chat open for that first click.
+ * - `collapse`: the idle bar, draft kept out of sight.
+ * - `hide`: off the screen, draft still kept. Never while Juno is working or
+ *   holding a state of its own (listening, speaking): the bar is the brake.
+ * - `nothing`: a popup owns the moment, or Juno is busy at the idle bar.
+ */
+export type OutsidePressStep = "spare" | "collapse" | "hide" | "nothing";
+
+export function outsidePressStep(
+  state: BarEscapeState,
+  { draftPresent, spared }: { draftPresent: boolean; spared: boolean },
+): OutsidePressStep {
+  if (state.popupOpen) return "nothing";
+  if (state.overlayOpen || state.composerOpen) {
+    return draftPresent && !spared ? "spare" : "collapse";
+  }
+  if (state.working || !isRestingState(state.barState)) return "nothing";
+  return "hide";
+}
+
+/**
  * How long after acting on Escape a second arrival is treated as the same
  * press. Both paths see one keystroke: the DOM keydown when the bar is
  * focused, and `bar-dismiss-pane` from Rust's monitor a moment later. One

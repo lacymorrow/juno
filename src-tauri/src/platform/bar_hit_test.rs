@@ -133,8 +133,10 @@ pub fn hit_state(prev: Option<bool>, in_regions: bool, button_down: bool) -> boo
 /// Whether this tick saw the left button go down away from the bar: down now,
 /// up last tick, and not over anything the bar is drawing. A press that
 /// starts on the bar is the bar's own (a click, a drag, a text selection).
-pub fn pressed_outside(was_down: bool, down: bool, in_regions: bool) -> bool {
-    down && !was_down && !in_regions
+/// While the agent drives the mouse the presses are Juno's own, not the
+/// person going elsewhere, so none of them count.
+pub fn pressed_outside(was_down: bool, down: bool, in_regions: bool, agent_driving: bool) -> bool {
+    down && !was_down && !in_regions && !agent_driving
 }
 
 /// Whether the left mouse button is down right now. Quartz, any thread.
@@ -215,7 +217,12 @@ fn poll(app: AppHandle) {
 
         let in_regions = cursor_in_regions(cursor, origin, 1.0, &regions);
         let down = left_button_down();
-        if pressed_outside(last_down, down, in_regions) {
+        if pressed_outside(
+            last_down,
+            down,
+            in_regions,
+            crate::bar_stacking::agent_driving(),
+        ) {
             let _ = window.emit(constants::events::system::MOUSE_PRESSED_OUTSIDE, ());
         }
         last_down = down;
@@ -263,13 +270,15 @@ mod tests {
 
     #[test]
     fn only_a_fresh_press_off_the_bar_counts_as_outside() {
-        assert!(pressed_outside(false, true, false));
+        assert!(pressed_outside(false, true, false, false));
         // On the bar: the bar's own click, drag or selection.
-        assert!(!pressed_outside(false, true, true));
+        assert!(!pressed_outside(false, true, true, false));
         // A hold, not a press.
-        assert!(!pressed_outside(true, true, false));
+        assert!(!pressed_outside(true, true, false, false));
         // A release.
-        assert!(!pressed_outside(true, false, false));
+        assert!(!pressed_outside(true, false, false, false));
+        // Juno's own click while the agent drives another app.
+        assert!(!pressed_outside(false, true, false, true));
     }
 
     #[test]
