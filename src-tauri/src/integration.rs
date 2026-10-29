@@ -1391,10 +1391,7 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
             // Here because every way an agent session is sent (key release,
             // second tap, the bar's Send) lands on this claim, and only a real
             // one does.
-            crate::commands::sound::play_cue(
-                app_handle,
-                crate::commands::sound::Cue::GotIt(VoiceTarget::Agent),
-            );
+            crate::commands::sound::play_release_cue(app_handle, VoiceTarget::Agent);
             session.id
         }
         Err(rejection) => {
