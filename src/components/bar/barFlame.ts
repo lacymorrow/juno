@@ -10,19 +10,23 @@ import { COMMANDS, EVENTS, UI } from "@/lib/constants.generated";
  *   blue  = Juno's own listening / working    green = your dictation input
  *   red   = error                             dim   = ambient, bright = engaged
  *   pulse = ongoing work (thinking / processing / ambient wait)
- * Named states win over the generic working fallback, because TRANSCRIBING is
- * itself a working state but belongs to the your-input (green) family.
+ * Named states win over the generic working fallback. TRANSCRIBING takes the
+ * colour of whoever was listening: green after dictation, blue after a
+ * request to Juno, so asking Juno never flashes the dictation colour between
+ * the listening blue and the working blue.
  */
 export function flameForState(
   state: string,
   isWorking: boolean,
   sessionColor: string,
+  isDictation: boolean,
 ): { color: string; intensity: number; pulse: boolean } | null {
   switch (state) {
     case UI.BAR_STATES_DICTATING:
       return { color: "#30D158", intensity: 0.2, pulse: false }; // green: your speech -> text
     case UI.BAR_STATES_TRANSCRIBING:
-      return { color: "#30D158", intensity: 0.13, pulse: true }; // green breathe: converting your speech
+      // breathe: converting your speech, in the colour it was heard in
+      return { color: isDictation ? "#30D158" : "#0A84FF", intensity: 0.13, pulse: true };
     case UI.BAR_STATES_LISTENING:
       return { color: "#0A84FF", intensity: 0.2, pulse: false }; // blue: listening to your request
     case UI.BAR_STATES_ALWAYS_LISTENING:
