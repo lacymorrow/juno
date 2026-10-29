@@ -169,6 +169,7 @@ function readQuery(): {
   dockLow: boolean;
   /** Where the Notch was left, as fractions of the display, or null for the notch itself. */
   dockCorner: { x: number; y: number } | null;
+  ask: AskScript | null;
 } {
   const params = new URLSearchParams(window.location.search);
   const appearance = appearanceEntry(params.get("appearance")).value;
@@ -186,6 +187,33 @@ function readQuery(): {
     pinFrame: params.get("pin") === "frame",
     dockLow: params.get("dock") === "low",
     dockCorner: NOTCH_DOCKS[params.get("dock") ?? ""] ?? null,
+    ask: params.get("demo") === "ask" ? readAsk(params) : null,
+  };
+}
+
+/**
+ * A turn written in the URL, so a clip needs no new code:
+ * `demo=ask&q=<question>&steps=<step;step>&answer=<markdown, JSX allowed>&say=<spoken sentence>&tool=<tool name>`.
+ * Missing parts fall back to the `demo=card` script. (`demo=turn` is the Island's fixed clip.)
+ */
+interface AskScript {
+  question: string;
+  tool: string;
+  steps: string[];
+  answer: string;
+  say: string | null;
+}
+
+function readAsk(params: URLSearchParams): AskScript {
+  return {
+    question: params.get("q") || DEMO_SENTENCE,
+    tool: params.get("tool") || "computer",
+    steps: (params.get("steps") || "")
+      .split(";")
+      .map((step) => step.trim())
+      .filter(Boolean),
+    answer: params.get("answer") || DEMO_ANSWER,
+    say: params.get("say"),
   };
 }
 
@@ -727,6 +755,84 @@ function playSpokenDemo(later: (fn: () => void, ms: number) => void): void {
  * and a failure after some work (the gap where it broke). Same events Rust
  * would send; nothing is run.
  */
+/**
+ * Play the turn the URL describes: submit, each step runs and finishes, the
+ * answer streams with whatever component it carries, Juno says `say` if there
+ * is one, then rest. Same beats and the same events as `demo=script`.
+ */
+function playAskDemo(later: Later, ask: AskScript): void {
+  const messageId = "preview-turn";
+  const now = Date.now();
+  const frame = (barState: string, bits: Partial<Frame> = {}, extra: FrameExtra = {}) =>
+    emitFrame(
+      { barState, audioLevel: 0, transcriptionText: "", ...bits },
+      { lastSubmittedValue: ask.question, ...extra },
+    );
+  const tool = (content: string, done: boolean) =>
+    void emit(EVENTS.AGENT_EVENT, {
+      type: done ? "tool_call_result" : "tool_call_request",
+      payload: done ? { tool_name: ask.tool, success: true, content: "Done" } : { tool_name: ask.tool, content },
+    });
+
+  // Heard first: the words arrive while the bar listens, then it submits.
+  const heard = ask.question.split(" ");
+  const hearing = 1800;
+  later(() => frame(UI.BAR_STATES_DEFAULT), 0);
+  for (let t = 0; t < hearing; t += 80) {
+    later(() => {
+      const level = 0.4 + 0.3 * Math.sin(t / 160) + 0.15 * Math.sin(t / 55);
+      const said = Math.min(heard.length, Math.floor((t / hearing) * (heard.length + 1)));
+      frame(UI.BAR_STATES_LISTENING, { audioLevel: level, transcriptionText: heard.slice(0, said).join(" ") });
+    }, 600 + t);
+  }
+  const submit = 600 + hearing + 300;
+  later(() => frame(UI.BAR_STATES_TRANSCRIBING, { transcriptionText: ask.question }), 600 + hearing);
+  later(() => {
+    void emit(EVENTS.MESSAGES_USER_MESSAGE_SUBMITTED, { content: ask.question, timestamp: now });
+    frame(UI.BAR_STATES_SUBMITTING);
+  }, submit);
+  later(() => frame(UI.BAR_STATES_LOADING), submit + 500);
+
+  let at = submit + 900;
+  for (const step of ask.steps) {
+    const start = at;
+    later(() => tool(step, false), start);
+    later(() => tool(step, true), start + 1200);
+    at += 1400;
+  }
+
+  const streamAt = ask.steps.length ? at + 200 : submit + 1100;
+  later(() => {
+    frame(UI.BAR_STATES_AGENT_RESPONDING);
+    void emit(EVENTS.STREAMING_STREAM_START, { message_id: messageId });
+  }, streamAt);
+  const words = ask.answer.split(" ");
+  words.forEach((word, i) => {
+    later(() => {
+      void emit(EVENTS.STREAMING_TEXT_STREAM, {
+        message_id: messageId,
+        chunk: (i === 0 ? "" : " ") + word,
+        tts_content: i === 0 ? (ask.say ?? undefined) : undefined,
+      });
+    }, streamAt + 100 + i * 45);
+  });
+  const end = streamAt + 100 + words.length * 45 + 200;
+  later(() => {
+    void emit(EVENTS.STREAMING_STREAM_END, { message_id: messageId, complete_text: ask.answer });
+    if (ask.say) frame(UI.BAR_STATES_SPEAKING, {}, { spokenText: ask.say });
+  }, end);
+  const rest = ask.say ? end + 2600 : end;
+  later(() => {
+    void emit(EVENTS.AGENT_ACTIVE, false);
+    frame(UI.BAR_STATES_FINISHING);
+  }, rest);
+  later(() => frame(UI.BAR_STATES_DEFAULT), rest + 300);
+  // Escape, as Rust's stop-key monitor reports it when nothing is running:
+  // the component steps back to the composer, then the composer to rest.
+  later(() => void emit(EVENTS.BAR_DISMISS_PANE, {}), rest + 3000);
+  later(() => void emit(EVENTS.BAR_DISMISS_PANE, {}), rest + 4500);
+}
+
 const RING_QUESTION = "How long until my next meeting?";
 
 type Later = (fn: () => void, ms: number) => void;
@@ -859,7 +965,7 @@ function useNaturalSize() {
 }
 
 export default function AppearancePreview() {
-  const { appearance, reducedMotion, holdState, demo, manualStart, background, theme, pinFrame, dockLow, dockCorner } =
+  const { appearance, reducedMotion, holdState, demo, manualStart, background, theme, pinFrame, dockLow, dockCorner, ask } =
     useMemo(readQuery, []);
 
   // With `start=manual` the script waits for the bench to say go.
@@ -906,7 +1012,17 @@ export default function AppearancePreview() {
   // Drive the script. Listening breathes the audio level; dictating reveals
   // the sentence a word at a time. Everything else is a single emit.
   useEffect(() => {
-    if (!ready || !started) return;
+    if (!ready) return;
+    if (!started) {
+      // A bench clip opens on the resting bar, not on nothing: paint it while
+      // the recorder is still starting. Re-sent every 400ms, as a held frame
+      // is, because the bar subscribes some time after its first paint.
+      if (!ask) return;
+      const resting = () => emitFrame({ barState: UI.BAR_STATES_DEFAULT, audioLevel: 0, transcriptionText: "" });
+      resting();
+      const id = window.setInterval(resting, 400);
+      return () => window.clearInterval(id);
+    }
 
     let cancelled = false;
     const timers: number[] = [];
@@ -932,6 +1048,10 @@ export default function AppearancePreview() {
       return stop;
     }
 
+    if (demo === "ask" && ask) {
+      playAskDemo(later, ask);
+      return stop;
+    }
     if (demo === "card") {
       playCardDemo(later);
       return stop;
