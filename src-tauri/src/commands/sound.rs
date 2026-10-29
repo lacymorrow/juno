@@ -1,18 +1,27 @@
 //! Juno's interface sounds.
 //!
-//! Three cues, and nothing else makes a sound: the spoken reply is how Juno
-//! says a turn went well, and the bar says in words what words can say.
+//! Three moments make a sound, and nothing else does: the spoken reply is how
+//! Juno says a turn went well, and the bar says in words what words can say.
 //!
 //! | Cue | When |
 //! |---|---|
-//! | `Listening` | the microphone is live (press, wake phrase, mic button) |
-//! | `GotIt` | a voice session is released to be sent or typed |
+//! | `Listening(target)` | the gesture that opens the microphone: a tap, a hold crossing its threshold, the mic button, the wake phrase |
+//! | `GotIt(target)` | the gesture that ends a session to be sent or typed |
 //! | `Failed` | something the person asked for did not happen |
+//!
+//! Dictation and Talk to Juno sound different, so the ear knows which one it
+//! just started: dictation is a short tick, Juno is a two-note chime.
+//!
+//! A cue belongs to the gesture, not to the work behind it. It plays on the
+//! key edge (or the hold threshold) and never waits on the microphone or on
+//! speech-to-text, because a sound that lands late does not sound like it
+//! came from the key.
 //!
 //! Silent on purpose: launch, the person stopping Juno (Escape, Cancel), a
 //! finished answer, and a lost connection (the reply says so out loud).
 //! A new sound needs a moment the person cannot see; add it here or not at all.
 
+use crate::state::VoiceTarget;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex as StdMutex;
@@ -31,20 +40,31 @@ static SOUND_PATH_CACHE: once_cell::sync::Lazy<StdMutex<HashMap<String, PathBuf>
 /// Every sound Juno makes. See the module docs for when each one plays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cue {
-    /// The microphone is live. Short, so it is over before the first word.
-    Listening,
+    /// A voice session was started. Short, so it is over before the first word.
+    Listening(VoiceTarget),
     /// A voice session was released. The falling half of `Listening`.
-    GotIt,
+    GotIt(VoiceTarget),
     /// Something the person asked for did not happen.
     Failed,
 }
 
 impl Cue {
+    /// Every cue, for priming and for the bundled-clip test.
+    pub const ALL: [Cue; 5] = [
+        Cue::Listening(VoiceTarget::Agent),
+        Cue::GotIt(VoiceTarget::Agent),
+        Cue::Listening(VoiceTarget::Dictation),
+        Cue::GotIt(VoiceTarget::Dictation),
+        Cue::Failed,
+    ];
+
     /// The clip's resource-relative path for this platform.
     pub fn file_path(self) -> String {
         let name = match self {
-            Cue::Listening => "listening",
-            Cue::GotIt => "got-it",
+            Cue::Listening(VoiceTarget::Agent) => "listening",
+            Cue::GotIt(VoiceTarget::Agent) => "got-it",
+            Cue::Listening(VoiceTarget::Dictation) => "dictation-start",
+            Cue::GotIt(VoiceTarget::Dictation) => "dictation-end",
             Cue::Failed => "failed",
         };
         if cfg!(target_os = "macos") {
@@ -146,15 +166,13 @@ fn resolve_sound_path(app: &AppHandle, file_path: &str) -> Option<PathBuf> {
     final_path
 }
 
-/// Play a cue with the lowest possible latency.
+/// Play a cue now.
 ///
-/// A plain synchronous function meant to be called directly on the key-event
-/// thread. It reads the sound setting from in-memory state, resolves the clip
-/// path from the process-wide cache (no per-press filesystem probing after the
-/// first call), and spawns the player on a detached thread. It returns in
-/// microseconds so the gesture that triggered it — a dictation start/stop,
-/// say — is never held up waiting on audio init or speech-to-text
-/// finalization.
+/// Returns at once, so the gesture that triggered it is never held up. On
+/// macOS the clip is already decoded in memory (see [`prime`]) and plays
+/// in-process on the main thread, a few milliseconds after the key. It used to
+/// start an `afplay` process per cue, and the process launch alone put the
+/// sound a few hundred milliseconds behind the key.
 pub fn play_cue(app: &AppHandle, cue: Cue) {
     // Respect the user's sound toggle — a cheap in-memory read. Default to
     // playing if state is somehow unavailable.
@@ -172,11 +190,127 @@ pub fn play_cue(app: &AppHandle, cue: Cue) {
         return;
     };
 
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(e) = app.run_on_main_thread(move || {
+            if !native::play(&path) {
+                error!("[Cue] Failed to play {:?} ({:?})", cue, path);
+            }
+        }) {
+            error!("[Cue] Could not reach the main thread for {:?}: {}", cue, e);
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
     std::thread::spawn(move || {
         if let Err(e) = play_audio_file(&path) {
             error!("[Cue] Failed to play {:?} ({:?}): {}", cue, path, e);
         }
     });
+}
+
+/// The start cue for a session that was just opened, if its gesture is one
+/// that is already decided by now.
+///
+/// A tap, a click on the mic, or a modifier tap is a start the moment it
+/// lands, and the start handler runs on that edge, before the microphone
+/// opens. A held key is not: its start opens the microphone on the press, but
+/// a press shorter than the hold threshold is a tap that will be thrown away,
+/// so its cue waits for [`play_hold_cue`]. A wake phrase chimed when it was
+/// heard.
+pub fn play_start_cue(app: &AppHandle, session: crate::state::VoiceSession) {
+    use crate::state::VoiceStartMethod;
+    match session.method {
+        VoiceStartMethod::PushToTalk | VoiceStartMethod::WakePhrase => {}
+        _ => play_cue(app, Cue::Listening(session.target)),
+    }
+}
+
+/// The start cue for a hold that just crossed its threshold. Only when the
+/// open session is that hold's: a press whose start was refused (the
+/// microphone already belongs to the other target) started nothing to hear.
+pub fn play_hold_cue(app: &AppHandle, target: VoiceTarget) {
+    let held = app
+        .try_state::<crate::state::AppState>()
+        .and_then(|state| state.current_voice_session())
+        .is_some_and(|session| {
+            session.target == target && session.method == crate::state::VoiceStartMethod::PushToTalk
+        });
+    if held {
+        play_cue(app, Cue::Listening(target));
+    }
+}
+
+/// Load every cue before the first one is needed, so the first press of the
+/// session is as quick as the hundredth. Main thread only; called from
+/// `apply_macos_setup`.
+#[cfg(target_os = "macos")]
+pub fn prime(app: &AppHandle) {
+    for cue in Cue::ALL {
+        if let Some(path) = resolve_sound_path(app, &cue.file_path()) {
+            native::load(&path);
+        }
+    }
+}
+
+/// In-process playback through `NSSound`, one loaded instance per clip.
+///
+/// AppKit, so main thread only: the instances live in a thread-local that only
+/// the main thread ever fills, and [`play_cue`] hops there with
+/// `run_on_main_thread` (async, never `dispatch_sync`).
+#[cfg(target_os = "macos")]
+mod native {
+    use cocoa::base::{id, nil, BOOL, YES};
+    use cocoa::foundation::NSString;
+    use objc::{class, msg_send, sel, sel_impl};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+
+    thread_local! {
+        /// Retained for the life of the process: five short clips.
+        static LOADED: RefCell<HashMap<PathBuf, id>> = RefCell::new(HashMap::new());
+    }
+
+    /// The loaded sound for `path`, loading it the first time. `nil` if the
+    /// file could not be read as audio.
+    pub fn load(path: &Path) -> id {
+        LOADED.with(|loaded| {
+            let mut loaded = loaded.borrow_mut();
+            if let Some(&sound) = loaded.get(path) {
+                return sound;
+            }
+            // SAFETY: plain AppKit calls on the main thread with a valid
+            // NSString; the alloc/init pair is balanced by keeping the
+            // instance for the life of the process.
+            let sound: id = unsafe {
+                let ns_path = NSString::alloc(nil).init_str(&path.to_string_lossy());
+                let sound: id = msg_send![class!(NSSound), alloc];
+                let sound: id = msg_send![sound, initWithContentsOfFile: ns_path byReference: YES];
+                let _: () = msg_send![ns_path, release];
+                sound
+            };
+            if sound != nil {
+                loaded.insert(path.to_path_buf(), sound);
+            }
+            sound
+        })
+    }
+
+    /// Play `path` from the start, cutting off this clip if it is still
+    /// sounding from the last press. False if it could not be played.
+    pub fn play(path: &Path) -> bool {
+        let sound = load(path);
+        if sound == nil {
+            return false;
+        }
+        // SAFETY: `sound` is a live NSSound owned by `LOADED`.
+        unsafe {
+            let _: BOOL = msg_send![sound, stop];
+            let started: BOOL = msg_send![sound, play];
+            started == YES
+        }
+    }
 }
 
 /// The page's one sound: a typed message that did not go through.
@@ -243,21 +377,7 @@ pub async fn get_sound_enabled(
     Ok(audio_settings.sound_enabled)
 }
 
-// Platform-specific audio playback
-#[cfg(target_os = "macos")]
-fn play_audio_file(path: &PathBuf) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use std::process::Command;
-
-    let output = Command::new("afplay").arg(path).output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("afplay failed: {}", stderr).into());
-    }
-
-    Ok(())
-}
-
+// Platform-specific audio playback (macOS plays in-process, see `native`)
 #[cfg(target_os = "windows")]
 fn play_audio_file(path: &PathBuf) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use std::process::Command;
@@ -308,7 +428,7 @@ mod tests {
             .parent()
             .map(|root| root.join("public"))
             .unwrap_or_default();
-        for cue in [Cue::Listening, Cue::GotIt, Cue::Failed] {
+        for cue in Cue::ALL {
             let path = public.join(cue.file_path());
             assert!(path.exists(), "{:?} has no clip at {:?}", cue, path);
         }
@@ -316,10 +436,26 @@ mod tests {
 
     #[test]
     fn cue_paths_use_the_platform_format() {
-        let path = Cue::GotIt.file_path();
+        let path = Cue::GotIt(VoiceTarget::Agent).file_path();
         #[cfg(target_os = "macos")]
         assert_eq!(path, "sounds/caf/got-it.caf");
         #[cfg(not(target_os = "macos"))]
         assert_eq!(path, "sounds/ogg/got-it.ogg");
+    }
+
+    #[test]
+    fn dictation_and_juno_sound_different() {
+        for (a, b) in [
+            (
+                Cue::Listening(VoiceTarget::Agent),
+                Cue::Listening(VoiceTarget::Dictation),
+            ),
+            (
+                Cue::GotIt(VoiceTarget::Agent),
+                Cue::GotIt(VoiceTarget::Dictation),
+            ),
+        ] {
+            assert_ne!(a.file_path(), b.file_path());
+        }
     }
 }
