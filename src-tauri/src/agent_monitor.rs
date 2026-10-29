@@ -291,6 +291,9 @@ fn schedule_hold_deadlines(app_handle: &AppHandle, generation: u64) {
                 // release has already settled this hold.
                 return;
             }
+            // The tap just became a hold: this is the moment the person
+            // hears the start, not the press and not the microphone opening.
+            crate::commands::sound::play_hold_cue(&app_handle, VoiceTarget::Agent);
             if let Err(e) = app_handle.emit(events::agent::COMMITTED, ()) {
                 error!("[AgentMonitor] Failed to emit agent-committed: {}", e);
             }

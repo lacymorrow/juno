@@ -53,6 +53,10 @@ pub fn apply_macos_setup(app_handle: &AppHandle) {
         // the layout can be learned.
         computer_use_ai_sdk::prime_cmd_v_keycode();
 
+        // Load the interface sounds now, on the main thread AppKit needs, so
+        // the first key press of the session sounds as quickly as any other.
+        crate::commands::sound::prime(app_handle);
+
         // The bar's level is set above as part of building it. Deriving it once
         // more from the situation means even the resting state comes from the
         // one function that owns the decision, rather than from a line of
