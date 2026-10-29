@@ -227,9 +227,8 @@ impl AgentInputMonitorState {
         true
     }
 
-    /// The max-duration deadline for `generation` fired. True when that same
-    /// hold is still open, which means the key has been down for
-    /// `MAX_AGENT_DURATION_MS` or its release never arrived.
+    /// A key check for `generation` fired. True when that same hold is still
+    /// open: its key is down, or its release never arrived.
     pub fn session_overran(&self, generation: u64) -> bool {
         self.hold_generation == generation && self.agent_started
     }
@@ -276,10 +275,10 @@ fn emit_agent_start_if_due(app_handle: &AppHandle, state: &mut AgentInputMonitor
     }
 }
 
-/// Schedule the two moments a hold can reach on its own, measured from the
-/// press: the hold threshold, where a tap becomes a hold, and the max session
-/// length. Each fires once, for this press only; a release or a later press
-/// turns it into a no-op (see `reach_threshold` and `session_overran`).
+/// Schedule what a hold does on its own, measured from the press: the hold
+/// threshold, where a tap becomes a hold, then the periodic check that its
+/// key is still down. Both are for this press only; a release or a later
+/// press turns them into no-ops (see `reach_threshold` and `session_overran`).
 fn schedule_hold_deadlines(app_handle: &AppHandle, generation: u64) {
     let app_handle = app_handle.clone();
     tauri::async_runtime::spawn(async move {
@@ -299,25 +298,35 @@ fn schedule_hold_deadlines(app_handle: &AppHandle, generation: u64) {
             }
         }
 
-        // Safety net: a hold that outlives the max session length is stopped.
-        // It covers a key genuinely held that long and a release event that
-        // never arrived, which would otherwise leave the microphone open. The
-        // force-stop handler resets this monitor's state.
-        tokio::time::sleep(Duration::from_millis(
-            monitor_sessions::MAX_AGENT_DURATION_MS
-                .saturating_sub(monitor_sessions::HOLD_DURATION_MS),
-        ))
-        .await;
-        let overran = AGENT_INPUT_STATE.lock().await.session_overran(generation);
-        if !overran {
+        // Safety net for a release that never arrives, which would leave the
+        // microphone open: the same key check as dictation (see
+        // `dictation_monitor`). Held, the hold goes on; up, or unreadable,
+        // it is stopped. The force-stop handler resets this monitor's state.
+        loop {
+            tokio::time::sleep(Duration::from_millis(
+                monitor_sessions::KEY_CHECK_INTERVAL_MS,
+            ))
+            .await;
+            let overran = AGENT_INPUT_STATE.lock().await.session_overran(generation);
+            if !overran {
+                return;
+            }
+            let held = crate::platform::held_input::hold_still_down(
+                &app_handle,
+                crate::triggers::TriggerTarget::Agent,
+            );
+            if held == Some(true) {
+                info!("[AgentMonitor] Hold key still down - recording on");
+                continue;
+            }
+            warn!(
+                "[AgentMonitor] Hold still open but its key is {} - its release was lost, forcing stop",
+                if held.is_some() { "up" } else { "unreadable" }
+            );
+            if let Err(e) = app_handle.emit(events::agent::FORCE_STOP, ()) {
+                error!("[AgentMonitor] Failed to emit agent-force-stop: {}", e);
+            }
             return;
-        }
-        warn!(
-            "[AgentMonitor] Hold still open after {}ms - forcing stop",
-            monitor_sessions::MAX_AGENT_DURATION_MS
-        );
-        if let Err(e) = app_handle.emit(events::agent::FORCE_STOP, ()) {
-            error!("[AgentMonitor] Failed to emit agent-force-stop: {}", e);
         }
     });
 }
@@ -329,8 +338,8 @@ pub async fn on_agent_input_pressed(app_handle: &AppHandle) {
     let started = state.start_hold();
     if started {
         info!("[AgentMonitor] Agent input pressed down - starting immediate tracking");
-        // The microphone opens on the press; the threshold and the max
-        // session length are deadlines from it.
+        // The microphone opens on the press; the threshold and the key
+        // checks are timed from it.
         emit_agent_start_if_due(app_handle, &mut state);
         schedule_hold_deadlines(app_handle, state.hold_generation);
     } else {

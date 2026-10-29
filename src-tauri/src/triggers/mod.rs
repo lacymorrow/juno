@@ -328,7 +328,7 @@ impl<'de> Deserialize<'de> for ModifierKey {
 ///
 /// Apple has called the same physical key both Fn and Globe, and a hand-edited
 /// store or an older build may carry either.
-fn modifier_word(word: &str) -> Option<ModifierKey> {
+pub(crate) fn modifier_word(word: &str) -> Option<ModifierKey> {
     Some(match word {
         "fn" | "globe" => ModifierKey::FN,
         "control" | "ctrl" => ModifierKey::CONTROL,
