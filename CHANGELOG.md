@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.244] - 2026-10-29
+
+### Added
+
+- **bar:** a click outside walks the bar down a rung, never stopping work (#848) (cfccdf85)
+
+### Changed
+
+- **voice:** show listening on the press, keep the mic running under a wake phrase (#905) (9191cf7d)
+
+### Fixed
+
+- **bar:** a chat in the bar can be picked by screen share (#836) (9faa7721)
+- **bar:** transcribing glows in the colour it was heard in (#903) (3cf5a606)
+- **sound:** cues play on the gesture, in-process, and dictation sounds its own (#904) (26a78455)
+
 ## [0.8.243] - 2026-10-29
 
 ### Fixed
@@ -1656,7 +1672,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.243...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.244...HEAD
+[0.8.244]: https://github.com/lacymorrow/juno/compare/cua-v0.8.243...v0.8.244
 [0.8.243]: https://github.com/lacymorrow/juno/compare/cua-v0.8.242...v0.8.243
 [0.8.242]: https://github.com/lacymorrow/juno/compare/cua-v0.8.241...v0.8.242
 [0.8.241]: https://github.com/lacymorrow/juno/compare/cua-v0.8.240...v0.8.241
