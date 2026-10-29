@@ -30,7 +30,7 @@ import { useConversation } from "@/hooks/useConversation";
 import { useOnboardingState } from "@/hooks/useOnboardingState";
 import { useBackendEvents } from "@/hooks/useBackendEvents";
 import { useMenuEvents } from "@/hooks/useMenuEvents";
-import { useSound, useVoiceSounds } from "@/hooks/useSound";
+import { useSound } from "@/hooks/useSound";
 import { useShortcutEvents } from "@/hooks/useShortcutEvents";
 import { useDictationStateEvents } from "@/hooks/useDictationStateEvents";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
@@ -104,9 +104,6 @@ function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Use voice sounds hook
-  useVoiceSounds();
 
   // The single submission path for every query this window originates
   // (typed input and example prompts). The backend owns everything after

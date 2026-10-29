@@ -16,7 +16,6 @@ pub const EXTENDED_DELAY_MS: u64 = 2000;
 pub const MAX_DELAY_MS: u64 = 3000;
 
 // Frontend UI timeouts (moved from frontend constants.ts)
-pub const SOUND_DEBOUNCE_MS: u64 = 300;
 pub const HEARTBEAT_INTERVAL_MS: u64 = 30000;
 pub const CLOUD_CONNECTION_TIMEOUT_MS: u64 = 10000;
 pub const CLOUD_RECONNECT_DELAY_MS: u64 = 5000;

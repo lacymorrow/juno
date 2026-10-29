@@ -445,13 +445,8 @@ async fn handle_voice_transcription_error(app_handle: AppHandle) {
         }
     }
 
-    // Play voice error sound automatically when transcription fails
-    let app_state = app_handle.state::<crate::state::AppState>();
-    if let Err(e) =
-        crate::commands::sound::play_voice_error_sound(app_handle.clone(), app_state).await
-    {
-        warn!("Failed to play voice error sound: {}", e);
-    }
+    // What was said is lost, and nothing on screen says so yet.
+    crate::commands::sound::play_cue(&app_handle, crate::commands::sound::Cue::Failed);
 }
 
 /// The capture id a dictation start carries, if a key press opened one.

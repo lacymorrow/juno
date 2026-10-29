@@ -778,10 +778,7 @@ fn handle_dictation_tap_mode(app: &AppHandle) {
         // Immediate stop cue on the tap edge — before the async stop that waits
         // on speech-to-text finalization. Keeps tap-mode stop as responsive as
         // hold-mode release.
-        crate::commands::sound::play_cue(
-            app,
-            crate::commands::sound::SoundType::NotificationDecorative01,
-        );
+        crate::commands::sound::play_cue(app, crate::commands::sound::Cue::GotIt);
 
         // Route through the same stop event as hold mode. Calling stop_dictation()
         // directly here skipped handle_dictation_stop, so no bar-state update was

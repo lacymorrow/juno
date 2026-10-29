@@ -493,26 +493,7 @@ pub mod shortcuts {
 pub mod sound {
     pub const GET_SOUND_ENABLED: &str = "get_sound_enabled";
     pub const SET_SOUND_ENABLED: &str = "set_sound_enabled";
-    pub const GET_AVAILABLE_SOUNDS: &str = "get_available_sounds";
-    pub const PLAY_SOUND_BY_TYPE: &str = "play_sound_by_type";
-    pub const PLAY_SOUND_FILE: &str = "play_sound_file";
-    pub const PLAY_NOTIFICATION_SOUND: &str = "play_notification_sound";
-    pub const PLAY_SUCCESS_SOUND: &str = "play_success_sound";
     pub const PLAY_ERROR_SOUND: &str = "play_error_sound";
-    pub const PLAY_ALERT_SOUND: &str = "play_alert_sound";
-    pub const PLAY_AGENT_START_SOUND: &str = "play_agent_start_sound";
-    pub const PLAY_AGENT_SUCCESS_SOUND: &str = "play_agent_success_sound";
-    pub const PLAY_AGENT_ERROR_SOUND: &str = "play_agent_error_sound";
-    pub const PLAY_AGENT_ATTENTION_SOUND: &str = "play_agent_attention_sound";
-    pub const PLAY_VOICE_START_SOUND: &str = "play_voice_start_sound";
-    pub const PLAY_VOICE_END_SOUND: &str = "play_voice_end_sound";
-    pub const PLAY_VOICE_ERROR_SOUND: &str = "play_voice_error_sound";
-    pub const PLAY_DICTATION_START_SOUND: &str = "play_dictation_start_sound";
-    pub const PLAY_DICTATION_END_SOUND: &str = "play_dictation_end_sound";
-    pub const PLAY_BOOT_SOUND: &str = "play_boot_sound";
-    pub const PLAY_SYSTEM_READY_SOUND: &str = "play_system_ready_sound";
-    pub const PLAY_CONNECTION_SOUND: &str = "play_connection_sound";
-    pub const PLAY_DISCONNECTION_SOUND: &str = "play_disconnection_sound";
 }
 
 /// Tool approval and configuration
