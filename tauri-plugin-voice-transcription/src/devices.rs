@@ -538,6 +538,11 @@ unsafe impl Send for SendStream {}
 /// device is not running, macOS draws no orange indicator, and
 /// [`open_input_streams`] does not count it. When a recording ends its stream
 /// is stopped and waits again.
+///
+/// The one exception is a wake phrase. While always-listening holds the
+/// microphone open the indicator is lit anyway, so the waiting stream runs
+/// too, delivering nowhere, and a press only routes its audio: no device
+/// start at all (see [`WakeMicHeld`]).
 pub struct WarmInput {
     device: cpal::Device,
     /// The device's UID, which is what "is this the microphone wanted" is
@@ -558,6 +563,15 @@ pub struct WarmInput {
 }
 
 static WARM_INPUT: Mutex<Option<WarmInput>> = Mutex::new(None);
+
+/// A stream that goes away stops its device first: cpal's macOS stream keeps
+/// running when it is merely dropped, and a waiting stream may be running
+/// (see [`WakeMicHeld`]).
+impl Drop for WarmInput {
+    fn drop(&mut self) {
+        self.stream.0.halt();
+    }
+}
 
 impl WarmInput {
     pub fn name(&self) -> &str {
@@ -607,6 +621,23 @@ impl WarmInput {
                 );
                 build_warm(device, name, config, sample_format)?.lend(audio_data_tx)
             }
+        }
+    }
+
+    /// Put it in the state a waiting stream should be in: running while a
+    /// wake phrase holds the microphone open, stopped otherwise. Called with
+    /// [`WARM_INPUT`] held, so it cannot cross [`WakeMicHeld`] changing.
+    fn settle(&self) {
+        if wake_mic_held() {
+            if let Err(failure) = start(&self.stream.0, &self.name) {
+                tracing::warn!(
+                    "[VoiceDevices] Could not keep {} running: {}",
+                    self.name,
+                    failure.message()
+                );
+            }
+        } else {
+            self.stream.0.halt();
         }
     }
 
@@ -668,6 +699,7 @@ fn put_back(warm: WarmInput) {
     match WARM_INPUT.lock() {
         Ok(mut slot) => {
             if slot.is_none() {
+                warm.settle();
                 *slot = Some(warm);
             }
         }
@@ -851,6 +883,61 @@ pub fn start_warm_stream(
     build_warm(device, device_name, config, sample_format)?.lend(audio_data_tx)
 }
 
+/// How many wake-phrase microphones are open. See [`WakeMicHeld`].
+static WAKE_MICS: AtomicUsize = AtomicUsize::new(0);
+
+fn wake_mic_held() -> bool {
+    WAKE_MICS.load(Ordering::SeqCst) > 0
+}
+
+/// Held by an open always-listening stream, for exactly as long as it is
+/// open: while one exists, the dictation stream waiting for the press keeps
+/// running (see [`WarmInput`]).
+///
+/// Resuming a stopped stream is a device start, 100 to 250 ms of CoreAudio
+/// on a press. Keeping it stopped is what keeps the orange indicator off
+/// between dictations, and a wake phrase has already lit it, so the start is
+/// paid for nothing. Tied to the wake stream's own lifetime rather than to a
+/// setting, so no path can leave the waiting stream running behind it.
+pub struct WakeMicHeld(());
+
+impl WakeMicHeld {
+    pub fn new() -> Self {
+        if WAKE_MICS.fetch_add(1, Ordering::SeqCst) == 0 {
+            settle_waiting();
+        }
+        Self(())
+    }
+}
+
+impl Default for WakeMicHeld {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for WakeMicHeld {
+    fn drop(&mut self) {
+        if WAKE_MICS.fetch_sub(1, Ordering::SeqCst) == 1 {
+            settle_waiting();
+        }
+    }
+}
+
+/// The count changed after the waiting stream was settled: settle it again.
+/// The count moves before the lock is taken, and every settle reads it under
+/// the lock, so the last one to run always sees the newest count.
+fn settle_waiting() {
+    match WARM_INPUT.lock() {
+        Ok(slot) => {
+            if let Some(warm) = slot.as_ref() {
+                warm.settle();
+            }
+        }
+        Err(e) => tracing::error!("[VoiceDevices] Could not reach the waiting microphone: {e}"),
+    }
+}
+
 /// Ask for the dictation microphone to be made ready, off the caller's thread.
 ///
 /// Driven only by events. Requests that arrive while one is being served are
@@ -944,6 +1031,7 @@ fn ensure_warm() {
             );
             match WARM_INPUT.lock() {
                 Ok(mut slot) => {
+                    warm.settle();
                     *slot = Some(warm);
                     FRESHNESS.verified_at(generation);
                 }

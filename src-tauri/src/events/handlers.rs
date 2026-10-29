@@ -512,12 +512,11 @@ async fn handle_dictation_transcription_start(
         warn!("Failed to set dictation active state: {}", e);
     }
 
-    // The microphone comes first. Nothing the person can see or hear happens
-    // before it is running: the bar, the tray, `dictation-active` and the
-    // start cue all follow the plugin's started event, which the audio thread
-    // sends once the device is open (`show_live_microphone` in
-    // integration.rs). Everything else this start does waits until after the
-    // call below.
+    // The microphone comes first: the call below hands the device to the
+    // audio thread, and only then is the bar, the tray and `dictation-active`
+    // shown (`announce_listening` in integration.rs), beside the device
+    // opening rather than after it. Everything else this start does waits
+    // until after the call below too.
     //
     // Use the plugin command to start dictation only if controller exists
     if let Some(controller_state) = app_handle.try_state::<Arc<Mutex<VoiceController>>>() {
@@ -554,6 +553,7 @@ async fn handle_dictation_transcription_start(
                 }
 
                 info!("[Dictation Mode] Started immediate transcription successfully");
+                crate::integration::announce_listening(&app_handle);
 
                 // Register escape key to cancel dictation
                 {
