@@ -100,13 +100,6 @@ use commands::{
     starters::*, test_accessibility_permissions, text_editor::*, ui_commands::*, window::*,
 };
 
-// Import specific sound commands from sound.rs
-use crate::commands::sound::{
-    play_agent_attention_sound, play_agent_error_sound, play_agent_start_sound,
-    play_agent_success_sound, play_boot_sound, play_connection_sound, play_dictation_end_sound,
-    play_dictation_start_sound, play_disconnection_sound, play_system_ready_sound,
-    play_tts_audio_backend, play_voice_end_sound, play_voice_error_sound, play_voice_start_sound,
-};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Import dictation reset commands
@@ -563,33 +556,9 @@ pub fn run() {
             commands::dock_icon::set_dock_icon_visible,
 
             // Sound Commands
-            play_sound_by_type,
-            play_sound_file,
-            play_notification_sound,
-            play_success_sound,
             play_error_sound,
-            play_alert_sound,
-            get_available_sounds,
             get_sound_enabled,
             set_sound_enabled,
-            // Specific Agent Sound Commands
-            play_agent_start_sound,
-            play_agent_success_sound,
-            play_agent_error_sound,
-            play_agent_attention_sound,
-            // Voice Sound Commands
-            play_voice_start_sound,
-            play_voice_end_sound,
-            play_dictation_start_sound,
-            play_dictation_end_sound,
-            play_voice_error_sound,
-            // System Sound Commands
-            play_boot_sound,
-            play_system_ready_sound,
-            play_connection_sound,
-            play_disconnection_sound,
-            // TTS Backend Audio Playback Command
-            play_tts_audio_backend,
             // Tool Configuration Commands
             get_tool_configurations,
             get_tool_config,
@@ -744,7 +713,6 @@ pub fn run() {
             load_bundled_environment,
             test_environment_variables,
             // TTS Commands
-            anthropic::handle_tts_completion,
             // Window Management Commands
             window_management::open_settings_window,
             agent::local_intents::settings_follow::run_reply_chip,

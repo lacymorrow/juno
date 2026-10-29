@@ -1620,36 +1620,19 @@ async fn execute_agent_internal(
 
             let (state_str, msg) = match e {
                 AgentError::Terminated => {
-                    // Play agent attention sound for cancellation (less intrusive than error)
-                    if !crate::cli::headless::is_headless_mode() {
-                        if let Err(e) = crate::commands::sound::play_agent_attention_sound(
-                            app_handle.clone(),
-                            state.clone(),
-                        )
-                        .await
-                        {
-                            warn!(
-                                "{}",
-                                format!("{}: {}", "Failed to play cancellation sound", e)
-                            );
-                        }
-                    }
+                    // Silent: the person stopped it, and a stop they asked for
+                    // is not an alert.
                     (
                         "Cancelled".to_string(),
                         "Agent execution was cancelled.".to_string(),
                     )
                 }
                 AgentError::MaxStepsReached => {
-                    // Play agent error sound for failure
                     if !crate::cli::headless::is_headless_mode() {
-                        if let Err(e) = crate::commands::sound::play_agent_error_sound(
-                            app_handle.clone(),
-                            state.clone(),
-                        )
-                        .await
-                        {
-                            warn!("{}", format!("{}: {}", "Failed to play error sound", e));
-                        }
+                        crate::commands::sound::play_cue(
+                            &app_handle,
+                            crate::commands::sound::Cue::Failed,
+                        );
                     }
                     (
                         "Failed".to_string(),
@@ -1662,20 +1645,7 @@ async fn execute_agent_internal(
                     // voice works offline, with a button to send it again.
                     warn!("LLM error appears to be network-related: {}", error_message);
 
-                    if !crate::cli::headless::is_headless_mode() {
-                        if let Err(e) = crate::commands::sound::play_agent_attention_sound(
-                            app_handle.clone(),
-                            state.clone(),
-                        )
-                        .await
-                        {
-                            warn!(
-                                "{}",
-                                format!("{}: {}", "Failed to play network error sound", e)
-                            );
-                        }
-                    }
-
+                    // Silent: the reply says what happened, out loud.
                     let reply = crate::connectivity::lost_mid_turn_reply(
                         &crate::connectivity::current(),
                         &query,
@@ -1695,16 +1665,11 @@ async fn execute_agent_internal(
                     )
                 }
                 _ => {
-                    // Play agent error sound for other failures
                     if !crate::cli::headless::is_headless_mode() {
-                        if let Err(e) = crate::commands::sound::play_agent_error_sound(
-                            app_handle.clone(),
-                            state.clone(),
-                        )
-                        .await
-                        {
-                            warn!("{}", format!("{}: {}", "Failed to play error sound", e));
-                        }
+                        crate::commands::sound::play_cue(
+                            &app_handle,
+                            crate::commands::sound::Cue::Failed,
+                        );
                     }
                     ("Failed".to_string(), format!("Agent error: {}", e))
                 }
@@ -1726,10 +1691,8 @@ async fn execute_agent_internal(
 
     let _tts_enabled = false; // TTS is now handled entirely via immediate processing during streaming
 
-    // Success sound will be played after TTS completion via handle_tts_completion()
-    // Skip immediate sound to prevent double-playing
     if final_response.agent_state == "Finished" {
-        info!("Agent completed successfully. Success sound will play after TTS completion.");
+        info!("Agent completed successfully.");
     }
 
     info!(
@@ -1784,38 +1747,6 @@ async fn execute_agent_internal(
     // Emitting a second stream_end with a new message_id would cause duplicate messages
     // The frontend reconstructs the complete response from the streaming events
     info!("Final response text: \"{}\"", final_response.text);
-
-    Ok(())
-}
-
-/// Handle TTS completion and play success sound
-#[tauri::command]
-pub async fn handle_tts_completion(
-    app_handle: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    info!("TTS completion event received from frontend");
-
-    // Update floating bar manager for TTS finish — skip in headless mode
-    if !crate::cli::headless::is_headless_mode() {
-        crate::commands::ui_commands::handle_tts_finished(&app_handle).await;
-    }
-
-    // Play agent success sound now that TTS has finished — skip in headless mode
-    if !crate::cli::headless::is_headless_mode() {
-        if let Err(e) =
-            crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone())
-                .await
-        {
-            warn!(
-                "{}",
-                format!(
-                    "{}: {}",
-                    "Failed to play success sound after TTS completion", e
-                )
-            );
-        }
-    }
 
     Ok(())
 }
