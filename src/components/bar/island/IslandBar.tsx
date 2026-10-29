@@ -317,7 +317,7 @@ export function IslandBar() {
   const { sessions: agentSessions, focusSession } = useAgentSessions();
   const showGlowBorder = useShowGlowBorder();
   const sessionColor = agentSessions.find((s) => s.focused)?.display_color ?? "#0A84FF";
-  const flame = showGlowBorder ? flameForState(bar.barState, working, sessionColor) : null;
+  const flame = showGlowBorder ? flameForState(bar.barState, working, sessionColor, bar.isDictationMode) : null;
   const hero = useMemo(
     () => (visibleText ? splitHeroContent(visibleText, streaming) : null),
     [visibleText, streaming],
