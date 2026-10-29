@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.243] - 2026-10-29
+
+### Fixed
+
+- **sound:** three cues, silence everywhere else (#902) (2038c5a2)
+
 ## [0.8.242] - 2026-10-28
 
 ### Added
@@ -1650,7 +1656,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.242...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.243...HEAD
+[0.8.243]: https://github.com/lacymorrow/juno/compare/cua-v0.8.242...v0.8.243
 [0.8.242]: https://github.com/lacymorrow/juno/compare/cua-v0.8.241...v0.8.242
 [0.8.241]: https://github.com/lacymorrow/juno/compare/cua-v0.8.240...v0.8.241
 [0.8.239]: https://github.com/lacymorrow/juno/compare/cua-v0.8.238...v0.8.239
