@@ -553,6 +553,7 @@ pub fn run() {
 
             // Dock icon / menu-bar-only mode
             commands::dock_icon::get_dock_icon_visible,
+            commands::frontend_log::frontend_log,
             commands::dock_icon::set_dock_icon_visible,
 
             // Sound Commands

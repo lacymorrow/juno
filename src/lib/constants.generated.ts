@@ -745,6 +745,7 @@ export const COMMANDS = {
   AGENT_SESSIONS_FOCUS_AGENT_SESSION: 'focus_agent_session',
   AGENT_SESSIONS_CANCEL_AGENT_SESSION: 'cancel_agent_session',
   APP_GET_BUILD_INFO: 'get_build_info',
+  APP_FRONTEND_LOG: 'frontend_log',
   APP_GET_CONNECTIVITY: 'get_connectivity',
   APP_GET_STARTUP_READINESS: 'get_startup_readiness',
   APP_OPEN_CONFIG_DIRECTORY: 'open_config_directory',
