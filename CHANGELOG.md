@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.246] - 2026-10-29
+
+### Fixed
+
+- **voice:** no stop cue under a second, no transcription under half a second (#908) (7d76e6df)
+- **errors:** plain words for failures, no red for a cancel, mic and transcription failures say so (#907) (7e4e690f)
+
 ## [0.8.245] - 2026-10-29
 
 ### Fixed
@@ -1678,7 +1685,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.245...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.246...HEAD
+[0.8.246]: https://github.com/lacymorrow/juno/compare/cua-v0.8.245...v0.8.246
 [0.8.245]: https://github.com/lacymorrow/juno/compare/cua-v0.8.244...v0.8.245
 [0.8.244]: https://github.com/lacymorrow/juno/compare/cua-v0.8.243...v0.8.244
 [0.8.243]: https://github.com/lacymorrow/juno/compare/cua-v0.8.242...v0.8.243
