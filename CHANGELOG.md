@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.245] - 2026-10-29
+
+### Fixed
+
+- **voice:** a hold lasts as long as its key is down, no 30s cutoff (#906) (d12dc76b)
+
 ## [0.8.244] - 2026-10-29
 
 ### Added
@@ -1672,7 +1678,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.244...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.245...HEAD
+[0.8.245]: https://github.com/lacymorrow/juno/compare/cua-v0.8.244...v0.8.245
 [0.8.244]: https://github.com/lacymorrow/juno/compare/cua-v0.8.243...v0.8.244
 [0.8.243]: https://github.com/lacymorrow/juno/compare/cua-v0.8.242...v0.8.243
 [0.8.242]: https://github.com/lacymorrow/juno/compare/cua-v0.8.241...v0.8.242
