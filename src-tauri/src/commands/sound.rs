@@ -220,6 +220,9 @@ pub fn play_cue(app: &AppHandle, cue: Cue) {
 /// heard.
 pub fn play_start_cue(app: &AppHandle, session: crate::state::VoiceSession) {
     use crate::state::VoiceStartMethod;
+    if let Ok(mut since) = RECORDING_SINCE.lock() {
+        *since = Some(std::time::Instant::now());
+    }
     match session.method {
         VoiceStartMethod::PushToTalk | VoiceStartMethod::WakePhrase => {}
         _ => play_cue(app, Cue::Listening(session.target)),
@@ -239,6 +242,34 @@ pub fn play_hold_cue(app: &AppHandle, target: VoiceTarget) {
     if held {
         play_cue(app, Cue::Listening(target));
     }
+}
+
+/// When the recording now ending began: set as each key session opens (see
+/// [`play_start_cue`]), read by [`play_release_cue`].
+static RECORDING_SINCE: StdMutex<Option<std::time::Instant>> = StdMutex::new(None);
+
+/// A recording shorter than this ends without the release cue. A stray press
+/// or a single word needs no "got it", and anything under half a second is not
+/// transcribed at all (the plugin's `MIN_TRANSCRIBE_MS`).
+const SHORT_RECORDING: std::time::Duration = std::time::Duration::from_millis(1_000);
+
+fn is_short(recorded_for: std::time::Duration) -> bool {
+    recorded_for < SHORT_RECORDING
+}
+
+/// The release cue for a recording that just ended, on the key's edge. Silent
+/// for a short one (see [`SHORT_RECORDING`]).
+pub fn play_release_cue(app: &AppHandle, target: VoiceTarget) {
+    let short = RECORDING_SINCE
+        .lock()
+        .ok()
+        .and_then(|since| *since)
+        .is_some_and(|since| is_short(since.elapsed()));
+    if short {
+        debug!("[Sound] Recording under {SHORT_RECORDING:?}; no release cue");
+        return;
+    }
+    play_cue(app, Cue::GotIt(target));
 }
 
 /// Load every cue before the first one is needed, so the first press of the
@@ -432,6 +463,13 @@ mod tests {
             let path = public.join(cue.file_path());
             assert!(path.exists(), "{:?} has no clip at {:?}", cue, path);
         }
+    }
+
+    #[test]
+    fn a_short_recording_ends_without_a_cue() {
+        assert!(is_short(std::time::Duration::from_millis(600)));
+        assert!(!is_short(std::time::Duration::from_millis(1_000)));
+        assert!(!is_short(std::time::Duration::from_secs(20)));
     }
 
     #[test]

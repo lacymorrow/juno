@@ -144,6 +144,11 @@ pub(crate) fn resample_for_final(
     Ok(waves.remove(0))
 }
 
+/// A recording shorter than this is not transcribed: an empty result closes
+/// its session. Recording starts on the press, so this is how long the key was
+/// down, and too short to hold a word; decoding it only invents one.
+const MIN_TRANSCRIBE_MS: u64 = 500;
+
 /// How often the live-partial window is re-decoded, at most.
 const LIVE_PARTIAL_CADENCE: Duration = Duration::from_millis(600);
 /// How much audio the live-partial window keeps; caps the per-decode cost.
@@ -1032,7 +1037,9 @@ impl VoiceController {
             *buffer_guard = Some(raw_full_session_audio.to_vec());
         }
 
-        if raw_full_session_audio.is_empty() {
+        let too_short = (raw_full_session_audio.len() as u64) * 1000
+            < MIN_TRANSCRIBE_MS * u64::from(actual_rate.max(1));
+        if too_short {
             drop(committer);
             // An empty transcript is still this session's transcript, and it
             // has to be emitted.
@@ -1049,7 +1056,13 @@ impl VoiceController {
             //
             // So the rule is: a session that was asked to finalise always gets
             // exactly one result, even when there was nothing to decode.
-            info!("[AudioThread] No audio to transcribe (empty buffer); emitting an empty result so the session is closed out");
+            //
+            // A recording under `MIN_TRANSCRIBE_MS` takes this branch too: too
+            // short to hold a word, and decoding it only invents one.
+            info!(
+                "[AudioThread] {} samples is too short to transcribe; emitting an empty result so the session is closed out",
+                raw_full_session_audio.len()
+            );
             Self::emit_empty_result(app_handle);
             return;
         }
