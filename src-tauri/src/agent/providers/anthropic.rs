@@ -1112,11 +1112,15 @@ impl AnthropicBrain {
 
     /// Handle streaming response from Anthropic API with XML-based TTS extraction
     /// Returns: (accumulated_text, tool_calls, stop_reason, stream_was_started, thinking_blocks)
+    ///
+    /// A cancel on `cancel_rx` stops reading at once and drops the connection;
+    /// the caller sees it on the receiver and ends the turn as cancelled.
     async fn handle_streaming_response<F>(
         &self,
         response: reqwest::Response,
         app_handle: Option<&tauri::AppHandle>,
         message_id: Option<String>,
+        mut cancel_rx: Option<crate::state::CancelReceiver>,
         mut on_text_chunk: F,
     ) -> Result<(String, Vec<ToolCall>, String, bool, Vec<ApiContentBlock>), AgentError>
     where
@@ -1167,7 +1171,24 @@ impl AnthropicBrain {
         let lines_stream = LinesStream::new(tokio::io::BufReader::new(reader).lines());
         tokio::pin!(lines_stream);
 
-        while let Some(line_result) = lines_stream.next().await {
+        // Escape lands here mid-answer. It used to be checked only between
+        // steps, so a long answer streamed and was spoken to its end after the
+        // person asked Juno to stop.
+        let mut cancelled = false;
+        loop {
+            let next = match cancel_rx.as_mut() {
+                Some(rx) => tokio::select! {
+                    line = lines_stream.next() => line,
+                    _ = until_cancelled(rx) => {
+                        cancelled = true;
+                        break;
+                    }
+                },
+                None => lines_stream.next().await,
+            };
+            let Some(line_result) = next else {
+                break;
+            };
             let line = line_result
                 .map_err(|e| AgentError::LlmError(format!("Failed to read stream line: {}", e)))?;
 
@@ -1543,6 +1564,18 @@ impl AnthropicBrain {
             }
         }
 
+        // A reasoning panel open when the stream was cut stops spinning.
+        if cancelled {
+            log::info!("Anthropic stream cancelled; the connection is dropped");
+            if let (Some(handle), Some(msg_id), Some(text)) = (
+                app_handle,
+                api_thinking_message_id.as_ref(),
+                current_thinking_content.as_ref(),
+            ) {
+                crate::agent::tool_logger::emit_thinking_end(handle, msg_id.clone(), text.clone());
+            }
+        }
+
         // Handle any remaining thinking state at end of stream
         if in_thinking_tag || !thinking_buffer.is_empty() {
             log::debug!(
@@ -1583,7 +1616,8 @@ impl AnthropicBrain {
         // Flush any TTS state left at end of stream: an unterminated block is
         // still spoken, and a partial tag held in the buffer is shown as text.
         let (tail_display, tail_spoken) = tts_stream.finish();
-        if !tail_spoken.is_empty() {
+        // Nothing more is said once the person has asked Juno to stop.
+        if !tail_spoken.is_empty() && !cancelled {
             log::warn!(
                 "Stream ended inside a <TTS> block; speaking the partial content: {:?}",
                 tail_spoken
@@ -1876,6 +1910,24 @@ impl AnthropicBrain {
     }
 }
 
+/// Resolves once the run is cancelled. Never resolves for a sender that is
+/// gone, since nothing can cancel then. Reads with `borrow` rather than
+/// `wait_for` so no guard is held across an await.
+async fn until_cancelled(rx: &mut crate::state::CancelReceiver) {
+    loop {
+        if *rx.borrow_and_update() {
+            return;
+        }
+        if rx.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
+fn is_cancelled(rx: Option<&crate::state::CancelReceiver>) -> bool {
+    rx.is_some_and(|rx| *rx.borrow())
+}
+
 /// Save API request to file for debugging in development mode only
 #[cfg(debug_assertions)]
 async fn save_debug_request(request: &AnthropicRequest) {
@@ -1936,9 +1988,10 @@ impl AgentBrain for AnthropicBrain {
         available_tools: &[ToolDefinition],
         app_handle: Option<tauri::AppHandle>,
         message_id: Option<String>,
-        // Cancellation is enforced by AgentRunner between steps for the HTTP
-        // provider; only subprocess-based brains (Claude CLI) consume this.
-        _cancel_rx: Option<crate::state::CancelReceiver>,
+        // The run's cancel channel (merged session+global for session-tracked
+        // runs). Raced against the request and every streamed line, so Escape
+        // ends a turn mid-answer instead of after it.
+        cancel_rx: Option<crate::state::CancelReceiver>,
     ) -> Result<AgentAction, AgentError> {
         // --- 1. Prepare API Request ---
         let mut api_messages = Vec::new();
@@ -2417,42 +2470,53 @@ impl AgentBrain for AnthropicBrain {
         // A blip (connect failure, 429, 5xx, 529) before anything streamed is
         // retried twice with a short pause; nothing has reached the person
         // yet, so a retry is invisible. Anything else returns at once.
-        let mut attempt = 0usize;
         // Times the non-streaming path's request. The streaming path keeps its
         // own clock inside `handle_streaming_response`, which is where its
         // record is written.
         let request_started = std::time::Instant::now();
-        let response = loop {
-            let sent = self
-                .client
-                .post(ANTHROPIC_API_URL)
-                .header("x-api-key", &self.api_key)
-                .header("anthropic-version", "2023-06-01") // Current stable API version
-                // Computer use beta + prompt caching (+ server-side fallbacks on supported models),
-                // comma-separated in a single header. Prompt caching reduces input token costs by
-                // ~90% and latency by ~50-80% for the stable system prompt and tool definitions.
-                .header("anthropic-beta", self.beta_header_value())
-                .header("content-type", "application/json")
-                .json(&request_payload)
-                .send()
-                .await;
-            let delay = Self::SEND_RETRY_DELAYS.get(attempt).copied();
-            match (sent, delay) {
-                (Ok(r), Some(delay)) if Self::is_retryable_status(r.status()) => {
-                    log::warn!("Anthropic answered {}; retrying in {:?}", r.status(), delay);
-                    drop(r);
-                    tokio::time::sleep(delay).await;
+        let send = async {
+            let mut attempt = 0usize;
+            loop {
+                let sent = self
+                    .client
+                    .post(ANTHROPIC_API_URL)
+                    .header("x-api-key", &self.api_key)
+                    .header("anthropic-version", "2023-06-01") // Current stable API version
+                    // Computer use beta + prompt caching (+ server-side fallbacks on supported models),
+                    // comma-separated in a single header. Prompt caching reduces input token costs by
+                    // ~90% and latency by ~50-80% for the stable system prompt and tool definitions.
+                    .header("anthropic-beta", self.beta_header_value())
+                    .header("content-type", "application/json")
+                    .json(&request_payload)
+                    .send()
+                    .await;
+                let delay = Self::SEND_RETRY_DELAYS.get(attempt).copied();
+                match (sent, delay) {
+                    (Ok(r), Some(delay)) if Self::is_retryable_status(r.status()) => {
+                        log::warn!("Anthropic answered {}; retrying in {:?}", r.status(), delay);
+                        drop(r);
+                        tokio::time::sleep(delay).await;
+                    }
+                    (Err(e), Some(delay)) if e.is_connect() => {
+                        log::warn!("Anthropic request failed ({}); retrying in {:?}", e, delay);
+                        tokio::time::sleep(delay).await;
+                    }
+                    (Ok(r), _) => return Ok(r),
+                    (Err(e), _) => {
+                        return Err(AgentError::LlmError(format!("HTTP request failed: {}", e)))
+                    }
                 }
-                (Err(e), Some(delay)) if e.is_connect() => {
-                    log::warn!("Anthropic request failed ({}); retrying in {:?}", e, delay);
-                    tokio::time::sleep(delay).await;
-                }
-                (Ok(r), _) => break r,
-                (Err(e), _) => {
-                    return Err(AgentError::LlmError(format!("HTTP request failed: {}", e)))
-                }
+                attempt += 1;
             }
-            attempt += 1;
+        };
+        // Escape while the request is in flight (or between retries) ends the
+        // turn here; dropping the future drops the connection.
+        let response = match cancel_rx.clone() {
+            Some(mut rx) => tokio::select! {
+                sent = send => sent?,
+                _ = until_cancelled(&mut rx) => return Err(AgentError::Terminated),
+            },
+            None => send.await?,
         };
 
         // --- 3. Parse API Response ---
@@ -2491,6 +2555,7 @@ impl AgentBrain for AnthropicBrain {
                     response,
                     Some(&app_handle),
                     Some(message_id.clone()),
+                    cancel_rx.clone(),
                     |chunk, tts_list| {
                         // Emit text chunk event - pass first TTS item if available for backward compatibility
                         crate::agent::tool_logger::emit_streaming_text_chunk(
@@ -2532,6 +2597,20 @@ impl AgentBrain for AnthropicBrain {
             }
 
             let final_display_text = accumulated_text;
+
+            // Cancelled mid-answer: close the bubble on what was already shown
+            // and end the turn. Neither the tools it asked for nor the rest of
+            // the answer is wanted any more; the runner keeps what was shown.
+            if is_cancelled(cancel_rx.as_ref()) {
+                if stream_was_started {
+                    crate::agent::tool_logger::emit_stream_end(
+                        &app_handle,
+                        message_id,
+                        final_display_text,
+                    );
+                }
+                return Err(AgentError::Terminated);
+            }
 
             // Always emit stream_start + stream_end so the frontend knows a response happened.
             // For TTS-only responses, display_text is empty but we still need to notify the

@@ -25,6 +25,21 @@ use tauri::{AppHandle, Emitter, Manager}; // Added Manager trait for accessing a
 pub(crate) const BATCH_HALT_SKIPPED_MESSAGE: &str =
     "Not executed: an earlier computer action in this turn failed.";
 
+/// The calls in `tool_calls` that no tool message in `messages` answers yet.
+fn unanswered_calls<'a>(
+    messages: &[Message],
+    tool_calls: &'a [crate::agent::core::ToolCall],
+) -> Vec<&'a crate::agent::core::ToolCall> {
+    tool_calls
+        .iter()
+        .filter(|call| {
+            !messages.iter().any(|m| {
+                matches!(m.role, Role::Tool) && m.tool_call_id.as_deref() == Some(call.id.as_str())
+            })
+        })
+        .collect()
+}
+
 /// The text of a tool result as the model will actually read it.
 ///
 /// This is the other half of the lying problem, and it was upstream of the
@@ -516,6 +531,43 @@ where
         log::info!(
             "Added cancellation messages for {} unexecuted tools",
             cancelled_count
+        );
+        Ok(())
+    }
+
+    /// Give every call in `tool_calls` that has no result yet one that says
+    /// why it did not run. A batch can end early before any result is written
+    /// (a stop while an approval or permission card waits), and an assistant
+    /// tool_use with no matching result makes the next request a 400.
+    async fn answer_unanswered_calls(
+        &mut self,
+        tool_calls: &[crate::agent::core::ToolCall],
+        error: &AgentError,
+    ) -> Result<(), AgentError> {
+        let mut mem = self.memory.lock().await;
+        let messages = mem.get_messages().await?;
+        let unanswered = unanswered_calls(&messages, tool_calls);
+        if unanswered.is_empty() {
+            return Ok(());
+        }
+        let content = match error {
+            AgentError::Terminated => "Tool execution was cancelled".to_string(),
+            other => format!("Error: {}", other),
+        };
+        for tool_call in &unanswered {
+            mem.add_message(Message {
+                role: Role::Tool,
+                content: content.clone(),
+                tool_calls: None,
+                tool_call_id: Some(tool_call.id.clone()),
+                name: Some(tool_call.name.clone()),
+                images: None,
+            })
+            .await?;
+        }
+        log::info!(
+            "Recorded results for {} tool call(s) the batch never reached",
+            unanswered.len()
         );
         Ok(())
     }
@@ -1591,6 +1643,7 @@ where
                     self.current_step,
                     self.max_steps,
                     &self.app_handle,
+                    cancel_rx.clone(),
                 )
                 .await
                 {
@@ -1650,6 +1703,14 @@ where
                         ))
                         .await;
                         return Err(AgentError::MaxStepsReached);
+                    }
+                    Err(AgentError::Terminated) => {
+                        // Stopped while the question was waiting: a cancel,
+                        // not a failure, so no error sound and no error row.
+                        log::info!("Agent run cancelled while asking to continue.");
+                        self.transition_state(AgentState::Failed("Cancelled".to_string()))
+                            .await;
+                        return Err(AgentError::Terminated);
                     }
                     Err(e) => {
                         log::error!("Failed to request continuation: {}. Terminating agent.", e);
@@ -1828,85 +1889,14 @@ where
                     Err(e) => {
                         log::error!("Tool batch execution failed: {}", e);
 
-                        // CRITICAL FIX: Only remove assistant message if NO tools were executed
-                        // If some tools executed (partial success), keep the assistant message
-                        // as handle_batch_cancellation will have added proper tool results/cancellations
-                        {
-                            let mut mem = self.memory.lock().await;
-                            let messages = mem.get_messages().await?;
-
-                            // Count how many tool result messages were added since our assistant message
-                            let mut tool_result_count = 0;
-                            let mut found_our_assistant_message = false;
-                            let mut assistant_tool_call_ids = Vec::new();
-
-                            // First pass: Find our assistant message and collect its tool call IDs
-                            for msg in messages.iter().rev() {
-                                if matches!(msg.role, Role::Assistant)
-                                    && msg
-                                        .tool_calls
-                                        .as_ref()
-                                        .map(|tc| tc.len() == tool_calls.len())
-                                        .unwrap_or(false)
-                                {
-                                    found_our_assistant_message = true;
-                                    // Collect all tool call IDs from this assistant message
-                                    if let Some(tool_calls) = &msg.tool_calls {
-                                        assistant_tool_call_ids =
-                                            tool_calls.iter().map(|tc| tc.id.clone()).collect();
-                                    }
-                                    break;
-                                }
-                            }
-
-                            // Second pass: Count tool results that match our assistant's tool call IDs
-                            if found_our_assistant_message {
-                                for msg in messages.iter().rev() {
-                                    if matches!(msg.role, Role::Tool)
-                                        && msg
-                                            .tool_call_id
-                                            .as_ref()
-                                            .map(|id| assistant_tool_call_ids.contains(id))
-                                            .unwrap_or(false)
-                                    {
-                                        tool_result_count += 1;
-                                    }
-                                }
-
-                                log::debug!(
-                                    "Found {} tool results out of {} expected for assistant message",
-                                    tool_result_count,
-                                    assistant_tool_call_ids.len()
-                                );
-                            }
-
-                            // Only remove assistant message if NO tool results were added (complete failure)
-                            if found_our_assistant_message && tool_result_count == 0 {
-                                let mut messages_vec = messages;
-                                // Remove the assistant message with tool calls
-                                if let Some(last_message) = messages_vec.last() {
-                                    if matches!(last_message.role, Role::Assistant)
-                                        && last_message
-                                            .tool_calls
-                                            .as_ref()
-                                            .map(|tc| tc.len() == tool_calls.len())
-                                            .unwrap_or(false)
-                                    {
-                                        messages_vec.pop();
-
-                                        // Clear and rebuild memory without the orphaned message
-                                        mem.clear_memory().await?;
-                                        for msg in messages_vec {
-                                            mem.add_message(msg).await?;
-                                        }
-
-                                        log::info!("Removed orphaned assistant message with tool calls (no tools executed)");
-                                    }
-                                }
-                            } else if found_our_assistant_message && tool_result_count > 0 {
-                                log::info!("Keeping assistant message as {} tool(s) were executed before failure", tool_result_count);
-                            }
-                        }
+                        // Every call the model asked for gets a result, so the
+                        // conversation stays valid for the next request. Memory
+                        // is append-only here on purpose: this used to drop the
+                        // assistant message by clearing memory and re-adding
+                        // every message, and each re-add was teed to the saved
+                        // history, so one Escape at an approval card wrote the
+                        // whole conversation into its file a second time.
+                        self.answer_unanswered_calls(&tool_calls, &e).await?;
 
                         // Return the original error
                         return Err(e);
@@ -2400,7 +2390,7 @@ mod tests {
 #[cfg(test)]
 mod batch_halt_tests {
     use super::*;
-    use crate::agent::core::ToolResult;
+    use crate::agent::core::{ToolCall, ToolResult};
 
     fn ok_result(output: serde_json::Value) -> Result<ToolResult, AgentError> {
         Ok(ToolResult {
@@ -2650,5 +2640,57 @@ mod batch_halt_tests {
         assert_eq!(tool_result_content(&serde_json::json!({})), "Empty result");
         assert_eq!(tool_result_content(&serde_json::json!([])), "Empty list");
         assert_eq!(tool_result_content(&serde_json::Value::Null), "No output");
+    }
+
+    fn call(id: &str) -> ToolCall {
+        ToolCall {
+            id: id.to_string(),
+            name: "bash".to_string(),
+            input: serde_json::json!({}),
+        }
+    }
+
+    fn result_for(id: &str) -> Message {
+        Message {
+            role: Role::Tool,
+            content: "ok".to_string(),
+            tool_calls: None,
+            tool_call_id: Some(id.to_string()),
+            name: Some("bash".to_string()),
+            images: None,
+        }
+    }
+
+    /// A batch that ended before writing anything leaves every call to be
+    /// answered; one that wrote some leaves only the rest.
+    #[test]
+    fn only_calls_without_a_result_are_answered() {
+        let calls = vec![call("a"), call("b"), call("c")];
+        let none: Vec<Message> = vec![Message::from_user("hi".to_string(), None)];
+        let ids: Vec<&str> = unanswered_calls(&none, &calls)
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        assert_eq!(ids, ["a", "b", "c"]);
+
+        let some = vec![result_for("a"), result_for("c")];
+        let ids: Vec<&str> = unanswered_calls(&some, &calls)
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        assert_eq!(ids, ["b"]);
+    }
+
+    /// The failed-batch path must never rebuild memory. Every message added
+    /// is teed to the saved conversation, so clearing and re-adding wrote the
+    /// whole history into the file a second time on one Escape.
+    #[test]
+    fn a_failed_batch_never_rebuilds_memory() {
+        let source = include_str!("agent_runner.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            !production.contains("clear_memory()"),
+            "the runner must keep memory append-only"
+        );
     }
 }

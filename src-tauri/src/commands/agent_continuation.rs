@@ -52,12 +52,16 @@ impl ContinuationManager {
     /// Request continuation from user when max iterations reached.
     /// In headless mode, auto-denies continuation (returns None) since there is
     /// no GUI to present the dialog — prevents hanging on user input.
+    ///
+    /// A cancel on `cancel_rx` while the question is waiting ends the wait
+    /// with `AgentError::Terminated`.
     pub async fn request_continuation(
         &self,
         execution_id: String,
         current_step: u32,
         max_steps: u32,
         app_handle: &AppHandle,
+        cancel_rx: crate::state::CancelReceiver,
     ) -> Result<Option<ContinuationResponse>, AgentError> {
         // In headless mode, there is no user to approve continuation — auto-deny
         if crate::cli::headless::is_headless_mode() {
@@ -121,9 +125,19 @@ impl ContinuationManager {
             execution_id, current_step, max_steps
         );
 
-        // Wait for user response (with timeout)
+        // Wait for user response (with timeout), or for the run to be stopped.
+        // Escape used to leave this waiting out the full timeout, so the
+        // stopped run held the bar and the next query for five minutes.
         let timeout_duration = std::time::Duration::from_secs(CONTINUATION_REQUEST_TIMEOUT_SECONDS);
-        match tokio::time::timeout(timeout_duration, rx).await {
+        let Some(answer) = wait_for_answer(rx, timeout_duration, cancel_rx).await else {
+            info!(
+                "Run stopped while asking to continue execution {}",
+                execution_id
+            );
+            self.cleanup_request(&request_id).await;
+            return Err(AgentError::Terminated);
+        };
+        match answer {
             Ok(Ok(response)) => {
                 // Clean up the request
                 self.cleanup_request(&request_id).await;
@@ -216,6 +230,31 @@ impl ContinuationManager {
     }
 }
 
+/// How a continuation question ended: answered, channel dropped, or timed out.
+type Answer = Result<
+    Result<Option<ContinuationResponse>, oneshot::error::RecvError>,
+    tokio::time::error::Elapsed,
+>;
+
+/// The person's answer (or the timeout), or `None` when the run was stopped
+/// while the question was waiting.
+async fn wait_for_answer(
+    rx: oneshot::Receiver<Option<ContinuationResponse>>,
+    timeout: std::time::Duration,
+    mut cancel_rx: crate::state::CancelReceiver,
+) -> Option<Answer> {
+    tokio::select! {
+        answer = tokio::time::timeout(timeout, rx) => Some(answer),
+        _ = async {
+            // A sender that is gone can never cancel.
+            let sender_gone = cancel_rx.wait_for(|&cancelled| cancelled).await.is_err();
+            if sender_gone {
+                std::future::pending::<()>().await;
+            }
+        } => None,
+    }
+}
+
 /// Global continuation manager instance
 static CONTINUATION_MANAGER: std::sync::OnceLock<ContinuationManager> = std::sync::OnceLock::new();
 
@@ -230,10 +269,11 @@ pub async fn request_agent_continuation(
     current_step: u32,
     max_steps: u32,
     app_handle: &AppHandle,
+    cancel_rx: crate::state::CancelReceiver,
 ) -> Result<Option<ContinuationResponse>, AgentError> {
     let manager = get_continuation_manager();
     manager
-        .request_continuation(execution_id, current_step, max_steps, app_handle)
+        .request_continuation(execution_id, current_step, max_steps, app_handle, cancel_rx)
         .await
 }
 
@@ -296,4 +336,52 @@ pub async fn has_pending_continuation_requests(
     let manager = get_continuation_manager();
     let requests = manager.get_pending_requests().await;
     Ok(!requests.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Escape while "Stop or continue?" is waiting ends the wait at once. It
+    /// used to sit out the full five-minute timeout with the run still alive.
+    #[tokio::test]
+    async fn a_stop_ends_the_wait_for_an_answer() {
+        let (_answer_tx, answer_rx) = oneshot::channel();
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        let started = std::time::Instant::now();
+        let waiting = tokio::spawn(wait_for_answer(
+            answer_rx,
+            Duration::from_secs(300),
+            cancel_rx,
+        ));
+        let _ = cancel_tx.send(true);
+        let ended = waiting.await.expect("the wait task runs to completion");
+        assert!(ended.is_none(), "a stop must read as a stop, not an answer");
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn an_answer_still_arrives() {
+        let (answer_tx, answer_rx) = oneshot::channel();
+        let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        let _ = answer_tx.send(Some(ContinuationResponse {
+            request_id: "r".to_string(),
+            approved: true,
+            additional_steps: Some(5),
+        }));
+        let ended = wait_for_answer(answer_rx, Duration::from_secs(300), cancel_rx).await;
+        assert!(matches!(ended, Some(Ok(Ok(Some(ref r)))) if r.approved));
+    }
+
+    /// A cancel channel whose sender is gone can never cancel, so it must
+    /// not end the wait as if it had.
+    #[tokio::test]
+    async fn a_closed_cancel_channel_is_not_a_stop() {
+        let (_answer_tx, answer_rx) = oneshot::channel::<Option<ContinuationResponse>>();
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        drop(cancel_tx);
+        let ended = wait_for_answer(answer_rx, Duration::from_millis(30), cancel_rx).await;
+        assert!(matches!(ended, Some(Err(_))), "only the timeout ends it");
+    }
 }

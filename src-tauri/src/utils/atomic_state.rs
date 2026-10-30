@@ -139,6 +139,20 @@ pub struct AtomicExecutionCoordinator {
     execution_semaphore: Arc<Semaphore>,
     #[allow(dead_code)]
     state_manager: Arc<AtomicStateManager>,
+    /// The ticket of the newest query to ask for a turn. A waiter holding an
+    /// older ticket has been replaced and must not run.
+    latest_ticket: AtomicU64,
+}
+
+/// How [`AtomicExecutionCoordinator::start_latest`] ended.
+pub enum StartOutcome {
+    /// This query runs now; the guard ends the turn when dropped.
+    Started(ExecutionGuard),
+    /// A newer query asked for a turn while this one waited. The newer one
+    /// runs instead, so this one is dropped on purpose.
+    Superseded,
+    /// The turn before it never ended within the wait.
+    TimedOut,
 }
 
 #[allow(clippy::new_without_default)]
@@ -148,7 +162,55 @@ impl AtomicExecutionCoordinator {
             current_execution_id: Arc::new(RwLock::new(None)),
             execution_semaphore: Arc::new(Semaphore::new(1)),
             state_manager: Arc::new(AtomicStateManager::new()),
+            latest_ticket: AtomicU64::new(0),
         }
+    }
+
+    /// Take a ticket for a new query. Taking one replaces every query still
+    /// waiting for its turn: the newest message is the one the person wants
+    /// answered.
+    pub fn claim_latest(&self) -> u64 {
+        self.latest_ticket.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Wait for the running turn to end, then start this one, unless a newer
+    /// query took a ticket in the meantime.
+    ///
+    /// The wait is on the semaphore the running turn holds, so it ends the
+    /// moment that turn drops its guard. It used to be a 3 s poll followed by
+    /// a single `try_start`, and a turn that took longer than that to honour
+    /// its cancel left the new query in a queue nobody read again: the
+    /// person's message sat in the chat with no answer.
+    pub async fn start_latest(
+        &self,
+        ticket: u64,
+        execution_id: String,
+        wait: std::time::Duration,
+    ) -> StartOutcome {
+        let permit = match tokio::time::timeout(
+            wait,
+            self.execution_semaphore.clone().acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            // The semaphore is never closed; treat it like a turn that never ended.
+            Ok(Err(_)) | Err(_) => return StartOutcome::TimedOut,
+        };
+        if self.latest_ticket.load(Ordering::SeqCst) != ticket {
+            return StartOutcome::Superseded;
+        }
+
+        // The permit is the exclusion; the id only names the turn. A previous
+        // guard clears it only while it still names that guard's own turn.
+        *self.current_execution_id.write().await = Some(execution_id.clone());
+        info!("Started execution atomically: {}", execution_id);
+
+        StartOutcome::Started(ExecutionGuard {
+            execution_id,
+            permit: Some(permit),
+            current_execution_id: self.current_execution_id.clone(),
+        })
     }
 
     /// Try to start execution atomically
@@ -208,25 +270,27 @@ impl Drop for ExecutionGuard {
         let current_id = self.current_execution_id.clone();
         let execution_id = self.execution_id.clone();
 
-        // Check if we're in a Tokio runtime before spawning
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
-                let mut current = current_id.write().await;
+        // Clear it now when the lock is free, so the next turn never finds
+        // this one's id still set; otherwise clear it async.
+        let cleared_now = match current_id.try_write() {
+            Ok(mut current) => {
                 if current.as_ref() == Some(&execution_id) {
                     *current = None;
                     debug!("Cleared execution ID on guard drop: {}", execution_id);
                 }
-            });
-        } else {
-            // Try synchronous cleanup with try_write
-            if let Ok(mut current) = current_id.try_write() {
-                if current.as_ref() == Some(&execution_id) {
-                    *current = None;
-                    debug!(
-                        "Cleared execution ID on guard drop (sync): {}",
-                        execution_id
-                    );
-                }
+                true
+            }
+            Err(_) => false,
+        };
+        if !cleared_now {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let mut current = current_id.write().await;
+                    if current.as_ref() == Some(&execution_id) {
+                        *current = None;
+                        debug!("Cleared execution ID on guard drop: {}", execution_id);
+                    }
+                });
             } else {
                 warn!(
                     "Dropped outside Tokio runtime - async cleanup skipped for execution ID: {}",
@@ -347,5 +411,87 @@ mod tests {
 
         let guard3 = coordinator.try_start_execution("exec3".to_string()).await;
         assert!(guard3.is_ok());
+    }
+
+    const WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+    /// A query sent while a slow turn is still stopping waits for that turn
+    /// to end and then runs. It used to give up after 3 s and sit in a queue
+    /// nobody read again, so the message got no answer.
+    #[tokio::test]
+    async fn a_new_query_waits_out_a_slow_stop_and_then_runs() {
+        let coordinator = Arc::new(AtomicExecutionCoordinator::new());
+        let first = coordinator.claim_latest();
+        let StartOutcome::Started(running) =
+            coordinator.start_latest(first, "a".to_string(), WAIT).await
+        else {
+            panic!("the first query must start");
+        };
+
+        let second = coordinator.claim_latest();
+        let waiter = {
+            let coordinator = coordinator.clone();
+            tokio::spawn(async move {
+                coordinator
+                    .start_latest(second, "b".to_string(), WAIT)
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+        assert!(!waiter.is_finished(), "must wait while the first turn runs");
+
+        drop(running);
+        // Held while it is checked: dropping it ends "b", and the check would
+        // race that cleanup (it failed CI that way).
+        let Ok(StartOutcome::Started(_b)) = waiter.await else {
+            panic!("the waiting query must start once the first ends");
+        };
+        assert_eq!(
+            coordinator.get_current_execution_id().await.as_deref(),
+            Some("b")
+        );
+    }
+
+    /// Two queries waiting behind one turn: only the newer one runs.
+    #[tokio::test]
+    async fn only_the_newest_waiting_query_runs() {
+        let coordinator = AtomicExecutionCoordinator::new();
+        let first = coordinator.claim_latest();
+        let StartOutcome::Started(running) =
+            coordinator.start_latest(first, "a".to_string(), WAIT).await
+        else {
+            panic!("the first query must start");
+        };
+
+        let older = coordinator.claim_latest();
+        let newer = coordinator.claim_latest();
+        drop(running);
+
+        assert!(matches!(
+            coordinator.start_latest(older, "b".to_string(), WAIT).await,
+            StartOutcome::Superseded
+        ));
+        assert!(matches!(
+            coordinator.start_latest(newer, "c".to_string(), WAIT).await,
+            StartOutcome::Started(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_never_ends_times_the_waiter_out() {
+        let coordinator = AtomicExecutionCoordinator::new();
+        let first = coordinator.claim_latest();
+        let _running = coordinator.start_latest(first, "a".to_string(), WAIT).await;
+        let second = coordinator.claim_latest();
+        assert!(matches!(
+            coordinator
+                .start_latest(
+                    second,
+                    "b".to_string(),
+                    std::time::Duration::from_millis(20)
+                )
+                .await,
+            StartOutcome::TimedOut
+        ));
     }
 }
