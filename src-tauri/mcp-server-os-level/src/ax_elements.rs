@@ -128,7 +128,8 @@ pub fn worth_listing(ax_role: &str, name: Option<&str>, value: Option<&str>) -> 
 
 #[cfg(target_os = "macos")]
 pub use macos_impl::{
-    focus, press, press_nearest, show_menu, window_elements, window_fingerprint, ElementRef,
+    focus, live_frame, press, press_nearest, show_menu, window_elements, window_fingerprint,
+    ElementRef,
 };
 
 #[cfg(not(target_os = "macos"))]
@@ -157,6 +158,11 @@ pub fn show_menu(_element: &ElementRef) -> Result<(), String> {
 #[cfg(not(target_os = "macos"))]
 pub fn focus(_element: &ElementRef) -> Result<(), String> {
     Err("Focusing an element is only available on macOS".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn live_frame(_element: &ElementRef) -> Option<(f64, f64, f64, f64)> {
+    None
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -441,6 +447,13 @@ mod macos_impl {
             }
         }
         Some(hasher.finish())
+    }
+
+    /// Where an element is now, in screen points, or `None` once it is gone
+    /// (its window closed, or the app rebuilt that part of its UI). A listing's
+    /// frame is only true when it was read; this is read at the moment of use.
+    pub fn live_frame(element: &ElementRef) -> Option<(f64, f64, f64, f64)> {
+        frame(&element.0).filter(|f| f.2 > 0.0 && f.3 > 0.0)
     }
 
     /// Give an element keyboard focus inside its app, without raising the

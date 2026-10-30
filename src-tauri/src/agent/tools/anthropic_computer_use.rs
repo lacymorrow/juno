@@ -148,6 +148,86 @@ async fn run_scoped_computer_action(
     result
 }
 
+/// A zoom region `(x0, y0, x1, y1)` given in a picture's own pixels, clamped
+/// to that picture: `(x, y, width, height)`, or `None` when nothing is left.
+fn picture_zoom_rect(
+    region: (i64, i64, i64, i64),
+    image: (u32, u32),
+) -> Option<(u32, u32, u32, u32)> {
+    let clamp = |v: i64, max: u32| v.clamp(0, i64::from(max)) as u32;
+    let (x0, y0) = (clamp(region.0, image.0), clamp(region.1, image.1));
+    let (x1, y1) = (clamp(region.2, image.0), clamp(region.3, image.1));
+    (x1 > x0 && y1 > y0).then_some((x0, y0, x1 - x0, y1 - y0))
+}
+
+/// A zoom region in standard-resolution coordinates, mapped onto a native
+/// capture of the display those coordinates were scaled from.
+///
+/// `scale` is display points to standard pixels (as recorded with the last
+/// screenshot), `display` the display's size in points, `image` the native
+/// capture's size in pixels (twice the points on Retina).
+fn native_zoom_rect(
+    region: (i64, i64, i64, i64),
+    scale: (f64, f64),
+    display: (u32, u32),
+    image: (u32, u32),
+) -> Option<(u32, u32, u32, u32)> {
+    if scale.0 <= 0.0 || scale.1 <= 0.0 || display.0 == 0 || display.1 == 0 {
+        return None;
+    }
+    let px_x = f64::from(image.0) / f64::from(display.0) / scale.0;
+    let px_y = f64::from(image.1) / f64::from(display.1) / scale.1;
+    let to_px = |v: i64, per: f64, round_up: bool| {
+        let p = v as f64 * per;
+        (if round_up { p.ceil() } else { p.floor() }) as i64
+    };
+    picture_zoom_rect(
+        (
+            to_px(region.0, px_x, false),
+            to_px(region.1, px_y, false),
+            to_px(region.2, px_x, true),
+            to_px(region.3, px_y, true),
+        ),
+        image,
+    )
+}
+
+/// `size` shrunk to fit a `longest` x `longest` box, keeping its shape;
+/// never enlarged.
+fn fit_within(size: (u32, u32), longest: u32) -> (u32, u32) {
+    let edge = size.0.max(size.1);
+    if edge <= longest || edge == 0 {
+        return size;
+    }
+    let fit = f64::from(longest) / f64::from(edge);
+    (
+        ((f64::from(size.0) * fit).round() as u32).max(1),
+        ((f64::from(size.1) * fit).round() as u32).max(1),
+    )
+}
+
+/// Decode a base64 picture produced by a capture path.
+fn decode_base64_image(encoded: &str) -> Result<image::DynamicImage, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|e| format!("Failed to decode the picture for zoom: {}", e))?;
+    image::load_from_memory(&bytes)
+        .map_err(|e| format!("Failed to load the picture for zoom: {}", e))
+}
+
+/// One display at its native resolution, for zoom.
+#[cfg(target_os = "macos")]
+fn capture_display_native(display_id: u32) -> Result<image::RgbaImage, String> {
+    computer_use_ai_sdk::platforms::macos::utils::capture_display_screenshot_buffer(display_id)
+        .map_err(|e| format!("Zoom capture failed: {}", e))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn capture_display_native(_display_id: u32) -> Result<image::RgbaImage, String> {
+    Err("Zoom is only available on macOS".to_string())
+}
+
 /// Extract [x, y] from a computer tool input's "coordinate" field.
 /// Returns None if the field is absent or malformed.
 fn extract_coordinate(input: &Value) -> Option<(f64, f64)> {
@@ -1363,7 +1443,7 @@ async fn run_element_action(
         Err(message) => return Ok(create_anthropic_error_response(message)),
     };
     let pin = resolved.pin;
-    let (center_x, center_y) = resolved.screen_center();
+    let (mut center_x, mut center_y) = resolved.screen_center();
     ax_targeting::set_working_window(pin);
 
     use computer_use_ai_sdk::click_verify::{ClickKind, Verdict};
@@ -1413,6 +1493,17 @@ async fn run_element_action(
             json!({ "success": true, "method": method })
         }
         Err(reason) => {
+            // The listing's position is only as fresh as the listing. Click
+            // where the control is now; one that has gone is not clicked at
+            // all, or the click lands on whatever took its place.
+            match resolved.live_center() {
+                Some((x, y)) => (center_x, center_y) = (x, y),
+                None => {
+                    return Ok(create_anthropic_error_response(format!(
+                        "{element_id} is no longer on screen ({reason}). List the elements again"
+                    )))
+                }
+            }
             info!(
                 "[AX] {} on {}: {}; clicking its centre at ({:.0}, {:.0})",
                 action,
@@ -2265,6 +2356,14 @@ pub async fn execute_computer_tool(
     // guard-taking actions: it saves nothing, and it is the ONLY spacing the
     // AX-grounded click/type paths below ever get.
     enforce_action_cooldown(action).await;
+
+    // The screen captured at push-to-talk release shows the screen before
+    // this action. Once anything is clicked or typed it no longer does, and a
+    // `screenshot` that handed it back would show the agent the screen from
+    // before its own click, as if the click had done nothing.
+    if is_ui_modifying_action(action) {
+        let _ = state_manager.take_pending_ptt_screenshot().await;
+    }
 
     // Serialize coordinate-based physical input across parallel sessions
     // (LAC-1432). macOS has one hardware pointer, so CGEvent-based actions
@@ -3375,9 +3474,22 @@ pub async fn execute_computer_tool(
 
             // Crop from the same kind of picture the coordinates refer to: the
             // window on its own when the last screenshot was one window,
-            // otherwise the screen at the standard resolution.
-            let source_base64 = match coordinates::current_frame() {
-                coordinates::CoordinateFrame::Window { pid, window_id, .. } => {
+            // otherwise the display the last screenshot was of, captured at
+            // its native resolution. That display comes from the recorded
+            // scaling, not from where the pointer is now: a fresh "display
+            // under the cursor" screenshot here re-recorded the scaling, so a
+            // zoom after the person moved the pointer to another screen
+            // retargeted every later click to that screen. And it cropped the
+            // downscaled picture, which is what zoom exists to avoid.
+            use base64::Engine;
+            use image::ImageFormat;
+            use std::io::Cursor;
+            let engine = base64::engine::general_purpose::STANDARD;
+            let region = (api_x0, api_y0, api_x1, api_y1);
+            let recorded = coordinates::SCREENSHOT_SCALE.read().ok().map(|s| *s);
+
+            let (img, crop) = match (coordinates::current_frame(), recorded) {
+                (coordinates::CoordinateFrame::Window { pid, window_id, .. }, _) => {
                     let pin = PinnedWindow { pid, window_id };
                     let picture =
                         handle_anthropic_result!(tokio::task::spawn_blocking(move || {
@@ -3387,54 +3499,69 @@ pub async fn execute_computer_tool(
                         .map_err(|e| format!("Window capture task failed: {}", e))
                         .and_then(|r| r));
                     let picture = super::ax_targeting::adopt_picture(picture);
-                    picture["base64_image"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string()
+                    let img = handle_anthropic_result!(decode_base64_image(
+                        picture["base64_image"].as_str().unwrap_or_default()
+                    ));
+                    // Window coordinates are pixels in this same picture.
+                    let crop = picture_zoom_rect(region, (img.width(), img.height()));
+                    (img, crop)
                 }
-                coordinates::CoordinateFrame::Screen => {
-                    handle_anthropic_result!(crate::commands::core::capture_screenshot_command(
-                        app_handle.clone(),
-                        state_manager.clone()
-                    )
+                (coordinates::CoordinateFrame::Screen, Some(scaling))
+                    if scaling.display_width > 0 && scaling.display_height > 0 =>
+                {
+                    let Some(display_id) = scaling.display_id else {
+                        return Ok(create_anthropic_error_response(
+                            "Take a screenshot before zooming".to_string(),
+                        ));
+                    };
+                    let buffer = handle_anthropic_result!(tokio::task::spawn_blocking(move || {
+                        capture_display_native(display_id)
+                    })
                     .await
-                    .map_err(|e| format!("Zoom screenshot capture failed: {}", e)))
-                    .base64_image
+                    .map_err(|e| format!("Zoom capture task failed: {}", e))
+                    .and_then(|r| r));
+                    let img = image::DynamicImage::ImageRgba8(buffer);
+                    let crop = native_zoom_rect(
+                        region,
+                        (
+                            f64::from(scaling.display_to_standard_scale_x),
+                            f64::from(scaling.display_to_standard_scale_y),
+                        ),
+                        (scaling.display_width, scaling.display_height),
+                        (img.width(), img.height()),
+                    );
+                    (img, crop)
+                }
+                (coordinates::CoordinateFrame::Screen, _) => {
+                    return Ok(create_anthropic_error_response(
+                        "Take a screenshot before zooming".to_string(),
+                    ));
                 }
             };
 
-            // Decode the base64 screenshot for cropping
-            use base64::Engine;
-            use image::ImageFormat;
-            use std::io::Cursor;
-            let engine = base64::engine::general_purpose::STANDARD;
-            let image_data = handle_anthropic_result!(engine
-                .decode(&source_base64)
-                .map_err(|e| format!("Failed to decode screenshot for zoom: {}", e)));
-
-            let img = handle_anthropic_result!(image::load_from_memory(&image_data)
-                .map_err(|e| format!("Failed to load screenshot image for zoom: {}", e)));
-
-            // The screenshot was already resized to standard resolution by capture_screenshot_command.
-            // We need to map the API coordinates to the screenshot pixel space.
-            // Since capture_screenshot_command resizes to standard_width x standard_height,
-            // and the API coordinates ARE in standard resolution space, we can crop directly
-            // using the API coordinates (they map 1:1 to screenshot pixels).
-            let crop_x = api_x0.max(0) as u32;
-            let crop_y = api_y0.max(0) as u32;
-            let crop_w = ((api_x1 - api_x0) as u32).min(img.width().saturating_sub(crop_x));
-            let crop_h = ((api_y1 - api_y0) as u32).min(img.height().saturating_sub(crop_y));
-
-            if crop_w == 0 || crop_h == 0 {
+            let Some((crop_x, crop_y, crop_w, crop_h)) = crop else {
                 return Ok(create_anthropic_error_response(
                     "Zoom region results in zero-size crop after bounds clamping".to_string(),
                 ));
-            }
+            };
+            let (img_width, img_height) = (img.width(), img.height());
 
-            // Crop the image to the specified region
+            // The region at the resolution it was captured at, but never
+            // larger than a full screenshot, so one zoom cannot cost more than
+            // the screen it came from.
             let cropped = img.crop_imm(crop_x, crop_y, crop_w, crop_h);
+            drop(img);
+            let longest = recorded
+                .map(|s| s.standard_width.max(s.standard_height))
+                .filter(|edge| *edge > 0)
+                .unwrap_or(u32::MAX);
+            let (out_w, out_h) = fit_within((crop_w, crop_h), longest);
+            let cropped = if (out_w, out_h) == (crop_w, crop_h) {
+                cropped
+            } else {
+                cropped.resize_exact(out_w, out_h, image::imageops::FilterType::Lanczos3)
+            };
 
-            // Encode cropped region as PNG (no downscaling — return at native resolution)
             let mut png_buffer = Cursor::new(Vec::new());
             handle_anthropic_result!(cropped
                 .write_to(&mut png_buffer, ImageFormat::Png)
@@ -3443,7 +3570,7 @@ pub async fn execute_computer_tool(
             let zoomed_base64 = engine.encode(png_buffer.into_inner());
 
             info!("Zoom action: API region [{},{},{},{}] → crop {}x{} at ({},{}) from {}x{} screenshot",
-                api_x0, api_y0, api_x1, api_y1, crop_w, crop_h, crop_x, crop_y, img.width(), img.height());
+                api_x0, api_y0, api_x1, api_y1, crop_w, crop_h, crop_x, crop_y, img_width, img_height);
 
             Ok(json!({
                 "base64_image": zoomed_base64,
@@ -5222,5 +5349,65 @@ mod ignored_click_tests {
             declined: false,
         };
         assert!(ignored.accepted().is_err());
+    }
+}
+
+#[cfg(test)]
+mod stale_picture_tests {
+    /// A screenshot captured at push-to-talk release must not be handed back
+    /// after the agent has acted: it would show the screen before its click.
+    #[test]
+    fn an_action_retires_the_push_to_talk_screenshot() {
+        let source = include_str!("anthropic_computer_use.rs");
+        let body = &source[source
+            .find("pub async fn execute_computer_tool(")
+            .expect("executor exists")..];
+        let retire = body
+            .find("if is_ui_modifying_action(action) {\n        let _ = state_manager.take_pending_ptt_screenshot().await;")
+            .expect("a UI-changing action discards the cached screenshot");
+        let dispatch = body
+            .find("let result = match action {")
+            .expect("the action dispatch");
+        assert!(retire < dispatch);
+    }
+}
+
+#[cfg(test)]
+mod zoom_tests {
+    use super::*;
+
+    #[test]
+    fn a_zoom_on_retina_crops_the_native_pixels() {
+        // A 1512x982 point Retina display (3024x1964 px), screenshots sent at
+        // 1280x831: the region maps through points to native pixels, so the
+        // crop holds about 2.4x the pixels the screenshot had for it.
+        let scale = (1280.0 / 1512.0, 831.0 / 982.0);
+        let crop = native_zoom_rect((640, 400, 740, 450), scale, (1512, 982), (3024, 1964));
+        let (x, y, w, h) = crop.expect("a region inside the display crops");
+        assert!((1511..=1512).contains(&x), "x {x}");
+        assert!((945..=946).contains(&y), "y {y}");
+        assert!((236..=238).contains(&w), "width {w}");
+        assert!((118..=120).contains(&h), "height {h}");
+    }
+
+    #[test]
+    fn a_zoom_on_a_1x_display_is_the_same_region_in_points() {
+        let crop = native_zoom_rect((0, 0, 100, 50), (1.0, 1.0), (1920, 1080), (1920, 1080));
+        assert_eq!(crop, Some((0, 0, 100, 50)));
+    }
+
+    #[test]
+    fn a_zoom_off_the_picture_is_clamped_or_refused() {
+        assert_eq!(
+            picture_zoom_rect((1200, 700, 2000, 2000), (1280, 800)),
+            Some((1200, 700, 80, 100))
+        );
+        assert_eq!(picture_zoom_rect((1300, 0, 1400, 10), (1280, 800)), None);
+    }
+
+    #[test]
+    fn a_zoom_never_costs_more_than_a_screenshot() {
+        assert_eq!(fit_within((3024, 1964), 1280), (1280, 831));
+        assert_eq!(fit_within((200, 100), 1280), (200, 100));
     }
 }

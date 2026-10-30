@@ -50,7 +50,9 @@ pub(crate) async fn capture_screenshot_command(
     state: State<'_, AppState>,
 ) -> Result<ScreenshotResult, String> {
     use base64::Engine;
-    use computer_use_ai_sdk::platforms::macos::utils::capture_screenshot_buffer;
+    use computer_use_ai_sdk::platforms::macos::utils::{
+        capture_display_screenshot_buffer, capture_screenshot_buffer,
+    };
     use image::DynamicImage;
     use std::io::Cursor;
 
@@ -59,15 +61,26 @@ pub(crate) async fn capture_screenshot_command(
         return Err(e.to_user_message());
     }
 
+    // Decide which display this picture is of once, and capture exactly that
+    // one. Picking "the display under the cursor" separately for the capture
+    // and for the scaling let a pointer crossing displays in between pair one
+    // display's picture with another's size and origin, and every click the
+    // agent aimed at that picture landed on the wrong screen.
+    let display = get_display_dimensions();
+    let capture_id = display.as_ref().ok().map(|d| d.4);
+
     // Capture straight to the raw RGBA buffer. The previous path PNG-encoded and
     // base64-encoded here only for this command to base64-decode and PNG-decode it right
     // back again before resizing — roughly 180ms of throwaway work on a 1920x1080 display,
     // paid on nearly every turn of a computer-use loop. Screen capture blocks, so it runs
     // on the blocking pool instead of an async worker thread.
-    let buffer = tokio::task::spawn_blocking(capture_screenshot_buffer)
-        .await
-        .map_err(|e| format!("Screenshot capture task failed: {}", e))?
-        .map_err(|e| format!("Failed to capture screenshot: {}", e))?;
+    let buffer = tokio::task::spawn_blocking(move || match capture_id {
+        Some(id) => capture_display_screenshot_buffer(id),
+        None => capture_screenshot_buffer(),
+    })
+    .await
+    .map_err(|e| format!("Screenshot capture task failed: {}", e))?
+    .map_err(|e| format!("Failed to capture screenshot: {}", e))?;
 
     // The old path decoded an RGBA8 PNG, so `img` was a `DynamicImage::ImageRgba8` holding
     // exactly these pixels. Wrapping the buffer reproduces that value without the encode /
@@ -77,7 +90,7 @@ pub(crate) async fn capture_screenshot_command(
     let original_height = img.height();
 
     // Get display information to calculate proper scaling
-    match get_display_dimensions() {
+    match display {
         Ok((display_width, display_height, origin_x, origin_y, display_id)) => {
             // Select the best standard resolution for this display, model-aware.
             // This MUST match the resolution used inside update_standard_resolution_scaling_with_display

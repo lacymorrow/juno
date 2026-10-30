@@ -236,6 +236,18 @@ pub fn capture_screenshot_buffer() -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, Aut
     Ok(buffer)
 }
 
+/// Captures one display, chosen by the caller, as a raw image buffer.
+///
+/// For callers that have already decided which display a picture is of (and
+/// record its size and origin for the coordinates sent against it): capturing
+/// "the display under the cursor" a second time could pick another display
+/// if the pointer crossed over in between.
+pub fn capture_display_screenshot_buffer(
+    display_id: CGDirectDisplayID,
+) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, AutomationError> {
+    capture_display_buffer(Some(display_id))
+}
+
 /// Captures a screenshot of the main display and encodes it as base64 PNG.
 ///
 /// Behaviour is unchanged for existing callers: this performs exactly the same capture

@@ -311,6 +311,13 @@ impl ResolvedElement {
         center(self.info.frame)
     }
 
+    /// Its centre where it is now, read from the app at the moment of use;
+    /// `None` once the control is gone. The fallback click aims here, never
+    /// at the listing's position, which may be stale.
+    pub fn live_center(&self) -> Option<(f64, f64)> {
+        live_click_point(ax_elements::live_frame(&self.element))
+    }
+
     /// How a result names it: `button "1"`.
     pub fn describe(&self) -> Value {
         let mut described = json!({ "role": self.info.role });
@@ -319,6 +326,12 @@ impl ResolvedElement {
         }
         described
     }
+}
+
+/// Where a fallback click on a listed control goes: the centre of its live
+/// frame, or nowhere when the control no longer exists.
+fn live_click_point(live: Option<(f64, f64, f64, f64)>) -> Option<(f64, f64)> {
+    live.map(center)
 }
 
 /// Look up an `element` id from the latest listing.
@@ -458,6 +471,17 @@ pub fn adopt_picture(picture: WindowPicture) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fallback_click_aims_at_the_control_where_it_is_now() {
+        // Moved since the listing: the live frame wins.
+        assert_eq!(
+            live_click_point(Some((100.0, 200.0, 40.0, 20.0))),
+            Some((120.0, 210.0))
+        );
+        // Gone: no click at all, never the old position.
+        assert_eq!(live_click_point(None), None);
+    }
 
     #[test]
     fn element_ids_round_trip() {

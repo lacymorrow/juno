@@ -2806,20 +2806,70 @@ fn repeated_click_no_warp(
     Ok(last)
 }
 
+/// Where the agent's left button went down and has not come up yet.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum HeldLeft {
+    /// Posted to one process (and window), which must get the release too:
+    /// an app that saw a press and never a release stays in its mouse
+    /// tracking loop.
+    Process { pid: i32, window_id: Option<u32> },
+    /// Through the shared pointer.
+    Physical,
+}
+
+/// The press `left_mouse_down` left standing, with the point it landed on.
+/// Cleared by the matching `left_mouse_up`, or by
+/// [`release_held_left_button`] when the run that pressed it ends.
+static HELD_LEFT: std::sync::Mutex<Option<(HeldLeft, f64, f64)>> = std::sync::Mutex::new(None);
+
+fn set_held_left(held: Option<(HeldLeft, f64, f64)>) {
+    if let Ok(mut guard) = HELD_LEFT.lock() {
+        *guard = held;
+    }
+}
+
+fn held_left() -> Option<(HeldLeft, f64, f64)> {
+    HELD_LEFT.lock().ok().and_then(|guard| *guard)
+}
+
+/// Where a release goes. A press posted to a process is released to that same
+/// process and window, wherever the release point is: resolving it again at a
+/// drag's end point would hand it to whatever window lies there and leave the
+/// pressed app holding the button. Otherwise it is resolved like any event.
+pub(crate) fn release_target(
+    held: Option<HeldLeft>,
+    resolved: Option<(i32, Option<u32>)>,
+) -> Option<(i32, Option<u32>)> {
+    match held {
+        Some(HeldLeft::Process { pid, window_id }) => Some((pid, window_id)),
+        Some(HeldLeft::Physical) => None,
+        None => resolved,
+    }
+}
+
 /// Press the left mouse button at a point without warping the system cursor.
 pub(crate) fn left_mouse_down_no_warp(
     x: f64,
     y: f64,
     allow_physical: bool,
 ) -> Result<Option<InputOutcome>, AutomationError> {
-    single_mouse_event_no_warp(
+    let delivered = single_mouse_event_no_warp(
         x,
         y,
         CGEventType::LeftMouseDown,
         CGMouseButton::Left,
         allow_physical,
+        None,
         &|| left_mouse_down(x, y, None),
-    )
+    )?;
+    Ok(delivered.map(|(outcome, target)| {
+        let held = match target {
+            Some((pid, window_id)) => HeldLeft::Process { pid, window_id },
+            None => HeldLeft::Physical,
+        };
+        set_held_left(Some((held, x, y)));
+        outcome
+    }))
 }
 
 /// Release the left mouse button at a point without warping the system cursor.
@@ -2828,32 +2878,85 @@ pub(crate) fn left_mouse_up_no_warp(
     y: f64,
     allow_physical: bool,
 ) -> Result<Option<InputOutcome>, AutomationError> {
-    single_mouse_event_no_warp(
+    let held = held_left().map(|(held, _, _)| held);
+    let delivered = single_mouse_event_no_warp(
         x,
         y,
         CGEventType::LeftMouseUp,
         CGMouseButton::Left,
         allow_physical,
+        held,
         &|| left_mouse_up(x, y, None),
-    )
+    )?;
+    if delivered.is_some() {
+        set_held_left(None);
+    }
+    Ok(delivered.map(|(outcome, _)| outcome))
 }
 
-/// Post one mouse event to the process under `(x, y)`, or fall back to the
-/// physical tap when that is allowed.
+/// Let go of a left button the agent pressed and never released, at the
+/// point it was pressed. Called when the run that pressed it ends, whether it
+/// finished, failed or was stopped, so no app is left mid-drag and the
+/// person's pointer is never left with the button down. Returns whether
+/// anything was held.
+pub fn release_held_left_button() -> bool {
+    let Some((held, x, y)) = HELD_LEFT.lock().ok().and_then(|mut guard| guard.take()) else {
+        return false;
+    };
+    warn!(
+        "Releasing a left button left down at ({:.0}, {:.0}) via {:?}",
+        x, y, held
+    );
+    match held {
+        HeldLeft::Process { pid, window_id } => {
+            let _ = post_mouse_event_to_window(
+                pid,
+                window_id,
+                CGEventType::LeftMouseUp,
+                CGPoint::new(x, y),
+                CGMouseButton::Left,
+                None,
+            );
+        }
+        HeldLeft::Physical => {
+            // Released where the pointer is now, so the person's pointer does
+            // not jump back to where the agent pressed.
+            let (px, py) = get_cursor_position().unwrap_or((x, y));
+            let _ = left_mouse_up(px, py, None);
+        }
+    }
+    true
+}
+
+/// What one posted mouse event reached: how, and which process and window
+/// (`None` for the physical tap).
+type MouseDelivery = (InputOutcome, Option<(i32, Option<u32>)>);
+
+/// Post one mouse event to the process under `(x, y)` (or, for a release, to
+/// the process `held` was pressed in), or fall back to the physical tap when
+/// that is allowed.
 fn single_mouse_event_no_warp(
     x: f64,
     y: f64,
     event_type: CGEventType,
     button: CGMouseButton,
     allow_physical: bool,
+    held: Option<HeldLeft>,
     physical: &dyn Fn() -> Result<(), AutomationError>,
-) -> Result<Option<InputOutcome>, AutomationError> {
-    if let Some((pid, window_id)) = resolve_click_target(x, y) {
+) -> Result<Option<MouseDelivery>, AutomationError> {
+    let resolved = match held {
+        Some(_) => None,
+        None => resolve_click_target(x, y),
+    };
+    if let Some((pid, window_id)) = release_target(held, resolved) {
         note_background_target_window(pid, window_id);
         if post_mouse_event_to_window(pid, window_id, event_type, CGPoint::new(x, y), button, None)
             .is_ok()
         {
-            return Ok(Some(InputOutcome::process_targeted(post_method_label())));
+            return Ok(Some((
+                InputOutcome::process_targeted(post_method_label()),
+                Some((pid, window_id)),
+            )));
         }
         debug!(
             "Process-targeted mouse event failed for PID {}, physical allowed: {}",
@@ -2874,7 +2977,10 @@ fn single_mouse_event_no_warp(
         let _ = mouse_move(sx, sy);
     }
     result?;
-    Ok(Some(InputOutcome::physical_cursor("HID-with-restore")))
+    Ok(Some((
+        InputOutcome::physical_cursor("HID-with-restore"),
+        None,
+    )))
 }
 
 /// Drag from one point to another without warping the system cursor.
@@ -3285,7 +3391,8 @@ fn left_click_no_warp_inner(
 #[cfg(test)]
 mod tests {
     use super::{
-        focus_to_restore, key_window_event_record, may_simulate_mouse, wait, MAX_WAIT_DURATION_MS,
+        focus_to_restore, key_window_event_record, may_simulate_mouse, release_target, wait,
+        HeldLeft, MAX_WAIT_DURATION_MS,
     };
 
     /// This file's source, for tests that pin a check to the code it guards.
@@ -3401,6 +3508,40 @@ mod tests {
                 name
             );
         }
+    }
+
+    // --- a pressed button is always released where it was pressed ---
+
+    #[test]
+    fn a_release_goes_to_the_process_that_was_pressed() {
+        let pressed = Some(HeldLeft::Process {
+            pid: 7,
+            window_id: Some(70),
+        });
+        // A drag ending over another app's window still releases in the first.
+        assert_eq!(
+            release_target(pressed, Some((8, Some(80)))),
+            Some((7, Some(70)))
+        );
+        // A press through the pointer is released through the pointer.
+        assert_eq!(
+            release_target(Some(HeldLeft::Physical), Some((8, None))),
+            None
+        );
+        // Nothing held: the release is resolved like any event.
+        assert_eq!(
+            release_target(None, Some((8, Some(80)))),
+            Some((8, Some(80)))
+        );
+    }
+
+    #[test]
+    fn the_press_is_remembered_until_released() {
+        let down = fn_body("left_mouse_down_no_warp");
+        assert!(down.contains("set_held_left(Some("));
+        let up = fn_body("left_mouse_up_no_warp");
+        assert!(up.contains("held_left()"));
+        assert!(up.contains("set_held_left(None)"));
     }
 
     const USER_APP: i32 = 101;
