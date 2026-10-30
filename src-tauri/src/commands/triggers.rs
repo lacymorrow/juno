@@ -15,6 +15,12 @@ use crate::settings::manager::SettingsManager;
 use crate::state::{self, AppState};
 use crate::triggers::{self, Trigger};
 
+/// One save at a time. A save writes memory, then the store, then re-registers
+/// the keys, awaiting between each step, and the keyboard-detection retry saves
+/// too. Two interleaved saves could leave the store holding one list and the
+/// running app (and its registered keys) the other.
+static SAVE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Whether voice triggers may arm the microphone in this run.
 ///
 /// Wake phrases are experimental for launch, so they follow the advanced
@@ -239,6 +245,7 @@ pub async fn set_triggers(
     // Hold rows pointing at dictation are a legitimate pair of keys, on
     // different keys. What is normalized here is only the identity itself: a
     // row the window has just created arrives with a blank id and is given one.
+    let _saving = SAVE_LOCK.lock().await;
     let mut normalized = triggers;
     triggers::ensure_ids(&mut normalized);
 
@@ -248,7 +255,8 @@ pub async fn set_triggers(
     // their key, greyed out, doing nothing. Compared against what was stored a
     // moment ago, by id, because only the first binding counts: rebinding a row
     // somebody deliberately switched off leaves it off.
-    let previous = app_state.get_triggers().unwrap_or_default();
+    let stored = app_state.get_triggers().ok();
+    let previous = stored.clone().unwrap_or_default();
     triggers::enable_newly_bound(&previous, &mut normalized);
 
     // And the reverse: a row with no binding cannot fire, so it must not come
@@ -279,8 +287,19 @@ pub async fn set_triggers(
     // 2. Keep the legacy in-memory fields coherent for peripheral consumers.
     sync_state_legacy(&app_state, &normalized, &ks);
 
-    // 3. Persist to the store (triggers + derived legacy fields).
-    persist(&app, &normalized).await?;
+    // 3. Persist to the store (triggers + derived legacy fields). A failed
+    // write puts memory back: the caller is told the save failed, and the keys
+    // registered and the wake phrase armed are still the old list's, so the
+    // running app must not claim the new one.
+    if let Err(e) = persist(&app, &normalized).await {
+        if let Some(stored) = stored {
+            if let Err(restore) = app_state.set_triggers(stored.clone()) {
+                error!("[Triggers] Could not restore the triggers after a failed save: {restore}");
+            }
+            sync_state_legacy(&app_state, &stored, &ks);
+        }
+        return Err(e);
+    }
 
     // 4. Re-register global shortcuts from the new triggers.
     if let Err(e) = crate::commands::shortcuts::update_global_shortcuts(&app, &app_state).await {

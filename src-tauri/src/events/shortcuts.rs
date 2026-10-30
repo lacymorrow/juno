@@ -291,6 +291,12 @@ pub mod recognizer {
     /// a question something else already answers.
     pub fn on_press(key: &str, gestures: KeyGestures, session: Option<TriggerTarget>) -> Decision {
         with(key, |s| {
+            // A key cannot go down twice without coming up. A swallow still
+            // pending here means the release it was set for never reached
+            // the recognizer (a bar voice query or onboarding took it first),
+            // and left standing it would eat the next real tap.
+            s.swallow_release = false;
+
             // A tap session is running: the next press of that key stops it on
             // the down edge, and its release is swallowed.
             if let Some(target) = session {
@@ -427,6 +433,20 @@ pub mod recognizer {
                 "the stop happened on the down edge"
             );
             // And the swallow was spent: the next release is an ordinary tap.
+            assert_eq!(on_release(key, g), Decision::Tap(Dictation));
+        }
+
+        #[test]
+        fn a_swallow_whose_release_was_lost_does_not_eat_the_next_tap() {
+            let key = "lost-release";
+            forget(key);
+            let g = tap_only(Dictation);
+
+            // The stop press arms a swallow, but the release never arrives
+            // (a bar voice query consumed it before the recognizer).
+            assert_eq!(on_press(key, g, Some(Dictation)), Decision::Tap(Dictation));
+            // The next press is a fresh gesture, and its release a real tap.
+            assert_eq!(on_press(key, g, None), Decision::Ignore);
             assert_eq!(on_release(key, g), Decision::Tap(Dictation));
         }
 

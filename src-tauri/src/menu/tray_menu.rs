@@ -1465,25 +1465,6 @@ pub fn handle_tray_icon_event(app_handle: &AppHandle, event: tauri::tray::TrayIc
     }
 }
 
-/// Enhanced tray menu refresh function
-pub fn refresh_tray_menu(app_handle: &AppHandle) {
-    info!("[TrayMenu] Refreshing tray menu...");
-
-    match create_state_aware_tray_menu(app_handle) {
-        Ok(_new_menu) => {
-            info!("[TrayMenu] Successfully refreshed tray menu");
-            // Note: Tauri v2 will handle menu updates automatically through the state
-        }
-        Err(e) => {
-            error!(
-                "{} {}",
-                prefixes::TRAY_MENU,
-                format_error(templates::FAILED_TO_LOAD, "tray menu refresh", e)
-            );
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     /// Developer Tools is listed exactly when this is a local development

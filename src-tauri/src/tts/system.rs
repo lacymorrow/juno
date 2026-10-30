@@ -38,7 +38,8 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
 /// non-Siri voice gets spoken, so it cannot be built here at all.
 ///
 /// `-a` is the output device by name, omitted when nothing was chosen, which
-/// leaves `say` on the Mac's own output.
+/// leaves `say` on the Mac's own output. The text always follows a `--`, so no
+/// text can be read as an option.
 pub fn say_arguments(text: &str, device: Option<&str>) -> Vec<String> {
     say_arguments_at(text, device, None)
 }
@@ -59,6 +60,10 @@ pub fn say_arguments_at(
         args.push("-a".to_string());
         args.push(device.to_string());
     }
+    // `--` ends the options. The text is model output, often web or email
+    // content, and `say` reads a leading dash as a flag: "-v Samantha ..." would
+    // pick a non-Siri voice and "-o /path ..." would overwrite a file.
+    args.push("--".to_string());
     args.push(text.to_string());
     args
 }
@@ -121,6 +126,12 @@ async fn run_say(args: Vec<String>) -> Result<std::process::ExitStatus, String> 
     let pid = child.id();
     if let Some(pid) = pid {
         crate::tts::register_audio_pid(pid);
+        // A stop that landed between taking this sentence and the pid being
+        // registered found nothing to signal. `say` would speak the whole
+        // sentence after Escape, so the stop is honoured here.
+        if crate::tts::is_tts_stop_requested() {
+            let _ = child.start_kill();
+        }
     }
 
     // `say` plays out of its own process, so its samples are never visible
@@ -172,7 +183,9 @@ pub async fn invoke_system_tts(text: String) -> Result<String, String> {
         Command::new("say")
             .arg("-o")
             .arg(&output_path_for_cmd)
-            // No `-v`: the System Voice, Siri included.
+            // No `-v`: the System Voice, Siri included. `--` so the text is
+            // never read as an option.
+            .arg("--")
             .arg(&text_clone)
             .output() // Use output() to wait for completion and capture stderr
     })
@@ -274,7 +287,7 @@ mod tests {
     /// the Mac's output device.
     #[test]
     fn no_choices_pass_only_the_text() {
-        assert_eq!(say_arguments("hello", None), vec!["hello"]);
+        assert_eq!(say_arguments("hello", None), vec!["--", "hello"]);
     }
 
     /// The point of the speaker picker: the chosen device reaches the command.
@@ -282,7 +295,7 @@ mod tests {
     fn a_chosen_speaker_reaches_say() {
         assert_eq!(
             say_arguments("hello", Some("MacBook Air Speakers")),
-            vec!["-a", "MacBook Air Speakers", "hello"]
+            vec!["-a", "MacBook Air Speakers", "--", "hello"]
         );
     }
 
@@ -290,7 +303,7 @@ mod tests {
     /// would make `say` fail rather than fall back.
     #[test]
     fn a_blank_speaker_is_dropped() {
-        assert_eq!(say_arguments("hi", Some("  ")), vec!["hi"]);
+        assert_eq!(say_arguments("hi", Some("  ")), vec!["--", "hi"]);
     }
 
     /// A device name with a space is one argument, not two.
@@ -298,7 +311,7 @@ mod tests {
     fn a_name_with_a_space_stays_one_argument() {
         assert_eq!(
             say_arguments("hi", Some("AirPods Pro")),
-            vec!["-a", "AirPods Pro", "hi"]
+            vec!["-a", "AirPods Pro", "--", "hi"]
         );
     }
 
@@ -306,7 +319,7 @@ mod tests {
     fn a_pace_reaches_say_ahead_of_the_text() {
         assert_eq!(
             say_arguments_at("hello", None, Some(263)),
-            vec!["-r", "263", "hello"]
+            vec!["-r", "263", "--", "hello"]
         );
     }
 
@@ -318,6 +331,17 @@ mod tests {
         );
     }
 
+    /// Text that starts with a dash is still only text: it sits after `--`, so
+    /// `say` cannot read it as `-v` (a non-Siri voice) or `-o` (a file write).
+    #[test]
+    fn text_that_looks_like_a_flag_stays_text() {
+        let args = say_arguments("-o /tmp/clobbered hello", Some("AirPods Pro"));
+        assert_eq!(
+            args,
+            vec!["-a", "AirPods Pro", "--", "-o /tmp/clobbered hello"]
+        );
+    }
+
     /// Juno never names a Mac voice: whatever the text, device and pace, the
     /// arguments carry no `-v`, so `say` speaks the System Voice (Siri).
     #[test]
@@ -326,7 +350,11 @@ mod tests {
             for device in [None, Some("AirPods Pro"), Some("")] {
                 for pace in [None, Some(131), Some(350)] {
                     let args = say_arguments_at(text, device, pace);
-                    let flags: Vec<&String> = args[..args.len() - 1].iter().collect();
+                    // Everything before the `--` is a flag Juno chose; the text
+                    // after it can never be read as one.
+                    let end = args.iter().position(|a| a == "--");
+                    assert_eq!(end, Some(args.len() - 2), "{args:?}");
+                    let flags: Vec<&String> = args[..args.len() - 2].iter().collect();
                     assert!(
                         !flags
                             .iter()
