@@ -152,6 +152,16 @@ impl EngineManager {
             .unwrap_or("none")
     }
 
+    /// The model directory the active engine loaded, when it has one (see
+    /// [`TranscriptionEngine::model_dir`]). This is how the host tells a
+    /// running Parakeet CTC from a running Parakeet TDT.
+    pub fn current_model_dir() -> Option<String> {
+        ACTIVE_ENGINE
+            .read()
+            .ok()
+            .and_then(|g| g.as_ref().and_then(|e| e.model_dir()))
+    }
+
     /// Load Whisper from `whisper_model_path`. The one place a Whisper engine
     /// is built, so the Intel fallback below reports a missing model file the
     /// same way an ordinary Whisper request does.

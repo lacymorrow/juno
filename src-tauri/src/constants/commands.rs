@@ -169,6 +169,8 @@ pub mod dictation {
     pub const SET_DICTATION_INSERTION_MODE: &str = "set_dictation_insertion_mode";
     pub const GET_DICTATION_CLEANUP_STATUS: &str = "get_dictation_cleanup_status";
     pub const SET_DICTATION_CLEANUP_ENABLED: &str = "set_dictation_cleanup_enabled";
+    pub const GET_DICTATION_DICTIONARY: &str = "get_dictation_dictionary";
+    pub const SET_DICTATION_DICTIONARY: &str = "set_dictation_dictionary";
     pub const OPEN_APPLE_INTELLIGENCE_SETTINGS: &str = "open_apple_intelligence_settings";
     pub const FORCE_RESET_DICTATION_STATE: &str = "force_reset_dictation_state";
     pub const GET_DICTATION_COMPREHENSIVE_STATUS: &str = "get_dictation_comprehensive_status";

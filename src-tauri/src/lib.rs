@@ -505,6 +505,8 @@ pub fn run() {
             set_dictation_clipboard_enabled,
             commands::dictation::get_dictation_cleanup_status,
             commands::dictation::set_dictation_cleanup_enabled,
+            commands::dictation::get_dictation_dictionary,
+            commands::dictation::set_dictation_dictionary,
             commands::dictation::open_apple_intelligence_settings,
             commands::dictation::get_dictation_insertion_mode,
             commands::dictation::set_dictation_insertion_mode,

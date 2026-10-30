@@ -109,6 +109,7 @@ pub mod audio_keys {
     pub const DICTATION_INSERTION_MODE: &str = "dictation_insertion_mode";
     pub const DICTATION_COPY_TO_CLIPBOARD: &str = "dictation_copy_to_clipboard";
     pub const DICTATION_CLEANUP: &str = "dictation_cleanup";
+    pub const DICTATION_DICTIONARY: &str = "dictation_dictionary";
     pub const ALWAYS_LISTENING_ACTIVE: &str = "always_listening_active";
     pub const ALWAYS_LISTENING_SENSITIVITY: &str = "always_listening_sensitivity";
     pub const ALWAYS_LISTENING_WAKE_WORDS: &str = "always_listening_wake_words";
@@ -194,6 +195,11 @@ pub mod defaults {
 
     pub fn dictation_cleanup() -> bool {
         DICTATION_CLEANUP
+    }
+    /// The personal dictionary starts with the one word every speech model
+    /// misspells in this app: its name. The person adds their own.
+    pub fn dictation_dictionary() -> Vec<String> {
+        vec!["Juno".to_string()]
     }
     /// Paste stays the default while clipboard-free proves itself in the field.
     /// Literal (not a re-export of `dictation_insertion_modes::PASTE`) because

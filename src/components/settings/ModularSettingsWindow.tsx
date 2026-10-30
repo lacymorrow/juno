@@ -214,7 +214,9 @@ export const settingsRowIndex: SettingsRowEntry[] = [
   // Triggers
   { sectionId: "triggers", rowId: "add-trigger", label: "Add shortcut", keywords: "trigger shortcut activation summon hotkey shortcut mouse button voice push to talk toggle wake word phrase" },
   // Models
-  { sectionId: "models", rowId: "model-row-parakeet-ctc", label: "Balanced dictation model", keywords: "parakeet balanced recommended dictation model download" },
+  { sectionId: "models", rowId: "model-row-parakeet-tdt", label: "Balanced dictation model", keywords: "parakeet tdt balanced recommended dictation model download capitals punctuation" },
+  { sectionId: "models", rowId: "model-row-parakeet-ctc", label: "Parakeet CTC dictation model", keywords: "parakeet ctc dictation model lowercase", advanced: true },
+  { sectionId: "voice", rowId: "dictation-dictionary", label: "Words to spell right", keywords: "dictionary vocabulary names spelling dictation words misspelled juno custom" },
   { sectionId: "models", rowId: "model-row-tiny-en", label: "Fast dictation model", keywords: "whisper tiny fast dictation model" },
   { sectionId: "models", rowId: "model-row-large-v3", label: "Most accurate dictation model", keywords: "whisper large accurate dictation model download" },
   // Audio

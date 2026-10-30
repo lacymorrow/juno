@@ -13,6 +13,7 @@ pub mod constants;
 pub mod controller;
 pub mod device_identity;
 pub mod devices;
+pub mod dictionary;
 pub mod engine;
 pub mod engine_manager;
 // The Parakeet loader only links on Apple Silicon; see parakeet_model for the
@@ -40,13 +41,13 @@ pub use devices::{
     effective_input_device_name, list_input_devices, preferred_input_device,
     set_preferred_input_device, AudioDeviceInfo,
 };
+pub use dictionary::apply_dictionary;
 pub use engine::{startup_provider, SttProvider, TranscriptionEngine, TranscriptionSession};
 pub use engine_manager::EngineManager;
 pub use error::{Error, Result};
 pub use parakeet_model::{
-    missing_parakeet_files, parakeet_file_url, parakeet_ready, parakeet_total_bytes,
-    parakeet_unsupported_reason, ParakeetFile, ParakeetModelStatus, PARAKEET_HF_REPO,
-    PARAKEET_HF_REVISION, PARAKEET_MODEL_FILES, PARAKEET_SUPPORTED, PARAKEET_UNSUPPORTED_REASON,
+    missing_parakeet_files, parakeet_ready, parakeet_unsupported_reason, ParakeetFile,
+    ParakeetModelStatus, ParakeetVariant, PARAKEET_SUPPORTED, PARAKEET_UNSUPPORTED_REASON,
 };
 pub use shared_whisper::SharedWhisperManager;
 pub use utils::{downloaded_models_dir, resolve_model_path, resolve_parakeet_model_dir};
@@ -107,8 +108,19 @@ impl Drop for EngineLoadingGuard {
 /// `AppHandle` finally does exist. `None` means "no saved preference", which
 /// boots Whisper. Keeping the reader on the host side is what keeps the
 /// settings-store layout (file name, key, schema) out of this crate.
-pub type SavedSttProviderReader<R> =
-    Arc<dyn Fn(&tauri::AppHandle<R>) -> Option<String> + Send + Sync>;
+pub type SavedSttProviderReader<R> = Arc<dyn Fn(&tauri::AppHandle<R>) -> SavedStt + Send + Sync>;
+
+/// What the host app remembers about the person's dictation engine.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SavedStt {
+    /// The provider name as saved, e.g. `"parakeet"`. `None` when nothing
+    /// was saved, which boots Whisper.
+    pub provider: Option<String>,
+    /// The Parakeet model directory as saved (`"models/parakeet-tdt"`), when
+    /// the person chose a Parakeet model. `None` means the plugin's default,
+    /// which is the directory every install before TDT used.
+    pub parakeet_model_dir: Option<String>,
+}
 
 /// Initialize the Voice Transcription plugin, always booting Whisper.
 ///
@@ -128,7 +140,7 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
 pub fn init_with_saved_provider<R, F>(read_saved_provider: F) -> TauriPlugin<R>
 where
     R: Runtime + 'static,
-    F: Fn(&tauri::AppHandle<R>) -> Option<String> + Send + Sync + 'static,
+    F: Fn(&tauri::AppHandle<R>) -> SavedStt + Send + Sync + 'static,
 {
     build_plugin(Some(Arc::new(read_saved_provider)))
 }
@@ -274,7 +286,18 @@ fn build_plugin<R: Runtime + 'static>(
                 // it first. Booting the wrong engine is not free: it loads a model,
                 // allocates its Metal buffers and warms it up, and all of that is
                 // thrown away seconds later when the app applies the saved choice.
-                let saved_provider = read_saved_provider.as_ref().and_then(|read| read(app));
+                let saved = read_saved_provider
+                    .as_ref()
+                    .map(|read| read(app))
+                    .unwrap_or_default();
+                let saved_provider = saved.provider;
+                // The saved Parakeet model (CTC or TDT) is a directory; the
+                // config default is the CTC one every older install has.
+                let parakeet_model_dir = saved
+                    .parakeet_model_dir
+                    .as_deref()
+                    .map(|dir| resolve_parakeet_model_dir(app, dir))
+                    .unwrap_or(parakeet_dir_bg);
                 // Both halves of the question: does this build contain Parakeet,
                 // and is the model on disk. An Intel build answers false to the
                 // first, so a saved "parakeet" boots Whisper instead of asking
@@ -283,16 +306,17 @@ fn build_plugin<R: Runtime + 'static>(
                     crate::parakeet_model::parakeet_ready(std::path::Path::new(&parakeet_model_dir));
                 let provider = startup_provider(saved_provider.as_deref(), parakeet_usable);
                 tracing::info!(
-                    "[VoicePlugin] STT provider: {} (saved: {}, parakeet usable: {}, parakeet supported by this build: {})",
+                    "[VoicePlugin] STT provider: {} (saved: {}, parakeet dir: {}, parakeet usable: {}, parakeet supported by this build: {})",
                     provider,
                     saved_provider.as_deref().unwrap_or("<none>"),
+                    parakeet_model_dir,
                     parakeet_usable,
                     crate::parakeet_model::PARAKEET_SUPPORTED
                 );
 
 
                 let model_path_bl = model_path_bg.clone();
-                let parakeet_bl = parakeet_dir_bg.clone();
+                let parakeet_bl = parakeet_model_dir.clone();
 
                 let engine = match tokio::task::spawn_blocking(move || {
                     EngineManager::initialize(provider, &model_path_bl, Some(&parakeet_bl))

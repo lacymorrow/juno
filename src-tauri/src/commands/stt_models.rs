@@ -22,10 +22,10 @@ use tauri::{AppHandle, Emitter, Manager};
 use tracing::{error, info, warn};
 
 use tauri_plugin_voice_transcription::{
-    downloaded_models_dir, parakeet_file_url, parakeet_total_bytes, resolve_model_path,
-    resolve_parakeet_model_dir, AlwaysListeningController, EngineManager, SharedWhisperManager,
+    downloaded_models_dir, resolve_model_path, resolve_parakeet_model_dir,
+    AlwaysListeningController, EngineManager, ParakeetVariant, SavedStt, SharedWhisperManager,
     SttProvider, TranscriptionEngine, VoiceController, VoiceTranscriptionConfig,
-    PARAKEET_MODEL_FILES, PARAKEET_SUPPORTED,
+    PARAKEET_SUPPORTED,
 };
 
 use super::model_download::{fetch_resumable, FetchError, FetchEvent, FetchTarget, RetryPolicy};
@@ -37,8 +37,12 @@ use tauri_plugin_store::StoreExt;
 
 const WHISPER_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
-/// Catalog id of the Parakeet model (the only non-Whisper entry).
-pub const PARAKEET_ID: &str = "parakeet-ctc";
+/// Catalog id of the recommended Parakeet model: TDT, which writes capitals
+/// and punctuation itself. The Balanced row on Apple Silicon.
+pub const PARAKEET_ID: &str = "parakeet-tdt";
+/// Catalog id of the original Parakeet model (CTC, lowercase and unpunctuated).
+/// Kept so people who downloaded it keep dictating on it; Advanced list only.
+pub const PARAKEET_CTC_ID: &str = "parakeet-ctc";
 /// Catalog id of the model that ships inside the app bundle.
 pub const BUNDLED_ID: &str = "tiny-en";
 
@@ -63,18 +67,21 @@ impl Engine {
 /// One catalog entry. Speed and accuracy are 1..=5 pips, set from published
 /// numbers, not vibes:
 /// - Word error rate (Open ASR leaderboard style average over the eight
-///   standard English sets): large-v3 7.4, Parakeet CTC 0.6B 7.7 (its model
-///   card, greedy decoding), large-v3-turbo 7.8, small.en 8.6, tiny.en 12.8.
+///   standard English sets): Parakeet TDT 0.6B v2 6.05 (its model card),
+///   large-v3 7.4, Parakeet CTC 0.6B 7.7 (its model card, greedy decoding),
+///   large-v3-turbo 7.8, small.en 8.6, tiny.en 12.8.
 /// - Speed: relative decode cost on Apple Silicon. tiny.en is about a tenth of
-///   turbo's compute; Parakeet is non-autoregressive (one encoder pass per
-///   utterance, 4000+ RTFx on GPU per its card) so it lands with the small
-///   models despite its size; large-v3 is roughly five times turbo.
+///   turbo's compute; Parakeet is one encoder pass per utterance (CTC) or one
+///   pass plus a cheap token-skipping decoder (TDT), 3000+ RTFx on GPU per
+///   their cards, so both land with the small models despite their size;
+///   large-v3 is roughly five times turbo.
 #[derive(Debug, Clone, Copy)]
 pub struct ModelDef {
     pub id: &'static str,
     pub engine: Engine,
     pub name: &'static str,
-    /// ggml filename for Whisper models; unused for Parakeet.
+    /// ggml filename for Whisper models; the model directory's name under
+    /// `<app data>/models/` for Parakeet (`ParakeetVariant::dir_leaf`).
     pub filename: &'static str,
     pub size_mb: u32,
     pub bundled: bool,
@@ -102,8 +109,19 @@ const CATALOG: &[ModelDef] = &[
     ModelDef {
         id: PARAKEET_ID,
         engine: Engine::Parakeet,
+        name: "Parakeet TDT 0.6B",
+        filename: "parakeet-tdt",
+        size_mb: 661,
+        bundled: false,
+        arm64_only: true,
+        speed: 4,
+        accuracy: 5,
+    },
+    ModelDef {
+        id: PARAKEET_CTC_ID,
+        engine: Engine::Parakeet,
         name: "Parakeet CTC 0.6B",
-        filename: "",
+        filename: "parakeet-ctc",
         size_mb: 612,
         bundled: false,
         arm64_only: true,
@@ -365,9 +383,30 @@ fn models_dir(app: &AppHandle) -> Result<PathBuf, String> {
     downloaded_models_dir(app).ok_or_else(|| "Failed to resolve app data dir".to_string())
 }
 
-fn parakeet_dir(app: &AppHandle) -> String {
-    let config = VoiceTranscriptionConfig::default();
-    resolve_parakeet_model_dir(app, &config.parakeet_model_dir)
+/// Where a Parakeet catalog entry's files live (or will, once downloaded).
+fn parakeet_dir(app: &AppHandle, def: &ModelDef) -> String {
+    resolve_parakeet_model_dir(app, &parakeet_dir_setting(def))
+}
+
+/// The value `VoiceTranscriptionSettings::parakeet_model_dir` holds for a
+/// Parakeet catalog entry: the config-style relative path, which the plugin
+/// resolves by its last component.
+fn parakeet_dir_setting(def: &ModelDef) -> String {
+    format!("models/{}", def.filename)
+}
+
+/// The Parakeet manifest a catalog entry downloads and is checked against.
+fn parakeet_variant(def: &ModelDef) -> ParakeetVariant {
+    ParakeetVariant::for_leaf(def.filename).unwrap_or(ParakeetVariant::Ctc)
+}
+
+/// The Parakeet catalog entry whose directory `dir` is, if it is one of ours.
+fn parakeet_id_for_dir(dir: &str) -> Option<&'static str> {
+    let leaf = Path::new(dir).file_name()?.to_str()?;
+    CATALOG
+        .iter()
+        .find(|m| m.engine == Engine::Parakeet && m.filename == leaf)
+        .map(|m| m.id)
 }
 
 /// Absolute path of a Whisper model if it is on disk (bundled or downloaded).
@@ -386,10 +425,9 @@ fn whisper_path_on_disk(app: &AppHandle, def: &ModelDef) -> Option<PathBuf> {
 fn is_downloaded(app: &AppHandle, def: &ModelDef) -> bool {
     match def.engine {
         Engine::Whisper => whisper_path_on_disk(app, def).is_some(),
-        Engine::Parakeet => {
-            tauri_plugin_voice_transcription::missing_parakeet_files(Path::new(&parakeet_dir(app)))
-                .is_empty()
-        }
+        Engine::Parakeet => parakeet_variant(def)
+            .missing_files(Path::new(&parakeet_dir(app, def)))
+            .is_empty(),
     }
 }
 
@@ -406,7 +444,16 @@ fn whisper_id_for_path(path: &str) -> Option<&'static str> {
 /// model is on disk (otherwise the plugin will have fallen back to tiny.en).
 fn active_model_id(app: &AppHandle, settings: &VoiceTranscriptionSettings) -> String {
     match EngineManager::current_provider_name() {
-        "parakeet" => return PARAKEET_ID.to_string(),
+        "parakeet" => {
+            // Both Parakeet models answer to the same engine name; the
+            // directory it loaded says which one is running.
+            return EngineManager::current_model_dir()
+                .as_deref()
+                .and_then(parakeet_id_for_dir)
+                .or_else(|| parakeet_id_for_dir(&settings.parakeet_model_dir))
+                .unwrap_or(PARAKEET_CTC_ID)
+                .to_string();
+        }
         "whisper" => {
             if let Some(id) = SharedWhisperManager::current_model_path()
                 .as_deref()
@@ -422,9 +469,9 @@ fn active_model_id(app: &AppHandle, settings: &VoiceTranscriptionSettings) -> St
     // Mac restored from an Apple Silicon backup). Reporting Parakeet active
     // there would name a row the catalog does not even list.
     if PARAKEET_SUPPORTED && settings.stt_provider.eq_ignore_ascii_case("parakeet") {
-        if let Some(def) = find_def(PARAKEET_ID) {
+        if let Some(def) = saved_parakeet_def(settings) {
             if is_downloaded(app, def) {
-                return PARAKEET_ID.to_string();
+                return def.id.to_string();
             }
         }
     }
@@ -434,6 +481,12 @@ fn active_model_id(app: &AppHandle, settings: &VoiceTranscriptionSettings) -> St
         }
     }
     BUNDLED_ID.to_string()
+}
+
+/// The Parakeet catalog entry the saved settings name. A saved directory the
+/// catalog does not know reads as CTC, the only Parakeet older installs had.
+fn saved_parakeet_def(settings: &VoiceTranscriptionSettings) -> Option<&'static ModelDef> {
+    find_def(parakeet_id_for_dir(&settings.parakeet_model_dir).unwrap_or(PARAKEET_CTC_ID))
 }
 
 async fn load_voice_settings(app: &AppHandle) -> Result<VoiceTranscriptionSettings, String> {
@@ -546,20 +599,24 @@ fn fetch_plan(def: &ModelDef) -> Vec<FetchFile> {
             name: def.filename.to_string(),
             expected_bytes: None,
         }],
-        Engine::Parakeet => PARAKEET_MODEL_FILES
-            .iter()
-            .map(|f| FetchFile {
-                url: parakeet_file_url(f),
-                name: f.name.to_string(),
-                expected_bytes: Some(f.bytes),
-            })
-            .collect(),
+        Engine::Parakeet => {
+            let variant = parakeet_variant(def);
+            variant
+                .files()
+                .iter()
+                .map(|f| FetchFile {
+                    url: variant.file_url(f),
+                    name: f.name.to_string(),
+                    expected_bytes: Some(f.bytes),
+                })
+                .collect()
+        }
     }
 }
 
 fn expected_total_bytes(model_id: &str) -> u64 {
     match find_def(model_id) {
-        Some(def) if def.engine == Engine::Parakeet => parakeet_total_bytes(),
+        Some(def) if def.engine == Engine::Parakeet => parakeet_variant(def).total_bytes(),
         Some(def) => u64::from(def.size_mb) * 1024 * 1024,
         None => 0,
     }
@@ -765,7 +822,7 @@ async fn run_download(
             let _ = tokio::fs::remove_dir_all(&staging).await;
         }
         Engine::Parakeet => {
-            let dest = PathBuf::from(parakeet_dir(app));
+            let dest = PathBuf::from(parakeet_dir(app, def));
             if dest.exists() {
                 tokio::fs::remove_dir_all(&dest).await.map_err(|e| {
                     FetchError::Permanent(format!("replace old Parakeet files: {}", e))
@@ -989,7 +1046,7 @@ async fn switch_engine_to(app: &AppHandle, model_id: &str) -> Result<(), String>
                 .map_err(|e| format!("{} could not be loaded: {}", def.name, e))?
         }
         Engine::Parakeet => {
-            let dir = parakeet_dir(app);
+            let dir = parakeet_dir(app, def);
             let whisper_path =
                 resolve_model_path(app, &VoiceTranscriptionConfig::default().model_path);
             tokio::task::spawn_blocking(move || {
@@ -1018,6 +1075,7 @@ async fn persist_choice(app: &AppHandle, def: &ModelDef, settle_offer: bool) -> 
         }
         Engine::Parakeet => {
             settings.stt_provider = "parakeet".to_string();
+            settings.parakeet_model_dir = parakeet_dir_setting(def);
         }
     }
     if settle_offer {
@@ -1121,7 +1179,7 @@ pub async fn delete_stt_model(model_id: String, app: AppHandle) -> Result<(), St
             }
         }
         Engine::Parakeet => {
-            let dir = PathBuf::from(parakeet_dir(&app));
+            let dir = PathBuf::from(parakeet_dir(&app, def));
             if dir.is_dir() {
                 tokio::fs::remove_dir_all(&dir)
                     .await
@@ -1148,20 +1206,31 @@ pub async fn delete_stt_model(model_id: String, app: AppHandle) -> Result<(), St
 /// plugin setup hooks run in registration order, and this reads the store from
 /// inside the voice plugin's hook. Any problem reading it returns `None`, and
 /// the plugin then boots Whisper exactly as it always has.
-pub fn saved_stt_provider<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
-    let store = app.store(SETTINGS_STORE_FILE).ok()?;
+pub fn saved_stt_provider<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> SavedStt {
+    let Ok(store) = app.store(SETTINGS_STORE_FILE) else {
+        return SavedStt::default();
+    };
     stt_provider_from_settings(store.get(store_keys::VOICE_TRANSCRIPTION).as_ref())
 }
 
-/// Pure half of [`saved_stt_provider`]: pull `stt_provider` out of the stored
-/// voice-transcription blob. The name is passed through as written; deciding
-/// what an unrecognised one means belongs to the plugin, which is the only
-/// place that knows which engines exist.
-fn stt_provider_from_settings(value: Option<&serde_json::Value>) -> Option<String> {
-    value?
-        .get("stt_provider")?
-        .as_str()
-        .map(|name| name.to_string())
+/// Pure half of [`saved_stt_provider`]: pull `stt_provider` and the Parakeet
+/// directory out of the stored voice-transcription blob. Both are passed
+/// through as written; deciding what an unrecognised one means belongs to the
+/// plugin, which is the only place that knows which engines exist.
+fn stt_provider_from_settings(value: Option<&serde_json::Value>) -> SavedStt {
+    let Some(value) = value else {
+        return SavedStt::default();
+    };
+    let string_at = |key: &str| {
+        value
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    };
+    SavedStt {
+        provider: string_at("stt_provider"),
+        parakeet_model_dir: string_at("parakeet_model_dir"),
+    }
 }
 
 /// Honour the saved model at startup. The plugin boots the saved *engine*
@@ -1185,7 +1254,7 @@ pub async fn apply_persisted_stt_model(app: &AppHandle) {
     };
 
     let wanted = if settings.stt_provider.eq_ignore_ascii_case("parakeet") {
-        Some(PARAKEET_ID)
+        saved_parakeet_def(&settings).map(|d| d.id)
     } else {
         whisper_id_for_path(&settings.model_path)
     };
@@ -1238,17 +1307,68 @@ mod tests {
             ids("aarch64"),
             [
                 "tiny-en",
-                "parakeet-ctc",
+                "parakeet-tdt",
                 "large-v3",
+                "parakeet-ctc",
                 "large-v3-turbo",
                 "small-en"
             ]
         );
         assert_eq!(tier_for("aarch64", "tiny-en"), Some(FAST));
-        assert_eq!(tier_for("aarch64", "parakeet-ctc"), Some(BALANCED));
+        assert_eq!(tier_for("aarch64", "parakeet-tdt"), Some(BALANCED));
         assert_eq!(tier_for("aarch64", "large-v3"), Some(ACCURATE));
         assert_eq!(tier_for("aarch64", "large-v3-turbo"), None);
+        // The original Parakeet stays for the people who have it, in the
+        // Advanced list, never as a headline row.
+        assert_eq!(tier_for("aarch64", "parakeet-ctc"), None);
         assert_eq!(recommended_id("aarch64"), PARAKEET_ID);
+        assert_eq!(PARAKEET_ID, "parakeet-tdt");
+    }
+
+    /// Each Parakeet row downloads into, and is checked against, its own
+    /// directory; the directory name is the manifest key the plugin uses.
+    #[test]
+    fn each_parakeet_row_names_its_own_directory() {
+        let tdt = find_def(PARAKEET_ID).unwrap();
+        let ctc = find_def(PARAKEET_CTC_ID).unwrap();
+        assert_eq!(parakeet_variant(tdt), ParakeetVariant::Tdt);
+        assert_eq!(parakeet_variant(ctc), ParakeetVariant::Ctc);
+        assert_eq!(parakeet_dir_setting(tdt), "models/parakeet-tdt");
+        assert_eq!(parakeet_dir_setting(ctc), "models/parakeet-ctc");
+        assert_eq!(
+            parakeet_id_for_dir("/x/Application Support/juno/models/parakeet-tdt"),
+            Some(PARAKEET_ID)
+        );
+        assert_eq!(
+            parakeet_id_for_dir("models/parakeet-ctc"),
+            Some(PARAKEET_CTC_ID)
+        );
+        assert_eq!(parakeet_id_for_dir("models/ggml-tiny.en.bin"), None);
+    }
+
+    /// An install from before TDT has `stt_provider = "parakeet"` and no
+    /// directory saved. That has to keep meaning the model it has on disk.
+    #[test]
+    fn a_saved_parakeet_with_no_directory_is_the_original_ctc() {
+        let settings: VoiceTranscriptionSettings = serde_json::from_value(serde_json::json!({
+            "model_path": "models/x.bin", "sample_rate": 16000, "channels": 1,
+            "buffer_duration_ms": 1500, "partial_interval_ms": 500,
+            "enable_partial_transcription": true, "enable_playback": true,
+            "stt_provider": "parakeet"
+        }))
+        .unwrap();
+        assert_eq!(settings.parakeet_model_dir, "models/parakeet-ctc");
+        assert_eq!(
+            saved_parakeet_def(&settings).map(|d| d.id),
+            Some(PARAKEET_CTC_ID)
+        );
+
+        let mut chose_tdt = settings.clone();
+        chose_tdt.parakeet_model_dir = "models/parakeet-tdt".to_string();
+        assert_eq!(
+            saved_parakeet_def(&chose_tdt).map(|d| d.id),
+            Some(PARAKEET_ID)
+        );
     }
 
     /// The catalog's `arm64_only` flag and the plugin's build gate are the
@@ -1284,6 +1404,7 @@ mod tests {
         );
         assert_eq!(tier_for("x86_64", "large-v3-turbo"), Some(BALANCED));
         assert_eq!(tier_for("x86_64", "parakeet-ctc"), None);
+        assert_eq!(tier_for("x86_64", "parakeet-tdt"), None);
         assert_eq!(recommended_id("x86_64"), "large-v3-turbo");
     }
 
@@ -1387,10 +1508,17 @@ mod tests {
         let plan = fetch_plan(def);
         assert_eq!(plan.len(), 3);
         assert!(plan.iter().all(|f| f.expected_bytes.is_some()));
-        assert!(plan.iter().all(|f| f.url.contains("/resolve/7df2cab7")));
-        assert_eq!(expected_total_bytes(PARAKEET_ID), 612_689_838);
+        assert!(plan.iter().all(|f| f.url.contains("/resolve/0bbb45a3")));
+        assert_eq!(expected_total_bytes(PARAKEET_ID), 661_191_684);
         // The pane shows the same number the download verifies.
-        assert_eq!(def.size_mb, 612);
+        assert_eq!(def.size_mb, 661);
+
+        let ctc = find_def(PARAKEET_CTC_ID).unwrap();
+        let plan = fetch_plan(ctc);
+        assert_eq!(plan.len(), 3);
+        assert!(plan.iter().all(|f| f.url.contains("/resolve/7df2cab7")));
+        assert_eq!(expected_total_bytes(PARAKEET_CTC_ID), 612_689_838);
+        assert_eq!(ctc.size_mb, 612);
     }
 
     #[test]
@@ -1421,13 +1549,16 @@ mod tests {
     fn pips_are_ordered_by_the_published_numbers() {
         let acc = |id: &str| find_def(id).unwrap().accuracy;
         let spd = |id: &str| find_def(id).unwrap().speed;
-        // WER: large-v3 < parakeet ~ turbo < small.en < tiny.en
+        // WER: parakeet tdt ~ large-v3 < parakeet ctc ~ turbo < small.en < tiny.en
+        assert_eq!(acc("parakeet-tdt"), acc("large-v3"));
         assert!(acc("large-v3") > acc("parakeet-ctc"));
         assert_eq!(acc("parakeet-ctc"), acc("large-v3-turbo"));
         assert!(acc("large-v3-turbo") > acc("small-en"));
         assert!(acc("small-en") > acc("tiny-en"));
-        // Speed: tiny.en fastest, large-v3 slowest, Parakeet with the small models.
-        assert!(spd("tiny-en") > spd("parakeet-ctc"));
+        // Speed: tiny.en fastest, large-v3 slowest, both Parakeets with the
+        // small models.
+        assert!(spd("tiny-en") > spd("parakeet-tdt"));
+        assert_eq!(spd("parakeet-tdt"), spd("parakeet-ctc"));
         assert!(spd("parakeet-ctc") > spd("large-v3-turbo"));
         assert!(spd("large-v3-turbo") > spd("large-v3"));
     }
@@ -1436,17 +1567,31 @@ mod tests {
     fn saved_provider_is_read_out_of_the_stored_blob() {
         let stored =
             serde_json::json!({ "model_path": "models/x.bin", "stt_provider": "parakeet" });
+        let saved = stt_provider_from_settings(Some(&stored));
+        assert_eq!(saved.provider.as_deref(), Some("parakeet"));
+        // No directory saved: the plugin falls back to its CTC default.
+        assert_eq!(saved.parakeet_model_dir, None);
+
+        let stored = serde_json::json!({
+            "stt_provider": "parakeet",
+            "parakeet_model_dir": "models/parakeet-tdt"
+        });
+        let saved = stt_provider_from_settings(Some(&stored));
+        assert_eq!(saved.provider.as_deref(), Some("parakeet"));
         assert_eq!(
-            stt_provider_from_settings(Some(&stored)).as_deref(),
-            Some("parakeet")
+            saved.parakeet_model_dir.as_deref(),
+            Some("models/parakeet-tdt")
         );
     }
 
     #[test]
     fn a_blob_without_the_key_reads_as_no_preference() {
         let stored = serde_json::json!({ "model_path": "models/x.bin" });
-        assert_eq!(stt_provider_from_settings(Some(&stored)), None);
-        assert_eq!(stt_provider_from_settings(None), None);
+        assert_eq!(
+            stt_provider_from_settings(Some(&stored)),
+            SavedStt::default()
+        );
+        assert_eq!(stt_provider_from_settings(None), SavedStt::default());
     }
 
     #[test]
@@ -1457,7 +1602,11 @@ mod tests {
             serde_json::json!({ "stt_provider": ["parakeet"] }),
             serde_json::json!("not an object"),
         ] {
-            assert_eq!(stt_provider_from_settings(Some(&bad)), None, "{bad}");
+            assert_eq!(
+                stt_provider_from_settings(Some(&bad)).provider,
+                None,
+                "{bad}"
+            );
         }
     }
 
@@ -1465,7 +1614,9 @@ mod tests {
     fn an_unknown_name_survives_the_read_and_the_plugin_falls_back() {
         let stored = serde_json::json!({ "stt_provider": "banana" });
         assert_eq!(
-            stt_provider_from_settings(Some(&stored)).as_deref(),
+            stt_provider_from_settings(Some(&stored))
+                .provider
+                .as_deref(),
             Some("banana")
         );
         // The plugin owns the decision, and it does not guess.
