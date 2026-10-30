@@ -636,6 +636,8 @@ export const COMMANDS = {
   TTS_SET_CHATTERBOX_SETTINGS: 'set_chatterbox_settings_command',
   TTS_GET_SUPERTONIC_SETTINGS: 'get_supertonic_settings_command',
   TTS_SET_SUPERTONIC_SETTINGS: 'set_supertonic_settings_command',
+  TTS_SET_ACCOUNT_KEY: 'set_tts_account_key_command',
+  TTS_HAS_ACCOUNT_KEY: 'has_tts_account_key_command',
   DICTATION_GET_DICTATION_TRIGGER_MODE: 'get_dictation_trigger_mode',
   DICTATION_SET_DICTATION_TRIGGER_MODE: 'set_dictation_trigger_mode',
   DICTATION_GET_DICTATION_CLIPBOARD_ENABLED: 'get_dictation_clipboard_enabled',
