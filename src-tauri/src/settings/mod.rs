@@ -308,6 +308,13 @@ pub struct AudioSettings {
     /// turning speech back on returns to it. `None` returns to the default.
     #[serde(default)]
     pub engine_before_silent: Option<String>,
+    /// The ElevenLabs account key, set in the Voice pane. See
+    /// `tts::account_keys`.
+    #[serde(default)]
+    pub elevenlabs_api_key: Option<String>,
+    /// The Replicate account key, for Replicate and Chatterbox.
+    #[serde(default)]
+    pub replicate_api_key: Option<String>,
     #[serde(default)]
     pub chatterbox_reference_audio_url: Option<String>,
     #[serde(default = "AudioSettings::default_chatterbox_exaggeration")]
@@ -689,6 +696,8 @@ impl Default for AudioSettings {
             system_voice_chosen: false,
             kokoro_voice: Self::default_kokoro_voice(),
             engine_before_silent: None,
+            elevenlabs_api_key: None,
+            replicate_api_key: None,
             chatterbox_reference_audio_url: None,
             chatterbox_exaggeration: Self::default_chatterbox_exaggeration(),
             chatterbox_use_hd: false,

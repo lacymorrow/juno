@@ -155,6 +155,8 @@ pub mod tts {
     pub const SET_CHATTERBOX_SETTINGS: &str = "set_chatterbox_settings_command";
     pub const GET_SUPERTONIC_SETTINGS: &str = "get_supertonic_settings_command";
     pub const SET_SUPERTONIC_SETTINGS: &str = "set_supertonic_settings_command";
+    pub const SET_ACCOUNT_KEY: &str = "set_tts_account_key_command";
+    pub const HAS_ACCOUNT_KEY: &str = "has_tts_account_key_command";
 }
 
 /// Dictation command names

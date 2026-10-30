@@ -47,8 +47,8 @@ pub async fn invoke_elevenlabs_tts(text: String, speed: Option<f64>) -> Result<S
         return Ok("TTS_STOPPED_BY_USER".to_string());
     }
 
-    let api_key = env::var("ELEVENLABS_API_KEY")
-        .map_err(|_| "ELEVENLABS_API_KEY environment variable not set".to_string())?;
+    let api_key =
+        crate::tts::account_keys::key(crate::tts::account_keys::KeyedEngine::ElevenLabs).await?;
     let voice_id = env::var("ELEVENLABS_VOICE_ID").unwrap_or_else(|_| DEFAULT_VOICE_ID.to_string());
     info!("Using ElevenLabs Voice ID: {}", voice_id);
 

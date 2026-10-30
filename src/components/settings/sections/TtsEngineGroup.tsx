@@ -1,14 +1,16 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { invoke } from "@tauri-apps/api/core";
 import { Save } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { COMMANDS } from "@/lib/constants.generated";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 
 /**
- * The settings only one engine has: Chatterbox's reference audio and
- * Supertonic's server.
+ * The settings only one engine has: a cloud engine's account key,
+ * Chatterbox's reference audio and Supertonic's server.
  *
  * Which engine speaks is chosen under Audio, right above the voices it
  * offers, because the two are one decision: changing the engine changes the
@@ -17,6 +19,81 @@ import { SettingsGroup, SettingsRow } from "../ui";
  * needs configured, and it appears only while that engine is the one in
  * force. Every other engine has nothing to configure, so nothing is drawn.
  */
+/**
+ * The key a cloud engine speaks with. Without one the engine cannot make a
+ * sound, and every sentence fell back to another voice, slowly. The key is
+ * written to Rust and never read back: the field only says whether one is
+ * saved.
+ */
+function AccountKeyRow({ engine, account }: { engine: string; account: string }) {
+  const [saved, setSaved] = useState<boolean | null>(null);
+  const [draft, setDraft] = useState("");
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<boolean>(COMMANDS.TTS_HAS_ACCOUNT_KEY, { engine })
+      .then((has) => !cancelled && setSaved(has))
+      .catch(() => !cancelled && setSaved(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [engine]);
+
+  const save = async () => {
+    try {
+      await invoke(COMMANDS.TTS_SET_ACCOUNT_KEY, { engine, key: draft });
+      setSaved(draft.trim().length > 0);
+      setDraft("");
+      setFailed(false);
+    } catch (error) {
+      console.error(`Could not save the ${account} key:`, error);
+      setFailed(true);
+    }
+  };
+
+  const id = `${engine}-account-key`;
+  return (
+    <SettingsRow
+      htmlFor={id}
+      label={`${account} API key`}
+      description={
+        failed
+          ? "Couldn't save the key. Try again."
+          : saved
+            ? "Saved. Paste a new one to replace it."
+            : `Juno can't speak with ${account} until you add one.`
+      }
+      below={
+        <div className="flex gap-2">
+          <Input
+            id={id}
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && draft.trim()) void save();
+            }}
+            placeholder={saved ? "••••••••••••" : "Paste your key"}
+            className="flex-1"
+          />
+          <Button
+            size="sm"
+            onClick={() => void save()}
+            variant="outline"
+            disabled={!draft.trim()}
+            aria-label={`Save ${account} key`}
+          >
+            <Save className="h-3 w-3" />
+          </Button>
+        </div>
+      }
+    />
+  );
+}
+
 export default function TtsEngineGroup({ settings }: SettingsSectionProps) {
   const {
     chatterboxReferenceAudioUrl,
@@ -43,13 +120,29 @@ export default function TtsEngineGroup({ settings }: SettingsSectionProps) {
     handleSupertonicSettingsChange(stServerUrl, stSpeed);
   };
 
+  if (settings.ttsProvider === "elevenlabs") {
+    return (
+      <SettingsGroup title="ElevenLabs">
+        <AccountKeyRow engine="elevenlabs" account="ElevenLabs" />
+      </SettingsGroup>
+    );
+  }
+
+  if (settings.ttsProvider === "replicate") {
+    return (
+      <SettingsGroup title="Replicate">
+        <AccountKeyRow engine="replicate" account="Replicate" />
+      </SettingsGroup>
+    );
+  }
+
   if (settings.ttsProvider === "chatterbox") {
     return (
       <SettingsGroup
         title="Chatterbox"
-        advanced
         footer="Runs on Replicate with your Replicate API key, about $0.006 a second."
       >
+        <AccountKeyRow engine="chatterbox" account="Replicate" />
         <SettingsRow
           htmlFor="chatterbox-ref-audio"
           label="Reference audio URL (optional)"
