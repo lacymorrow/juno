@@ -43,10 +43,12 @@ const TDT_VOCAB: &str = "vocab.txt";
 
 /// Whichever Parakeet model is in memory. The two `parakeet-rs` types share
 /// the `Transcriber` trait, but that trait has generic methods and cannot be
-/// boxed, so the choice is an enum rather than a `dyn`.
+/// boxed as a `dyn`, so the choice is an enum. Each variant is boxed because
+/// the two structs differ a lot in size and the enum lives behind a mutex
+/// for the life of the engine.
 enum Loaded {
-    Ctc(Parakeet),
-    Tdt(ParakeetTDT),
+    Ctc(Box<Parakeet>),
+    Tdt(Box<ParakeetTDT>),
 }
 
 impl Loaded {
@@ -94,8 +96,8 @@ impl ParakeetEngine {
 
         let started = Instant::now();
         let model = match variant {
-            ParakeetVariant::Ctc => Loaded::Ctc(Self::load_ctc(model_dir)?),
-            ParakeetVariant::Tdt => Loaded::Tdt(Self::load_tdt(model_dir)?),
+            ParakeetVariant::Ctc => Loaded::Ctc(Box::new(Self::load_ctc(model_dir)?)),
+            ParakeetVariant::Tdt => Loaded::Tdt(Box::new(Self::load_tdt(model_dir)?)),
         };
 
         info!(
@@ -258,15 +260,15 @@ impl ParakeetEngine {
             Ok(model) => {
                 let vocab_src = model_dir.join(TDT_VOCAB);
                 let vocab_dst = cache.join(TDT_VOCAB);
-                if std::fs::hard_link(&vocab_src, &vocab_dst).is_err() {
-                    if let Err(e) = std::fs::copy(&vocab_src, &vocab_dst) {
-                        // Without the vocabulary the cache is incomplete and
-                        // the next launch rebuilds it; this launch is fine.
-                        warn!(
-                            "[ParakeetEngine] Could not place the vocabulary beside the optimised graphs: {}",
-                            e
-                        );
-                    }
+                let placed = std::fs::hard_link(&vocab_src, &vocab_dst)
+                    .or_else(|_| std::fs::copy(&vocab_src, &vocab_dst).map(|_| ()));
+                if let Err(e) = placed {
+                    // Without the vocabulary the cache is incomplete and the
+                    // next launch rebuilds it; this launch is fine.
+                    warn!(
+                        "[ParakeetEngine] Could not place the vocabulary beside the optimised graphs: {}",
+                        e
+                    );
                 }
                 info!(
                     "[ParakeetEngine] Loaded and wrote optimised graphs to {:?}",
