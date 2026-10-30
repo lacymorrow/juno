@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { EVENTS, UI, COMMANDS } from "@/lib/constants.generated";
 import { useBarDrag } from "@/hooks/useDragWindow";
 import { useEventListener } from "@/hooks/useEventListener";
+import { useTypeToFocus } from "@/hooks/useTypeToFocus";
 import { openComposerThroughRust, useEscapeToIdle, type ClimbTarget } from "@/hooks/useEscapeToIdle";
 import { useBarConversation } from "@/hooks/useBarConversation";
 import { useBarChatOpen } from "@/hooks/useBarChatOpen";
@@ -424,6 +425,8 @@ export function IslandBar() {
   const focusComposer = useCallback(() => {
     composer.ref.current?.focus();
   }, [composer.ref]);
+  // Type to focus: a key with nothing editable focused starts the message.
+  useTypeToFocus({ focus: focusComposer, recording: recording || dictatingNow });
   // Rust entering its input state is the composer opened on purpose (a
   // click, the type control, the Dock): bring a put-away draft back and put
   // the caret in it. Rust still in its input state just after the box was
@@ -1162,13 +1165,10 @@ export function IslandBar() {
     );
   }
 
-  // The content sits between the docked edge and the composer.
+  // The composer is always the bottom row, whichever way the shape grows from
+  // its anchor: the content sits above it.
   const beside = layerKey === "answer" || layerKey === "component" || layerKey === "chat";
-  const layerStyle = beside
-    ? growUp
-      ? { top: composerH, bottom: 0 }
-      : { top: 0, bottom: composerH }
-    : { top: 0, bottom: 0 };
+  const layerStyle = beside ? { top: 0, bottom: composerH } : { top: 0, bottom: 0 };
 
   const idle = face === "idle";
   const onShapeClick = useCallback(() => {
@@ -1196,13 +1196,13 @@ export function IslandBar() {
       className={cn(
         "absolute inset-x-0 flex flex-col pl-4 pr-2.5",
         idle && "pointer-events-none",
-        beside && (growUp ? "border-b" : "border-t"),
+        beside && "border-t",
         "border-white/[0.08]",
       )}
       style={{
         height: composerH,
         paddingTop: pasted.images.length ? COMPOSER_PAD_Y : (textBlockH - composer.height) / 2,
-        ...(growUp ? { top: 0 } : { bottom: 0 }),
+        bottom: 0,
       }}
       onClick={(e) => e.stopPropagation()}
     >
