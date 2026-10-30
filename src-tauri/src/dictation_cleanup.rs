@@ -229,6 +229,19 @@ pub async fn prepare(app_handle: &AppHandle, text: &str) -> String {
     let stripped = tauri_plugin_voice_transcription::utils::strip_pause_ellipses(text);
     let stripped = stripped.trim().to_string();
 
+    // The personal dictionary goes first, so the grammar pass (when it
+    // runs) reads the person's names spelled the way they spell them.
+    let stripped = match SettingsManager::new(app_handle.clone()) {
+        Ok(manager) => match manager.get_audio_settings().await {
+            Ok(audio) => tauri_plugin_voice_transcription::apply_dictionary(
+                &stripped,
+                &audio.dictation_dictionary,
+            ),
+            Err(_) => stripped,
+        },
+        Err(_) => stripped,
+    };
+
     let started = Instant::now();
     let (result, outcome) = if !is_enabled(app_handle).await {
         (stripped.clone(), Outcome::Skipped)

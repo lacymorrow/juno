@@ -349,6 +349,11 @@ pub struct AudioSettings {
     /// before typing it. Dictation only; never voice turns sent to the agent.
     #[serde(default = "defaults::dictation_cleanup")]
     pub dictation_cleanup: bool,
+    /// Words the speech model keeps misspelling, as the person wants them
+    /// written ("Juno", "Lacy"). Every dictation is checked against them by
+    /// sound and a match is typed in this spelling. Dictation only.
+    #[serde(default = "defaults::dictation_dictionary")]
+    pub dictation_dictionary: Vec<String>,
     pub dictation_trigger_mode: String, // "tap" or "hold"
     pub always_listening_active: bool,
     pub always_listening_sensitivity: f32,
@@ -581,10 +586,19 @@ pub struct VoiceTranscriptionSettings {
     /// pane still offers the download.
     #[serde(default)]
     pub parakeet_download_declined: bool,
+    /// Which Parakeet model `stt_provider = "parakeet"` means, as the
+    /// directory it lives in (`"models/parakeet-tdt"`). Defaults to the CTC
+    /// directory, which is what every install before TDT had on disk.
+    #[serde(default = "default_parakeet_model_dir")]
+    pub parakeet_model_dir: String,
 }
 
 fn default_stt_provider() -> String {
     "whisper".to_string()
+}
+
+fn default_parakeet_model_dir() -> String {
+    "models/parakeet-ctc".to_string()
 }
 
 impl Default for AppSettings {
@@ -710,6 +724,7 @@ impl Default for AudioSettings {
             dictation_insertion_mode: defaults::dictation_insertion_mode(),
             dictation_copy_to_clipboard: Some(defaults::DICTATION_CLIPBOARD_ENABLED),
             dictation_cleanup: defaults::DICTATION_CLEANUP,
+            dictation_dictionary: defaults::dictation_dictionary(),
             dictation_trigger_mode: "hold".to_string(),
             always_listening_active: defaults::ALWAYS_LISTENING_ACTIVE,
             always_listening_sensitivity: defaults::ALWAYS_LISTENING_SENSITIVITY,
@@ -779,6 +794,7 @@ impl Default for VoiceTranscriptionSettings {
             stt_provider: default_stt_provider(),
             live_partial_transcription: false,
             parakeet_download_declined: false,
+            parakeet_model_dir: default_parakeet_model_dir(),
         }
     }
 }

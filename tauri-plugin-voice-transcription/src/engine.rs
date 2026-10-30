@@ -70,6 +70,13 @@ pub trait TranscriptionEngine: Send + Sync {
     /// Whether the engine loaded its model successfully and is ready to use.
     fn is_initialized(&self) -> bool;
 
+    /// The model directory this engine loaded, for engines that have more
+    /// than one model to choose from (Parakeet CTC and TDT share a name).
+    /// `None` for engines identified by name alone.
+    fn model_dir(&self) -> Option<String> {
+        None
+    }
+
     /// Create a fresh per-recording session. Cheap for Whisper (creates WhisperState
     /// from shared weights); may involve model warm-up for Parakeet.
     fn create_session(&self) -> Result<Box<dyn TranscriptionSession>, String>;

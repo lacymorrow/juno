@@ -14,6 +14,7 @@ import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 import { VoicePicker } from "../VoicePicker";
 import { DictationCleanupRow } from "./DictationCleanupRow";
+import { DictationDictionaryRow } from "./DictationDictionaryRow";
 import TtsEngineGroup from "./TtsEngineGroup";
 
 // The insertion-mode row re-explains itself: its subtitle is the selected
@@ -242,11 +243,10 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
         </SettingsRow>
       </SettingsGroup>
 
-      {betaFeatures && (
-        <SettingsGroup title="Dictation">
-          <DictationCleanupRow />
-        </SettingsGroup>
-      )}
+      <SettingsGroup title="Dictation">
+        <DictationDictionaryRow />
+        {betaFeatures && <DictationCleanupRow />}
+      </SettingsGroup>
 
       <SettingsGroup
         title="After you finish speaking"
