@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, oneshot, Mutex as TokioMutex};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -18,6 +19,10 @@ use super::types::{
 };
 use crate::constants::events;
 use crate::constants::{api, permissions};
+
+/// How long a WebSocket handshake may take. `connect_async` has no deadline of
+/// its own, and the connector loop waits on it before it can retry anything.
+const WEBSOCKET_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Production-ready cloud connector using official Tauri WebSocket plugin
 #[derive(Debug)]
@@ -59,6 +64,11 @@ pub struct ProductionCloudConnector {
     command_statistics: Arc<TokioMutex<CommandStatistics>>,
     last_heartbeat: Arc<TokioMutex<Option<SystemTime>>>,
     reconnection_count: Arc<TokioMutex<u32>>,
+
+    // Raised by `disconnect`. The connector loop, the heartbeat loop and the
+    // status loop each hold a clone of the connector, so dropping the handle
+    // stops none of them; this is what does.
+    shutdown: CancellationToken,
 }
 
 /// Enhanced connection state for production use
@@ -87,6 +97,13 @@ enum ConnectorMessage {
     #[allow(dead_code)]
     HandleError(String),
     UpdateStatus,
+    /// The socket of connection `connection_id` ended (closed by the server,
+    /// errored, or the stream finished). Carries the id so a message from a
+    /// connection that was already replaced is recognised and ignored.
+    ConnectionLost {
+        connection_id: String,
+        reason: String,
+    },
 }
 
 /// Connection statistics for monitoring
@@ -411,6 +428,7 @@ impl ProductionCloudConnector {
             command_statistics: Arc::new(TokioMutex::new(CommandStatistics::default())),
             last_heartbeat: Arc::new(TokioMutex::new(None)),
             reconnection_count: Arc::new(TokioMutex::new(0)),
+            shutdown: CancellationToken::new(),
         })
     }
 
@@ -461,20 +479,39 @@ impl ProductionCloudConnector {
         Ok(())
     }
 
+    /// Sleep for `delay`, or return at once when the connector is shut down.
+    async fn pause(&self, delay: Duration) {
+        tokio::select! {
+            _ = tokio::time::sleep(delay) => {}
+            _ = self.shutdown.cancelled() => {}
+        }
+    }
+
+    /// Close the socket (if one is open) and forget the connection.
+    async fn close_socket(&self) {
+        let sender = self.ws_sender.lock().await.take();
+        if let Some(mut sender) = sender {
+            use tokio_tungstenite::tungstenite::Message;
+            if let Err(e) = sender.send(Message::Close(None)).await {
+                warn!("Failed to send close message: {}", e);
+            }
+        }
+        *self.connection_id.lock().await = None;
+    }
+
     /// Main connector loop
     async fn run_connector_loop(&self) {
         let mut retry_count = 0u32;
         let max_retries = api::cloud_networking::MAX_CONNECTION_RETRIES;
         let base_delay = Duration::from_millis(api::cloud_networking::BASE_RETRY_DELAY_MS);
 
-        loop {
+        while !self.shutdown.is_cancelled() {
             // Check if we should connect
             if self.should_connect().await {
                 self.set_connection_state(ConnectorState::Connecting).await;
 
                 match self.establish_connection().await {
                     Ok(()) => {
-                        retry_count = 0;
                         self.set_connection_state(ConnectorState::Ready).await;
                         info!("Production cloud connector established and ready");
 
@@ -484,6 +521,21 @@ impl ProductionCloudConnector {
                             self.set_connection_state(ConnectorState::Error(e.to_string()))
                                 .await;
                         }
+
+                        // The connection is over, however it ended. Unless the
+                        // connector was shut down, connect again: an `Error`
+                        // state is not one `should_connect` accepts, so
+                        // without this a dropped connection stayed dropped
+                        // until the app was relaunched.
+                        self.close_socket().await;
+                        if self.shutdown.is_cancelled() {
+                            break;
+                        }
+                        *self.reconnection_count.lock().await += 1;
+                        retry_count = 1;
+                        self.set_connection_state(ConnectorState::Reconnecting(retry_count))
+                            .await;
+                        self.pause(backoff_delay(base_delay, retry_count)).await;
                     }
                     Err(e) => {
                         retry_count += 1;
@@ -513,16 +565,24 @@ impl ProductionCloudConnector {
                         // BASE_RETRY_DELAY_MS or MAX_BACKOFF_EXPONENT.
                         let delay = backoff_delay(base_delay, retry_count);
                         info!("Retrying connection in {:?}", delay);
-                        tokio::time::sleep(delay).await;
+                        self.pause(delay).await;
                     }
                 }
             } else {
                 // Wait before checking again
-                tokio::time::sleep(Duration::from_millis(
+                self.pause(Duration::from_millis(
                     api::cloud_networking::CONNECTION_CHECK_INTERVAL_MS,
                 ))
                 .await;
             }
+        }
+
+        // Shut down mid-handshake or mid-connection: leave nothing open and
+        // say so, instead of the state the interrupted step last set.
+        if self.shutdown.is_cancelled() {
+            self.close_socket().await;
+            self.set_connection_state(ConnectorState::Disconnected)
+                .await;
         }
     }
 
@@ -553,9 +613,17 @@ impl ProductionCloudConnector {
         use tokio_tungstenite::{connect_async, tungstenite::Message};
 
         let url = self.config.server_url.clone();
-        let (ws_stream, _) = connect_async(&url).await.map_err(|e| {
-            CloudError::ConnectionFailed(format!("WebSocket connection failed: {}", e))
-        })?;
+        let (ws_stream, _) = tokio::time::timeout(WEBSOCKET_CONNECT_TIMEOUT, connect_async(&url))
+            .await
+            .map_err(|_| {
+                CloudError::ConnectionFailed(format!(
+                    "WebSocket connection timed out after {:?}",
+                    WEBSOCKET_CONNECT_TIMEOUT
+                ))
+            })?
+            .map_err(|e| {
+                CloudError::ConnectionFailed(format!("WebSocket connection failed: {}", e))
+            })?;
 
         info!("✅ WebSocket connected successfully to {}", url);
         self.set_connection_state(ConnectorState::Connected).await;
@@ -601,6 +669,9 @@ impl ProductionCloudConnector {
         let connection_state = self.connection_state.clone();
         let ws_sender_clone = self.ws_sender.clone();
         let auth_clone = self.auth.clone();
+        let command_tx = self.command_tx.clone();
+        let connection_id_slot = self.connection_id.clone();
+        let reader_connection_id = connection_id.clone();
 
         // Use a channel to signal authentication completion
         let (auth_tx, auth_rx) = tokio::sync::oneshot::channel();
@@ -674,6 +745,7 @@ impl ProductionCloudConnector {
 
             // Only continue message handling if authentication succeeded
             if auth_result {
+                let mut reason = "stream ended".to_string();
                 // Handle incoming messages (authentication already completed)
                 while let Some(msg) = ws_receiver.next().await {
                     match msg {
@@ -683,23 +755,30 @@ impl ProductionCloudConnector {
                         }
                         Ok(Message::Close(_)) => {
                             info!("🔌 WebSocket closed by server");
-                            let mut state = connection_state.lock().await;
-                            *state = ConnectorState::Disconnected;
+                            reason = "closed by server".to_string();
                             break;
                         }
                         Err(e) => {
                             error!("❌ WebSocket error: {}", e);
-                            let mut state = connection_state.lock().await;
-                            *state = ConnectorState::Error(e.to_string());
+                            reason = e.to_string();
                             break;
                         }
                         _ => {}
                     }
                 }
+
+                // Tell the connection loop. It owns the state and the retry;
+                // this task used to write the state itself, which nothing
+                // acted on, and the loop never learned the socket was gone.
+                let _ = command_tx.send(ConnectorMessage::ConnectionLost {
+                    connection_id: reader_connection_id.clone(),
+                    reason,
+                });
             }
 
-            // Clean up sender when connection closes
-            {
+            // Clean up sender when connection closes, unless a newer
+            // connection has already put its own there.
+            if connection_id_slot.lock().await.as_deref() == Some(reader_connection_id.as_str()) {
                 let mut sender_guard = ws_sender_clone.lock().await;
                 *sender_guard = None;
             }
@@ -927,6 +1006,18 @@ impl ProductionCloudConnector {
                             info!("Received disconnect command");
                             break;
                         },
+                        Some(ConnectorMessage::ConnectionLost { connection_id, reason }) => {
+                            // Only the live connection's end ends the loop; a
+                            // message from one already replaced is stale.
+                            if self.connection_id.lock().await.as_deref()
+                                == Some(connection_id.as_str())
+                            {
+                                return Err(CloudError::NetworkError(format!(
+                                    "Connection lost: {}",
+                                    reason
+                                )));
+                            }
+                        },
                         Some(ConnectorMessage::Connect) => {
                             // Already connected, ignore
                         },
@@ -935,6 +1026,11 @@ impl ProductionCloudConnector {
                             break;
                         }
                     }
+                },
+
+                _ = self.shutdown.cancelled() => {
+                    info!("Cloud connector shut down");
+                    break;
                 },
 
                 // Connection timeout check
@@ -1081,9 +1177,10 @@ impl ProductionCloudConnector {
 
     /// Check if connection is healthy
     async fn is_connection_healthy(&self) -> bool {
-        // For now, just check if we have a connection ID
-        // In a full implementation, we would check WebSocket state
-        self.connection_id.lock().await.is_some()
+        // The reader task clears the sender when the socket ends, so a sender
+        // is the one thing that means a socket is still open. (A connection id
+        // is set before the handshake and says nothing about the socket.)
+        self.ws_sender.lock().await.is_some()
     }
 
     /// Heartbeat loop to maintain connection
@@ -1092,7 +1189,10 @@ impl ProductionCloudConnector {
             tokio::time::interval(Duration::from_secs(self.config.heartbeat_interval));
 
         loop {
-            interval.tick().await;
+            tokio::select! {
+                _ = interval.tick() => {}
+                _ = self.shutdown.cancelled() => break,
+            }
 
             let state = self.connection_state.lock().await;
             if matches!(
@@ -1153,7 +1253,10 @@ impl ProductionCloudConnector {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
 
         loop {
-            interval.tick().await;
+            tokio::select! {
+                _ = interval.tick() => {}
+                _ = self.shutdown.cancelled() => break,
+            }
 
             let state = self.connection_state.lock().await;
             if matches!(*state, ConnectorState::Ready) {
@@ -1325,25 +1428,21 @@ impl ProductionCloudConnector {
     pub async fn disconnect(&self) -> Result<(), CloudError> {
         info!("Disconnecting from cloud");
 
+        // Stop the connector, heartbeat and status loops first. Without this
+        // the connector loop saw the state go to Disconnected and connected
+        // again at once, so a stop was a reconnect, and every start added a
+        // second set of loops.
+        self.shutdown.cancel();
+
         // Send disconnect message
         if self.command_tx.send(ConnectorMessage::Disconnect).is_err() {
             warn!("Failed to send disconnect message");
         }
 
-        // Close WebSocket connection
-        {
-            let mut sender_guard = self.ws_sender.lock().await;
-            if let Some(mut sender) = sender_guard.take() {
-                use tokio_tungstenite::tungstenite::Message;
-                if let Err(e) = sender.send(Message::Close(None)).await {
-                    warn!("Failed to send close message: {}", e);
-                }
-                info!("🔌 WebSocket sender closed");
-            }
-        }
+        // Close WebSocket connection and clear the connection id
+        self.close_socket().await;
+        info!("🔌 WebSocket closed");
 
-        // Clear connection state
-        *self.connection_id.lock().await = None;
         self.set_connection_state(ConnectorState::Disconnected)
             .await;
 
@@ -1442,6 +1541,7 @@ impl Clone for ProductionCloudConnector {
             command_statistics: self.command_statistics.clone(),
             last_heartbeat: self.last_heartbeat.clone(),
             reconnection_count: self.reconnection_count.clone(),
+            shutdown: self.shutdown.clone(),
         }
     }
 }

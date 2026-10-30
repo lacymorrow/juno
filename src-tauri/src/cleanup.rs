@@ -98,6 +98,16 @@ pub async fn cleanup_application(app_handle: &tauri::AppHandle) {
             Err(_) => warn!("Browser controller is busy; leaving it to the process exit"),
         }
 
+        // MCP server children: stdio servers are separate processes that the
+        // exit would otherwise leave to notice their stdin closing.
+        let manager = app_state.get_mcp_manager().await;
+        let manager = manager.lock().await;
+        for config in manager.get_server_configs().await {
+            if let Err(e) = manager.stop_server(&config.id).await {
+                warn!("Failed to stop MCP server '{}': {}", config.name, e);
+            }
+        }
+
         // Note: the CDP browser connection is cleaned up when AppState is dropped
         // TTS provider is part of AudioSettings and doesn't need explicit cleanup
     }
@@ -118,7 +128,11 @@ fn cleanup_temp_directories() {
     if let Ok(temp_dir) = std::env::temp_dir().read_dir() {
         for entry in temp_dir.flatten() {
             if let Some(name) = entry.file_name().to_str() {
-                if name.starts_with("juno_") || name.starts_with("juno-") {
+                // Browser profiles belong to the browser controller, which
+                // removes its own and sweeps only those whose owner has died.
+                if (name.starts_with("juno_") || name.starts_with("juno-"))
+                    && !name.starts_with("juno-browser-")
+                {
                     if let Ok(metadata) = entry.metadata() {
                         // Only delete if older than 1 hour (in case multiple instances are running)
                         if let Ok(modified) = metadata.modified() {
