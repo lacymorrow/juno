@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.251] - 2026-10-30
+
+### Added
+
+- **dictation:** Parakeet TDT with capitals and punctuation, plus a personal dictionary (#913) (64ace514)
+
 ## [0.8.250] - 2026-10-30
 
 ### Fixed
@@ -1729,7 +1735,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.250...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.251...HEAD
+[0.8.251]: https://github.com/lacymorrow/juno/compare/cua-v0.8.250...v0.8.251
 [0.8.250]: https://github.com/lacymorrow/juno/compare/cua-v0.8.249...v0.8.250
 [0.8.249]: https://github.com/lacymorrow/juno/compare/cua-v0.8.248...v0.8.249
 [0.8.248]: https://github.com/lacymorrow/juno/compare/cua-v0.8.247...v0.8.248
