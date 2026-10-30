@@ -220,6 +220,17 @@ const ANSWER: ChatMessage[] = [
   { role: "assistant", content: "Sunny, 72.", messageId: "m1", timestamp: 2 },
 ];
 
+/** The answer from juno#858: a name in bold above the buttons that act on it. */
+const MARKDOWN_CAPTION_ANSWER: ChatMessage[] = [
+  { role: "user", content: "What is Jenny's number?", timestamp: 1 },
+  {
+    role: "assistant",
+    content: '**Jenny Song**, mobile: 867-5309 <ContactActions name="Jenny" />',
+    messageId: "c2",
+    timestamp: 2,
+  },
+];
+
 const COMPONENT_ANSWER: ChatMessage[] = [
   { role: "user", content: "Send the draft to Maya", timestamp: 1 },
   {
@@ -564,6 +575,30 @@ describe("IslandBar: component", () => {
     expect(screen.queryByTestId("island-caption-full")).toBeNull();
     fireEvent.click(screen.getByTestId("island-caption"));
     expect(screen.getByTestId("island-caption-full")).toBeInTheDocument();
+  });
+
+  it("reads the caption's marks instead of printing them (juno#858)", async () => {
+    renderWithAnswer(MARKDOWN_CAPTION_ANSWER);
+    expect(face()).toBe("component");
+    const caption = screen.getByTestId("island-caption");
+    expect(caption.textContent).toBe("Jenny Song, mobile: 867-5309");
+    expect(caption.querySelector("strong")).toHaveTextContent("Jenny Song");
+  });
+
+  it("keeps the caption one line: a mark is inline, never a block", async () => {
+    // The row is `truncate`, so a paragraph or a list item in it would grow
+    // the island. The preview renderer has no block node to emit at all.
+    renderWithAnswer(MARKDOWN_CAPTION_ANSWER);
+    const caption = screen.getByTestId("island-caption");
+    expect(caption.querySelector("p, div, ul, ol, li, h1, h2, h3, pre, br")).toBeNull();
+  });
+
+  it("shows the same marks when the caption is opened in full", async () => {
+    renderWithAnswer(MARKDOWN_CAPTION_ANSWER);
+    fireEvent.click(screen.getByTestId("island-caption"));
+    const full = screen.getByTestId("island-caption-full");
+    expect(full.textContent).toBe("Jenny Song, mobile: 867-5309");
+    expect(full.querySelector("strong")).toHaveTextContent("Jenny Song");
   });
 
   it("X steps back to the composer, with the caret in it", async () => {

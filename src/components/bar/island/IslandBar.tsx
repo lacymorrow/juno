@@ -37,6 +37,7 @@ import { useSkillAutocomplete } from "@/hooks/useSkillAutocomplete";
 import { isSendKey, useAutoGrowTextarea } from "@/hooks/useAutoGrowTextarea";
 import { SkillGhostText, SkillSuggestionList } from "@/components/SkillAutocomplete";
 import { MixedContentRenderer, splitHeroContent } from "@/components/ui/mixed-content-renderer";
+import { InlineMarkdown } from "@/components/ui/inline-markdown";
 import { InputControlNotices } from "@/components/input-control/InputControlNotices";
 import { drivingLabel, type InputControlStatePayload } from "@/lib/inputControl";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
@@ -1034,7 +1035,11 @@ export function IslandBar() {
     );
   } else if (layerKey === "answer" || layerKey === "component") {
     const isComponent = layerKey === "component" && hero;
-    const caption = (isComponent ? hero.prose : "") || question;
+    // Two different things can caption a component, and only one of them is
+    // markdown: the answer's prose carries the model's marks, the question is
+    // the person's own words and is shown exactly as they typed them.
+    const captionProse = isComponent ? hero.prose : "";
+    const caption = captionProse || question;
     layer = (
       <div className="dark flex h-full w-full flex-col" data-testid={`island-${layerKey}`} data-surface="island">
         <header className="flex shrink-0 items-center gap-2.5 pl-2.5 pr-3" style={{ height: HEADER_H }}>
@@ -1050,7 +1055,7 @@ export function IslandBar() {
               className="min-w-0 flex-1 truncate text-left text-[13px] tracking-[-0.01em] text-white/55 hover:text-white/80"
               data-testid="island-caption"
             >
-              {caption}
+              {captionProse ? <InlineMarkdown text={captionProse} /> : caption}
             </button>
           ) : (
             <p className="min-w-0 flex-1 truncate text-[13px] tracking-[-0.01em] text-white/45" data-testid="island-question">
@@ -1126,7 +1131,7 @@ export function IslandBar() {
               <>
                 {captionOpen && hero.prose && (
                   <p className="mb-2 px-2 text-[12.5px] text-white/60" data-testid="island-caption-full">
-                    {hero.prose}
+                    <InlineMarkdown text={hero.prose} />
                   </p>
                 )}
                 <div data-testid="island-hero">
