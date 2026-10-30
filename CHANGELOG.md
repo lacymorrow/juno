@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.250] - 2026-10-30
+
+### Fixed
+
+- **mcp:** spawn tools with the person's login-shell PATH; empty working directory means none (#917) (7f0b33c5)
+
 ## [0.8.249] - 2026-10-30
 
 ### Added
@@ -1723,7 +1729,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.249...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.250...HEAD
+[0.8.250]: https://github.com/lacymorrow/juno/compare/cua-v0.8.249...v0.8.250
 [0.8.249]: https://github.com/lacymorrow/juno/compare/cua-v0.8.248...v0.8.249
 [0.8.248]: https://github.com/lacymorrow/juno/compare/cua-v0.8.247...v0.8.248
 [0.8.247]: https://github.com/lacymorrow/juno/compare/cua-v0.8.246...v0.8.247
