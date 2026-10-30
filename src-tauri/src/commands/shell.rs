@@ -953,7 +953,7 @@ mod tests {
             "bash_command must not be registered as a Tauri command"
         );
         assert!(
-            registered.iter().any(|line| *line == "list_files,"),
+            registered.contains(&"list_files,"),
             "the scan must see the handler list"
         );
     }

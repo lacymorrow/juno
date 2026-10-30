@@ -96,8 +96,8 @@ use commands::{
     keyboard::*, media::*, memory::*, mouse::*, permission_diagnostics::*, permissions::*,
     persistent_memory::*, providers::*, safari_clear_cache, safari_click_element,
     safari_execute_javascript, safari_extract_dom, safari_get_url, safari_is_active,
-    safari_list_clickable_elements, safari_navigate, safari_type_text, shell::*, sound::*,
-    starters::*, test_accessibility_permissions, text_editor::*, ui_commands::*, window::*,
+    safari_list_clickable_elements, safari_navigate, safari_type_text, sound::*, starters::*,
+    test_accessibility_permissions, text_editor::*, ui_commands::*, window::*,
 };
 
 // Import specific sound commands from sound.rs
