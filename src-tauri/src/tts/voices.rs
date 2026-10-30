@@ -1184,6 +1184,7 @@ fn settings_manager(
 /// it has.
 pub fn sync_engine_model(app_handle: &AppHandle, provider: &str) {
     crate::tts::kokoro::remember_app(app_handle);
+    crate::tts::account_keys::remember_app(app_handle);
     // The greeting rendered ahead follows the engine and voice in force.
     crate::greeting::refresh_cache(app_handle);
     let app = app_handle.clone();

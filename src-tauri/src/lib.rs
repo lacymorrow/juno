@@ -408,6 +408,8 @@ pub fn run() {
             tts::set_chatterbox_settings_command, // Chatterbox TTS settings
             tts::get_supertonic_settings_command, // Supertonic TTS settings
             tts::set_supertonic_settings_command, // Supertonic TTS settings
+            tts::set_tts_account_key_command, // ElevenLabs / Replicate key, from the Voice pane
+            tts::has_tts_account_key_command, // Whether that key is saved, never the key
             tts::stop_tts,                 // Added for stopping TTS via escape key
             commands::stop_operations::stop_all_operations, // Added for stop button functionality
             agent_monitor::agent_voice, // Floating bar mic button

@@ -1,3 +1,4 @@
+pub mod account_keys;
 pub mod elevenlabs;
 pub mod kokoro;
 pub mod pcm_player;
@@ -911,6 +912,46 @@ pub async fn get_chatterbox_settings_command(
     }))
 }
 
+/// Save the account key a cloud voice engine speaks with, or clear it with an
+/// empty one. See `account_keys`.
+#[tauri::command]
+pub async fn set_tts_account_key_command(
+    engine: String,
+    key: String,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let which = account_keys::KeyedEngine::from_id(&engine)
+        .ok_or_else(|| format!("{engine} does not take an account key"))?;
+    let key = Some(key.trim().to_string()).filter(|k| !k.is_empty());
+
+    let _change = voices::lock_voice_change().await;
+    let manager = crate::settings::manager::SettingsManager::new(app_handle)
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+    let mut audio = manager
+        .get_audio_settings()
+        .await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+    match which {
+        account_keys::KeyedEngine::ElevenLabs => audio.elevenlabs_api_key = key,
+        account_keys::KeyedEngine::Replicate => audio.replicate_api_key = key,
+    }
+    manager
+        .set_audio_settings(&audio)
+        .await
+        .map_err(|e| format!("Failed to save the key: {}", e))?;
+    info!("[TTS] Account key for {:?} saved", which);
+    Ok(())
+}
+
+/// Whether a cloud voice engine has a key to speak with. The key itself never
+/// goes back to the page.
+#[tauri::command]
+pub async fn has_tts_account_key_command(engine: String) -> Result<bool, String> {
+    let which = account_keys::KeyedEngine::from_id(&engine)
+        .ok_or_else(|| format!("{engine} does not take an account key"))?;
+    Ok(account_keys::key(which).await.is_ok())
+}
+
 // Command to update Chatterbox settings
 #[tauri::command]
 pub async fn set_chatterbox_settings_command(
@@ -1611,9 +1652,10 @@ async fn execute_tts_with_fallback(
     if is_cloud_provider {
         info!("Cloud TTS provider detected, checking network connectivity...");
         // The network monitor already knows when there is no route, and
-        // answers at once; the slower probe only runs when it thinks there is.
-        let is_online =
-            crate::connectivity::network_up() && crate::utils::network::is_online().await;
+        // answers at once. The probe that used to follow it cost 0.25 to 1 s
+        // before every sentence; a route that is up but cannot reach the
+        // engine fails its request, and the fallback chain speaks instead.
+        let is_online = crate::connectivity::network_up();
         if !is_online {
             if !allow_direct {
                 return Err("offline; system voice cannot be rendered ahead".to_string());
