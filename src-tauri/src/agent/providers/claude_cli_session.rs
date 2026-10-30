@@ -196,6 +196,15 @@ pub struct LaunchConfig {
     pub include_partial_messages: bool,
     pub system_prompt: Option<String>,
     pub mcp_config: Option<PathBuf>,
+    /// The `--settings` file carrying background mode's shell screen, for a
+    /// spawn that skips permissions (LAC-5010).
+    ///
+    /// Deliberately not in the session signature: whether it is passed is
+    /// decided by `ask_before_send` and `mcp_config`, which are both in the
+    /// signature already, and the path itself is fixed for the app's life. So
+    /// nothing about it can differ between two spawns that the signature
+    /// already calls the same.
+    pub shell_screen: Option<PathBuf>,
     /// Extra system-prompt guidance, appended only when `mcp_config` is present.
     pub mcp_guidance: &'static str,
     /// Whether the CLI may load the MCP servers on the person's own Claude
@@ -1081,6 +1090,7 @@ fn spawn_args(launch: &LaunchConfig, session_id: &str, session_is_new: bool) -> 
     args.extend(super::cli_approval::permission_args(
         launch.ask_before_send,
         launch.mcp_config.is_some(),
+        launch.shell_screen.as_deref(),
     ));
 
     // A fresh id is pinned; one that already exists must be resumed. Getting this
@@ -2319,6 +2329,7 @@ mod tests {
             include_partial_messages: true,
             system_prompt: Some("be Juno".to_string()),
             mcp_config: Some(PathBuf::from("/tmp/juno-mcp-1.json")),
+            shell_screen: Some(PathBuf::from("/tmp/juno-cli-hooks-1.json")),
             mcp_guidance: "use the computer tool",
             load_account_mcp: true,
             ask_before_send: true,

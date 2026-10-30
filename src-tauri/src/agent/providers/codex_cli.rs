@@ -868,6 +868,7 @@ mod tests {
         };
         let endpoint = juno_mcp::Endpoint {
             url: "http://127.0.0.1:51234/mcp".to_string(),
+            hook_url: "http://127.0.0.1:51234/hook/pretooluse".to_string(),
             token: "secret".to_string(),
         };
         let args = brain.build_args("hi", Some(&endpoint));

@@ -20,6 +20,7 @@
 //! off restores the old skip-permissions behaviour for testing.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -27,6 +28,7 @@ use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 use tracing::{info, warn};
 
+use crate::agent::background_shell::{policy_for, ShellPolicy};
 use crate::constants::events;
 use crate::constants::settings::{store_keys, SETTINGS_STORE_FILE};
 use crate::state::{AppState, RiskLevel, ToolApprovalRequest};
@@ -58,8 +60,13 @@ pub const APPROVE_TOOL_NAME: &str = "approve";
 pub const ALLOWED_TOOLS: &str = "Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,NotebookEdit,\
      TodoWrite,Task,mcp__juno__computer,mcp__juno__settings";
 
-/// The CLI's own shell tool, as the permission prompt names it.
+/// The CLI's own shell tool, as the permission prompt names it, and as the
+/// hook's `matcher` names it.
 pub const BASH_TOOL: &str = "Bash";
+
+/// The hook event the shell screen answers. Claude Code routes a hook answer
+/// by this name, so a wrong one is silently ignored.
+pub const HOOK_EVENT: &str = "PreToolUse";
 
 /// How long the sheet waits for an answer before denying.
 pub const APPROVAL_TIMEOUT_SECS: u64 = 60;
@@ -118,23 +125,48 @@ pub async fn set_cli_ask_before_send_enabled(
 /// skip-permissions behaviour stays (that is the headless and test path,
 /// where no connectors load under `--strict-mcp-config` anyway).
 ///
-/// Background mode's shell screen (LAC-5007) rides this same route, because
-/// `ALLOWED_TOOLS` no longer pre-approves `Bash`. The skip-permissions branch
-/// therefore has no shell screen: with no MCP server, or with "Ask before Juno
-/// sends" off, the CLI's `Bash` can still take the front and background mode's
-/// guarantee is limited to Juno's own tools. Both are headless, test or
-/// opted-out paths, and the gap is named rather than papered over.
-pub fn permission_args(ask_before_send: bool, has_mcp_server: bool) -> Vec<String> {
+/// Background mode's shell screen (LAC-5007) rides this same route on the
+/// asking path, because `ALLOWED_TOOLS` no longer pre-approves `Bash`.
+///
+/// It used to stop there. With "Ask before Juno sends" off there was no
+/// `approve` call to read a command, so `open -a Mail` took the front again
+/// (LAC-5010), on the configuration that is Lacy's default. `shell_screen` is
+/// the repair: a `--settings` file installing a `PreToolUse` hook on `Bash`,
+/// which Juno answers on its own loopback route.
+///
+/// The hook is **added to** skip-permissions rather than replacing it.
+/// Swapping in `--permission-prompt-tool` would have been the obvious fix and
+/// is the wrong one: skip-permissions suppresses more than the prompt tool
+/// covers (trust dialogs, writes outside cwd), so the person who opted out of
+/// the send gate would start being asked about things they never agreed to
+/// see. A hook leaves `permissionMode` at `bypassPermissions` and reads only
+/// `Bash`. Measured on `claude` 2.1.311: a `PreToolUse` hook fires under
+/// skip-permissions, and its `updatedInput` and `deny` both take effect.
+///
+/// With no MCP server there is nothing to serve a prompt and nothing to
+/// answer a hook, so that spawn still has no shell screen. It is the headless
+/// and test path, where there is no desktop to take, and the gap is named
+/// rather than papered over.
+pub fn permission_args(
+    ask_before_send: bool,
+    has_mcp_server: bool,
+    shell_screen: Option<&Path>,
+) -> Vec<String> {
     if ask_before_send && has_mcp_server {
-        vec![
+        return vec![
             "--permission-prompt-tool".to_string(),
             APPROVE_TOOL_CLI_NAME.to_string(),
             "--allowedTools".to_string(),
             ALLOWED_TOOLS.to_string(),
-        ]
-    } else {
-        vec!["--dangerously-skip-permissions".to_string()]
+        ];
     }
+
+    let mut args = vec!["--dangerously-skip-permissions".to_string()];
+    if let Some(settings) = shell_screen {
+        args.push("--settings".to_string());
+        args.push(settings.display().to_string());
+    }
+    args
 }
 
 /// Read one `Bash` call against background mode, in the CLI's permission shape.
@@ -153,29 +185,109 @@ async fn background_shell_answer(
     tool_name: &str,
     input: &Value,
 ) -> Option<Value> {
-    use crate::agent::background_shell::{policy_for, ShellPolicy};
+    // The tool name first: it costs a string compare and answers most calls,
+    // where reading the setting is an await.
+    if tool_name != BASH_TOOL {
+        return None;
+    }
+    let background_mode = crate::input_control::background_mode_enabled(app).await;
+    match shell_verdict(background_mode, tool_name, input)? {
+        ShellPolicy::Rewritten { command, .. } => {
+            info!("[CliApproval] Background mode: running `{command}` instead");
+            Some(allow_result(&with_command(input, &command)))
+        }
+        ShellPolicy::Refused(reason) => {
+            let command = input
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            info!("[CliApproval] Background mode refused `{command}`");
+            Some(deny_result(&reason))
+        }
+        ShellPolicy::Run => None,
+    }
+}
 
-    if tool_name != BASH_TOOL || !crate::input_control::background_mode_enabled(app).await {
+/// What background mode says about one tool call, or `None` when it has
+/// nothing to say: not the shell, background mode off, or a command that
+/// leaves the front alone.
+///
+/// Pure in the one piece of live state it needs, so both envelopes below are
+/// pinned in tests without an app in the loop.
+fn shell_verdict(background_mode: bool, tool_name: &str, input: &Value) -> Option<ShellPolicy> {
+    if !background_mode || tool_name != BASH_TOOL {
         return None;
     }
     let command = input.get("command").and_then(Value::as_str)?;
     match policy_for(command) {
         ShellPolicy::Run => None,
-        ShellPolicy::Rewritten {
-            command: rewritten, ..
-        } => {
-            info!("[CliApproval] Background mode: running `{rewritten}` instead");
-            let mut updated = input.clone();
-            if let Some(map) = updated.as_object_mut() {
-                map.insert("command".to_string(), json!(rewritten));
-            }
-            Some(allow_result(&updated))
-        }
-        ShellPolicy::Refused(reason) => {
-            info!("[CliApproval] Background mode refused `{command}`");
-            Some(deny_result(&reason))
-        }
+        judged => Some(judged),
     }
+}
+
+/// The same call with its command replaced.
+///
+/// Everything else the model wrote is carried through. Both envelopes replace
+/// the whole input rather than merging into it, so a field dropped here is a
+/// field the model loses: its own `description` and `timeout` among them.
+fn with_command(input: &Value, command: &str) -> Value {
+    let mut updated = input.clone();
+    if let Some(map) = updated.as_object_mut() {
+        map.insert("command".to_string(), json!(command));
+    }
+    updated
+}
+
+/// Read one `Bash` call against background mode, in the PreToolUse hook's
+/// answer shape (LAC-5010).
+///
+/// Same verdict as [`background_shell_answer`], different envelope. The
+/// `approve` route only exists when the CLI spawns with
+/// `--permission-prompt-tool`; with "Ask before Juno sends" off it spawns with
+/// `--dangerously-skip-permissions` instead, and a hook is the one thing that
+/// still runs there. Measured on `claude` 2.1.311: a `PreToolUse` hook fires
+/// under skip-permissions, its `updatedInput` replaces what the model wrote,
+/// and a `deny` stops the call with the reason reaching the model.
+///
+/// `{}` means "nothing to say", which the CLI treats as "carry on". That is
+/// the answer for a tool that is not the shell, for background mode off, and
+/// for a command that leaves the front alone.
+///
+/// Pure in the one piece of live state it needs, so every shape is pinned in
+/// tests without an app in the loop.
+fn hook_answer_for(background_mode: bool, tool_name: &str, input: &Value) -> Value {
+    match shell_verdict(background_mode, tool_name, input) {
+        None | Some(ShellPolicy::Run) => json!({}),
+        Some(ShellPolicy::Rewritten { command, note }) => json!({
+            "hookSpecificOutput": {
+                "hookEventName": HOOK_EVENT,
+                "permissionDecision": "allow",
+                "permissionDecisionReason": note,
+                "updatedInput": with_command(input, &command),
+            }
+        }),
+        Some(ShellPolicy::Refused(reason)) => json!({
+            "hookSpecificOutput": {
+                "hookEventName": HOOK_EVENT,
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }),
+    }
+}
+
+/// The hook route's answer for one `PreToolUse` payload from the CLI.
+pub async fn background_shell_hook_answer(app: &tauri::AppHandle, payload: &Value) -> Value {
+    let background_mode = crate::input_control::background_mode_enabled(app).await;
+    let tool_name = payload
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let input = payload
+        .get("tool_input")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    hook_answer_for(background_mode, tool_name, &input)
 }
 
 /// What `approve` decides before any sheet is shown.
@@ -910,43 +1022,171 @@ mod tests {
     // setting on and the MCP server present, the prompt tool is wired in and
     // skip-permissions is gone. `claude_cli::tests` pins the same through
     // `build_args`; this covers the seam both spawn paths share.
+    /// LAC-5010. The two settings that decide a spawn's permission posture,
+    /// in all four combinations, so moving one of them can never quietly
+    /// move another.
     #[test]
-    fn asking_replaces_skip_permissions() {
-        let args = permission_args(true, true);
-        assert!(args.contains(&"--permission-prompt-tool".to_string()));
-        assert!(args.contains(&APPROVE_TOOL_CLI_NAME.to_string()));
-        assert!(!args.contains(&"--dangerously-skip-permissions".to_string()));
-        assert!(args.contains(&"--allowedTools".to_string()));
+    fn all_four_permission_postures_are_pinned() {
+        let screen = Path::new("/tmp/juno-cli-hooks-1.json");
+
+        // Asking, with a server to ask through: the prompt tool, and the
+        // shell screen rides it because `Bash` is not pre-approved.
+        assert_eq!(
+            permission_args(true, true, Some(screen)),
+            vec![
+                "--permission-prompt-tool".to_string(),
+                APPROVE_TOOL_CLI_NAME.to_string(),
+                "--allowedTools".to_string(),
+                ALLOWED_TOOLS.to_string(),
+            ]
+        );
+
+        // Not asking, but the server is there: permissions are skipped, as
+        // the person asked, and the shell screen arrives as a PreToolUse
+        // hook instead of through `approve`.
+        assert_eq!(
+            permission_args(false, true, Some(screen)),
+            vec![
+                "--dangerously-skip-permissions".to_string(),
+                "--settings".to_string(),
+                screen.display().to_string(),
+            ]
+        );
+
+        // No server: nothing to serve a prompt, and nothing to answer a
+        // hook either. The headless and test path, named rather than
+        // papered over.
+        assert_eq!(
+            permission_args(true, false, None),
+            vec!["--dangerously-skip-permissions".to_string()]
+        );
+        assert_eq!(
+            permission_args(false, false, None),
+            vec!["--dangerously-skip-permissions".to_string()]
+        );
     }
 
-    /// LAC-5007. `Bash` was pre-approved, which is exactly why background mode
-    /// could not see `open -a Mail`: the call never reached Juno. The screen
-    /// in `background_shell_answer` only runs if the CLI asks first, so the
-    /// tool has to stay off this list.
+    /// LAC-5010's second acceptance line: nothing that skip-permissions used
+    /// to wave through starts prompting.
+    ///
+    /// The hook is additive. It carries no `--permission-prompt-tool` and no
+    /// `--allowedTools`, so the CLI stays in `bypassPermissions` and the
+    /// trust dialogs and out-of-cwd writes the person opted out of stay
+    /// waved through. Only `Bash` is read, and only to keep the screen.
+    #[test]
+    fn the_shell_screen_adds_no_prompt_to_the_opted_out_path() {
+        let args = permission_args(false, true, Some(Path::new("/tmp/juno-cli-hooks-1.json")));
+        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
+        assert!(!args.contains(&"--permission-prompt-tool".to_string()));
+        assert!(!args.contains(&"--allowedTools".to_string()));
+    }
+
     #[test]
     fn the_clis_shell_is_never_pre_approved() {
         assert!(
             !ALLOWED_TOOLS.split(',').any(|t| t == BASH_TOOL),
-            "pre-approving {BASH_TOOL} takes the CLI's shell out of background mode's reach"
+            "pre-approving {BASH_TOOL} puts the CLI's shell back outside \
+             background mode's reach (LAC-5007)"
         );
-        // And it is still allowed once asked, so nothing new is put in front
-        // of the person: only a foregrounding command is ever stopped.
-        assert_eq!(verdict_for(BASH_TOOL), Verdict::Allow);
     }
 
-    #[test]
-    fn setting_off_restores_skip_permissions() {
-        let args = permission_args(false, true);
-        assert_eq!(args, vec!["--dangerously-skip-permissions".to_string()]);
-        assert!(!args.contains(&"--permission-prompt-tool".to_string()));
+    fn hook_decision(answer: &Value) -> Option<&str> {
+        answer
+            .get("hookSpecificOutput")?
+            .get("permissionDecision")?
+            .as_str()
     }
 
+    fn hook_command(answer: &Value) -> Option<&str> {
+        answer
+            .get("hookSpecificOutput")?
+            .get("updatedInput")?
+            .get("command")?
+            .as_str()
+    }
+
+    /// LAC-5010 regression. The two commands from the 2026-10-19 transcript,
+    /// verbatim, down the skip-permissions path this time: the hook has to
+    /// background them exactly as `approve` does on the asking path.
     #[test]
-    fn no_mcp_server_means_no_prompt_tool_to_serve() {
-        // Without Juno's server there is nothing to answer the prompt, so
-        // pointing the CLI at it would hang every gated call.
-        let args = permission_args(true, false);
-        assert_eq!(args, vec!["--dangerously-skip-permissions".to_string()]);
+    fn the_two_commands_that_took_lacys_screen_are_backgrounded_by_the_hook_too() {
+        for (before, after) in [
+            (
+                r#"cd ~/Desktop/"Jenny's Folder" && open -a Mail "Headphones receipt.pdf" "Kitchen remodel quote.pdf""#,
+                r#"cd ~/Desktop/"Jenny's Folder" && open -g -a Mail "Headphones receipt.pdf" "Kitchen remodel quote.pdf""#,
+            ),
+            ("open -a Mail", "open -g -a Mail"),
+        ] {
+            let answer = hook_answer_for(true, BASH_TOOL, &json!({ "command": before }));
+            assert_eq!(hook_decision(&answer), Some("allow"), "{before:?}");
+            assert_eq!(hook_command(&answer), Some(after), "{before:?}");
+            assert_eq!(
+                answer["hookSpecificOutput"]["hookEventName"],
+                json!("PreToolUse")
+            );
+        }
+    }
+
+    /// Only `command` changes. The CLI runs `updatedInput` in place of what
+    /// the model wrote, so dropping a field here would silently drop the
+    /// model's timeout or its description from the transcript.
+    #[test]
+    fn a_rewrite_keeps_the_rest_of_the_call() {
+        let answer = hook_answer_for(
+            true,
+            BASH_TOOL,
+            &json!({ "command": "open -a Mail", "description": "Open Mail", "timeout": 5000 }),
+        );
+        let updated = &answer["hookSpecificOutput"]["updatedInput"];
+        assert_eq!(updated["command"], json!("open -g -a Mail"));
+        assert_eq!(updated["description"], json!("Open Mail"));
+        assert_eq!(updated["timeout"], json!(5000));
+    }
+
+    /// An activation has no background form, so the hook refuses it and the
+    /// reason is the sentence the model acts on. Measured: a hook `deny`
+    /// reaches the model as text under skip-permissions.
+    #[test]
+    fn an_activation_is_denied_with_the_reason_the_model_reads() {
+        let answer = hook_answer_for(
+            true,
+            BASH_TOOL,
+            &json!({ "command": r#"osascript -e 'tell application "Mail" to activate'"# }),
+        );
+        assert_eq!(hook_decision(&answer), Some("deny"));
+        let reason = answer["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(reason.contains("Mail"), "{reason}");
+        assert!(reason.contains("where it is"), "{reason}");
+        // A denial has nothing to run, so it carries no rewritten input.
+        assert!(answer["hookSpecificOutput"].get("updatedInput").is_none());
+    }
+
+    /// `{}` is "carry on", and it is the answer to everything the screen has
+    /// no business touching. Background mode off is first: that is the person
+    /// having said they are not working alongside Juno right now.
+    #[test]
+    fn the_hook_stays_silent_when_it_has_nothing_to_say() {
+        let nothing = json!({});
+        for (background_mode, tool, input) in [
+            (false, BASH_TOOL, json!({ "command": "open -a Mail" })),
+            (true, "Read", json!({ "file_path": "/tmp/x" })),
+            (
+                true,
+                BASH_TOOL,
+                json!({ "command": "ls -la && git status" }),
+            ),
+            (true, BASH_TOOL, json!({ "command": "open -g -a Mail" })),
+            // A payload with no command at all must not panic or guess.
+            (true, BASH_TOOL, json!({})),
+        ] {
+            assert_eq!(
+                hook_answer_for(background_mode, tool, &input),
+                nothing,
+                "{tool} {input} with background mode {background_mode}"
+            );
+        }
     }
 
     #[test]
