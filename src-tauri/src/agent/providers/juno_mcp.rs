@@ -55,6 +55,10 @@ use crate::state::ToolApprovalRequest;
 /// The MCP protocol revision this server speaks.
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
+/// Where the shell screen's `PreToolUse` hook posts (LAC-5010). Off the
+/// `/mcp` route because the body is Claude Code's hook payload, not JSON-RPC.
+const HOOK_ROUTE: &str = "/hook/pretooluse";
+
 /// The overlay cursor identity for work the Claude CLI drives.
 ///
 /// One identity, because the CLI is one agent however many turns it takes.
@@ -70,6 +74,10 @@ const CLI_CURSOR_COLOR: &str = crate::constants::ui::agent_session_colors::SLOT_
 #[derive(Clone, Debug)]
 pub struct Endpoint {
     pub url: String,
+    /// Where the CLI's own `Bash` calls are read before they run (LAC-5010).
+    /// Same server, same token, a different route: this one speaks Claude
+    /// Code's `PreToolUse` hook shape rather than MCP.
+    pub hook_url: String,
     pub token: String,
 }
 
@@ -98,6 +106,7 @@ pub async fn ensure_running(app: &tauri::AppHandle) -> Result<Endpoint, AgentErr
 
     let router = Router::new()
         .route("/mcp", post(handle_rpc))
+        .route(HOOK_ROUTE, post(handle_shell_screen_hook))
         .with_state(state);
 
     // Port 0: the OS picks a free one. A fixed port would collide with a second
@@ -120,6 +129,7 @@ pub async fn ensure_running(app: &tauri::AppHandle) -> Result<Endpoint, AgentErr
 
     let endpoint = Endpoint {
         url: format!("http://{addr}/mcp"),
+        hook_url: format!("http://{addr}{HOOK_ROUTE}"),
         token,
     };
     info!("[JunoMCP] Serving Juno's computer tool at {}", endpoint.url);
@@ -142,6 +152,69 @@ pub fn mcp_config(endpoint: &Endpoint) -> Value {
             }
         }
     })
+}
+
+/// How long the hook waits for Juno before giving up on it.
+///
+/// The answer is a pure function and a cached atomic read, so a healthy Juno
+/// replies in under a millisecond. The limit is here for an unhealthy one:
+/// curl writes nothing and exits non-zero, which Claude Code reads as "carry
+/// on", so a wedged Juno costs the person five seconds per shell call rather
+/// than their whole turn. Measured on `claude` 2.1.311.
+const HOOK_TIMEOUT_SECS: u32 = 5;
+
+/// The `--settings` contents that keep the CLI's own shell off the person's
+/// screen while background mode is on (LAC-5010).
+///
+/// Passed only on the spawn that skips permissions, where `approve` is
+/// unreachable and a hook is the one thing that still runs. Claude Code merges
+/// settings sources rather than replacing them, so the person's own hooks in
+/// `~/.claude/settings.json` and in the project still fire alongside this one;
+/// verified on 2.1.311.
+///
+/// The token rides in the file rather than on the command line, for the same
+/// reason [`crate::agent::providers::claude_cli`] writes the MCP config to a
+/// file: every `ps` on the machine can read a command line.
+///
+/// `curl` by absolute path: the hook runs through the person's shell, and a
+/// `curl` shadowed on their `PATH` would turn the screen off silently.
+pub fn shell_screen_settings(endpoint: &Endpoint) -> Value {
+    json!({
+        "hooks": {
+            "PreToolUse": [{
+                "matcher": cli_approval::BASH_TOOL,
+                "hooks": [{
+                    "type": "command",
+                    "command": format!(
+                        "/usr/bin/curl -s --max-time {HOOK_TIMEOUT_SECS} -X POST \
+                         -H 'Authorization: Bearer {}' \
+                         -H 'Content-Type: application/json' \
+                         --data-binary @- '{}'",
+                        endpoint.token, endpoint.hook_url
+                    ),
+                }],
+            }],
+        }
+    })
+}
+
+/// Read one of the CLI's own shell calls before it runs (LAC-5010).
+///
+/// Neither MCP nor JSON-RPC: the body in is Claude Code's `PreToolUse`
+/// payload and the body out is its hook answer. It is on this server because
+/// the verdict needs the live app, the token boundary already exists here, and
+/// one more route is cheaper than one more listener.
+async fn handle_shell_screen_hook(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
+    if !authorized(&headers, &state.token) {
+        warn!("[JunoMCP] Rejected a shell screen hook with no valid token");
+        return (StatusCode::UNAUTHORIZED, Json(json!({}))).into_response();
+    }
+    let answer = cli_approval::background_shell_hook_answer(&state.app, &payload).await;
+    (StatusCode::OK, Json(answer)).into_response()
 }
 
 async fn handle_rpc(
@@ -806,12 +879,45 @@ mod tests {
         assert_eq!(result["content"][0]["text"], "Reminders is off.");
     }
 
+    fn test_endpoint() -> Endpoint {
+        Endpoint {
+            url: "http://127.0.0.1:51234/mcp".to_string(),
+            hook_url: "http://127.0.0.1:51234/hook/pretooluse".to_string(),
+            token: "secret".to_string(),
+        }
+    }
+
+    /// LAC-5010. With "Ask before Juno sends" off the CLI spawns with
+    /// `--dangerously-skip-permissions`, so `approve` is never called and a
+    /// `PreToolUse` hook is the only thing left that still runs. These are the
+    /// settings that install it.
+    ///
+    /// The token rides in the file rather than on the command line, for the
+    /// same reason the MCP config does: every `ps` on the machine can read a
+    /// command line.
+    #[test]
+    fn the_shell_screen_settings_point_at_the_hook_route_with_the_token() {
+        let settings = shell_screen_settings(&test_endpoint());
+        let entry = &settings["hooks"]["PreToolUse"][0];
+        assert_eq!(entry["matcher"], "Bash");
+
+        let hook = &entry["hooks"][0];
+        assert_eq!(hook["type"], "command");
+        let command = hook["command"].as_str().unwrap_or_default();
+        assert!(
+            command.contains("http://127.0.0.1:51234/hook/pretooluse"),
+            "{command}"
+        );
+        assert!(command.contains("Bearer secret"), "{command}");
+        // A dead server must not block the person's shell: curl writes
+        // nothing on failure and exits non-zero, which the CLI reads as
+        // "carry on". Measured on claude 2.1.311.
+        assert!(command.contains("--max-time"), "{command}");
+    }
+
     #[test]
     fn the_config_points_at_the_server_and_carries_the_token() {
-        let endpoint = Endpoint {
-            url: "http://127.0.0.1:51234/mcp".to_string(),
-            token: "secret".to_string(),
-        };
+        let endpoint = test_endpoint();
         let config = mcp_config(&endpoint);
         let server = &config["mcpServers"]["juno"];
         assert_eq!(server["type"], "http");
