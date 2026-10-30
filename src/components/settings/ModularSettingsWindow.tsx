@@ -298,6 +298,19 @@ function SettingsWindowContent() {
       .catch((error) => console.error("Settings: could not close:", error));
   });
   const theme = useSystemTheme();
+
+  // The same class on the document, because a menu is not drawn inside this
+  // component. Radix portals its content to `document.body`, which is outside
+  // the `.dark` div below, so a popover opened in a dark settings window came
+  // out white: white sheet, black text, over a black window. Nobody had caught
+  // it because this window had exactly one menu and it was rarely opened. Each
+  // Tauri window owns its own document, so this cannot reach another window.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle("dark", theme === "dark");
+    return () => root.classList.remove("dark");
+  }, [theme]);
+
   const contentRef = useRef<HTMLDivElement>(null);
   const { advanced, loading: advancedLoading, setAdvanced } =
     useAdvancedSettings();
