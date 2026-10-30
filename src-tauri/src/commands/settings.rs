@@ -518,6 +518,7 @@ pub async fn reset_centralized_settings(
         )
     })?;
 
+    let before = crate::settings::reset::Before::capture(&settings_manager).await;
     let active_provider = crate::settings::reset::reset_to_available_defaults(&settings_manager)
         .await
         .map_err(|e| format_error(templates::FAILED_TO_RESTORE, actions::SETTINGS, e))?;
@@ -537,6 +538,11 @@ pub async fn reset_centralized_settings(
     // controller kept the flag it was last given, so live words went on
     // showing until the next launch.
     crate::commands::stt::apply_persisted_live_partial(&app_handle).await;
+
+    // And everything else that kept its own copy since launch: shortcuts, the
+    // tool configuration, the bar, where Juno shows up, the login item. See
+    // `settings::reset`.
+    crate::settings::reset::refresh_running_app(&app_handle, &before).await;
 
     let display_name = crate::agent::providers::types::Provider::from_str(&active_provider)
         .map(|p| p.display_name().to_string());
@@ -588,6 +594,7 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "autostart_enabled",
     "advanced_settings_enabled",
     "beta_features_enabled",
+    "notifications_enabled",
     "cli",
     "voice_transcription",
     "triggers",

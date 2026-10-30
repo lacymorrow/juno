@@ -30,6 +30,7 @@ pub mod store_keys {
     pub const AUTOSTART_ENABLED: &str = "autostart_enabled";
     pub const ADVANCED_SETTINGS_ENABLED: &str = "advanced_settings_enabled";
     pub const BETA_FEATURES_ENABLED: &str = "beta_features_enabled";
+    pub const NOTIFICATIONS_ENABLED: &str = "notifications_enabled";
     pub const BACKGROUND_MODE: &str = "background_mode";
     pub const MOUSE_CONTROL: &str = "mouse_control";
     pub const PERMISSION_MODE: &str = "permission_mode";
@@ -229,6 +230,8 @@ pub mod defaults {
     pub const ADVANCED_SETTINGS_ENABLED: bool = false;
     /// Features still being finished stay hidden until the user opts in.
     pub const BETA_FEATURES_ENABLED: bool = false;
+    /// Juno may post notifications until the person says otherwise.
+    pub const NOTIFICATIONS_ENABLED: bool = true;
     pub const ONBOARDING_COMPLETED: bool = false;
     /// The agent works without taking the cursor or the frontmost app from the
     /// user. On by default: a person can keep typing while Juno works.
@@ -322,6 +325,10 @@ pub mod defaults {
 
     pub fn beta_features_enabled() -> bool {
         BETA_FEATURES_ENABLED
+    }
+
+    pub fn notifications_enabled() -> bool {
+        NOTIFICATIONS_ENABLED
     }
     /// The floating bar follows the cursor to whichever display it is on, so the
     /// user never hunts for it. On by default; older stores lack the key.

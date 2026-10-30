@@ -54,6 +54,11 @@ pub struct AppSettings {
     /// not this field, so the answer stays in one place.
     #[serde(default = "defaults::beta_features_enabled")]
     pub beta_features_enabled: bool,
+    /// Whether Juno posts notifications at all. The switch in General. It is
+    /// kept here, not in memory, so it survives a relaunch and a reset puts it
+    /// back. Older stores lack the key, so it defaults on.
+    #[serde(default = "defaults::notifications_enabled")]
+    pub notifications_enabled: bool,
     /// CLI configuration settings
     pub cli: CLISettings,
     /// Voice transcription configuration
@@ -590,6 +595,7 @@ impl Default for AppSettings {
             autostart_enabled: defaults::AUTOSTART_ENABLED,
             advanced_settings_enabled: defaults::ADVANCED_SETTINGS_ENABLED,
             beta_features_enabled: defaults::BETA_FEATURES_ENABLED,
+            notifications_enabled: defaults::NOTIFICATIONS_ENABLED,
             cli: CLISettings::default(),
             voice_transcription: VoiceTranscriptionSettings::default(),
             triggers: crate::triggers::default_triggers(),
@@ -862,6 +868,19 @@ mod tests {
             .remove("beta_features_enabled");
         let old: AppSettings = serde_json::from_value(value).expect("old store parses");
         assert!(!old.beta_features_enabled);
+    }
+
+    #[test]
+    fn notifications_default_on_and_old_stores_still_parse() {
+        let settings = AppSettings::default();
+        assert!(settings.notifications_enabled);
+        let mut value = serde_json::to_value(&settings).expect("settings serialize");
+        value
+            .as_object_mut()
+            .expect("settings are an object")
+            .remove("notifications_enabled");
+        let old: AppSettings = serde_json::from_value(value).expect("old store parses");
+        assert!(old.notifications_enabled);
     }
 
     #[test]

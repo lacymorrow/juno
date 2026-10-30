@@ -96,31 +96,60 @@ pub async fn check_onboarding_status(app: AppHandle) -> Result<bool, String> {
     Ok(onboarding_settings.completed)
 }
 
+/// Record that setup finished. False, and nothing changed, when it already had.
+///
+/// `skip_count` and `user_role` are kept: they are history, and only
+/// `reset_onboarding` zeroes them.
+fn record_completed(onboarding: &mut OnboardingSettings, now: &str) -> bool {
+    if onboarding.completed {
+        return false;
+    }
+    onboarding.completed = true;
+    onboarding.completed_at = Some(now.to_string());
+    onboarding.skipped = false;
+    true
+}
+
+/// Record that setup was skipped, and return how many times it has been. None,
+/// and nothing changed, when setup had already finished or been skipped.
+fn record_skipped(onboarding: &mut OnboardingSettings, now: &str) -> Option<u32> {
+    if onboarding.completed {
+        return None;
+    }
+    onboarding.completed = true;
+    onboarding.completed_at = Some(now.to_string());
+    onboarding.skipped = true;
+    onboarding.skip_count += 1;
+    Some(onboarding.skip_count)
+}
+
 /// Mark onboarding as completed
+///
+/// Finishing is a one-time event, so asking twice is answered once. The last
+/// screen finishes on the Enter key as well as on its button, and a second
+/// press while the window is still closing used to run all of this again:
+/// Juno introduced herself over her own introduction.
 #[tauri::command]
 pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
     let settings_manager = SettingsManager::new(app.clone()).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
 
-    let current_settings = settings_manager
-        .get_onboarding_settings()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    // Preserve skip_count — it is historical data (how many times the user
-    // previously skipped). reset_onboarding() zeroes it explicitly.
-    let onboarding_settings = OnboardingSettings {
-        completed: true,
-        completed_at: Some(now.clone()),
-        skipped: false,
-        skip_count: current_settings.skip_count,
-        user_role: current_settings.user_role,
-    };
-
+    // Preserve skip_count and user_role: they are historical data (how many
+    // times the user previously skipped, what they said they do).
+    // reset_onboarding() zeroes them explicitly.
+    let mut newly_completed = false;
     settings_manager
-        .set_onboarding_settings(&onboarding_settings)
+        .update_onboarding_settings(|onboarding| {
+            newly_completed = record_completed(onboarding, &now);
+        })
         .await
         .map_err(|e| e.to_string())?;
+
+    if !newly_completed {
+        info!("Onboarding was already completed; nothing more to do");
+        release_onboarding(&app).await;
+        return Ok(());
+    }
 
     info!("Onboarding marked as completed at {}", now);
 
@@ -154,34 +183,28 @@ pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
 }
 
 /// Mark onboarding as skipped (still counts as completed)
+///
+/// Once, like [`complete_onboarding`]: a second skip must not count twice.
 #[tauri::command]
 pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
     let settings_manager = SettingsManager::new(app.clone()).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
 
-    // Get current settings to preserve skip count
-    let current_settings = settings_manager
-        .get_onboarding_settings()
+    let mut skip_count = None;
+    settings_manager
+        .update_onboarding_settings(|onboarding| {
+            skip_count = record_skipped(onboarding, &now);
+        })
         .await
         .map_err(|e| e.to_string())?;
 
-    let onboarding_settings = OnboardingSettings {
-        completed: true,
-        completed_at: Some(now.clone()),
-        skipped: true,
-        skip_count: current_settings.skip_count + 1,
-        user_role: current_settings.user_role.clone(),
+    let Some(skip_count) = skip_count else {
+        info!("Onboarding was already completed; nothing more to do");
+        release_onboarding(&app).await;
+        return Ok(());
     };
 
-    settings_manager
-        .set_onboarding_settings(&onboarding_settings)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    info!(
-        "Onboarding skipped at {} (skip count: {})",
-        now, onboarding_settings.skip_count
-    );
+    info!("Onboarding skipped at {} (skip count: {})", now, skip_count);
 
     update_onboarding_phase(&app, OnboardingPhase::Complete, true).await;
 
@@ -202,6 +225,16 @@ pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
     crate::greeting::on_first_run(&app).await;
 
     Ok(())
+}
+
+/// Let go of the latches setup holds: the flag that mutes the shortcuts and the
+/// bare-modifier capture. Both are idempotent, so this is also what an
+/// already-finished setup does when it is told to finish again.
+async fn release_onboarding(app: &AppHandle) {
+    if let Err(e) = set_onboarding_active(app.clone(), false).await {
+        warn!("Failed to clear onboarding active state: {}", e);
+    }
+    stop_listening_for_a_binding(app);
 }
 
 /// Reset onboarding (for testing/development and user-requested restart)
@@ -278,6 +311,13 @@ pub async fn reset_onboarding(app: AppHandle) -> Result<(), String> {
 pub async fn restart_onboarding(app: AppHandle) -> Result<(), String> {
     info!("Restarting onboarding flow...");
 
+    // What setup said before this, so a restart that never gets its window on
+    // screen can be taken back instead of leaving Juno half in setup.
+    let previous = match SettingsManager::new(app.clone()) {
+        Ok(manager) => manager.get_onboarding_settings().await.ok(),
+        Err(_) => None,
+    };
+
     // Reset onboarding status (persisted settings)
     reset_onboarding(app.clone()).await?;
 
@@ -310,11 +350,38 @@ pub async fn restart_onboarding(app: AppHandle) -> Result<(), String> {
     // Open the onboarding window
     if let Err(e) = crate::window_management::open_onboarding_window(app.clone()).await {
         warn!("Failed to open onboarding window: {}", e);
+        abandon_restart(&app, previous).await;
         return Err(format!("Failed to open onboarding window: {}", e));
     }
 
     info!("Onboarding flow restarted successfully");
     Ok(())
+}
+
+/// Take a restart back when setup never appeared.
+///
+/// By then the restart had reset the record, muted the shortcuts and
+/// re-blocked the chat input, all of which only the setup window ever undoes.
+/// With no window they stayed that way until the next launch: no key worked and
+/// nothing said why.
+async fn abandon_restart(app: &AppHandle, previous: Option<OnboardingSettings>) {
+    if let Some(previous) = previous {
+        match SettingsManager::new(app.clone()) {
+            Ok(manager) => {
+                if let Err(e) = manager.set_onboarding_settings(&previous).await {
+                    warn!(
+                        "[Onboarding] Could not restore the onboarding record: {}",
+                        e
+                    );
+                }
+            }
+            Err(e) => warn!("[Onboarding] Could not open settings to restore: {}", e),
+        }
+    }
+    update_onboarding_phase(app, OnboardingPhase::Complete, false).await;
+    if let Err(e) = set_onboarding_active(app.clone(), false).await {
+        error!("[Onboarding] Failed to release the shortcuts: {}", e);
+    }
 }
 
 /// Stop everything live before setup takes the screen.
@@ -646,22 +713,62 @@ pub async fn save_user_role(app: AppHandle, role: String) -> Result<(), String> 
 
     let settings_manager = SettingsManager::new(app.clone()).map_err(|e| e.to_string())?;
 
-    let mut onboarding_settings = settings_manager
-        .get_onboarding_settings()
-        .await
-        .map_err(|e| e.to_string())?;
-
     info!("User role saved: {}", role);
-    onboarding_settings.user_role = Some(role);
-
     settings_manager
-        .set_onboarding_settings(&onboarding_settings)
+        .update_onboarding_settings(|onboarding| onboarding.user_role = Some(role))
         .await
+        .map(|_| ())
         .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{record_completed, record_skipped};
+    use crate::settings::OnboardingSettings;
+
+    #[test]
+    fn finishing_twice_finishes_once() {
+        let mut onboarding = OnboardingSettings::default();
+        assert!(record_completed(&mut onboarding, "first"));
+        assert_eq!(onboarding.completed_at.as_deref(), Some("first"));
+        assert!(
+            !record_completed(&mut onboarding, "second"),
+            "the second finish must report that nothing happened, so she is not introduced twice"
+        );
+        assert_eq!(onboarding.completed_at.as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn skipping_twice_counts_once() {
+        let mut onboarding = OnboardingSettings::default();
+        assert_eq!(record_skipped(&mut onboarding, "now"), Some(1));
+        assert!(onboarding.skipped);
+        assert_eq!(record_skipped(&mut onboarding, "again"), None);
+        assert_eq!(onboarding.skip_count, 1);
+    }
+
+    #[test]
+    fn finishing_keeps_the_history() {
+        let mut onboarding = OnboardingSettings {
+            skip_count: 2,
+            user_role: Some("designer".to_string()),
+            ..OnboardingSettings::default()
+        };
+        assert!(record_completed(&mut onboarding, "now"));
+        assert_eq!(onboarding.skip_count, 2);
+        assert_eq!(onboarding.user_role.as_deref(), Some("designer"));
+        assert!(!onboarding.skipped);
+    }
+
+    #[test]
+    fn a_finished_setup_is_not_skipped_afterwards() {
+        let mut onboarding = OnboardingSettings::default();
+        assert!(record_completed(&mut onboarding, "now"));
+        assert_eq!(record_skipped(&mut onboarding, "later"), None);
+        assert!(!onboarding.skipped);
+        assert_eq!(onboarding.skip_count, 0);
+    }
+
     /// The text of the function that starts at `signature` in this file.
     fn body_of<'a>(source: &'a str, signature: &str) -> &'a str {
         let start = source

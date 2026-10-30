@@ -217,6 +217,19 @@ async fn initialize_audio_state(app_handle: AppHandle) -> Result<(), String> {
         info!("Successfully loaded audio settings from centralized settings");
     }
 
+    // The cues read the mute switch from memory, and the only thing that ever
+    // loaded it was the Settings provider mounting in the main window. Until
+    // that webview was up, a Juno set to silent still played its dictation
+    // cues, and a Juno with no window at all always did.
+    if let Ok(manager) = crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+        match manager.get_audio_settings().await {
+            Ok(audio) => {
+                let _ = app_state.set_sound_enabled(audio.sound_enabled);
+            }
+            Err(e) => warn!("Could not read the sound switch at startup: {}", e),
+        }
+    }
+
     // Always-listening is NOT restored here. It is started by
     // `apply_stored_voice_triggers`, from the voice triggers, which is the only
     // thing that decides whether a wake phrase should be listened for. This

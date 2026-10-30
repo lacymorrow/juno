@@ -79,13 +79,42 @@ impl SettingsManager {
     }
 
     /// Initialize default settings if they don't exist
+    ///
+    /// This runs unawaited from every `SettingsManager::new`, so it can land at
+    /// any moment relative to the first real save of a fresh install. It used
+    /// to test for the store being empty, then write every section from the
+    /// defaults, as two separate steps: a save that arrived between them (the
+    /// provider the launch picked, a setting changed in setup) was written over
+    /// by the defaults, and the person met a Juno that had forgotten it. The
+    /// test is now made inside the writer's turn, and only a key nobody has
+    /// written yet takes its default.
     async fn initialize_defaults(&self) -> Result<(), String> {
         let store = self.store()?;
 
-        // Check if settings exist, if not, create defaults
-        if store.get(store_keys::KEYBOARD_SHORTCUTS).is_none() {
-            let defaults = AppSettings::default();
-            self.save_all_settings(&defaults).await?;
+        // The common case, after the first launch: nothing to do, no lock.
+        if store.get(store_keys::KEYBOARD_SHORTCUTS).is_some() {
+            return Ok(());
+        }
+
+        let entries = Self::entries_of(&AppSettings::default())?;
+        let wrote = persist::one_writer(|| {
+            if store.get(store_keys::KEYBOARD_SHORTCUTS).is_some() {
+                return Ok(false);
+            }
+            for (key, value) in entries {
+                if store.get(key).is_none() {
+                    store.set(key, value);
+                }
+            }
+            store
+                .save()
+                .map(|_| true)
+                .map_err(|e| format!("Failed to save settings store: {}", e))
+        })
+        .await?;
+
+        if wrote {
+            self.emit_settings_changed().await;
         }
 
         Ok(())
@@ -124,6 +153,7 @@ impl SettingsManager {
                 .get(store_keys::BETA_FEATURES_ENABLED)
                 .and_then(|v| v.as_bool())
                 .unwrap_or(defaults::BETA_FEATURES_ENABLED),
+            notifications_enabled: read_notifications(&store),
             cli: self.get_cli_settings_from_store(&store)?,
             voice_transcription: self.get_voice_transcription_settings_from_store(&store)?,
             triggers,
@@ -137,7 +167,18 @@ impl SettingsManager {
     pub async fn save_all_settings(&self, settings: &AppSettings) -> Result<(), String> {
         // Every section goes to the store and to disk as one write, so no
         // other save can land between two of its sections.
-        self.write_entries(vec![
+        self.write_entries(Self::entries_of(settings)?).await?;
+
+        // A whole-settings write changes every section, so it says so about
+        // every section. See `emit_every_section_changed`.
+        self.emit_every_section_changed(settings).await;
+
+        Ok(())
+    }
+
+    /// Every section of `settings`, keyed the way the store keeps it.
+    fn entries_of(settings: &AppSettings) -> Result<Vec<(&'static str, Value)>, String> {
+        Ok(vec![
             (
                 store_keys::KEYBOARD_SHORTCUTS,
                 to_json("keyboard shortcuts", &settings.keyboard_shortcuts)?,
@@ -186,6 +227,10 @@ impl SettingsManager {
                 store_keys::BETA_FEATURES_ENABLED,
                 Value::Bool(settings.beta_features_enabled),
             ),
+            (
+                store_keys::NOTIFICATIONS_ENABLED,
+                Value::Bool(settings.notifications_enabled),
+            ),
             (store_keys::CLI, to_json("CLI settings", &settings.cli)?),
             (
                 store_keys::VOICE_TRANSCRIPTION,
@@ -203,13 +248,6 @@ impl SettingsManager {
                 to_json("update settings", &settings.updates)?,
             ),
         ])
-        .await?;
-
-        // A whole-settings write changes every section, so it says so about
-        // every section. See `emit_every_section_changed`.
-        self.emit_every_section_changed(settings).await;
-
-        Ok(())
     }
 
     // Individual getters
@@ -500,6 +538,195 @@ impl SettingsManager {
         Ok(())
     }
 
+    /// Whether Juno may post notifications. Persisted, so a switch turned off
+    /// stays off after a relaunch.
+    pub async fn get_notifications_enabled(&self) -> Result<bool, String> {
+        let store = self.store()?;
+        Ok(read_notifications(&store))
+    }
+
+    /// The same answer for code with no manager and no await (the one door
+    /// every notification goes through). On when the store cannot be read: a
+    /// missed notification is worse than an extra one.
+    pub fn read_notifications_enabled(app: &AppHandle) -> bool {
+        app.store(SETTINGS_STORE_FILE)
+            .ok()
+            .map(|store| read_notifications(&store))
+            .unwrap_or(defaults::NOTIFICATIONS_ENABLED)
+    }
+
+    pub async fn set_notifications_enabled(&self, enabled: bool) -> Result<(), String> {
+        self.write_entries(vec![(
+            store_keys::NOTIFICATIONS_ENABLED,
+            Value::Bool(enabled),
+        )])
+        .await?;
+
+        self.emit_settings_changed().await;
+        Ok(())
+    }
+
+    /// Replace the unified triggers list.
+    pub async fn set_triggers(&self, triggers: &[crate::triggers::Trigger]) -> Result<(), String> {
+        self.write_entries(vec![(
+            store_keys::TRIGGERS,
+            to_json("triggers", &triggers)?,
+        )])
+        .await?;
+
+        self.emit_settings_changed().await;
+        Ok(())
+    }
+
+    // Read-modify-write, done inside the writer's turn.
+    //
+    // `get_x_settings` then `set_x_settings` is two steps with the turn only
+    // around the second, so two callers that each changed one field of the same
+    // section both started from the old copy and the later write undid the
+    // earlier one. These take the turn first, read the section while holding
+    // it, apply the change and write it back, so the change is applied to what
+    // is stored now and not to what was stored a moment ago.
+
+    /// Read `key`'s section, change it and write it back as one turn. Nothing is
+    /// written when `change` refuses. Returns the section as saved.
+    async fn update_section<T, F>(
+        &self,
+        key: &'static str,
+        what: &str,
+        change: F,
+    ) -> Result<T, String>
+    where
+        T: DeserializeOwned + Serialize + Default,
+        F: FnOnce(&mut T) -> Result<(), String>,
+    {
+        let store = self.store()?;
+        persist::one_writer(|| {
+            let mut section: T = read_section(&store, key);
+            change(&mut section)?;
+            store.set(key, to_json(what, &section)?);
+            store
+                .save()
+                .map_err(|e| format!("Failed to save settings store: {}", e))?;
+            Ok::<T, String>(section)
+        })
+        .await
+    }
+
+    /// Change the agent settings in place. See [`Self::update_section`].
+    pub async fn update_agent_settings(
+        &self,
+        change: impl FnOnce(&mut AgentSettings),
+    ) -> Result<AgentSettings, String> {
+        let saved = self
+            .update_section(
+                store_keys::AGENT,
+                "agent settings",
+                |s: &mut AgentSettings| {
+                    change(s);
+                    Ok(())
+                },
+            )
+            .await?;
+
+        self.app_handle
+            .emit(events::AGENT_SETTINGS_CHANGED, &saved)
+            .map_err(|e| format!("Failed to emit agent settings changed event: {}", e))?;
+        self.emit_settings_changed().await;
+        Ok(saved)
+    }
+
+    /// Change the audio settings in place, with the same range check
+    /// [`Self::set_audio_settings`] makes. See [`Self::update_section`].
+    pub async fn update_audio_settings(
+        &self,
+        change: impl FnOnce(&mut AudioSettings),
+    ) -> Result<AudioSettings, String> {
+        let saved = self
+            .update_section(
+                store_keys::AUDIO,
+                "audio settings",
+                |s: &mut AudioSettings| {
+                    change(s);
+                    if s.always_listening_sensitivity < validation::MIN_SENSITIVITY
+                        || s.always_listening_sensitivity > validation::MAX_SENSITIVITY
+                    {
+                        return Err("Invalid sensitivity value".to_string());
+                    }
+                    Ok(())
+                },
+            )
+            .await?;
+
+        self.app_handle
+            .emit(events::AUDIO_SETTINGS_CHANGED, &saved)
+            .map_err(|e| format!("Failed to emit audio settings changed event: {}", e))?;
+        self.emit_settings_changed().await;
+        Ok(saved)
+    }
+
+    /// Change the floating bar settings in place. See [`Self::update_section`].
+    pub async fn update_floating_bar_settings(
+        &self,
+        change: impl FnOnce(&mut FloatingBarSettings),
+    ) -> Result<FloatingBarSettings, String> {
+        let saved = self
+            .update_section(
+                store_keys::FLOATING_BAR,
+                "floating bar settings",
+                |s: &mut FloatingBarSettings| {
+                    change(s);
+                    Ok(())
+                },
+            )
+            .await?;
+
+        self.app_handle
+            .emit(events::FLOATING_BAR_SETTINGS_CHANGED, &saved)
+            .map_err(|e| format!("Failed to emit floating bar settings changed event: {}", e))?;
+        self.emit_settings_changed().await;
+        Ok(saved)
+    }
+
+    /// Change the onboarding record in place. See [`Self::update_section`].
+    pub async fn update_onboarding_settings(
+        &self,
+        change: impl FnOnce(&mut OnboardingSettings),
+    ) -> Result<OnboardingSettings, String> {
+        let saved = self
+            .update_section(
+                store_keys::ONBOARDING,
+                "onboarding settings",
+                |s: &mut OnboardingSettings| {
+                    change(s);
+                    Ok(())
+                },
+            )
+            .await?;
+
+        self.emit_settings_changed().await;
+        Ok(saved)
+    }
+
+    /// Forget the switches that live in the store beside the sections.
+    ///
+    /// A few flags are written straight to the store under their own keys and
+    /// are not part of [`AppSettings`], so writing the defaults over the
+    /// sections leaves them as they were. Deleting them puts each back on the
+    /// default it reads when the key is missing. Without this, "Reset all
+    /// settings" kept an "Ask before Juno sends" that had been turned off.
+    pub async fn clear_standalone_flags(&self) -> Result<(), String> {
+        let store = self.store()?;
+        persist::one_writer(|| {
+            for key in STANDALONE_FLAGS {
+                let _ = store.delete(key);
+            }
+            store
+                .save()
+                .map_err(|e| format!("Failed to save settings store: {}", e))
+        })
+        .await
+    }
+
     pub async fn set_cli_settings(&self, settings: &CLISettings) -> Result<(), String> {
         // Validate CLI settings
         if settings.command_timeout == 0 || settings.command_timeout > 3600 {
@@ -755,5 +982,78 @@ where
     match store.get(key) {
         Some(value) => persist::lenient(key, &value),
         None => T::default(),
+    }
+}
+
+/// The switches stored under their own keys, outside [`AppSettings`]. Each one
+/// reads its default when the key is missing (see `cli_approval::is_enabled`,
+/// `router::is_enabled`, `claude_cli_session`), so deleting the key resets it.
+const STANDALONE_FLAGS: [&str; 4] = [
+    store_keys::CLI_PERSISTENT_SESSION_ENABLED,
+    store_keys::CLI_ASK_BEFORE_SEND_ENABLED,
+    store_keys::SMART_ROUTING_ENABLED,
+    store_keys::COST_LOGGING_ENABLED,
+];
+
+fn read_notifications(store: &Store<Wry>) -> bool {
+    store
+        .get(store_keys::NOTIFICATIONS_ENABLED)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(defaults::NOTIFICATIONS_ENABLED)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_sections() -> serde_json::Map<String, Value> {
+        match serde_json::to_value(AppSettings::default()) {
+            Ok(Value::Object(object)) => object,
+            other => panic!("default settings must serialize to an object, got {other:?}"),
+        }
+    }
+
+    /// Every field of `AppSettings` has to reach the store. `notifications_enabled`
+    /// was a switch that was never saved; this is what would have said so.
+    #[test]
+    fn every_settings_field_is_written_under_its_own_key() {
+        let entries = SettingsManager::entries_of(&AppSettings::default())
+            .unwrap_or_else(|e| panic!("default settings must convert: {e}"));
+        let written: Vec<&str> = entries.iter().map(|(key, _)| *key).collect();
+        for key in default_sections().keys() {
+            assert!(
+                written.contains(&key.as_str()),
+                "AppSettings has {key:?} but save_all_settings does not write it"
+            );
+        }
+        assert_eq!(
+            written.len(),
+            default_sections().len(),
+            "an entry is written that AppSettings does not have"
+        );
+    }
+
+    /// The flags a reset deletes sit beside the sections. One that was also a
+    /// section would be deleted out from under the settings that own it.
+    #[test]
+    fn standalone_flags_are_not_settings_sections() {
+        let sections = default_sections();
+        for flag in STANDALONE_FLAGS {
+            assert!(
+                !sections.contains_key(flag),
+                "{flag:?} is a settings section, so a reset must not delete it"
+            );
+        }
+    }
+
+    #[test]
+    fn notifications_default_on_in_the_saved_entries() {
+        let entries = SettingsManager::entries_of(&AppSettings::default())
+            .unwrap_or_else(|e| panic!("default settings must convert: {e}"));
+        let saved = entries
+            .iter()
+            .find(|(key, _)| *key == store_keys::NOTIFICATIONS_ENABLED)
+            .map(|(_, value)| value.clone());
+        assert_eq!(saved, Some(Value::Bool(true)));
     }
 }

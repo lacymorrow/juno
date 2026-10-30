@@ -124,9 +124,9 @@ pub async fn set_tray_icon_visible(
     settings_manager: State<'_, SettingsManager>,
     visible: bool,
 ) -> Result<(), String> {
-    let mut agent_settings = settings_manager.get_agent_settings().await?;
-    agent_settings.show_tray_icon = visible;
-    settings_manager.set_agent_settings(&agent_settings).await?;
+    settings_manager
+        .update_agent_settings(|agent| agent.show_tray_icon = visible)
+        .await?;
 
     set_tray_icon_visible_now(visible).await;
     info!(

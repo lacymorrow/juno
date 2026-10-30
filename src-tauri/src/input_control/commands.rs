@@ -22,15 +22,18 @@ async fn load_agent_settings(app_handle: &AppHandle) -> Result<AgentSettings, St
     manager.get_agent_settings().await
 }
 
-/// Write agent settings back whole, so fields owned by other subsystems survive.
-async fn save_agent_settings(
+/// Change some fields of the agent settings, leaving the rest as they are
+/// stored right now. The read happens inside the settings writer's turn, so a
+/// field another subsystem changed a moment ago is not written back to its old
+/// value.
+async fn change_agent_settings(
     app_handle: &AppHandle,
-    settings: &AgentSettings,
+    change: impl FnOnce(&mut AgentSettings),
 ) -> Result<(), String> {
     let manager = app_handle
         .try_state::<SettingsManager>()
         .ok_or_else(|| "Settings manager is not available".to_string())?;
-    manager.set_agent_settings(settings).await
+    manager.update_agent_settings(change).await.map(|_| ())
 }
 
 /// Answer a pending request to take the physical cursor.
@@ -74,17 +77,16 @@ pub async fn set_mouse_control(mode: String, app_handle: AppHandle) -> Result<()
         ));
     }
 
-    let mut settings = load_agent_settings(&app_handle).await?;
-    settings.mouse_control = normalized;
-    save_agent_settings(&app_handle, &settings).await
+    change_agent_settings(&app_handle, |settings| settings.mouse_control = normalized).await
 }
 
 /// Remember that the user does not want to be offered "stop asking" again.
 #[tauri::command]
 pub async fn dismiss_mouse_control_prompt(app_handle: AppHandle) -> Result<(), String> {
-    let mut settings = load_agent_settings(&app_handle).await?;
-    settings.mouse_control_prompt_dismissed = true;
-    save_agent_settings(&app_handle, &settings).await
+    change_agent_settings(&app_handle, |settings| {
+        settings.mouse_control_prompt_dismissed = true
+    })
+    .await
 }
 
 /// Is the agent working in the background?
@@ -96,9 +98,7 @@ pub async fn get_background_mode(app_handle: AppHandle) -> Result<bool, String> 
 /// Turn background operation on or off.
 #[tauri::command]
 pub async fn set_background_mode(enabled: bool, app_handle: AppHandle) -> Result<(), String> {
-    let mut settings = load_agent_settings(&app_handle).await?;
-    settings.background_mode = enabled;
-    save_agent_settings(&app_handle, &settings).await?;
+    change_agent_settings(&app_handle, |settings| settings.background_mode = enabled).await?;
     // The cache is refreshed on the next read rather than written here, so the
     // persisted value stays the only source of truth.
     invalidate_background_mode_cache();

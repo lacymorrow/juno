@@ -1,3 +1,4 @@
+use crate::settings::manager::SettingsManager;
 use crate::state::AppState;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
@@ -96,31 +97,31 @@ const NOT_ASKED_REASON: &str = "Allow notifications for Juno first.";
 
 /// Get notification settings
 #[tauri::command]
-pub async fn get_notification_settings(
-    state: tauri::State<'_, AppState>,
-) -> Result<NotificationSettings, String> {
+pub async fn get_notification_settings(app: AppHandle) -> Result<NotificationSettings, String> {
     Ok(NotificationSettings {
-        enabled: state.get_notifications_enabled()?,
+        enabled: notifications_enabled(&app),
     })
 }
 
-/// Turn Juno's notifications on or off.
+/// Turn Juno's notifications on or off, and keep the answer.
+///
+/// The switch used to live only in memory, so it came back on at every launch
+/// whatever the person had chosen. It is a setting like the rest now.
 #[tauri::command]
-pub async fn set_notifications_enabled(
-    state: tauri::State<'_, AppState>,
-    enabled: bool,
-) -> Result<(), String> {
-    state.set_notifications_enabled(enabled)
+pub async fn set_notifications_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let settings = app
+        .try_state::<SettingsManager>()
+        .ok_or_else(|| "Settings are not ready yet".to_string())?;
+    settings.set_notifications_enabled(enabled).await
 }
 
 /// Is the switch on?
 ///
-/// No state means we are too early or headless. Speak up rather than swallow:
+/// Read from the settings store, so it is right before any window has asked,
+/// and in a process with no window at all. An unreadable store reads as on:
 /// a missed notification is worse than an extra one.
 fn notifications_enabled(app: &AppHandle) -> bool {
-    app.try_state::<AppState>()
-        .map(|state| state.get_notifications_enabled().unwrap_or(true))
-        .unwrap_or(true)
+    SettingsManager::read_notifications_enabled(app)
 }
 
 /// Whether this process is the executable inside a `.app` bundle.

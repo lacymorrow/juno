@@ -238,9 +238,9 @@ pub async fn set_dock_icon_visible(
     settings_manager: State<'_, SettingsManager>,
     visible: bool,
 ) -> Result<(), String> {
-    let mut agent_settings = settings_manager.get_agent_settings().await?;
-    agent_settings.dock_icon_visible = visible;
-    settings_manager.set_agent_settings(&agent_settings).await?;
+    settings_manager
+        .update_agent_settings(|agent| agent.dock_icon_visible = visible)
+        .await?;
 
     apply_dock_icon_policy(&app, visible);
     // Back in the Dock means the user is found again; the panic counter goes.
