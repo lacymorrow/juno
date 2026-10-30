@@ -267,6 +267,11 @@ pub fn start_scheduler(app_handle: AppHandle) {
     });
 }
 
+/// Whether a stored automation should fire at `now`.
+fn is_due(automation: &ScheduledAutomation, now: u64) -> bool {
+    automation.enabled && automation.next_run_at.is_some_and(|t| t <= now)
+}
+
 /// One scheduler cycle: fire every enabled, due automation and reschedule it.
 ///
 /// Automations fire sequentially on purpose — the orchestrator processes one
@@ -312,16 +317,30 @@ async fn tick(app: &AppHandle) -> Result<(), String> {
                 let Some(_claim) = try_claim_firing(&automation.id) else {
                     continue;
                 };
-                let mut fired = automation.clone();
+                // The snapshot at the top of the tick can be minutes old: an
+                // earlier automation in this loop may have run the whole time.
+                // Fire what is stored now, and only if it is still enabled and
+                // due, so an automation deleted, paused or rescheduled in the
+                // meantime does not run an unattended agent turn anyway.
+                let Some(mut fired) = load_automations(app)?
+                    .into_iter()
+                    .find(|a| a.id == automation.id)
+                    .filter(|a| is_due(a, now_secs()))
+                else {
+                    continue;
+                };
                 fire_automation(app, &mut fired).await;
                 // Missed occurrences (e.g. the app was closed) collapse into the
                 // single run above; reschedule from now rather than replaying
-                // each missed slot.
-                let next = compute_next_run(&fired.cron).ok();
+                // each missed slot. The cron is read from the stored record, not
+                // the copy fired: an edit made while the run was going must keep
+                // its own schedule, and a pause must stay paused.
                 update_automation(app, &automation.id, |a| {
                     a.last_run_at = fired.last_run_at;
                     a.last_result = fired.last_result;
-                    a.next_run_at = next;
+                    if a.enabled {
+                        a.next_run_at = compute_next_run(&a.cron).ok();
+                    }
                 })
                 .await?;
             }
@@ -415,6 +434,32 @@ mod tests {
         // Every minute is exactly MIN_INTERVAL_SECS — allowed
         assert!(validate_cron_interval("0 * * * * *").is_ok());
         assert!(validate_cron_interval("0 9 * * MON").is_ok());
+    }
+
+    fn automation(enabled: bool, next_run_at: Option<u64>) -> ScheduledAutomation {
+        ScheduledAutomation {
+            id: "a".into(),
+            name: "n".into(),
+            query: "q".into(),
+            cron: "0 9 * * *".into(),
+            natural_language: None,
+            enabled,
+            notify: false,
+            created_at: 0,
+            last_run_at: None,
+            next_run_at,
+            last_result: None,
+        }
+    }
+
+    /// Re-checked against the stored record just before firing: a pause or a
+    /// reschedule made while an earlier automation ran must stop this one.
+    #[test]
+    fn only_an_enabled_due_automation_fires() {
+        assert!(is_due(&automation(true, Some(100)), 100));
+        assert!(!is_due(&automation(false, Some(100)), 100));
+        assert!(!is_due(&automation(true, Some(101)), 100));
+        assert!(!is_due(&automation(true, None), 100));
     }
 
     #[test]

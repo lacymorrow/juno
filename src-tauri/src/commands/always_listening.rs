@@ -7,6 +7,17 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::{error, info, warn};
 
+/// One start or stop of the wake-phrase engine at a time.
+///
+/// A save, the engine-ready retry, the end of a dictation, a coordinated stop
+/// and the bar's pause control all start and stop the engine, and each one
+/// awaits the settings store between its "should this run" check and the
+/// microphone. Without this, a start that had passed the check could land
+/// after the stop that switched voice off, and reopen the microphone for a
+/// wake phrase nobody wants. Held for the whole call so the check and the
+/// action cannot be separated. Nothing that runs inside takes it again.
+static ENGINE_LIFECYCLE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 // Helper function for error formatting - properly handles template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
     template
@@ -27,6 +38,8 @@ pub async fn start_always_listening_mode(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     info!("[Command] start_always_listening_mode called");
+
+    let _lifecycle = ENGINE_LIFECYCLE.lock().await;
 
     if crate::commands::triggers::armed_phrases_now(&app).is_empty() {
         info!("[Command] No voice trigger is armed, the microphone stays off");
@@ -138,6 +151,8 @@ pub async fn stop_always_listening_mode(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     info!("[Command] stop_always_listening_mode called");
+
+    let _lifecycle = ENGINE_LIFECYCLE.lock().await;
 
     // Stop the microphone first. The bookkeeping below can fail; this must
     // not wait on it.

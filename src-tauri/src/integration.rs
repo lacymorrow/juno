@@ -688,6 +688,23 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
         });
     });
 
+    // The engine went back to waiting after a wake phrase that was followed by
+    // silence (a false wake, or "juno" and then nothing). Nothing else ends
+    // that activation: the bar stayed in the activated voice mode and the
+    // audio-level meter kept emitting about fourteen events a second until the
+    // next command or a restart.
+    let app_handle_for_deactivated = app_handle.clone();
+    app_handle.listen(
+        constants::events::always_listening::DEACTIVATED,
+        move |_event| {
+            let app_handle_clone = app_handle_for_deactivated.clone();
+            safe_spawn_async_task(move || async move {
+                commands::ui_commands::handle_always_listening_change(&app_handle_clone, false)
+                    .await;
+            });
+        },
+    );
+
     // Listen for always listening transcription results (after wake word)
     let app_handle_for_always_listening = app_handle.clone();
     app_handle.listen(

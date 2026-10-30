@@ -1199,11 +1199,17 @@ pub fn begin_turn() {
     }
 }
 
-/// Take the next chunk for the worker. Taking a chunk clears the stop flag in
-/// the same lock `stop_speech` clears the queue under, so a stop that came
-/// before this chunk was queued cannot silence it, and a stop that comes after
-/// still reaches it.
-fn next_speech_chunk(finish_when_empty: bool) -> Option<String> {
+/// Take the next chunk for the worker, with the speech generation it was taken
+/// under. Taking a chunk clears the stop flag in the same lock `stop_speech`
+/// clears the queue under, so a stop that came before this chunk was queued
+/// cannot silence it, and a stop that comes after still reaches it.
+///
+/// The generation is what lets the worker tell, once the chunk has been
+/// rendered, that a stop or a new turn happened meanwhile. The stop flag cannot:
+/// the next chunk taken clears it, and an audition resets it, so a sentence
+/// that was rendering when Escape landed would otherwise be played over
+/// whatever came next.
+fn next_speech_chunk(finish_when_empty: bool) -> Option<(String, u64)> {
     with_queue(|queue| {
         let next = if finish_when_empty {
             queue.pop_or_finish()
@@ -1213,24 +1219,36 @@ fn next_speech_chunk(finish_when_empty: bool) -> Option<String> {
         if next.is_some() {
             TTS_STOP_REQUESTED.store(false, Ordering::SeqCst);
         }
-        next
+        next.map(|text| (text, queue.generation))
     })
+}
+
+/// True while `generation` is still the one speech is in: no stop and no new
+/// turn since the chunk was taken.
+fn speech_generation_is(generation: u64) -> bool {
+    with_queue(|queue| queue.generation == generation)
 }
 
 type PendingRender = (
     String,
+    u64,
     tauri::async_runtime::JoinHandle<Result<String, String>>,
 );
 
 /// Start rendering `text` in the background, for a chunk that plays next.
-fn spawn_prefetch(text: String, provider: &str, app_state: &AppState) -> PendingRender {
+fn spawn_prefetch(
+    text: String,
+    generation: u64,
+    provider: &str,
+    app_state: &AppState,
+) -> PendingRender {
     let provider = provider.to_string();
     let state = app_state.clone();
     let task_text = text.clone();
     let handle = tauri::async_runtime::spawn(async move {
         execute_tts_with_fallback(task_text, &provider, state, false).await
     });
-    (text, handle)
+    (text, generation, handle)
 }
 
 /// The one worker that speaks a turn's queued chunks, in order.
@@ -1261,27 +1279,50 @@ async fn drain_speech_queue(app_handle: AppHandle) {
             break;
         }
 
-        let (text, rendered) = match prefetched.take() {
-            Some((text, handle)) => match handle.await {
-                Ok(Ok(audio)) => (text, Ok(audio)),
-                // A failed render-ahead gets the full chain, system voice included.
-                _ => {
-                    let rendered =
-                        execute_tts_with_fallback(text.clone(), &provider, app_state.clone(), true)
-                            .await;
-                    (text, rendered)
+        let (text, chunk_generation, rendered) = match prefetched.take() {
+            Some((text, generation, handle)) => {
+                // Rendered ahead for speech that has since been stopped or
+                // replaced: not worth waiting on, and never played.
+                if !speech_generation_is(generation) {
+                    handle.abort();
+                    continue;
                 }
-            },
+                match handle.await {
+                    Ok(Ok(audio)) => (text, generation, Ok(audio)),
+                    // A failed render-ahead gets the full chain, system voice included.
+                    _ => {
+                        let rendered = execute_tts_with_fallback(
+                            text.clone(),
+                            &provider,
+                            app_state.clone(),
+                            true,
+                        )
+                        .await;
+                        (text, generation, rendered)
+                    }
+                }
+            }
             None => {
-                let Some(text) = next_speech_chunk(true) else {
+                let Some((text, generation)) = next_speech_chunk(true) else {
                     break;
                 };
                 let rendered =
                     execute_tts_with_fallback(text.clone(), &provider, app_state.clone(), true)
                         .await;
-                (text, rendered)
+                (text, generation, rendered)
             }
         };
+        // A stop or a new turn landed while this sentence was rendering. The
+        // stop flag may already be clear again (the next chunk taken clears it,
+        // and an audition resets it), so ask the generation: that sentence
+        // belongs to speech the person has since ended.
+        if !speech_generation_is(chunk_generation) {
+            info!("[TTS] Dropping a sentence rendered for speech that was stopped");
+            if let Some((_, _, handle)) = prefetched.take() {
+                handle.abort();
+            }
+            continue;
+        }
         debug!(
             "[TTS] Queue: playing chunk of {} chars",
             text.chars().count()
@@ -1296,8 +1337,8 @@ async fn drain_speech_queue(app_handle: AppHandle) {
         tokio::pin!(play);
         let result = loop {
             if can_render_ahead && prefetched.is_none() {
-                if let Some(next) = next_speech_chunk(false) {
-                    prefetched = Some(spawn_prefetch(next, &provider, &app_state));
+                if let Some((next, generation)) = next_speech_chunk(false) {
+                    prefetched = Some(spawn_prefetch(next, generation, &provider, &app_state));
                 }
             }
             tokio::select! {
@@ -1310,7 +1351,7 @@ async fn drain_speech_queue(app_handle: AppHandle) {
             Ok("TTS_STOPPED_BY_USER") => {
                 // Escape already emptied the queue; what was rendered ahead
                 // belongs to the speech that was just stopped.
-                if let Some((_, handle)) = prefetched.take() {
+                if let Some((_, _, handle)) = prefetched.take() {
                     handle.abort();
                 }
             }
@@ -1321,7 +1362,7 @@ async fn drain_speech_queue(app_handle: AppHandle) {
                     "tts_off"
                 };
                 crate::turn_timing::finish(None, outcome);
-                if let Some((_, handle)) = prefetched.take() {
+                if let Some((_, _, handle)) = prefetched.take() {
                     handle.abort();
                 }
                 with_queue(|queue| queue.abandon());
