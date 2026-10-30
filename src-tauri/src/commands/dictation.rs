@@ -639,6 +639,51 @@ pub async fn set_dictation_cleanup_enabled(
     Ok(())
 }
 
+/// The personal dictionary: words typed in the person's own spelling
+/// whenever dictation hears something that sounds like them.
+#[tauri::command]
+pub async fn get_dictation_dictionary(app_handle: AppHandle) -> Result<Vec<String>, String> {
+    let settings_manager = SettingsManager::new(app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
+    settings_manager
+        .get_audio_settings()
+        .await
+        .map(|audio| audio.dictation_dictionary)
+        .map_err(|e| format!("Failed to load audio settings: {}", e))
+}
+
+/// Replace the personal dictionary. Blank entries and repeats are dropped;
+/// the rest is kept in the order given, as spelled.
+#[tauri::command]
+pub async fn set_dictation_dictionary(
+    app_handle: AppHandle,
+    words: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let words = tidy_dictionary(words);
+    let settings_manager = SettingsManager::new(app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
+    let saved = settings_manager
+        .update_audio_settings(|audio| audio.dictation_dictionary = words)
+        .await
+        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+    info!(
+        "Dictation dictionary now has {} words",
+        saved.dictation_dictionary.len()
+    );
+    Ok(saved.dictation_dictionary)
+}
+
+/// Trim, drop blanks, drop case-insensitive repeats (first spelling wins).
+fn tidy_dictionary(words: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    words
+        .into_iter()
+        .map(|w| w.trim().to_string())
+        .filter(|w| !w.is_empty())
+        .filter(|w| seen.insert(w.to_lowercase()))
+        .collect()
+}
+
 /// Open System Settings on Apple Intelligence & Siri, where the on-device
 /// model is switched on.
 #[tauri::command]

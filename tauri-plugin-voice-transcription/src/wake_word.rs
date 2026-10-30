@@ -109,7 +109,7 @@ fn contains_phrase(
 
 /// Whether one heard word is the wake phrase's word: spelled the same, or
 /// sounding the same, or near enough for a word long enough to afford it.
-fn words_match(heard: &str, heard_key: &str, phrase: &str, phrase_key: &str) -> bool {
+pub(crate) fn words_match(heard: &str, heard_key: &str, phrase: &str, phrase_key: &str) -> bool {
     if heard == phrase {
         return true;
     }
@@ -141,7 +141,7 @@ fn words_match(heard: &str, heard_key: &str, phrase: &str, phrase_key: &str) -> 
 /// This is what strips the trailing full stop off "hey juneau." and the comma
 /// out of "hey, juno", both of which defeated the old literal comparison on
 /// their own, before any question of how the word sounds comes up.
-fn tokenize(text: &str) -> Vec<String> {
+pub(crate) fn tokenize(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
         .map(|w| w.to_lowercase())
@@ -163,7 +163,9 @@ fn is_vowel(c: char) -> bool {
 /// for a single vowel.
 fn vowel_class(run: &str) -> char {
     match run {
-        "eau" | "oa" | "oe" | "au" | "aw" | "ow" | "oi" | "oy" => 'O',
+        // "eou" is not an English spelling of anything; it is what a speech
+        // model writes for an /oʊ/ it has no word for ("Juneou" for Juno).
+        "eau" | "eou" | "oa" | "oe" | "au" | "aw" | "ow" | "oi" | "oy" => 'O',
         "ea" | "ee" | "ie" | "ei" => 'E',
         "oo" | "ou" | "ew" | "eu" | "ui" | "ue" => 'U',
         "ai" | "ay" | "ey" => 'A',
@@ -184,7 +186,7 @@ fn vowel_class(run: &str) -> char {
 ///
 /// Works on `chars`, never on byte offsets, so a transcription that comes back
 /// with an accent or a non-Latin character cannot split a character in half.
-fn phonetic_key(word: &str) -> String {
+pub(crate) fn phonetic_key(word: &str) -> String {
     let mut chars: Vec<char> = word
         .chars()
         .filter(|c| c.is_ascii_alphabetic())

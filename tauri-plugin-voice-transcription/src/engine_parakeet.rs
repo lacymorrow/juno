@@ -1,52 +1,89 @@
-//! The Parakeet engine itself: loading the ONNX graph and running audio
-//! through it.
+//! The Parakeet engine itself: loading the ONNX graphs and running audio
+//! through them.
 //!
 //! Compiled on Apple Silicon only. `parakeet-rs` pulls in `ort-sys`, which
 //! ships a prebuilt ONNX Runtime for `aarch64-apple-darwin` and nothing else,
 //! so this module (and that dependency) are gated on `target_arch =
 //! "aarch64"` and the crate is built universal without them. Everything that
 //! does not touch the loader lives in [`crate::parakeet_model`] and is
-//! compiled everywhere: the download manifest, what is on disk, and whether
+//! compiled everywhere: the download manifests, what is on disk, and whether
 //! this build supports Parakeet at all.
+//!
+//! One engine, two models. The directory decides which (see
+//! [`ParakeetVariant::for_dir`]): CTC is one graph and types lowercase, TDT
+//! is two graphs and types capitals and punctuation. Past loading they are
+//! the same to the rest of the plugin: audio in, text out.
 
 use crate::engine::{TranscriptionEngine, TranscriptionSession};
-use crate::parakeet_model::{missing_parakeet_files, PARAKEET_MODEL_FILES};
-use parakeet_rs::{ExecutionConfig, Parakeet, Transcriber};
+use crate::parakeet_model::ParakeetVariant;
+use parakeet_rs::{ExecutionConfig, Parakeet, ParakeetTDT, Transcriber};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Instant, SystemTime};
 use tracing::{error, info, warn};
 
-/// Where ONNX Runtime's optimised graph is kept, inside the model directory
-/// so `from_pretrained` finds `tokenizer.json` beside it in file mode.
+/// Where ONNX Runtime's optimised CTC graph is kept, inside the model
+/// directory so `from_pretrained` finds `tokenizer.json` beside it in file
+/// mode.
 ///
 /// Deliberately not one of the names `find_model_file` looks for
 /// (`model.onnx`, `model_fp16.onnx`, `model_int8.onnx`, `model_q4.onnx`), so
 /// a directory-mode load never picks it up by accident.
-const OPTIMIZED_MODEL_FILE: &str = "model_optimized.onnx";
+const CTC_OPTIMIZED_FILE: &str = "model_optimized.onnx";
 
-/// STT engine backed by NVIDIA Parakeet CTC 0.6B via ONNX Runtime.
+/// Where ONNX Runtime's optimised TDT graphs are kept: a directory inside the
+/// model directory, laid out exactly as the loader wants a model directory
+/// (its first-choice file names, plus the vocabulary), so later launches
+/// simply load from here instead of from the download.
+const TDT_OPTIMIZED_DIR: &str = "optimized";
+const TDT_OPTIMIZED_ENCODER: &str = "encoder-model.onnx";
+const TDT_OPTIMIZED_DECODER: &str = "decoder_joint-model.onnx";
+const TDT_VOCAB: &str = "vocab.txt";
+
+/// Whichever Parakeet model is in memory. The two `parakeet-rs` types share
+/// the `Transcriber` trait, but that trait has generic methods and cannot be
+/// boxed, so the choice is an enum rather than a `dyn`.
+enum Loaded {
+    Ctc(Parakeet),
+    Tdt(ParakeetTDT),
+}
+
+impl Loaded {
+    fn transcribe(&mut self, audio: &[f32]) -> Result<String, parakeet_rs::Error> {
+        let result = match self {
+            Loaded::Ctc(model) => model.transcribe_samples(audio.to_vec(), 16000, 1, None)?,
+            Loaded::Tdt(model) => model.transcribe_samples(audio.to_vec(), 16000, 1, None)?,
+        };
+        Ok(result.text)
+    }
+}
+
+/// STT engine backed by NVIDIA Parakeet 0.6B (CTC or TDT) via ONNX Runtime.
 ///
-/// Model directory must contain every file in `PARAKEET_MODEL_FILES`; the app's
-/// `download_dictation_model` command fetches them.
+/// Model directory must contain every file in the variant's manifest; the
+/// app's `download_stt_model` command fetches them.
 ///
-/// The inner `Parakeet` is guarded by a Mutex because `transcribe_samples` takes
-/// `&mut self`. In practice only one recording is active at a time, so contention
-/// is not a concern.
+/// The inner model is guarded by a Mutex because `transcribe_samples` takes
+/// `&mut self`. In practice only one recording is active at a time, so
+/// contention is not a concern.
 pub struct ParakeetEngine {
-    model: Arc<Mutex<Option<Parakeet>>>,
+    model: Arc<Mutex<Option<Loaded>>>,
     pub model_dir: PathBuf,
+    variant: ParakeetVariant,
 }
 
 impl ParakeetEngine {
-    /// Load the Parakeet CTC model from `model_dir`. Returns an error if the
-    /// directory does not exist or model files are missing.
+    /// Load the Parakeet model `model_dir` is named for. Returns an error if
+    /// the directory does not exist or model files are missing.
     pub fn new(model_dir: &Path) -> Result<Self, String> {
+        let variant = ParakeetVariant::for_dir(model_dir);
         info!(
-            "[ParakeetEngine] Loading Parakeet CTC model from {:?}",
-            model_dir
+            "[ParakeetEngine] Loading Parakeet {:?} model from {:?}",
+            variant, model_dir
         );
 
-        let missing = missing_parakeet_files(model_dir);
+        let missing = variant.missing_files(model_dir);
         if !missing.is_empty() {
             return Err(format!(
                 "Parakeet model files missing in {}: {}. Download Parakeet from Settings > Models.",
@@ -55,18 +92,31 @@ impl ParakeetEngine {
             ));
         }
 
-        let model = Self::load_model(model_dir)?;
+        let started = Instant::now();
+        let model = match variant {
+            ParakeetVariant::Ctc => Loaded::Ctc(Self::load_ctc(model_dir)?),
+            ParakeetVariant::Tdt => Loaded::Tdt(Self::load_tdt(model_dir)?),
+        };
 
-        info!("[ParakeetEngine] Parakeet model loaded successfully");
+        info!(
+            "[ParakeetEngine] Parakeet {:?} model loaded in {} ms",
+            variant,
+            started.elapsed().as_millis()
+        );
 
         Ok(Self {
             model: Arc::new(Mutex::new(Some(model))),
             model_dir: model_dir.to_path_buf(),
+            variant,
         })
     }
 
-    /// Load the model, reusing ONNX Runtime's optimised graph when one has
-    /// been written.
+    pub fn variant(&self) -> ParakeetVariant {
+        self.variant
+    }
+
+    /// Load the CTC model, reusing ONNX Runtime's optimised graph when one
+    /// has been written.
     ///
     /// ORT re-runs its entire optimisation pipeline on every launch — the
     /// hundreds of `GraphTransformer ... modified` and `Removing initializer`
@@ -79,10 +129,10 @@ impl ParakeetEngine {
     /// cache that cannot be read is deleted rather than retried: it is a
     /// derived artefact and regenerating it is cheaper than reasoning about
     /// why it went bad.
-    fn load_model(model_dir: &Path) -> Result<Parakeet, String> {
-        let optimized = model_dir.join(OPTIMIZED_MODEL_FILE);
+    fn load_ctc(model_dir: &Path) -> Result<Parakeet, String> {
+        let optimized = model_dir.join(CTC_OPTIMIZED_FILE);
 
-        if Self::cache_is_stale(&optimized, model_dir) {
+        if cache_is_stale(&optimized, model_dir, ParakeetVariant::Ctc) {
             info!("[ParakeetEngine] Source model is newer than the optimised graph; rebuilding");
             let _ = std::fs::remove_file(&optimized);
         }
@@ -136,24 +186,133 @@ impl ParakeetEngine {
         }
     }
 
-    /// True when the optimised graph predates the model it was built from.
+    /// Load the TDT model, with the same optimised-graph cache as CTC, in a
+    /// different shape.
     ///
-    /// Re-downloading the model leaves a cache describing the old weights,
-    /// which would load happily and transcribe with whatever was there
-    /// before. Modification time is the cheap check; a missing timestamp on
-    /// either side counts as stale, because guessing wrong in that direction
-    /// only costs one slow launch.
-    fn cache_is_stale(optimized: &Path, model_dir: &Path) -> bool {
-        let Ok(cache_time) = std::fs::metadata(optimized).and_then(|m| m.modified()) else {
-            return false; // no cache at all is not staleness
-        };
-        PARAKEET_MODEL_FILES.iter().any(|f| {
-            std::fs::metadata(model_dir.join(f.name))
-                .and_then(|m| m.modified())
-                .map(|source_time| source_time > cache_time)
-                .unwrap_or(true)
+    /// TDT is two ONNX sessions (encoder, then the joined decoder), and
+    /// `parakeet-rs` applies one `ExecutionConfig` to both, so one output
+    /// path would make the second session overwrite the first. The closure
+    /// counts its calls instead: the loader builds the encoder first and the
+    /// decoder second, so call 0 writes the encoder's graph and call 1 the
+    /// decoder's, into `optimized/` under the loader's first-choice names.
+    /// The vocabulary is linked in beside them, and a later launch loads
+    /// `optimized/` as if it were the model directory.
+    ///
+    /// A cache that is incomplete, stale or unreadable is removed and
+    /// rebuilt; nothing here can stop the model loading plain.
+    fn load_tdt(model_dir: &Path) -> Result<ParakeetTDT, String> {
+        let cache = model_dir.join(TDT_OPTIMIZED_DIR);
+        let cache_files = [
+            cache.join(TDT_OPTIMIZED_ENCODER),
+            cache.join(TDT_OPTIMIZED_DECODER),
+            cache.join(TDT_VOCAB),
+        ];
+
+        if cache_files
+            .iter()
+            .any(|f| cache_is_stale(f, model_dir, ParakeetVariant::Tdt))
+        {
+            info!("[ParakeetEngine] Source model is newer than the optimised graphs; rebuilding");
+            let _ = std::fs::remove_dir_all(&cache);
+        }
+
+        if cache_files.iter().all(|f| f.is_file()) {
+            match ParakeetTDT::from_pretrained(&cache, None) {
+                Ok(model) => {
+                    info!("[ParakeetEngine] Loaded the pre-optimised graphs");
+                    return Ok(model);
+                }
+                Err(e) => {
+                    warn!(
+                        "[ParakeetEngine] Optimised graphs unusable ({}); rebuilding them",
+                        e
+                    );
+                    let _ = std::fs::remove_dir_all(&cache);
+                }
+            }
+        } else if cache.exists() {
+            // Half a cache (a crash mid-write) is worth nothing; start over.
+            let _ = std::fs::remove_dir_all(&cache);
+        }
+
+        if let Err(e) = std::fs::create_dir_all(&cache) {
+            warn!(
+                "[ParakeetEngine] Could not create {:?} ({}); loading plain",
+                cache, e
+            );
+            return Self::load_tdt_plain(model_dir);
+        }
+
+        let write_dir = cache.clone();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let config = ExecutionConfig::new().with_custom_configure(move |b| {
+            let target = match calls.fetch_add(1, Ordering::SeqCst) {
+                0 => TDT_OPTIMIZED_ENCODER,
+                _ => TDT_OPTIMIZED_DECODER,
+            };
+            b.with_optimized_model_path(write_dir.join(target))
+                .map_err(Into::into)
+        });
+
+        match ParakeetTDT::from_pretrained(model_dir, Some(config)) {
+            Ok(model) => {
+                let vocab_src = model_dir.join(TDT_VOCAB);
+                let vocab_dst = cache.join(TDT_VOCAB);
+                if std::fs::hard_link(&vocab_src, &vocab_dst).is_err() {
+                    if let Err(e) = std::fs::copy(&vocab_src, &vocab_dst) {
+                        // Without the vocabulary the cache is incomplete and
+                        // the next launch rebuilds it; this launch is fine.
+                        warn!(
+                            "[ParakeetEngine] Could not place the vocabulary beside the optimised graphs: {}",
+                            e
+                        );
+                    }
+                }
+                info!(
+                    "[ParakeetEngine] Loaded and wrote optimised graphs to {:?}",
+                    cache
+                );
+                Ok(model)
+            }
+            Err(e) => {
+                warn!(
+                    "[ParakeetEngine] Could not write optimised graphs ({}); loading plain",
+                    e
+                );
+                let _ = std::fs::remove_dir_all(&cache);
+                Self::load_tdt_plain(model_dir)
+            }
+        }
+    }
+
+    fn load_tdt_plain(model_dir: &Path) -> Result<ParakeetTDT, String> {
+        ParakeetTDT::from_pretrained(model_dir, None).map_err(|e| {
+            format!(
+                "Failed to load Parakeet TDT model from {:?}: {}",
+                model_dir, e
+            )
         })
     }
+}
+
+/// True when an optimised graph predates the model it was built from.
+///
+/// Re-downloading the model leaves a cache describing the old weights,
+/// which would load happily and transcribe with whatever was there
+/// before. Modification time is the cheap check; a missing timestamp on
+/// the model's side counts as stale, because guessing wrong in that
+/// direction only costs one slow launch. A missing cache file is not
+/// staleness: there is nothing to invalidate.
+fn cache_is_stale(optimized: &Path, model_dir: &Path, variant: ParakeetVariant) -> bool {
+    let Ok(cache_time) = std::fs::metadata(optimized).and_then(|m| m.modified()) else {
+        return false;
+    };
+    variant.files().iter().any(|f| {
+        std::fs::metadata(model_dir.join(f.name))
+            .and_then(|m| m.modified())
+            .map(|source_time: SystemTime| source_time > cache_time)
+            .unwrap_or(true)
+    })
 }
 
 impl TranscriptionEngine for ParakeetEngine {
@@ -169,6 +328,10 @@ impl TranscriptionEngine for ParakeetEngine {
         self.model.lock().map(|g| g.is_some()).unwrap_or(false)
     }
 
+    fn model_dir(&self) -> Option<String> {
+        Some(self.model_dir.to_string_lossy().into_owned())
+    }
+
     fn create_session(&self) -> Result<Box<dyn TranscriptionSession>, String> {
         Ok(Box::new(ParakeetSession {
             model: Arc::clone(&self.model),
@@ -179,15 +342,11 @@ impl TranscriptionEngine for ParakeetEngine {
 /// Per-recording Parakeet session. Shares the loaded ONNX model via Arc<Mutex<>>
 /// so initialization cost is paid once per engine, not once per recording.
 pub struct ParakeetSession {
-    model: Arc<Mutex<Option<Parakeet>>>,
+    model: Arc<Mutex<Option<Loaded>>>,
 }
 
-impl TranscriptionSession for ParakeetSession {
-    fn transcribe_partial(&mut self, audio: &[f32]) -> Result<Option<String>, String> {
-        if audio.is_empty() {
-            return Ok(None);
-        }
-
+impl ParakeetSession {
+    fn run(&mut self, audio: &[f32]) -> Result<String, String> {
         let mut guard = self
             .model
             .lock()
@@ -197,14 +356,18 @@ impl TranscriptionSession for ParakeetSession {
             .as_mut()
             .ok_or_else(|| "Parakeet model not loaded".to_string())?;
 
-        match model.transcribe_samples(audio.to_vec(), 16000, 1, None) {
-            Ok(result) => {
-                if result.text.trim().is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(result.text))
-                }
-            }
+        model.transcribe(audio).map_err(|e| e.to_string())
+    }
+}
+
+impl TranscriptionSession for ParakeetSession {
+    fn transcribe_partial(&mut self, audio: &[f32]) -> Result<Option<String>, String> {
+        if audio.is_empty() {
+            return Ok(None);
+        }
+        match self.run(audio) {
+            Ok(text) if text.trim().is_empty() => Ok(None),
+            Ok(text) => Ok(Some(text)),
             Err(e) => {
                 error!("[ParakeetSession] Partial transcription failed: {}", e);
                 Err(format!("Parakeet partial transcription failed: {}", e))
@@ -216,19 +379,7 @@ impl TranscriptionSession for ParakeetSession {
         if audio.is_empty() {
             return Ok(String::new());
         }
-
-        let mut guard = self
-            .model
-            .lock()
-            .map_err(|e| format!("Parakeet model lock poisoned: {}", e))?;
-
-        let model = guard
-            .as_mut()
-            .ok_or_else(|| "Parakeet model not loaded".to_string())?;
-
-        model
-            .transcribe_samples(audio.to_vec(), 16000, 1, None)
-            .map(|r| r.text)
+        self.run(audio)
             .map_err(|e| format!("Parakeet final transcription failed: {}", e))
     }
 }
@@ -237,20 +388,31 @@ impl TranscriptionSession for ParakeetSession {
 mod tests {
     use super::*;
 
-    /// Where a dogfooding install keeps the downloaded Parakeet model.
+    /// Where a dogfooding install keeps a downloaded Parakeet model. TDT
+    /// first: it is the recommended one, and the one whose output has
+    /// casing to check.
     fn installed_model_dir() -> Option<PathBuf> {
         if let Ok(dir) = std::env::var("JUNO_PARAKEET_DIR") {
             return Some(PathBuf::from(dir));
         }
-        let dir = dirs_home()?
+        let models = dirs_home()?
             .join("Library/Application Support")
             .join(crate::constants::HOST_BUNDLE_IDENTIFIER)
-            .join("models/parakeet-ctc");
-        crate::parakeet_model::model_files_present(&dir).then_some(dir)
+            .join("models");
+        [ParakeetVariant::Tdt, ParakeetVariant::Ctc]
+            .into_iter()
+            .map(|v| models.join(v.dir_leaf()))
+            .find(|dir| crate::parakeet_model::model_files_present(dir))
     }
 
     fn dirs_home() -> Option<PathBuf> {
         std::env::var_os("HOME").map(PathBuf::from)
+    }
+
+    fn write_model_files(dir: &Path, variant: ParakeetVariant, contents: &[u8]) {
+        for f in variant.files() {
+            std::fs::write(dir.join(f.name), contents).expect("model file");
+        }
     }
 
     #[test]
@@ -259,9 +421,10 @@ mod tests {
         // first launch try to delete a file that was never written.
         let dir = std::env::temp_dir().join("juno-stale-none");
         let _ = std::fs::create_dir_all(&dir);
-        assert!(!ParakeetEngine::cache_is_stale(
-            &dir.join("model_optimized.onnx"),
-            &dir
+        assert!(!cache_is_stale(
+            &dir.join(CTC_OPTIMIZED_FILE),
+            &dir,
+            ParakeetVariant::Ctc
         ));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -275,14 +438,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp dir");
 
-        let cache = dir.join("model_optimized.onnx");
+        let cache = dir.join(CTC_OPTIMIZED_FILE);
         std::fs::write(&cache, b"old").expect("cache");
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        for f in PARAKEET_MODEL_FILES {
-            std::fs::write(dir.join(f.name), b"new").expect("model file");
-        }
+        write_model_files(&dir, ParakeetVariant::Ctc, b"new");
 
-        assert!(ParakeetEngine::cache_is_stale(&cache, &dir));
+        assert!(cache_is_stale(&cache, &dir, ParakeetVariant::Ctc));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -292,14 +453,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp dir");
 
-        for f in PARAKEET_MODEL_FILES {
-            std::fs::write(dir.join(f.name), b"model").expect("model file");
-        }
+        write_model_files(&dir, ParakeetVariant::Ctc, b"model");
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        let cache = dir.join("model_optimized.onnx");
+        let cache = dir.join(CTC_OPTIMIZED_FILE);
         std::fs::write(&cache, b"built after").expect("cache");
 
-        assert!(!ParakeetEngine::cache_is_stale(&cache, &dir));
+        assert!(!cache_is_stale(&cache, &dir, ParakeetVariant::Ctc));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -310,11 +469,31 @@ mod tests {
         let dir = std::env::temp_dir().join("juno-stale-gone");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp dir");
-        let cache = dir.join("model_optimized.onnx");
+        let cache = dir.join(CTC_OPTIMIZED_FILE);
         std::fs::write(&cache, b"cache").expect("cache");
 
-        assert!(ParakeetEngine::cache_is_stale(&cache, &dir));
+        assert!(cache_is_stale(&cache, &dir, ParakeetVariant::Ctc));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The TDT cache is judged against the TDT manifest, in its own
+    /// directory. A re-downloaded encoder invalidates it the same way.
+    #[test]
+    fn a_tdt_cache_older_than_its_model_is_stale() {
+        let dir = std::env::temp_dir()
+            .join("juno-stale-tdt")
+            .join("parakeet-tdt");
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache_dir = dir.join(TDT_OPTIMIZED_DIR);
+        std::fs::create_dir_all(&cache_dir).expect("temp dir");
+
+        let cache = cache_dir.join(TDT_OPTIMIZED_ENCODER);
+        std::fs::write(&cache, b"old").expect("cache");
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        write_model_files(&dir, ParakeetVariant::Tdt, b"new");
+
+        assert!(cache_is_stale(&cache, &dir, ParakeetVariant::Tdt));
+        let _ = std::fs::remove_dir_all(dir.parent().expect("parent"));
     }
 
     /// The only guard against a silent transcription regression.
@@ -336,7 +515,7 @@ mod tests {
     /// inference, so a fallback around the constructor never fired. Without
     /// this test that ships as "Juno starts, you speak, nothing comes back".
     ///
-    /// Runs automatically wherever the model is downloaded, which is any
+    /// Runs automatically wherever a model is downloaded, which is any
     /// machine actually running Juno. CI has no model, so it skips rather
     /// than fails — a skip is honest, a green light on an untested path is
     /// not.
@@ -374,6 +553,14 @@ mod tests {
         // execution provider does not.
         for word in ["quick", "brown", "fox", "lazy"] {
             assert!(lower.contains(word), "expected {word:?} in {text:?}");
+        }
+        // TDT is in the catalog for its casing and punctuation; a TDT that
+        // types lowercase is the CTC experience with a bigger download.
+        if engine.variant() == ParakeetVariant::Tdt {
+            assert!(
+                text.trim_start().starts_with('T'),
+                "TDT should capitalise the sentence: {text:?}"
+            );
         }
     }
 
