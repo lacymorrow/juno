@@ -14,13 +14,14 @@
 //! a picker whose effect waits for the next restart is a picker that appears
 //! not to work.
 
+use crate::constants::events;
 use crate::settings::manager::SettingsManager;
 use crate::settings::AudioSettings;
 use crate::state::AppState;
 use cpal::traits::HostTrait;
 use serde::Serialize;
 use std::collections::HashSet;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_voice_transcription::{
     device_audio_id, device_ref, device_uid, find_device, uid_for_legacy_name, DeviceChoice,
     DeviceRef,
@@ -224,6 +225,50 @@ pub async fn convert_legacy_device_names_at_startup(app: &AppHandle, audio: &mut
         }
         Err(e) => warn!("[AudioDevices] Could not save the converted device choice: {e}"),
     }
+}
+
+/// Send every window the device lists again whenever the Mac's audio hardware
+/// changes, so a settings window open across a plug or an unplug shows what is
+/// there now instead of what was there when it opened.
+///
+/// Pushed rather than polled, and the whole answer rather than a nudge: the
+/// pane renders what Rust emits, so there is no second round trip and no
+/// moment where two reads can land out of order.
+///
+/// Not gated on microphone permission. Watching for a change opens no device,
+/// and the list is right to show on a Mac that has never granted access.
+///
+/// Safe to call more than once: the audio settings are loaded again after a
+/// reset, and that must not stack a second listener on the same change.
+pub fn watch_audio_hardware(app: &AppHandle) {
+    static WATCHING: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    if WATCHING.set(()).is_err() {
+        return;
+    }
+    let app = app.clone();
+    // Installed before the watch that drives it: a change landing between the
+    // two would otherwise find nobody listening.
+    tauri_plugin_voice_transcription::on_hardware_change(move || {
+        let app = app.clone();
+        // The notification arrives on a CoreAudio thread, where listing
+        // devices and reading the settings store do not belong.
+        tauri::async_runtime::spawn(async move {
+            match list_audio_devices(app.clone()).await {
+                Ok(choices) => {
+                    info!(
+                        "[AudioDevices] The Mac's audio devices changed: {} in, {} out",
+                        choices.inputs.len(),
+                        choices.outputs.len()
+                    );
+                    if let Err(e) = app.emit(events::audio_devices::CHANGED, choices) {
+                        warn!("[AudioDevices] Could not report the new device list: {e}");
+                    }
+                }
+                Err(e) => warn!("[AudioDevices] Could not re-read the device list: {e}"),
+            }
+        });
+    });
+    tauri_plugin_voice_transcription::watch_audio_hardware();
 }
 
 /// List both pickers and say which choice is in force.
