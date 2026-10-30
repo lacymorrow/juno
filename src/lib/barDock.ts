@@ -106,10 +106,16 @@ export function predictedWindowOrigin(
 
 // ── The dock slot store ───────────────────────────────────────────────────
 //
-// One slot per window label. A plain box rather than React state because two
-// unrelated readers need it: whichever bar look is mounted (to lay itself out
-// against the docked edges) and `useWindowSize` (to anchor every resize on
-// them), and the second is not a component.
+// One slot per window label. A plain box rather than React state because its
+// one reader is not a component: `withDockDefaults` in `useWindowSize` pulls
+// the slot at resize time, to anchor the resize on the docked edges.
+//
+// A bar look used to be the second reader, laying itself out against those
+// edges, which is what the subscribe path below was built for. `steadyFrame`
+// took that over: `steadyLayout` derives the slot from the `Well` it is handed
+// and calls `dockAnchorX` and `dockGrowsUp` (above) on that, and the looks
+// subscribe to `subscribeSteady` for the result. So the looks still use this
+// file, but no longer this store, and nothing in the app subscribes here.
 
 const slotByLabel = new Map<string, WellSlot | null>();
 const listenersByLabel = new Map<string, Set<() => void>>();
