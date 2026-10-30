@@ -28,14 +28,16 @@ pub(crate) async fn type_text(
         &format!("Typing text length: {}", text.len()),
         &debug_config,
     );
-    info!("Executing type_text for text: '{}'", text);
+    // Length only, never the text: this is how the agent types passwords and
+    // card numbers, and the log on disk is kept for a week.
+    info!("Executing type_text ({} chars)", text.chars().count());
 
     let desktop = state.get_desktop()?;
     let result = desktop.type_text(&text);
 
     match result {
         Ok(_) => {
-            info!("Successfully typed text: '{}'", text);
+            info!("Typed {} chars", text.chars().count());
 
             // Send debug notification if enabled
             if debug_config.send_notifications {
@@ -56,7 +58,7 @@ pub(crate) async fn type_text(
             Ok(())
         }
         Err(e) => {
-            let error_msg = format!("Failed to type text '{}': {}", text, e);
+            let error_msg = format!("Failed to type text: {}", e);
             error!("{}", error_msg);
             Err(error_msg)
         }
@@ -165,7 +167,10 @@ pub(crate) async fn global_type_text(
         &format!("Global typing text length: {}", text.len()),
         &debug_config,
     );
-    info!("Executing global_type_text for text: '{}'", text);
+    info!(
+        "Executing global_type_text ({} chars)",
+        text.chars().count()
+    );
 
     let desktop = state.get_desktop()?;
     let result = desktop.type_text(&text);
@@ -318,5 +323,101 @@ pub(crate) async fn release_key(
             Ok(())
         }
         Err(e) => Err(format!("Error during release key: {}", e)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The files that hand typed text to the keyboard. What the agent types
+    /// includes passwords and card numbers, and the log on disk is kept for a
+    /// week, so a log line may carry a length but never the text itself.
+    const TYPING_SOURCES: [(&str, &str); 3] = [
+        ("commands/keyboard.rs", include_str!("keyboard.rs")),
+        (
+            "agent/tools/browser_controller.rs",
+            include_str!("../agent/tools/browser_controller.rs"),
+        ),
+        ("cloud/commands.rs", include_str!("../cloud/commands.rs")),
+    ];
+
+    const LOG_MACROS: [&str; 5] = ["info!(", "debug!(", "warn!(", "error!(", "trace!("];
+
+    /// Every log statement in `source`, joined onto one line.
+    fn log_statements(source: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut current: Option<String> = None;
+        for line in source.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("//") {
+                continue;
+            }
+            if current.is_none() && LOG_MACROS.iter().any(|m| trimmed.contains(m)) {
+                current = Some(String::new());
+            }
+            if let Some(statement) = current.as_mut() {
+                statement.push_str(trimmed);
+                statement.push(' ');
+                if trimmed.ends_with(");") {
+                    out.extend(current.take());
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether a log statement passes `text` or `value` itself as an argument.
+    fn prints_typed_text(statement: &str) -> bool {
+        statement
+            .trim()
+            .rsplit('"')
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(';')
+            .trim_end_matches(')')
+            .split(',')
+            .map(str::trim)
+            .any(|arg| arg == "text" || arg == "value")
+    }
+
+    #[test]
+    fn the_check_catches_the_lines_that_used_to_leak() {
+        assert!(prints_typed_text(
+            "info!(\"Executing type_text for text: '{}'\", text);"
+        ));
+        assert!(prints_typed_text(
+            "log::info!(\"Typing '{}' into element: {}\", value, selector);"
+        ));
+        assert!(!prints_typed_text(
+            "info!(\"Typed {} chars\", text.chars().count());"
+        ));
+    }
+
+    #[test]
+    fn no_log_line_carries_the_typed_text() {
+        let mut offenders = Vec::new();
+        for (file, source) in TYPING_SOURCES {
+            for statement in log_statements(source) {
+                if prints_typed_text(&statement) {
+                    offenders.push(format!("{}: {}", file, statement.trim()));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "log lines must not print typed text:\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn the_scan_sees_log_statements() {
+        // Guards the test above against passing because it parsed nothing.
+        for (file, source) in TYPING_SOURCES {
+            assert!(
+                !log_statements(source).is_empty(),
+                "{} has no log statements; the scan is broken",
+                file
+            );
+        }
     }
 }

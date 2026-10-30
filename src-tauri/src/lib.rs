@@ -97,8 +97,8 @@ use commands::{
     keyboard::*, media::*, memory::*, mouse::*, permission_diagnostics::*, permissions::*,
     persistent_memory::*, providers::*, safari_clear_cache, safari_click_element,
     safari_execute_javascript, safari_extract_dom, safari_get_url, safari_is_active,
-    safari_list_clickable_elements, safari_navigate, safari_type_text, shell::*, sound::*,
-    starters::*, test_accessibility_permissions, text_editor::*, ui_commands::*, window::*,
+    safari_list_clickable_elements, safari_navigate, safari_type_text, sound::*, starters::*,
+    test_accessibility_permissions, text_editor::*, ui_commands::*, window::*,
 };
 
 pub use anthropic::submit_query; // Re-export the submit_query command
@@ -457,8 +457,10 @@ pub fn run() {
             // mouse_move → computer tool with action: "mouse_move"
             // This eliminates redundancy and ensures 100% compliance with the official specification.
 
-            // Production shell function with debug capabilities
-            bash_command,
+            // `bash_command` is deliberately not registered. The agent and the
+            // cloud path call it as a Rust function behind the approval gate;
+            // no window calls it, and exposed over IPC it was a shell any
+            // webview could reach with no gate at all.
             // Production filesystem functions with debug capabilities
             list_files,
             get_file_content,

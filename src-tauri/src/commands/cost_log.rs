@@ -94,7 +94,10 @@ pub struct CostLogExport {
 pub async fn export_cost_log_csv(path: Option<String>) -> Result<CostLogExport, String> {
     let records = cost_log::read_log()?;
     let destination = match path {
-        Some(path) => std::path::PathBuf::from(path),
+        // A caller-chosen destination is a write anywhere, so it answers to
+        // the same gate as every other file-touching command. The default,
+        // next to the log in Juno's own cache directory, is not caller input.
+        Some(path) => crate::path_gate::authorize(&path, crate::path_gate::PathOp::Write)?,
         None => cost_log::log_path()
             .map(|p| p.with_extension("csv"))
             .ok_or_else(|| "No cache directory on this system".to_string())?,

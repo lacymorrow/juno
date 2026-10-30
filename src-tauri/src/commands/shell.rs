@@ -930,6 +930,34 @@ pub async fn bash_command(
 mod tests {
     use super::*;
 
+    // --- no window reaches the shell over IPC ---
+
+    #[test]
+    fn bash_command_is_not_an_ipc_command() {
+        // The agent reaches the shell through the approval gate; a webview
+        // calling `invoke("bash_command")` would skip it. The handler list
+        // must not name it.
+        let lib = include_str!("../lib.rs");
+        let start = lib
+            .find("generate_handler![")
+            .unwrap_or_else(|| panic!("lib.rs has no generate_handler! block"));
+        let registered: Vec<&str> = lib[start..]
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with("//"))
+            .collect();
+        assert!(
+            !registered
+                .iter()
+                .any(|line| *line == "bash_command," || line.ends_with("::bash_command,")),
+            "bash_command must not be registered as a Tauri command"
+        );
+        assert!(
+            registered.contains(&"list_files,"),
+            "the scan must see the handler list"
+        );
+    }
+
     // --- bash timeout bounds run unconditionally (LAC-4013) ---
 
     #[test]

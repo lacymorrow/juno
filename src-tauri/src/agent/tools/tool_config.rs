@@ -795,7 +795,11 @@ impl ToolConfigManager {
     ///
     /// # Arguments
     /// * `config` - MCP server configuration to add
-    pub fn add_mcp_server(&mut self, config: MCPServerConfig) {
+    ///
+    /// A new server is never approved, whatever the config says: approval is
+    /// only ever given by [`Self::approve_mcp_server`].
+    pub fn add_mcp_server(&mut self, mut config: MCPServerConfig) {
+        config.approved = false;
         self.mcp_servers.insert(config.id.clone(), config);
     }
 
@@ -834,7 +838,16 @@ impl ToolConfigManager {
     ///
     /// # Arguments
     /// * `config` - Updated server configuration
-    pub fn update_mcp_server(&mut self, config: MCPServerConfig) {
+    ///
+    /// The approval carries over only while the server would spawn exactly the
+    /// process that was approved. Change the command, its arguments, its
+    /// environment or its directory and it has to be approved again; the
+    /// `approved` flag on the incoming config is never trusted.
+    pub fn update_mcp_server(&mut self, mut config: MCPServerConfig) {
+        config.approved = self
+            .mcp_servers
+            .get(&config.id)
+            .is_some_and(|old| old.approved && old.spawns_same_process(&config));
         self.mcp_servers.insert(config.id.clone(), config);
     }
 
@@ -981,5 +994,80 @@ mod tests {
 
         assert!(manager.tools.values().all(|t| t.enabled));
         assert!(manager.category_enabled.values().all(|enabled| *enabled));
+    }
+
+    fn approved_server(command: &str) -> MCPServerConfig {
+        let mut config = MCPServerConfig::new("files".to_string(), command.to_string(), vec![]);
+        config.approved = true;
+        config
+    }
+
+    #[test]
+    fn a_new_mcp_server_never_arrives_approved() {
+        // The spawn gate is the person's answer. A config that says
+        // `approved: true` about itself is not that answer.
+        let mut manager = ToolConfigManager::default();
+        let config = approved_server("npx");
+        let id = config.id.clone();
+        manager.add_mcp_server(config);
+
+        let stored = manager
+            .get_mcp_server(&id)
+            .unwrap_or_else(|| panic!("server was not stored"));
+        assert!(!stored.approved);
+    }
+
+    #[test]
+    fn an_edit_that_changes_the_command_needs_approving_again() {
+        let mut manager = ToolConfigManager::default();
+        let config = MCPServerConfig::new("files".to_string(), "npx".to_string(), vec![]);
+        let id = config.id.clone();
+        manager.add_mcp_server(config.clone());
+        assert!(manager.approve_mcp_server("files"));
+
+        let mut edited = config;
+        edited.command = "/tmp/something-else".to_string();
+        edited.approved = true;
+        manager.update_mcp_server(edited);
+
+        let stored = manager
+            .get_mcp_server(&id)
+            .unwrap_or_else(|| panic!("server was not stored"));
+        assert!(
+            !stored.approved,
+            "a different command is a different approval"
+        );
+    }
+
+    #[test]
+    fn an_edit_that_keeps_the_command_keeps_the_approval() {
+        let mut manager = ToolConfigManager::default();
+        let config = MCPServerConfig::new("files".to_string(), "npx".to_string(), vec![]);
+        let id = config.id.clone();
+        manager.add_mcp_server(config.clone());
+        assert!(manager.approve_mcp_server("files"));
+
+        let mut edited = config;
+        edited.timeout_seconds = 90;
+        edited.approved = false;
+        manager.update_mcp_server(edited);
+
+        let stored = manager
+            .get_mcp_server(&id)
+            .unwrap_or_else(|| panic!("server was not stored"));
+        assert!(stored.approved, "a timeout change is not a new process");
+    }
+
+    #[test]
+    fn an_update_cannot_approve_a_server_that_never_was() {
+        let mut manager = ToolConfigManager::default();
+        let config = approved_server("npx");
+        let id = config.id.clone();
+        manager.update_mcp_server(config);
+
+        let stored = manager
+            .get_mcp_server(&id)
+            .unwrap_or_else(|| panic!("server was not stored"));
+        assert!(!stored.approved);
     }
 }
