@@ -512,7 +512,6 @@ impl ProductionCloudConnector {
 
                 match self.establish_connection().await {
                     Ok(()) => {
-                        retry_count = 0;
                         self.set_connection_state(ConnectorState::Ready).await;
                         info!("Production cloud connector established and ready");
 
