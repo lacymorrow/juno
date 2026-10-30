@@ -180,17 +180,20 @@ export function escapeHandled(outcome: EscapeOutcome): boolean {
 }
 
 /**
- * What one press of the mouse outside the bar does: the same ladder Escape
- * walks (chat, idle bar, hidden), except that a click never stops Juno's work.
+ * What one press of the mouse outside the bar does: the top of the ladder
+ * Escape walks (chat, idle bar), except that a click never stops Juno's work
+ * and never takes the bar off the screen. A click outside is mostly someone
+ * switching to another app, which is not a request for Juno to vanish; that
+ * made the idle bar disappear on nearly every app switch. Hiding stays a
+ * deliberate act: Escape on the idle bar, or the tray.
  *
  * - `spare`: nothing yet. Someone typing a draft who clicks away (to copy
  *   something, to look) keeps the chat open for that first click.
  * - `collapse`: the idle bar, draft kept out of sight.
- * - `hide`: off the screen, draft still kept. Never while Juno is working or
- *   holding a state of its own (listening, speaking): the bar is the brake.
- * - `nothing`: a popup owns the moment, or Juno is busy at the idle bar.
+ * - `nothing`: the bar is already idle, a popup owns the moment, or Juno is
+ *   busy at the idle bar.
  */
-export type OutsidePressStep = "spare" | "collapse" | "hide" | "nothing";
+export type OutsidePressStep = "spare" | "collapse" | "nothing";
 
 export function outsidePressStep(
   state: BarEscapeState,
@@ -200,8 +203,7 @@ export function outsidePressStep(
   if (state.overlayOpen || state.composerOpen) {
     return draftPresent && !spared ? "spare" : "collapse";
   }
-  if (state.working || !isRestingState(state.barState)) return "nothing";
-  return "hide";
+  return "nothing";
 }
 
 /**

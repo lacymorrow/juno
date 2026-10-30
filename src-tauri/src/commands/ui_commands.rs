@@ -406,6 +406,9 @@ impl UIManager {
         );
         self.bar_state = new_state;
         self.emit_bar_state_update().await;
+        if self.bar_state == BarState::Default {
+            crate::bar_presence::bar_at_rest(&self.app_handle);
+        }
     }
 
     /// The agent's run asks the bar for `state`. Remembered always, shown only
@@ -1313,6 +1316,19 @@ pub async fn initialize_ui_manager(app_handle: AppHandle) -> Result<(), String> 
 
 pub async fn get_ui_manager() -> Option<Arc<TokioMutex<UIManager>>> {
     UI_MANAGER.get().cloned()
+}
+
+/// Whether the bar is at rest with nothing going on: no state of its own, no
+/// run, no dictation. What `bar_presence` waits for before it hides a bar it
+/// showed.
+pub async fn bar_is_resting() -> bool {
+    let Some(manager) = get_ui_manager().await else {
+        return true;
+    };
+    let manager = manager.lock().await;
+    manager.bar_state == BarState::Default
+        && !manager.is_agent_working
+        && !manager.is_dictation_mode
 }
 
 // === EVENT LISTENERS ===

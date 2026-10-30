@@ -250,8 +250,6 @@ export function useEscapeToIdle(options: EscapeToIdleOptions): void {
       // Rust holds a composer's input state; settle it, but only when nothing
       // is running, since reporting is what stops work.
       if (composerOpen && !working) report();
-    } else if (step === "hide") {
-      void invoke(COMMANDS.WINDOWS_HIDE_FLOATING_BAR).catch(() => {});
     }
   });
 

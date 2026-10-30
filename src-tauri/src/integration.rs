@@ -116,6 +116,7 @@ async fn show_listening(app_handle: &AppHandle) {
         "[Voice] Showing voice session {} as listening",
         session.describe()
     );
+    crate::bar_presence::show_for_work(app_handle, session.target);
 
     // If it's dictation mode, set the flag in floating bar manager first
     if app_state.is_dictation_active() {
@@ -658,6 +659,13 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
                     crate::triggers::TriggerTarget::Agent => VoiceTarget::Agent,
                     crate::triggers::TriggerTarget::Dictation => VoiceTarget::Dictation,
                 }),
+            );
+            crate::bar_presence::show_for_work(
+                &app_handle_clone,
+                match target {
+                    crate::triggers::TriggerTarget::Agent => VoiceTarget::Agent,
+                    crate::triggers::TriggerTarget::Dictation => VoiceTarget::Dictation,
+                },
             );
             if let Ok(mut pending) = PENDING_VOICE_TARGET.lock() {
                 *pending = Some(target);
