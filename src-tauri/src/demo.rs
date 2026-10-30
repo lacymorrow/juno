@@ -1,4 +1,5 @@
-//! Demo builds: a golden copy that carries its own Anthropic key.
+//! Demo builds: a golden copy that carries its own Anthropic key, and
+//! optionally an ElevenLabs key so it speaks in a voice worth hearing.
 //!
 //! A demo build is for handing Juno to someone who should be able to open it
 //! and talk to it without signing up for an AI provider first. The key is
@@ -18,6 +19,29 @@
 /// The key compiled into this build, when it is a demo build.
 pub fn api_key() -> Option<&'static str> {
     option_env!("JUNO_DEMO_ANTHROPIC_KEY").filter(|k| !k.is_empty())
+}
+
+/// The ElevenLabs key compiled into a demo build, when one was given
+/// (`JUNO_DEMO_ELEVENLABS_KEY`). Optional: a demo without one speaks with
+/// Kokoro. Same terms as the Anthropic key: not a secret, so give it its own
+/// ElevenLabs key with a character limit, and revoke it when the cohort ends.
+pub fn elevenlabs_key() -> Option<&'static str> {
+    option_env!("JUNO_DEMO_ELEVENLABS_KEY").filter(|k| !k.is_empty())
+}
+
+/// The voice engine a fresh install speaks with. A demo that carries an
+/// ElevenLabs key starts there, since that key is only worth carrying if the
+/// demo uses it; everything else starts on the local default.
+pub fn default_tts_engine() -> &'static str {
+    default_tts_engine_for(elevenlabs_key().is_some())
+}
+
+fn default_tts_engine_for(has_elevenlabs: bool) -> &'static str {
+    if has_elevenlabs {
+        "elevenlabs"
+    } else {
+        crate::constants::settings::defaults::TTS_PROVIDER
+    }
 }
 
 /// Which batch this build was made for, e.g. "sept-investors". Shows in
@@ -118,6 +142,15 @@ pub fn resolve_api_key(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_demo_carrying_an_elevenlabs_key_starts_on_elevenlabs() {
+        assert_eq!(super::default_tts_engine_for(true), "elevenlabs");
+        assert_eq!(
+            super::default_tts_engine_for(false),
+            crate::constants::settings::defaults::TTS_PROVIDER
+        );
+    }
+
     use super::*;
 
     const DEMO: Option<&'static str> = Some("sk-ant-demo");

@@ -70,6 +70,7 @@ export TAURI_BUNDLER_DMG_IGNORE_CI=true
 
 key_path="$HOME/.tauri/juno.key"
 demo_key_path="$HOME/.tauri/juno-demo.key"
+demo_elevenlabs_key_path="$HOME/.tauri/juno-demo-elevenlabs.key"
 demo=0
 
 # Set by the arg loop, read by name_artifacts.
@@ -493,6 +494,10 @@ assert_no_key_in_binary() {
     echo "tauri-build: FAILED, an Anthropic key is present in a non-demo binary: $binary" >&2
     exit 1
   fi
+  if strings "$binary" 2>/dev/null | grep -Eq 'sk_[0-9a-f]{40,}'; then
+    echo "tauri-build: FAILED, an ElevenLabs key is present in a non-demo binary: $binary" >&2
+    exit 1
+  fi
   echo "tauri-build: checked, no key material in $binary" >&2
 }
 
@@ -570,6 +575,16 @@ MSG
   fi
   export JUNO_DEMO_ANTHROPIC_KEY
   export JUNO_DEMO_COHORT="${JUNO_DEMO_COHORT:-}"
+  # Optional: a demo with an ElevenLabs key speaks with ElevenLabs.
+  if [[ -z "${JUNO_DEMO_ELEVENLABS_KEY:-}" && -f "$demo_elevenlabs_key_path" ]]; then
+    JUNO_DEMO_ELEVENLABS_KEY="$(tr -d '[:space:]' < "$demo_elevenlabs_key_path")"
+  fi
+  export JUNO_DEMO_ELEVENLABS_KEY="${JUNO_DEMO_ELEVENLABS_KEY:-}"
+  if [[ -n "$JUNO_DEMO_ELEVENLABS_KEY" ]]; then
+    echo "tauri-build: demo voice: ElevenLabs (${#JUNO_DEMO_ELEVENLABS_KEY} char key)" >&2
+  else
+    echo "tauri-build: demo voice: Kokoro (no ElevenLabs key)" >&2
+  fi
   echo "tauri-build: demo build, key ${JUNO_DEMO_ANTHROPIC_KEY:0:7}... (${#JUNO_DEMO_ANTHROPIC_KEY} chars)${JUNO_DEMO_COHORT:+, cohort $JUNO_DEMO_COHORT}" >&2
   echo "tauri-build: ${version} build ${build_number} ${commit} on ${branch}" >&2
   run_build "Juno-Demo" bunx tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}' "$@"
@@ -577,7 +592,7 @@ MSG
 fi
 
 # Not a demo build: make sure nothing exported a demo key into this one.
-unset JUNO_DEMO_ANTHROPIC_KEY JUNO_DEMO_COHORT
+unset JUNO_DEMO_ANTHROPIC_KEY JUNO_DEMO_COHORT JUNO_DEMO_ELEVENLABS_KEY
 # Not `exec` below: an exec'd process replaces this shell, and the EXIT trap
 # that checks for key material would never run.
 trap assert_no_key_in_binary EXIT

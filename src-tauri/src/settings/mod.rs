@@ -687,7 +687,7 @@ impl Default for CloudSettings {
 impl Default for AudioSettings {
     fn default() -> Self {
         Self {
-            tts_provider: defaults::TTS_PROVIDER.to_string(),
+            tts_provider: crate::demo::default_tts_engine().to_string(),
             input_device: None,
             input_device_uid: None,
             output_device: None,
