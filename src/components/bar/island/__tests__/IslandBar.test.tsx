@@ -8,7 +8,9 @@ import { PILL_TOOLTIP_DELAY_MS } from "../../PillTooltip";
 
 // ── Tauri and hook stand-ins ────────────────────────────────────────
 
-const { invoke, emit, listenHandlers, eventHandlers, chat, focusHandlers, setFocus, frameReport, agents, backend } = vi.hoisted(() => ({
+const { invoke, emit, listenHandlers, eventHandlers, chat, focusHandlers, setFocus, frameReport, agents, backend, anchor } = vi.hoisted(() => ({
+  /** Which edge the stand-in frame is docked to: the top grows down, the bottom grows up. */
+  anchor: { edge: "top" as "top" | "bottom" },
   agents: { sessions: [] as Array<Record<string, unknown>>, focusSession: vi.fn() },
   /** What the stand-in backend answers, per command. Unlisted commands answer true. */
   backend: { answers: {} as Record<string, unknown> },
@@ -140,13 +142,11 @@ vi.mock("@/components/ui/mixed-content-renderer", () => ({
 vi.mock("../useIslandFrame", async () => {
   const { steadyLayout } = await import("@/lib/steadyFrame");
   const { ISLAND_STEADY_SPEC } = await import("../islandModel");
-  const layout = steadyLayout(
-    { x: 650, y: 30, width: 140, height: 76, fx: 0.5, fy: 0, monitorIndex: 0 },
-    { position: { x: 0, y: 0 }, size: { width: 1440, height: 900 }, scaleFactor: 1 },
-    ISLAND_STEADY_SPEC,
-  );
+  const monitor = { position: { x: 0, y: 0 }, size: { width: 1440, height: 900 }, scaleFactor: 1 };
+  const top = steadyLayout({ x: 650, y: 30, width: 140, height: 76, fx: 0.5, fy: 0, monitorIndex: 0 }, monitor, ISLAND_STEADY_SPEC);
+  const bottom = steadyLayout({ x: 650, y: 790, width: 140, height: 76, fx: 0.5, fy: 1, monitorIndex: 0 }, monitor, ISLAND_STEADY_SPEC);
   return {
-    useIslandFrame: () => ({ layout, hidden: false, region: { current: null }, report: frameReport }),
+    useIslandFrame: () => ({ layout: anchor.edge === "top" ? top : bottom, hidden: false, region: { current: null }, report: frameReport }),
   };
 });
 vi.mock("motion/react", async () => {
@@ -406,6 +406,51 @@ describe("IslandBar: answer", () => {
       vi.advanceTimersByTime(LINGER_MS + 100);
     });
     expect(face()).toBe("idle");
+  });
+
+  it.each(["top", "bottom"] as const)("the composer is the bottom row whichever edge the island is docked to (%s)", async (edge) => {
+    anchor.edge = edge;
+    try {
+      renderWithAnswer();
+      expect(face()).toBe("answer");
+      const row = screen.getByTestId("island-composer");
+      expect(row.style.bottom).toBe("0px");
+      expect(row.style.top).toBe("");
+      expect(row.className).toContain("border-t");
+    } finally {
+      anchor.edge = "top";
+    }
+  });
+
+  it("type to focus: a printable key with nothing focused puts the caret in the composer", () => {
+    render(<IslandBar />);
+    expect(face()).toBe("idle");
+    expect(fireEvent.keyDown(document.body, { key: "h" })).toBe(true);
+    expect(document.activeElement).toBe(composer());
+    expect(face()).toBe("compose");
+  });
+
+  it("type to focus: Cmd+V focuses too, and a chord, Escape or an open menu does not", () => {
+    render(<IslandBar />);
+    fireEvent.keyDown(document.body, { key: "c", metaKey: true });
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(document.activeElement).not.toBe(composer());
+    const menu = document.createElement("div");
+    menu.setAttribute("role", "menu");
+    document.body.appendChild(menu);
+    fireEvent.keyDown(document.body, { key: "h" });
+    expect(document.activeElement).not.toBe(composer());
+    menu.remove();
+    fireEvent.keyDown(document.body, { key: "v", metaKey: true });
+    expect(document.activeElement).toBe(composer());
+  });
+
+  it("type to focus: not while a dictation is recording", async () => {
+    render(<IslandBar />);
+    await send(UI.BAR_STATES_DICTATING);
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.keyDown(document.body, { key: "h" });
+    expect(document.activeElement).not.toBe(composer());
   });
 
   it("the composer is the same element in compose and answer: a follow-up never changes fields", async () => {
