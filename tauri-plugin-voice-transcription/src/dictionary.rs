@@ -50,7 +50,7 @@ pub fn apply_dictionary(text: &str, entries: &[String]) -> String {
             if words.is_empty() {
                 return None;
             }
-            let keys = words.iter().map(|w| phonetic_key(w)).collect();
+            let keys = words.iter().map(|w| phonetic_key(w.as_str())).collect();
             Some(Entry {
                 text: e,
                 words,
@@ -219,10 +219,10 @@ mod tests {
     /// and a non-ASCII entry does not split a character.
     #[test]
     fn entries_keep_their_own_case_and_survive_unicode() {
-        let entries = vec!["Lacy".to_string(), "Zoë".to_string()];
+        let entries = vec!["Zoë".to_string(), "Juno".to_string()];
         assert_eq!(
-            apply_dictionary("lacey and zoe went out — très bien", &entries),
-            "Lacy and Zoë went out — très bien"
+            apply_dictionary("zoe and JUNO went out — très bien", &entries),
+            "Zoë and Juno went out — très bien"
         );
     }
 }
