@@ -322,6 +322,11 @@ pub fn release(app: &AppHandle, agent_id: &str) {
     if !nobody_driving(app) {
         return;
     }
+    // A run that pressed the button and ended before releasing it (stopped,
+    // failed, or the model simply never sent `left_mouse_up`) would leave the
+    // app mid-drag and the person's pointer with the button down.
+    #[cfg(target_os = "macos")]
+    computer_use_ai_sdk::platforms::macos::interaction::release_held_left_button();
     // Nobody is driving any more, so the bar goes back to whatever the rest of
     // the situation asks for.
     crate::bar_stacking::note_agent_driving(app, false);
@@ -496,6 +501,22 @@ mod tests {
             assert!(v.get(key).is_some(), "update is missing {key}");
         }
         assert_eq!(v["origin_x"], json!(-2560.0));
+    }
+
+    #[test]
+    fn the_last_cursor_out_lets_go_of_a_held_button() {
+        // Every end path of a run comes through `release`; a button pressed
+        // and never released must come up there, once nobody is driving.
+        let source = include_str!("cursor_overlay.rs");
+        let body = &source[source.find("pub fn release(").expect("release exists")..];
+        let body = &body[..body.find("\npub fn ").unwrap_or(body.len())];
+        let gate = body
+            .find("if !nobody_driving(app)")
+            .expect("release waits for the last cursor");
+        let let_go = body
+            .find("release_held_left_button()")
+            .expect("release lets go of a held button");
+        assert!(gate < let_go);
     }
 
     #[test]
