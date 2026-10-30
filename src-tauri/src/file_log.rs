@@ -230,11 +230,14 @@ mod tests {
     fn a_relaunch_counts_what_the_file_already_holds() {
         let dir = scratch_dir("relaunch");
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("juno-2026-10-05.log"), "0123456789ab\n").unwrap();
+        // Today, because opening prunes by the real date: a fixed day aged
+        // past a week and was deleted before the relaunch could count it.
+        let today = Local::now().date_naive();
+        let path = dir.join(file_name(today));
+        fs::write(&path, "0123456789ab\n").unwrap();
         let log = DailyLog::open_in(dir.clone(), 10).unwrap();
-        log.write_on(day("2026-10-05"), b"after relaunch\n")
-            .unwrap();
-        let text = fs::read_to_string(dir.join("juno-2026-10-05.log")).unwrap();
+        log.write_on(today, b"after relaunch\n").unwrap();
+        let text = fs::read_to_string(&path).unwrap();
         assert_eq!(
             text, "0123456789ab\n",
             "already over the cap: nothing appended"
