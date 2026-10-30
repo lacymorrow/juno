@@ -441,7 +441,11 @@ mod tests {
         assert!(!waiter.is_finished(), "must wait while the first turn runs");
 
         drop(running);
-        assert!(matches!(waiter.await, Ok(StartOutcome::Started(_))));
+        // Held while it is checked: dropping it ends "b", and the check would
+        // race that cleanup (it failed CI that way).
+        let Ok(StartOutcome::Started(_b)) = waiter.await else {
+            panic!("the waiting query must start once the first ends");
+        };
         assert_eq!(
             coordinator.get_current_execution_id().await.as_deref(),
             Some("b")
