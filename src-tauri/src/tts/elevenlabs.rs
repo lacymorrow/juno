@@ -29,12 +29,21 @@ struct ElevenLabsVoiceSettings {
 #[derive(Serialize)]
 struct ElevenLabsPayload {
     text: String,
+    model_id: &'static str,
     voice_settings: ElevenLabsVoiceSettings,
 }
 // --- End ElevenLabs API Structures ---
 
-/// The voice used when `ELEVENLABS_VOICE_ID` is not set.
-pub const DEFAULT_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM";
+/// The voice used when `ELEVENLABS_VOICE_ID` is not set: Sarah, one of the
+/// premade voices every account can use through the API. It was Rachel, which
+/// ElevenLabs now treats as a library voice, refused to free accounts with a
+/// 402 ("Free users cannot use library voices via the API"); the demo key is
+/// a free account, so every sentence failed and fell back to Kokoro.
+pub const DEFAULT_VOICE_ID: &str = "EXAVITQu4vr4xnSDxMaL";
+
+/// ElevenLabs' lowest-latency model. Left unset, the API picks its default,
+/// the slowest of the current models, and a spoken reply waits on it.
+const MODEL_ID: &str = "eleven_flash_v2_5";
 
 // --- ElevenLabs TTS Command ---
 #[tauri::command]
@@ -73,6 +82,7 @@ pub async fn invoke_elevenlabs_tts(text: String, speed: Option<f64>) -> Result<S
         .map_err(|e| format!("Failed to create ElevenLabs HTTP client: {}", e))?;
     let payload = ElevenLabsPayload {
         text: text.clone(),
+        model_id: MODEL_ID,
         voice_settings: ElevenLabsVoiceSettings {
             stability: 0.5,
             similarity_boost: 0.75,
