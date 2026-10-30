@@ -1219,15 +1219,23 @@ async fn run_in_session(
     // The message has already been written to its stdin, so a process left alive
     // could still run it — after the one-shot fallback has answered the same query,
     // to a user who asked once. Killing the process is what makes the fallback safe.
+    //
+    // The one exception is a turn the CLI closed itself after an interrupt
+    // (`survives`). Nothing falls back after a stop, and the process is idle,
+    // so killing it would only make the next message pay a cold boot.
     match outcome {
         Ok(TurnOutcome::Completed(text)) => Ok(TurnOutcome::Completed(text)),
         Ok(TurnOutcome::Unavailable) => {
             evict(req.conversation_id).await;
             Ok(TurnOutcome::Unavailable)
         }
-        Err(e) => {
-            evict(req.conversation_id).await;
-            Err(e)
+        Err(failure) => {
+            if survives(&failure) && !session.is_dead() {
+                info!("[CliSession] Turn interrupted; the process stays for the next message");
+            } else {
+                evict(req.conversation_id).await;
+            }
+            Err(failure.error)
         }
     }
 }
@@ -1755,6 +1763,10 @@ struct TurnFailure {
     error: AgentError,
     /// What the bubble is left showing.
     shown: &'static str,
+    /// The CLI itself closed the turn (its aborted `result`, or a `cancelled`
+    /// lifecycle for a turn it had not started), so the process is idle and
+    /// can take the next message. False when the process died or was killed.
+    process_idle: bool,
 }
 
 impl TurnFailure {
@@ -1762,6 +1774,7 @@ impl TurnFailure {
         Self {
             error: AgentError::Terminated,
             shown: "Cancelled",
+            process_idle: true,
         }
     }
 
@@ -1772,8 +1785,29 @@ impl TurnFailure {
                 TURN_IDLE_TIMEOUT.as_secs() / 60
             )),
             shown: "Claude Code stopped responding",
+            process_idle: true,
         }
     }
+
+    /// The same ending, with the process killed on the way out.
+    fn killed(self) -> Self {
+        Self {
+            process_idle: false,
+            ..self
+        }
+    }
+}
+
+/// Whether a session survives a turn that ended this way.
+///
+/// Only a turn the CLI closed itself leaves a process worth keeping. That is
+/// the whole point of interrupting rather than killing (module doc, section
+/// 1): the next message lands in a warm process instead of paying a cold boot
+/// and a `--resume`. A failure the CLI did not close is the opposite case: the
+/// message may still be sitting on its stdin, so a live process could run it
+/// after the one-shot fallback already has.
+fn survives(failure: &TurnFailure) -> bool {
+    failure.process_idle
 }
 
 /// Read the turn off the stream, emitting as it goes.
@@ -1789,7 +1823,7 @@ async fn stream_turn(
     inbox: &mut mpsc::UnboundedReceiver<Value>,
     req: &TurnRequest<'_>,
     command_uuid: &str,
-) -> Result<TurnOutcome, AgentError> {
+) -> Result<TurnOutcome, TurnFailure> {
     // Prefer the run's own cancellation channel. For session-tracked runs that is
     // the merged session+global receiver — escape cancels only the focused session,
     // whose token the global channel never sees (LAC-3697) — and the global AppState
@@ -1883,6 +1917,7 @@ async fn stream_turn(
                         "The Claude CLI session ended mid-turn".to_string(),
                     ),
                     shown: "Error: The Claude CLI session ended mid-turn",
+                    process_idle: false,
                 });
             }
             Err(_elapsed) => {
@@ -1894,11 +1929,14 @@ async fn stream_turn(
                     if let Some(turn) = own.take() {
                         turn.finish(OwnTurnEnd::Cancelled).await;
                     }
-                    break Some(if timed_out {
-                        TurnFailure::timed_out()
-                    } else {
-                        TurnFailure::cancelled()
-                    });
+                    break Some(
+                        if timed_out {
+                            TurnFailure::timed_out()
+                        } else {
+                            TurnFailure::cancelled()
+                        }
+                        .killed(),
+                    );
                 }
                 if !ours {
                     // No lifecycle frame for our uuid within the window: an older CLI
@@ -2017,7 +2055,7 @@ async fn stream_turn(
 
     if let Some(failure) = failure {
         surface.close(failure.shown.to_string());
-        return Err(failure.error);
+        return Err(failure);
     }
 
     let complete = renderer.complete(final_result);
@@ -2732,6 +2770,17 @@ mod tests {
         align_effort(&session, "high");
         let line = outbox.try_recv().expect("switch back written");
         assert!(line.contains("\"high\""));
+    }
+
+    /// Escape interrupts; it must not also kill. A turn the CLI closed itself
+    /// keeps its process, so the next message lands warm. A process that had
+    /// to be killed, or died, is gone either way.
+    #[test]
+    fn an_interrupted_turn_keeps_its_process() {
+        assert!(survives(&TurnFailure::cancelled()));
+        assert!(survives(&TurnFailure::timed_out()));
+        assert!(!survives(&TurnFailure::cancelled().killed()));
+        assert!(!survives(&TurnFailure::timed_out().killed()));
     }
 
     #[test]
