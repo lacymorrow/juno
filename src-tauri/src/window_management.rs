@@ -256,6 +256,8 @@ pub async fn escape_main_window(app: AppHandle) -> Result<bool, String> {
 /// tray icon brings her back.
 #[tauri::command]
 pub async fn hide_floating_bar(app: AppHandle) -> Result<(), String> {
+    // Put away by the person: not one for `bar_presence` to put away later.
+    crate::bar_presence::forget();
     WindowManager::hide_window(&app, window_labels::FLOATING_BAR).await
 }
 

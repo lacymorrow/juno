@@ -180,16 +180,16 @@ describe("barEscape: a press outside the bar", () => {
   const chat = { ...rest, overlayOpen: true };
   const fresh = { draftPresent: false, spared: false };
 
-  it("walks a draft-holding chat down in three clicks: stay, idle, hidden", () => {
+  it("walks a draft-holding chat down in two clicks: stay, idle, and no further", () => {
     expect(outsidePressStep(chat, { draftPresent: true, spared: false })).toBe("spare");
     expect(outsidePressStep(chat, { draftPresent: true, spared: true })).toBe("collapse");
-    expect(outsidePressStep(rest, { draftPresent: true, spared: true })).toBe("hide");
+    expect(outsidePressStep(rest, { draftPresent: true, spared: true })).toBe("nothing");
   });
 
-  it("walks an empty chat or composer down in two", () => {
+  it("walks an empty chat or composer down to the idle bar, never off the screen", () => {
     expect(outsidePressStep(chat, fresh)).toBe("collapse");
     expect(outsidePressStep({ ...rest, composerOpen: true }, fresh)).toBe("collapse");
-    expect(outsidePressStep(rest, fresh)).toBe("hide");
+    expect(outsidePressStep(rest, fresh)).toBe("nothing");
   });
 
   it("puts the chat away while Juno works, but never hides the brake", () => {

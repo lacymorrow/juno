@@ -1489,7 +1489,7 @@ describe("IslandBar: out of the way when the person goes elsewhere", () => {
     });
   const hid = () => invoke.mock.calls.some(([cmd]) => cmd === "hide_floating_bar");
 
-  it("an empty composer goes to the idle capsule, then the bar hides", async () => {
+  it("an empty composer goes to the idle capsule, and a click outside never hides the bar", async () => {
     render(<IslandBar />);
     act(() => composer().focus());
     await send(UI.BAR_STATES_INPUT);
@@ -1501,10 +1501,10 @@ describe("IslandBar: out of the way when the person goes elsewhere", () => {
     await send(UI.BAR_STATES_DEFAULT);
     expect(hid()).toBe(false);
     await pressOutside();
-    expect(hid()).toBe(true);
+    expect(hid()).toBe(false);
   });
 
-  it("a draft keeps the box open for one click, then idles, then hides, kept throughout", async () => {
+  it("a draft keeps the box open for one click, then idles, kept throughout, and the bar stays", async () => {
     render(<IslandBar />);
     act(() => composer().focus());
     await send(UI.BAR_STATES_INPUT);
@@ -1518,7 +1518,7 @@ describe("IslandBar: out of the way when the person goes elsewhere", () => {
     await send(UI.BAR_STATES_DEFAULT);
     expect(hid()).toBe(false);
     await pressOutside();
-    expect(hid()).toBe(true);
+    expect(hid()).toBe(false);
     expect(composer().value).toBe("half a thought");
   });
 
