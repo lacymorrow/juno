@@ -348,27 +348,22 @@ impl UIManager {
         let settings_manager = SettingsManager::new(self.app_handle.clone())
             .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-        // Preserve fields this config view does not own (read-modify-write):
-        // follow_cursor_display and agent_cursor_color are set only from
-        // Settings.
-        let saved = settings_manager
-            .get_floating_bar_settings()
-            .await
-            .unwrap_or_default();
-        let settings = FloatingBarSettings {
-            show_voice_indicator: self.bar_config.show_voice_indicator,
-            enable_animations: self.bar_config.enable_animations,
-            auto_hide: self.bar_config.auto_hide,
-            auto_hide_delay: self.bar_config.auto_hide_delay,
-            opacity: self.bar_config.opacity,
-            bar_appearance: self.bar_config.bar_appearance.clone(),
-            follow_cursor_display: saved.follow_cursor_display,
-            show_glow_border: self.bar_config.show_glow_border,
-            agent_cursor_color: saved.agent_cursor_color,
-        };
-
+        // Write only the fields this config view owns. follow_cursor_display
+        // and agent_cursor_color are set from Settings, so they stay as stored.
+        // The merge happens in the settings writer's turn: reading them first
+        // and writing the whole section after let a change to either, made at
+        // the same moment, be put back to its old value.
+        let config = self.bar_config.clone();
         settings_manager
-            .set_floating_bar_settings(&settings)
+            .update_floating_bar_settings(move |saved| {
+                saved.show_voice_indicator = config.show_voice_indicator;
+                saved.enable_animations = config.enable_animations;
+                saved.auto_hide = config.auto_hide;
+                saved.auto_hide_delay = config.auto_hide_delay;
+                saved.opacity = config.opacity;
+                saved.bar_appearance = config.bar_appearance;
+                saved.show_glow_border = config.show_glow_border;
+            })
             .await
             .map_err(|e| format!("Failed to save floating bar settings: {}", e))?;
 
@@ -1683,6 +1678,26 @@ pub fn announce_bar_config(app_handle: &AppHandle) {
     if let Err(e) = app_handle.emit(events::bar::CONFIG_CHANGED, &config) {
         warn!("Failed to emit config change event: {}", e);
     }
+}
+
+/// Take the bar's config from settings again, and tell the bar.
+///
+/// The UI manager keeps its own copy of the config, loaded at launch, and
+/// answers `ui_get_bar_config` from it. A write to the settings store that
+/// does not go through `ui_set_bar_config` (a reset to defaults) left that
+/// copy as it was: the bar kept its old look, Settings kept offering it, and
+/// the next appearance change wrote the old copy's other fields back over the
+/// reset.
+pub async fn reload_bar_config(app_handle: &AppHandle) {
+    match UIManager::load_bar_config(app_handle).await {
+        Ok(fresh) => {
+            if let Some(manager) = get_ui_manager().await {
+                manager.lock().await.bar_config = fresh;
+            }
+        }
+        Err(e) => warn!("Could not reload the bar's config: {}", e),
+    }
+    announce_bar_config(app_handle);
 }
 
 #[tauri::command]

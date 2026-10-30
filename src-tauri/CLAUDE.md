@@ -592,6 +592,8 @@ let client = Client::builder()
 
 Never construct a fresh `ToolSettings` and save it — this clobbers fields owned by other subsystems. See `ToolConfigManager::save_to_centralized_settings()` for the correct pattern.
 
+The same rule holds for every section, and `get_x_settings()` then `set_x_settings()` is not enough: the writer's turn only wraps the second call, so two callers that each change one field both start from the old copy and the later write undoes the earlier. Use `SettingsManager::update_agent_settings` / `update_audio_settings` / `update_floating_bar_settings` / `update_onboarding_settings` (`|section| section.field = value`), which read inside the turn. Anything that rewrites settings behind the running app's back (a reset) must also hand the new values to what cached them at launch; see `settings::reset::refresh_running_app`.
+
 ### Code Deduplication
 - `parse_shortcut_string` lives in `src/shortcuts.rs` — do not duplicate in `lib.rs`
 - `format_error` helper is `pub` in `lib.rs` — use `crate::format_error` instead of local copies

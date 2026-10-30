@@ -350,6 +350,68 @@ pub(crate) async fn reapply_voice_triggers(app: &AppHandle) {
     sync_voice_listener(app, &app_state, &triggers).await;
 }
 
+/// Make the running triggers match the store again.
+///
+/// The triggers the app acts on live in `AppState` (and the global shortcuts
+/// are registered from them), loaded once at startup and changed after that
+/// only by [`set_triggers`]. Anything that rewrites the store on its own, a
+/// reset to defaults, therefore changed the file and nothing else: the old
+/// keys went on working, the Shortcuts pane went on showing them, and the next
+/// launch quietly swapped them for the defaults. This is the startup load run
+/// again: state first, then the registrations that read it.
+pub(crate) async fn reload_from_store(app: &AppHandle) {
+    let app_state = app.state::<AppState>();
+    let manager = match SettingsManager::new(app.clone()) {
+        Ok(manager) => manager,
+        Err(e) => {
+            warn!("[Triggers] Could not open settings to reload triggers: {e}");
+            return;
+        }
+    };
+    let all = match manager.get_all_settings().await {
+        Ok(all) => all,
+        Err(e) => {
+            warn!("[Triggers] Could not read settings to reload triggers: {e}");
+            return;
+        }
+    };
+    if let Err(e) = app_state.set_triggers(all.triggers) {
+        warn!("[Triggers] Could not load the stored triggers: {e}");
+        return;
+    }
+    if let Err(e) =
+        crate::commands::shortcuts::load_shortcuts_from_centralized_settings(app, &app_state).await
+    {
+        warn!("[Triggers] Could not reload the shortcuts: {e}");
+    }
+    if let Err(e) = crate::commands::core::load_agent_trigger_mode_from_store(app, &app_state).await
+    {
+        warn!("[Triggers] Could not reload the agent trigger mode: {e}");
+    }
+    if let Err(e) =
+        crate::commands::core::load_dictation_trigger_mode_from_store(app, &app_state).await
+    {
+        warn!("[Triggers] Could not reload the dictation trigger mode: {e}");
+    }
+
+    // Wake phrases follow the advanced switch, which the store may also have
+    // just changed.
+    set_voice_triggers_allowed(all.advanced_settings_enabled);
+
+    if let Err(e) = crate::commands::shortcuts::update_global_shortcuts(app, &app_state).await {
+        error!("[Triggers] Failed to re-register shortcuts: {}", e);
+    }
+    reapply_voice_triggers(app).await;
+
+    // The stored defaults name the globe key. A keyboard without one moves
+    // them, exactly as it does at launch.
+    apply_keyboard_detection(app.clone()).await;
+
+    if let Err(e) = app.emit(events::triggers::CHANGED, ()) {
+        warn!("[Triggers] Could not announce the reloaded triggers: {e}");
+    }
+}
+
 /// Apply the voice triggers again once the speech engine has finished loading.
 ///
 /// The STT model is loaded on a background task because it can be over a
@@ -536,30 +598,37 @@ fn sync_state_legacy(app_state: &AppState, triggers: &[Trigger], prev: &state::K
 }
 
 /// Write the triggers and their derived legacy fields to the centralized store.
+///
+/// This used to read every section of the settings and write every section
+/// back, so any save of another section that landed in between was undone by
+/// this one. Each section is now changed where it lives, under the settings
+/// writer's turn, and only the fields a trigger save owns are touched.
 async fn persist(app: &AppHandle, triggers: &[Trigger]) -> Result<(), String> {
     let settings_manager = SettingsManager::new(app.clone())
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-    let mut all = settings_manager.get_all_settings().await?;
+    let mut shortcuts = settings_manager.get_keyboard_shortcuts().await?;
 
     let (agent_combo, agent_mode, dictation_combo, dictation_mode, always_listening, wake_words) =
-        triggers::derive_legacy(
-            triggers,
-            &all.keyboard_shortcuts.agent_mode,
-            &all.keyboard_shortcuts.dictation_input,
-        );
-    all.keyboard_shortcuts.agent_mode = agent_combo;
-    all.keyboard_shortcuts.dictation_input = dictation_combo;
-    all.agent.trigger_mode = agent_mode;
-    all.audio.dictation_trigger_mode = dictation_mode;
+        triggers::derive_legacy(triggers, &shortcuts.agent_mode, &shortcuts.dictation_input);
+    shortcuts.agent_mode = agent_combo;
+    shortcuts.dictation_input = dictation_combo;
     // `always_listening_active` is owned by the engine, not derived here.
     // Writing the desired value first meant `start_always_listening_mode` read
     // its own "already active" early-return and returned success without ever
     // starting the controller, so a saved voice trigger never listened.
     let _ = always_listening;
-    all.audio.always_listening_wake_words = wake_words;
-    all.triggers = triggers.to_vec();
 
-    settings_manager.save_all_settings(&all).await
+    settings_manager.set_keyboard_shortcuts(&shortcuts).await?;
+    settings_manager
+        .update_agent_settings(|agent| agent.trigger_mode = agent_mode)
+        .await?;
+    settings_manager
+        .update_audio_settings(|audio| {
+            audio.dictation_trigger_mode = dictation_mode;
+            audio.always_listening_wake_words = wake_words;
+        })
+        .await?;
+    settings_manager.set_triggers(triggers).await
 }
 
 #[cfg(test)]

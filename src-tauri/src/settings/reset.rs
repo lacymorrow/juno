@@ -38,6 +38,19 @@
 //! resets itself into a dead end.
 //! `defaults_leave_the_provider_choice_unmade` below holds that down.
 
+//!
+//! ## The third thing: the running app
+//!
+//! Writing the file is not the same as resetting the app. Several things read
+//! a setting once, at launch, and keep their own copy: the registered
+//! shortcuts and trigger list, the tool configuration, the bar's config, the
+//! Dock and menu-bar presence, the login item, the cursor follower. A reset
+//! that only wrote the file changed none of them, so the old shortcuts kept
+//! working, the Settings window kept showing what was just reset, and the next
+//! launch silently changed everything at once. [`refresh_running_app`] hands
+//! each of them the reset values, the same way startup does.
+
+use tauri::{AppHandle, Emitter, Manager};
 use tracing::warn;
 
 use crate::agent::providers::{config as provider_config, startup_default};
@@ -50,7 +63,131 @@ use crate::settings::AppSettings;
 pub async fn reset_to_available_defaults(
     settings_manager: &SettingsManager,
 ) -> Result<String, String> {
-    apply_reset(settings_manager, &AppSettings::default()).await
+    let active = apply_reset(settings_manager, &AppSettings::default()).await?;
+
+    // A few switches live in the store beside the sections, not in them, so
+    // the write above did not touch them. A reset that left "Ask before Juno
+    // sends" off, for one, is not a reset.
+    if let Err(e) = settings_manager.clear_standalone_flags().await {
+        warn!("[Settings] Reset could not clear the standalone flags: {e}");
+    }
+
+    Ok(active)
+}
+
+/// What the running app was showing before a reset, for the parts that only
+/// need touching when the reset changes them.
+pub struct Before {
+    dock_icon_visible: bool,
+}
+
+impl Before {
+    /// Read it. Call before the reset writes anything.
+    pub async fn capture(settings_manager: &SettingsManager) -> Self {
+        let agent = settings_manager
+            .get_agent_settings()
+            .await
+            .unwrap_or_default();
+        Self {
+            dock_icon_visible: agent.dock_icon_visible,
+        }
+    }
+}
+
+/// Make the running app agree with the settings that were just reset.
+///
+/// Best effort, piece by piece: one that cannot be applied is logged and the
+/// rest still are, because the file is already reset and a half-applied reset
+/// is better than one that stopped at the first problem.
+pub async fn refresh_running_app(app: &AppHandle, before: &Before) {
+    use crate::constants::settings::events;
+
+    let manager = match SettingsManager::new(app.clone()) {
+        Ok(manager) => manager,
+        Err(e) => {
+            warn!("[Settings] Reset could not open settings to refresh the app: {e}");
+            return;
+        }
+    };
+    let all = match manager.get_all_settings().await {
+        Ok(all) => all,
+        Err(e) => {
+            warn!("[Settings] Reset could not read settings to refresh the app: {e}");
+            return;
+        }
+    };
+
+    // Where Juno shows up. The Dock policy is only touched when it changes: it
+    // deactivates the app, and AppKit orders windows out when that happens.
+    if all.agent.dock_icon_visible != before.dock_icon_visible {
+        crate::commands::dock_icon::apply_dock_icon_policy(app, all.agent.dock_icon_visible);
+    }
+    crate::menu::tray_menu::set_tray_icon_visible_now(all.agent.show_tray_icon).await;
+
+    #[cfg(target_os = "macos")]
+    crate::platform::cursor_follow::set_enabled(all.floating_bar.follow_cursor_display);
+
+    // The login item is the system's, not Juno's, so the store was not the
+    // only place it was kept.
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        let launcher = app.autolaunch();
+        match launcher.is_enabled() {
+            Ok(on) if on != all.autostart_enabled => {
+                let changed = if all.autostart_enabled {
+                    launcher.enable()
+                } else {
+                    launcher.disable()
+                };
+                if let Err(e) = changed {
+                    warn!("[Settings] Reset could not change the login item: {e}");
+                }
+            }
+            Ok(_) => {}
+            Err(e) => warn!("[Settings] Reset could not read the login item: {e}"),
+        }
+    }
+
+    if let Some(state) = app.try_state::<crate::state::AppState>() {
+        // The cues read the mute switch from memory.
+        let _ = state.set_sound_enabled(all.audio.sound_enabled);
+
+        if let Err(e) =
+            crate::agent::tools::tool_config::load_tool_config_from_centralized_settings(
+                &manager, &state,
+            )
+            .await
+        {
+            warn!("[Settings] Reset could not reload the tool configuration: {e}");
+        }
+    }
+
+    // The bar draws from its own copy of the config.
+    crate::commands::ui_commands::reload_bar_config(app).await;
+
+    // Shortcuts, trigger list and wake phrases.
+    crate::commands::triggers::reload_from_store(app).await;
+
+    // Open windows follow. The switches say what they now are, and the
+    // Settings window redraws every pane from Rust, as it does when the agent
+    // changes a setting.
+    if let Err(e) = app.emit(
+        events::ADVANCED_SETTINGS_CHANGED,
+        all.advanced_settings_enabled,
+    ) {
+        warn!("[Settings] Reset could not announce the advanced switch: {e}");
+    }
+    if let Err(e) = app.emit(events::BETA_FEATURES_CHANGED, all.beta_features_enabled) {
+        warn!("[Settings] Reset could not announce the beta switch: {e}");
+    }
+    let redraw = crate::agent::tools::settings_tool::Navigation {
+        pane: None,
+        row: None,
+        reload: true,
+    };
+    if let Err(e) = app.emit(events::SETTINGS_NAVIGATE, &redraw) {
+        warn!("[Settings] Reset could not reach the Settings window: {e}");
+    }
 }
 
 /// Write `settings` as a reset, then make sure what they select is available.

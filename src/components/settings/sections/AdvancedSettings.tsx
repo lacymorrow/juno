@@ -410,18 +410,6 @@ export default function AdvancedSettings({
             }}
           />
         </SettingsRow>
-
-        <SettingsRow
-          htmlFor="performance-monitoring"
-          label="Performance Monitoring"
-          description="Monitor system resource usage"
-        >
-          <Switch
-            id="performance-monitoring"
-            checked={settings.performanceMonitoringEnabled}
-            onCheckedChange={settings.handlePerformanceMonitoringChange}
-          />
-        </SettingsRow>
       </SettingsGroup>
 
       <SettingsGroup title="Reset Settings" collapsible>
