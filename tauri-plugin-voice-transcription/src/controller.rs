@@ -906,6 +906,27 @@ impl VoiceController {
             match control_rx.try_recv() {
                 Ok(AudioThreadMessage::Stop) => {
                     info!("[AudioThread] Stop message received.");
+                    // Everything the microphone delivered before the release
+                    // belongs to this utterance, including chunks still queued
+                    // behind a slow partial decode.
+                    let backlog = Self::ingest_pending(
+                        &audio_data_rx,
+                        &mut raw_full_session_audio,
+                        &mut planner,
+                        &committer,
+                        None,
+                    );
+                    // A release before the loop took any chunk: the first
+                    // sample is in this backlog.
+                    if backlog > 0 && !first_sample_seen {
+                        capture_timing::mark_for(capture_id, capture_timing::Stage::FirstSample);
+                    }
+                    if backlog > 0 {
+                        info!(
+                            "[AudioThread] Took in {} queued chunk(s) at release",
+                            backlog
+                        );
+                    }
                     info!(
                         "[AudioThread] Live window: {} samples",
                         live_window.samples().len()
@@ -964,18 +985,30 @@ impl VoiceController {
                     first_sample_seen = true;
                     capture_timing::mark_for(capture_id, capture_timing::Stage::FirstSample);
                 }
-                raw_full_session_audio.extend_from_slice(&audio_chunk);
-                planner.push(&audio_chunk);
-                if let Some(segment) = planner.next_commit() {
-                    if let Some(raw) = raw_full_session_audio.get(segment) {
-                        committer.submit(raw.to_vec());
-                    }
-                }
                 // Read live, every pass: the setting can change mid-session.
                 let live = live_partial.is_open();
+                Self::ingest_chunk(
+                    &audio_chunk,
+                    &mut raw_full_session_audio,
+                    &mut planner,
+                    &committer,
+                );
                 if live {
                     live_window.push(&audio_chunk);
                 }
+                // Then everything else already queued, so one pass of this
+                // loop (and the partial decode at its end) never leaves audio
+                // behind. Taking one chunk per pass let a ~1 s partial decode
+                // fall further behind the microphone on every pass, and the
+                // release finalised only what had been taken: the first few
+                // words.
+                Self::ingest_pending(
+                    &audio_data_rx,
+                    &mut raw_full_session_audio,
+                    &mut planner,
+                    &committer,
+                    live.then_some(&mut live_window),
+                );
 
                 // Emit audio level at ~70ms intervals for waveform visualization
                 if last_level_emit.elapsed() >= level_emit_interval {
@@ -1008,6 +1041,44 @@ impl VoiceController {
         // The microphone before the segment worker; see where `capture` is
         // declared.
         drop(capture);
+    }
+
+    /// Adds one microphone chunk to the recording: the full session audio
+    /// the final pass decodes, and the commit planner.
+    fn ingest_chunk(
+        chunk: &[f32],
+        raw_full_session_audio: &mut Vec<f32>,
+        planner: &mut CommitPlanner,
+        committer: &SegmentCommitter,
+    ) {
+        raw_full_session_audio.extend_from_slice(chunk);
+        planner.push(chunk);
+        if let Some(segment) = planner.next_commit() {
+            if let Some(raw) = raw_full_session_audio.get(segment) {
+                committer.submit(raw.to_vec());
+            }
+        }
+    }
+
+    /// Takes in every chunk already waiting on the channel, without blocking,
+    /// feeding the live window too when one is given. Returns how many there
+    /// were.
+    fn ingest_pending(
+        audio_data_rx: &std::sync::mpsc::Receiver<Vec<f32>>,
+        raw_full_session_audio: &mut Vec<f32>,
+        planner: &mut CommitPlanner,
+        committer: &SegmentCommitter,
+        mut live_window: Option<&mut LivePartialWindow>,
+    ) -> usize {
+        let mut taken = 0;
+        while let Ok(chunk) = audio_data_rx.try_recv() {
+            Self::ingest_chunk(&chunk, raw_full_session_audio, planner, committer);
+            if let Some(window) = live_window.as_mut() {
+                window.push(&chunk);
+            }
+            taken += 1;
+        }
+        taken
     }
 
     fn process_partial_transcription<R: Runtime>(
@@ -1607,6 +1678,112 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(c.active_capture_handles(), 1, "the fake microphone opened");
+    }
+
+    // ── With partials on, the final pass still hears the whole utterance ──
+    //
+    // The bug: "Show words as I speak" on, and only the first few words were
+    // typed or sent. The audio loop took one microphone chunk per pass, and a
+    // pass that decoded a partial took about a second, so the loop fell
+    // further behind the microphone with every partial. The release then
+    // finalised only the audio taken so far (2.9 s of a 24 s hold in the
+    // field log). This engine makes a partial decode slow and reports, as
+    // its final text, how much audio the final pass was given.
+
+    /// Ten seconds of steady, clearly non-silent audio at 16 kHz, in 10 ms
+    /// chunks. Steady so no pause is found and the final pass is one decode.
+    const UTTERANCE_CHUNKS: usize = 1_000;
+    const CHUNK_SAMPLES: usize = 160;
+
+    struct SlowPartialEngine;
+    struct SlowPartialSession;
+
+    impl TranscriptionSession for SlowPartialSession {
+        fn transcribe_partial(
+            &mut self,
+            _audio: &[f32],
+        ) -> std::result::Result<Option<String>, String> {
+            thread::sleep(Duration::from_millis(300));
+            Ok(Some("the first few words".into()))
+        }
+        fn transcribe_final(&mut self, audio: &[f32]) -> std::result::Result<String, String> {
+            Ok(audio.len().to_string())
+        }
+    }
+
+    impl TranscriptionEngine for SlowPartialEngine {
+        fn name(&self) -> &'static str {
+            "slow-partial"
+        }
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+        fn is_initialized(&self) -> bool {
+            true
+        }
+        fn create_session(&self) -> std::result::Result<Box<dyn TranscriptionSession>, String> {
+            Ok(Box::new(SlowPartialSession))
+        }
+    }
+
+    /// A microphone that has delivered the whole utterance by the time it
+    /// reports open, so all of it is queued before the loop takes any.
+    fn talkative_microphone() -> CaptureOpen {
+        Box::new(|tx: Sender<Vec<f32>>| -> OpenResult {
+            for _ in 0..UTTERANCE_CHUNKS {
+                let _ = tx.send(vec![0.2; CHUNK_SAMPLES]);
+            }
+            Ok(Box::new(tx) as Box<dyn std::any::Any>)
+        })
+    }
+
+    #[test]
+    fn with_partials_on_the_final_result_is_the_whole_utterance() {
+        use tauri::Listener;
+
+        for partials in [true, false] {
+            let app = tauri::test::mock_app();
+            let (final_tx, final_rx) = channel::<String>();
+            let final_tx = Mutex::new(final_tx);
+            app.listen_any(constants::voice_transcription::FINAL_RESULT, move |event| {
+                let text = serde_json::from_str::<serde_json::Value>(event.payload())
+                    .ok()
+                    .and_then(|v| v["text"].as_str().map(str::to_owned))
+                    .unwrap_or_default();
+                let _ = final_tx.lock().unwrap().send(text);
+            });
+
+            let mut c = VoiceController::new_with_engine("test", Arc::new(SlowPartialEngine))
+                .expect("controller");
+            c.set_live_partial(partials);
+            c.spawn_audio_worker(
+                app.handle(),
+                talkative_microphone(),
+                WHISPER_SAMPLE_RATE,
+                1,
+                Instant::now(),
+                None,
+            )
+            .expect("start");
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while c.active_capture_handles() != 1 && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(c.active_capture_handles(), 1, "the microphone opened");
+
+            // Released at once: before the loop's first pass, or while its
+            // first partial decodes. Either way the whole queue is owed.
+            assert!(c.stop_dictation().expect("stop"));
+
+            let text = final_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("a final result");
+            assert_eq!(
+                text,
+                (UTTERANCE_CHUNKS * CHUNK_SAMPLES).to_string(),
+                "the final pass decoded every sample spoken (partials={partials})"
+            );
+        }
     }
 
     #[test]
