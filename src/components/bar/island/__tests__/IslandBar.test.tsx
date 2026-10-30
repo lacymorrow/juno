@@ -283,6 +283,58 @@ describe("IslandBar: one surface", () => {
     expect(face()).toBe("idle");
   });
 
+  describe("the mini voice capsule: listening and transcribing say nothing", () => {
+    beforeEach(() => {
+      backend.answers.get_live_partial_transcription = false;
+    });
+
+    it("listening is a level indicator with no words, no buttons at rest, and a screen reader label", async () => {
+      render(<IslandBar />);
+      await send(UI.BAR_STATES_LISTENING, { audioLevel: 0.5 });
+      expect(face()).toBe("compose");
+      expect(screen.getByTestId("island-mini")).toHaveAttribute("data-mini", "listening");
+      expect(screen.getByTestId("island-level")).toBeInTheDocument();
+      expect(screen.queryByTestId("island-placeholder")).toBeNull();
+      expect(screen.queryByText("Listening…")).toBeNull();
+      expect(screen.getByRole("status")).toHaveTextContent("Listening");
+      // The controls are there for the keyboard but not drawn.
+      expect(screen.getByRole("button", { name: "Send" }).parentElement?.className).toContain("opacity-0");
+      // The capsule is the size of its mark.
+      expect((frameReport.mock.calls[frameReport.mock.calls.length - 1][0] as { width: number }).width).toBeLessThan(200);
+    });
+
+    it("hover and keyboard focus reveal the controls", async () => {
+      render(<IslandBar />);
+      await send(UI.BAR_STATES_LISTENING, { audioLevel: 0.5 });
+      const send_ = () => screen.getByRole("button", { name: "Send" }).parentElement as HTMLElement;
+      expect(send_().className).toContain("opacity-0");
+      fireEvent.pointerEnter(stage());
+      expect(send_().className).not.toContain("opacity-0");
+      fireEvent.pointerLeave(stage());
+      await act(async () => {
+        vi.advanceTimersByTime(LEAVE_VERIFY_MS + 50);
+      });
+      act(() => screen.getByRole("button", { name: "Send" }).focus());
+      expect(send_().className).not.toContain("opacity-0");
+    });
+
+    it("transcribing is a quiet working mark, labelled for a screen reader", async () => {
+      render(<IslandBar />);
+      await send(UI.BAR_STATES_TRANSCRIBING, { transcriptionProvisional: false });
+      expect(screen.getByTestId("island-mini")).toHaveAttribute("data-mini", "transcribing");
+      expect(screen.getByTestId("island-quiet-work")).toBeInTheDocument();
+      expect(screen.queryByTestId("island-placeholder")).toBeNull();
+      expect(screen.getByRole("status")).toHaveTextContent("Transcribing");
+    });
+
+    it("Working still says so: only voice states are mini", async () => {
+      render(<IslandBar />);
+      await send(UI.BAR_STATES_LOADING);
+      expect(screen.queryByTestId("island-mini")).toBeNull();
+      expect(placeholder()).toHaveTextContent("Working…");
+    });
+  });
+
   it("keeps one composer element through every state", async () => {
     render(<IslandBar />);
     const node = composer();
