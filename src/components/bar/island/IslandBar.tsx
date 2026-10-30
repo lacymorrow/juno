@@ -608,16 +608,25 @@ export function IslandBar() {
     setChatOpen(true);
     setEngaged(false);
   }, []);
+  /**
+   * The full chat, asked for by name: Open chat before any turn, Show Chat,
+   * and every route that used to open the chat window. Before any turn it is
+   * the empty chat with its example prompts. Entirely the Island's own, so it
+   * opens even when Rust does not answer a click; the window is made key and
+   * the caret put in the box, ready to type.
+   */
+  const openFullChat = useCallback(() => {
+    // The Island decides this alone, so it says so in Juno's log.
+    console.info(`[Island] opening the full chat (${hasTurnRef.current ? "with" : "before"} a turn)`);
+    activateWindow();
+    openChat();
+    requestAnimationFrame(() => focusComposer());
+  }, [openChat, focusComposer]);
   // Show/Hide Chat (the bar's right-click menu): the chat face, or back to
-  // the capsule. Before any turn there is no chat to show, so it opens the
-  // composer, the same as the hover capsule's Open chat.
+  // the capsule.
   useEventListener(EVENTS.BAR_TOGGLE_PANE, () => {
-    if (faceRef.current === "chat") settle();
-    else if (hasTurnRef.current) openChat();
-    else {
-      activateWindow();
-      void sendInteraction(UI.INTERACTION_TYPES_CLICK);
-    }
+    if (faceRef.current === "chat") putAway();
+    else openFullChat();
   });
 
   // ── New chat: the tray, the right-click menu, Cmd+N, the + in a header ──
@@ -694,8 +703,8 @@ export function IslandBar() {
       openComposerThroughRust(() => void sendInteraction(UI.INTERACTION_TYPES_CLICK));
     },
     // The Island's large chat is the big chat: every route that opened the
-    // chat window opens it, empty with its example prompts before any turn.
-    openFullChat: openChat,
+    // chat window opens it.
+    openFullChat,
   });
 
   // ── Controls ──
@@ -706,19 +715,22 @@ export function IslandBar() {
     );
   }, []);
   // The hover expand climbs one size: the small chat (the last answer), whose
-  // own expand opens the full chat. Before any turn there is no answer to
-  // show, so it opens the composer, where a chat starts.
+  // own expand opens the full chat. Either way the window is made key and the
+  // caret is in the box, with the last answer showing above it. Before any
+  // turn there is no answer to show, so it opens the full chat, empty, with
+  // its example prompts.
   const expandFromHover = useCallback(
     (e: ReactMouseEvent) => {
       e.stopPropagation();
       if (hasTurnRef.current) {
         openAnswer();
+        activateWindow();
+        focusComposer();
         return;
       }
-      activateWindow();
-      void sendInteraction(UI.INTERACTION_TYPES_CLICK);
+      openFullChat();
     },
-    [openAnswer],
+    [openAnswer, openFullChat, focusComposer],
   );
   const stopKind = stopControl({
     face,
