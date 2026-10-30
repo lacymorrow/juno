@@ -1193,19 +1193,17 @@ pub fn run() {
             Ok(())
         });
 
-    // The bar's web process died (a crash, or macOS reclaiming memory). Load
-    // the page again, and put the bar up now rather than waiting out the
-    // startup fallback: a bar that is coming back beats no bar.
+    // A web process died (a crash, or macOS reclaiming memory). Load the page
+    // again; for the bar, put it up now rather than waiting out the startup
+    // fallback: a bar that is coming back beats no bar.
+    //
+    // Every window, not only the bar. wry's delegate answers this callback
+    // itself and WebKit then does nothing, so a chat window hidden for hours
+    // (the likeliest victim when macOS reclaims memory) came back blank until
+    // Juno was relaunched.
     #[cfg(target_os = "macos")]
     let builder = builder.on_web_content_process_terminate(|webview| {
-        if webview.label() != constants::window_labels::FLOATING_BAR {
-            return;
-        }
-        warn!("[Startup] The floating bar's web process ended; reloading it");
-        if let Err(e) = webview.reload() {
-            warn!("Could not reload the floating bar: {}", e);
-        }
-        intro::show_bar_with_reveal(webview.app_handle());
+        window_management::recover_terminated_webview(webview);
     });
 
     // Build the app, then run with event callback for dock click (RunEvent::Reopen) support
@@ -1308,14 +1306,18 @@ pub fn run() {
                     // being torn down around the children (their conversations
                     // survive via their session ids on disk).
                     tauri::RunEvent::Exit => {
-                        // The only moment a downloaded update is swapped in:
-                        // the process is ending, so no TCC check can run
-                        // against a bundle that changed under it.
-                        updater::install_pending();
                         tauri::async_runtime::block_on(
                             agent::providers::claude_cli_session::shutdown_all(),
                         );
                         agent::providers::codex_session::shutdown();
+                        // The browser Juno launched, armed timers, temp files.
+                        // Bounded, so a stuck Chrome cannot hold up quitting.
+                        cleanup::run_exit_cleanup(app_handle);
+                        // The only moment a downloaded update is swapped in:
+                        // the process is ending, so no TCC check can run
+                        // against a bundle that changed under it. Last, so
+                        // everything Juno started is already stopped.
+                        updater::install_pending();
                     }
                     _ => {}
                 }
@@ -1356,17 +1358,6 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_focused_element_info_placeholder() {
-        // This test ensures focused element info structure is correct
-        let info = serde_json::json!({
-            "element": "input",
-            "value": "test",
-            "placeholder": "Enter text"
-        });
-        assert!(info.is_object());
-    }
 
     // --- Regression Tests for Permission System Crashes ---
 
@@ -1451,185 +1442,15 @@ mod tests {
 
     #[test]
     fn test_shortcut_parsing_safety() {
-        // Test that shortcut parsing is memory-safe
-        let test_shortcuts = vec![
-            "Option+D",
-            "Option+Space",
-            "Escape",
-            "InvalidShortcut",
-            "",
-            "🚀+Space", // Unicode test
-        ];
-
-        for shortcut_str in test_shortcuts {
-            // This should never crash, only return None for invalid shortcuts
-            let result = parse_shortcut_string(shortcut_str);
-            println!(
-                "Shortcut '{}' parsed safely: {:?}",
-                shortcut_str,
-                result.is_some()
+        // Nonsense, including multi-byte text, is refused rather than
+        // panicking; a real combo parses.
+        assert!(parse_shortcut_string("Option+D").is_some());
+        for nonsense in ["InvalidShortcut", "", "🚀+Space", "🚀"] {
+            assert!(
+                parse_shortcut_string(nonsense).is_none(),
+                "{nonsense:?} is not a shortcut"
             );
         }
-
-        println!("✅ Shortcut parsing is memory-safe");
-    }
-
-    // --- Window Management Safety Tests ---
-
-    #[test]
-    fn test_window_focus_no_infinite_loops() {
-        // Test that window focus operations don't create infinite loops
-        // This is a mock test - in reality we'd need a test window
-
-        // The regression we fixed: infinite `for _ in 0..3` loops with unsafe NSWindow calls
-        // This test ensures we use single, safe focus attempts
-
-        // Simulate safe focus operation (no actual window operations in unit tests)
-        let mut focus_attempts = 0;
-        let max_attempts = 1; // Should be 1, not 3+ which caused crashes
-
-        while focus_attempts < max_attempts {
-            focus_attempts += 1;
-            // Simulate safe focus operation
-            println!("Safe focus attempt: {}", focus_attempts);
-        }
-
-        assert_eq!(
-            focus_attempts, 1,
-            "Should only attempt focus once to avoid infinite loops"
-        );
-        println!("✅ Window focus operations are bounded and safe");
-    }
-
-    #[test]
-    fn test_floating_bar_initialization_safety() {
-        // Test that floating bar initialization doesn't use unsafe operations
-
-        // The regression we fixed: aggressive NSWindow API calls causing segfaults
-        // This test ensures we avoid unsafe Objective-C message sending
-
-        // Mock the safe initialization pattern
-        struct MockFloatingBar {
-            initialized: bool,
-            focus_count: u32,
-        }
-
-        let mut mock_bar = MockFloatingBar {
-            initialized: false,
-            focus_count: 0,
-        };
-
-        // Safe initialization (no unsafe msg_send! macros)
-        mock_bar.initialized = true;
-        mock_bar.focus_count = 1; // Single focus attempt, not multiple
-
-        assert!(mock_bar.initialized);
-        assert_eq!(mock_bar.focus_count, 1, "Should only focus once");
-
-        println!("✅ Floating bar initialization avoids unsafe operations");
-    }
-
-    // --- Memory Safety Tests ---
-
-    #[test]
-    fn test_global_shortcut_handler_memory_safety() {
-        // Test that global shortcut handlers don't cause memory issues
-
-        // The regression we fixed: async spawn with borrowed data escapes
-        // This test ensures we clone necessary data before async operations
-
-        // Simulate the safe pattern
-        let mock_app_data = "test_data".to_string();
-        let cloned_data = mock_app_data.clone(); // Safe: data is cloned, not borrowed
-
-        // This would be safe to pass to async spawn
-        tokio_test::block_on(async move {
-            // Use cloned_data instead of borrowed references
-            println!("Using cloned data safely: {}", cloned_data);
-        });
-
-        println!("✅ Global shortcut handlers use safe memory patterns");
-    }
-
-    #[test]
-    fn test_permission_system_no_circular_dependencies() {
-        // Test that permission checking doesn't create circular dependencies
-
-        // The regression we fixed: permission check called Desktop::new() internally
-        // This creates circular dependency: need permissions to check permissions
-
-        // Mock safe permission check pattern
-        fn mock_safe_permission_check() -> Result<bool, String> {
-            // Safe: uses platform APIs directly, not Desktop::new()
-            #[cfg(target_os = "macos")]
-            {
-                // Would use check_accessibility_permissions() directly
-                // Not Desktop::new() which requires the permissions we're checking
-                Ok(true) // Mock result
-            }
-
-            #[cfg(not(target_os = "macos"))]
-            {
-                Ok(true) // Safe default for other platforms
-            }
-        }
-
-        let result = mock_safe_permission_check();
-        assert!(result.is_ok());
-
-        println!("✅ Permission system avoids circular dependencies");
-    }
-
-    // --- Error Handling Tests ---
-
-    #[test]
-    fn test_error_propagation_no_panics() {
-        // Test that all error paths use Result<T, E> not panics/exits
-
-        // Mock various error scenarios that should return errors, not crash
-        let error_scenarios = vec![
-            "Permission denied",
-            "Desktop unavailable",
-            "Window not found",
-            "Invalid shortcut",
-            "TTS unavailable",
-        ];
-
-        for scenario in error_scenarios {
-            // All should be represented as Result::Err, not panics
-            let mock_result: Result<(), String> = Err(scenario.to_string());
-            assert!(mock_result.is_err());
-            println!("Error scenario '{}' handled safely", scenario);
-        }
-
-        println!("✅ All error scenarios use proper Result types");
-    }
-
-    // --- Integration Safety Tests ---
-
-    #[test]
-    fn test_app_initialization_with_missing_permissions() {
-        // Test that app can start even when permissions are missing
-
-        // The key insight: app should degrade gracefully, not crash
-        struct MockAppState {
-            desktop_available: bool,
-            ui_functional: bool,
-        }
-
-        // Simulate app starting without permissions
-        let app_state = MockAppState {
-            desktop_available: false, // No permissions
-            ui_functional: true,      // But UI still works
-        };
-
-        assert!(!app_state.desktop_available);
-        assert!(
-            app_state.ui_functional,
-            "UI should work even without desktop permissions"
-        );
-
-        println!("✅ App initializes safely with missing permissions");
     }
 }
 

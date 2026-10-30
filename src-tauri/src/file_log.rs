@@ -16,6 +16,12 @@ use tracing_subscriber::fmt::MakeWriter;
 
 /// Days of log files kept, today included.
 const KEEP_DAYS: i64 = 7;
+/// The most one day's file may hold. A week of files at this size is the worst
+/// case on disk; a runaway logger (`RUST_LOG=debug`, a tight error loop) stops
+/// here instead of filling the disk. Normal days are a few megabytes.
+const MAX_DAY_BYTES: u64 = 64 * 1024 * 1024;
+const CAP_NOTICE: &str =
+    "[log] today's log reached its size cap; later lines are dropped until midnight\n";
 const FILE_PREFIX: &str = "juno-";
 const FILE_SUFFIX: &str = ".log";
 
@@ -62,27 +68,39 @@ fn prune(dir: &Path, today: NaiveDate) {
 /// A `tracing` writer that appends to today's file and moves to a new one at midnight.
 pub struct DailyLog {
     dir: PathBuf,
-    current: Mutex<Option<(NaiveDate, File)>>,
+    /// Bytes one day's file may reach. See [`MAX_DAY_BYTES`].
+    cap: u64,
+    current: Mutex<Option<OpenDay>>,
+}
+
+/// Today's file, and how full it is.
+struct OpenDay {
+    day: NaiveDate,
+    file: File,
+    written: u64,
+    /// The cap notice has been written; nothing more goes to the file today.
+    capped: bool,
 }
 
 impl DailyLog {
     /// Create the log folder and drop expired files. `None` if the folder cannot be created.
     pub fn open() -> Option<Self> {
-        Self::open_in(log_dir()?)
+        Self::open_in(log_dir()?, MAX_DAY_BYTES)
     }
 
-    fn open_in(dir: PathBuf) -> Option<Self> {
+    fn open_in(dir: PathBuf, cap: u64) -> Option<Self> {
         fs::create_dir_all(&dir).ok()?;
         prune(&dir, Local::now().date_naive());
         Some(Self {
             dir,
+            cap,
             current: Mutex::new(None),
         })
     }
 
     fn write_on(&self, today: NaiveDate, buf: &[u8]) -> io::Result<usize> {
         let mut current = self.current.lock().unwrap_or_else(|e| e.into_inner());
-        if !matches!(current.as_ref(), Some((day, _)) if *day == today) {
+        if !matches!(current.as_ref(), Some(open) if open.day == today) {
             let file = OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -90,12 +108,30 @@ impl DailyLog {
             if current.is_some() {
                 prune(&self.dir, today);
             }
-            *current = Some((today, file));
+            // A relaunch appends to today's file, so start from what is there.
+            let written = file.metadata().map(|m| m.len()).unwrap_or(0);
+            *current = Some(OpenDay {
+                day: today,
+                file,
+                written,
+                capped: written >= self.cap,
+            });
         }
-        match current.as_mut() {
-            Some((_, file)) => file.write(buf),
-            None => Ok(buf.len()),
+        let Some(open) = current.as_mut() else {
+            return Ok(buf.len());
+        };
+        if open.written >= self.cap {
+            // Past the cap the line is dropped and reported as written, so the
+            // logger carries on rather than retrying every line.
+            if !open.capped {
+                open.capped = true;
+                let _ = open.file.write_all(CAP_NOTICE.as_bytes());
+            }
+            return Ok(buf.len());
         }
+        let n = open.file.write(buf)?;
+        open.written += n as u64;
+        Ok(n)
     }
 }
 
@@ -109,7 +145,7 @@ impl Write for DailyLogWriter<'_> {
     fn flush(&mut self) -> io::Result<()> {
         let mut current = self.0.current.lock().unwrap_or_else(|e| e.into_inner());
         match current.as_mut() {
-            Some((_, file)) => file.flush(),
+            Some(open) => open.file.flush(),
             None => Ok(()),
         }
     }
@@ -149,7 +185,7 @@ mod tests {
     #[test]
     fn appends_and_rolls_over_at_midnight() {
         let dir = scratch_dir("roll");
-        let log = DailyLog::open_in(dir.clone()).unwrap();
+        let log = DailyLog::open_in(dir.clone(), MAX_DAY_BYTES).unwrap();
         log.write_on(day("2026-10-05"), b"one\n").unwrap();
         log.write_on(day("2026-10-05"), b"two\n").unwrap();
         log.write_on(day("2026-10-06"), b"three\n").unwrap();
@@ -160,6 +196,51 @@ mod tests {
         assert_eq!(
             fs::read_to_string(dir.join("juno-2026-10-06.log")).unwrap(),
             "three\n"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_day_stops_growing_at_the_cap_and_the_next_day_starts_fresh() {
+        let dir = scratch_dir("cap");
+        let log = DailyLog::open_in(dir.clone(), 10).unwrap();
+        let d = day("2026-10-05");
+        // The line that crosses the cap is kept whole; what follows is dropped.
+        assert_eq!(log.write_on(d, b"0123456789ab\n").unwrap(), 13);
+        assert_eq!(log.write_on(d, b"dropped\n").unwrap(), 8);
+        assert_eq!(log.write_on(d, b"dropped again\n").unwrap(), 14);
+        let text = fs::read_to_string(dir.join("juno-2026-10-05.log")).unwrap();
+        assert!(text.starts_with("0123456789ab\n"));
+        assert!(!text.contains("dropped\n"));
+        assert_eq!(
+            text.matches("size cap").count(),
+            1,
+            "one notice, not one per line"
+        );
+
+        log.write_on(day("2026-10-06"), b"fresh\n").unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join("juno-2026-10-06.log")).unwrap(),
+            "fresh\n"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_relaunch_counts_what_the_file_already_holds() {
+        let dir = scratch_dir("relaunch");
+        fs::create_dir_all(&dir).unwrap();
+        // Today, because opening prunes by the real date: a fixed day aged
+        // past a week and was deleted before the relaunch could count it.
+        let today = Local::now().date_naive();
+        let path = dir.join(file_name(today));
+        fs::write(&path, "0123456789ab\n").unwrap();
+        let log = DailyLog::open_in(dir.clone(), 10).unwrap();
+        log.write_on(today, b"after relaunch\n").unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            text, "0123456789ab\n",
+            "already over the cap: nothing appended"
         );
         let _ = fs::remove_dir_all(&dir);
     }

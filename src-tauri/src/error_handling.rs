@@ -319,13 +319,14 @@ pub mod utils {
     }
 }
 
-/// Test utilities for error handling validation
 #[cfg(test)]
-pub mod test_utils {
+mod tests {
     use super::*;
 
-    /// Test that all error types can be created and displayed
-    pub fn test_error_types() {
+    /// Every error type displays something. These helpers were `pub fn`s that
+    /// no `#[test]` called, so they never ran.
+    #[test]
+    fn test_error_types() {
         let errors = vec![
             JunoError::PermissionError("Test permission error".to_string()),
             JunoError::VoiceError("Test voice error".to_string()),
@@ -344,8 +345,9 @@ pub mod test_utils {
         }
     }
 
-    /// Test error message formatting
-    pub fn test_error_formatting() {
+    /// Error message formatting
+    #[test]
+    fn test_error_formatting() {
         let formatted =
             utils::format_error_message("TestComponent", "test_operation", "test error");
         assert_eq!(formatted, "[TestComponent] test_operation: test error");

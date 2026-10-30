@@ -551,41 +551,6 @@ mod tests {
             "Should not detect legacy flags in modern CLI"
         );
     }
-
-    #[test]
-    fn test_create_minimal_tauri_app_logic() {
-        // Test that the create_minimal_tauri_app function logic is sound
-        // We can't run the actual async function in a unit test, but we can verify
-        // the synchronization primitives work correctly
-        use crate::error_handling::JunoError;
-        use std::sync::{Arc, Mutex};
-        use tokio::sync::oneshot;
-
-        // Test the container pattern we use for app handle storage
-        let app_handle_container = Arc::new(Mutex::new(None::<String>)); // Use String as a simple test type
-        let container_clone = app_handle_container.clone();
-
-        // Simulate storing a value
-        {
-            let mut container = container_clone.lock().unwrap();
-            *container = Some("test_handle".to_string());
-        }
-
-        // Simulate retrieving the value
-        {
-            let container = app_handle_container.lock().unwrap();
-            assert!(
-                container.is_some(),
-                "Container should hold the stored value"
-            );
-            assert_eq!(container.as_ref().unwrap(), "test_handle");
-        }
-
-        // Test the channel pattern
-        let (tx, _rx) = oneshot::channel::<Result<String, JunoError>>();
-        let send_result = tx.send(Ok("test".to_string()));
-        assert!(send_result.is_ok(), "Channel send should succeed");
-    }
 }
 
 #[cfg(test)]
