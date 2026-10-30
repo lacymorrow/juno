@@ -11,7 +11,7 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
         .replacen("{}", &error.to_string(), 1)
 }
 
-use crate::agent::tools::mcp_integration::MCPManager;
+use crate::agent::tools::mcp_integration::{should_start_after_approval, MCPManager};
 use crate::agent::tools::{MCPServerConfig, MCPServerStatus, MCPToolInfo};
 use crate::state::AppState;
 
@@ -247,7 +247,13 @@ pub async fn update_mcp_server(
                 }
                 true
             }
-            _ => false,
+            Some(_) => {
+                // Same process: only flags/labels changed. Keep the manager's copy
+                // in step with the store so the UI and spawn gate read the truth.
+                manager_guard.apply_server_flags(&stored).await;
+                false
+            }
+            None => false,
         }
     };
 
@@ -272,10 +278,18 @@ pub async fn set_mcp_server_enabled(
     info!("Setting MCP server {} enabled: {}", server_id, enabled);
 
     // Update in tool configuration
-    {
+    let stored = {
         let tool_config = state.get_tool_config_manager().await;
         let mut config_guard = tool_config.lock().await;
         config_guard.set_mcp_server_enabled(&server_id, enabled);
+        config_guard.get_mcp_server(&server_id)
+    };
+
+    // The manager keeps its own copy, and the UI reads that one.
+    if let Some(stored) = stored {
+        let mcp_manager = state.get_mcp_manager().await;
+        let manager_guard = mcp_manager.lock().await;
+        manager_guard.apply_server_flags(&stored).await;
     }
 
     // Save configuration
@@ -345,6 +359,35 @@ pub async fn approve_mcp_server(
     // Save configuration so the approval survives restarts
     state.save_tool_config(&app_handle).await?;
 
+    // Approval was the last gate: an enabled server starts now.
+    let to_start: Vec<String> = {
+        let mcp_manager = state.get_mcp_manager().await;
+        let manager_guard = mcp_manager.lock().await;
+        let statuses = manager_guard.get_server_statuses().await;
+        manager_guard
+            .get_server_configs()
+            .await
+            .into_iter()
+            .filter(|c| c.name == server_name)
+            .filter(|c| {
+                let status = statuses
+                    .get(&c.id)
+                    .cloned()
+                    .unwrap_or(MCPServerStatus::Disconnected);
+                should_start_after_approval(c, &status)
+            })
+            .map(|c| c.id)
+            .collect()
+    };
+    for id in to_start {
+        if let Err(e) = start_mcp_server(app_handle.clone(), state.clone(), id).await {
+            warn!(
+                "{}",
+                format_error(templates::FAILED_TO_START, "MCP server", e)
+            );
+        }
+    }
+
     // Emit state update to frontend
     state.emit_mcp_state_update(&app_handle).await?;
 
@@ -380,7 +423,8 @@ pub async fn toggle_mcp_tool(
     {
         let tool_config = state.get_tool_config_manager().await;
         let mut config_guard = tool_config.lock().await;
-        config_guard.set_tool_enabled(&format!("{}:{}", server_id, tool_name), enabled);
+        // Tools are stored under their (server-prefixed) name, the one the UI sends.
+        config_guard.set_tool_enabled(&tool_name, enabled);
     }
 
     // Save configuration

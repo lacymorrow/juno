@@ -1025,7 +1025,7 @@ impl MCPManager {
                         server_id: server_id.clone(),
                         server_name: connection.get_config().name.clone(),
                         tool_definition: tool_def.clone(),
-                        enabled: true, // TODO: Get from configuration
+                        enabled: true, // overlaid from the tool configuration by the caller
                     });
                 }
             }
@@ -1209,6 +1209,30 @@ impl MCPManager {
     pub async fn get_server_configs(&self) -> Vec<MCPServerConfig> {
         let configs = self.configs.read().await;
         configs.values().cloned().collect()
+    }
+
+    /// Copy the flags the person can change without changing the process
+    /// (enabled, auto_start, approved, description) from the stored config
+    /// onto this manager's copy and its connection's copy. The tool
+    /// configuration is the persisted truth; this copy is what the UI and the
+    /// spawn gate read, so it must follow every change made there.
+    pub async fn apply_server_flags(&self, stored: &MCPServerConfig) {
+        {
+            let mut configs = self.configs.write().await;
+            if let Some(config) = configs.get_mut(&stored.id) {
+                config.enabled = stored.enabled;
+                config.auto_start = stored.auto_start;
+                config.approved = stored.approved;
+                config.description = stored.description.clone();
+            }
+        }
+        let mut servers = self.servers.write().await;
+        if let Some(connection) = servers.get_mut(&stored.id) {
+            connection.config.enabled = stored.enabled;
+            connection.config.auto_start = stored.auto_start;
+            connection.config.approved = stored.approved;
+            connection.config.description = stored.description.clone();
+        }
     }
 
     /// Approve a server (by name) to spawn its configured command.
@@ -1624,5 +1648,88 @@ impl MCPServerConnection {
                     timeout_duration.as_secs()
                 )
             })?
+    }
+}
+
+/// Whether approving a server should start it now: it is switched on and
+/// nothing is running or starting yet. (Approval is the last gate to open.)
+pub fn should_start_after_approval(config: &MCPServerConfig, status: &MCPServerStatus) -> bool {
+    config.enabled
+        && config.approved
+        && !matches!(
+            status,
+            MCPServerStatus::Connected | MCPServerStatus::Connecting
+        )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn server() -> MCPServerConfig {
+        let mut config = MCPServerConfig::new("files".to_string(), "npx".to_string(), vec![]);
+        config.auto_start = false;
+        config
+    }
+
+    #[tokio::test]
+    async fn flags_follow_the_stored_config_both_ways() {
+        let manager = MCPManager::new();
+        let mut config = server();
+        let id = config.id.clone();
+        assert!(manager.add_server(config.clone()).await.is_ok());
+
+        config.enabled = false;
+        manager.apply_server_flags(&config).await;
+        let listed = manager.get_server_configs().await;
+        assert!(listed.iter().all(|c| c.id == id && !c.enabled));
+
+        config.enabled = true;
+        manager.apply_server_flags(&config).await;
+        let listed = manager.get_server_configs().await;
+        assert!(listed.iter().all(|c| c.id == id && c.enabled));
+    }
+
+    #[tokio::test]
+    async fn approval_reaches_the_listed_config() {
+        let manager = MCPManager::new();
+        let mut config = server();
+        assert!(manager.add_server(config.clone()).await.is_ok());
+        config.approved = true;
+        manager.apply_server_flags(&config).await;
+        assert!(manager
+            .get_server_configs()
+            .await
+            .iter()
+            .all(|c| c.approved));
+    }
+
+    #[test]
+    fn approving_an_enabled_server_starts_it() {
+        let mut config = server();
+        config.approved = true;
+        assert!(should_start_after_approval(
+            &config,
+            &MCPServerStatus::Disconnected
+        ));
+        assert!(should_start_after_approval(
+            &config,
+            &MCPServerStatus::Error("x".to_string())
+        ));
+        assert!(!should_start_after_approval(
+            &config,
+            &MCPServerStatus::Connected
+        ));
+        config.enabled = false;
+        assert!(!should_start_after_approval(
+            &config,
+            &MCPServerStatus::Disconnected
+        ));
+        config.enabled = true;
+        config.approved = false;
+        assert!(!should_start_after_approval(
+            &config,
+            &MCPServerStatus::Disconnected
+        ));
     }
 }
