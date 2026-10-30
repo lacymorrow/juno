@@ -310,7 +310,7 @@ impl Default for AudioSettings {
             // needs credentials is not a default. The constant is shared with
             // the persisted default so the in-memory and on-disk notions of
             // "no choice yet" cannot drift apart.
-            tts_provider: crate::constants::settings::defaults::TTS_PROVIDER.to_string(),
+            tts_provider: crate::demo::default_tts_engine().to_string(),
             output_device: None,
             system_voice: None,
             // af_bella's embedding is never downloaded, so it was an error on

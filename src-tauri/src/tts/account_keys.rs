@@ -63,7 +63,10 @@ fn stored(settings: &crate::settings::AudioSettings, engine: KeyedEngine) -> Opt
         .map(str::to_string)
 }
 
-/// The key for `engine`: the one saved in Settings, else the environment's.
+/// The key for `engine`: the one saved in Settings, else the environment's,
+/// else, for ElevenLabs in a demo build, the one compiled in (`demo`). The
+/// person's own key always wins, so a demo they add a key to stops spending
+/// the demo's characters.
 pub async fn key(engine: KeyedEngine) -> Result<String, String> {
     if let Some(app) = APP.get() {
         if let Ok(manager) = crate::settings::manager::SettingsManager::new(app.clone()) {
@@ -77,6 +80,10 @@ pub async fn key(engine: KeyedEngine) -> Result<String, String> {
     std::env::var(engine.env_var())
         .ok()
         .filter(|k| !k.trim().is_empty())
+        .or_else(|| match engine {
+            KeyedEngine::ElevenLabs => crate::demo::elevenlabs_key().map(str::to_string),
+            KeyedEngine::Replicate => None,
+        })
         .ok_or_else(|| engine.missing())
 }
 

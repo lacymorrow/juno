@@ -924,19 +924,13 @@ pub async fn set_tts_account_key_command(
         .ok_or_else(|| format!("{engine} does not take an account key"))?;
     let key = Some(key.trim().to_string()).filter(|k| !k.is_empty());
 
-    let _change = voices::lock_voice_change().await;
     let manager = crate::settings::manager::SettingsManager::new(app_handle)
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-    let mut audio = manager
-        .get_audio_settings()
-        .await
-        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
-    match which {
-        account_keys::KeyedEngine::ElevenLabs => audio.elevenlabs_api_key = key,
-        account_keys::KeyedEngine::Replicate => audio.replicate_api_key = key,
-    }
     manager
-        .set_audio_settings(&audio)
+        .update_audio_settings(|audio| match which {
+            account_keys::KeyedEngine::ElevenLabs => audio.elevenlabs_api_key = key,
+            account_keys::KeyedEngine::Replicate => audio.replicate_api_key = key,
+        })
         .await
         .map_err(|e| format!("Failed to save the key: {}", e))?;
     info!("[TTS] Account key for {:?} saved", which);
