@@ -25,6 +25,7 @@ pub mod agent;
 pub mod agent_monitor; // Module for intelligent agent input handling (tap vs hold)
 pub mod agents; // Multi-agent system with specialized agents
 pub mod anthropic;
+pub mod bar_presence; // The bar shows for voice work while hidden, and leaves after
 pub mod bar_stacking; // Where the floating bar sits in the window stack, and why
 pub mod build_info; // Which build this is: version, commit, branch, demo cohort
 pub mod cleanup; // Application cleanup and resource management
