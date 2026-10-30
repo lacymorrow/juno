@@ -753,17 +753,3 @@ pub async fn validate_state_consistency(app_handle: &AppHandle) -> Result<Vec<St
 
     Ok(issues)
 }
-
-#[cfg(test)]
-mod tests {
-    #[allow(unused_imports)]
-    use super::*;
-
-    #[test]
-    fn test_state_validation_logic() {
-        // Test state validation logic
-        let issues = ["test issue".to_string()];
-        assert_eq!(issues.len(), 1);
-        assert_eq!(issues[0], "test issue");
-    }
-}

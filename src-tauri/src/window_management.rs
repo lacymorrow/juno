@@ -406,6 +406,65 @@ impl WindowManager {
     }
 }
 
+/// How many times one window's page is reloaded after its web process dies,
+/// inside [`RELOAD_WINDOW`]. A page that dies on every load would otherwise
+/// reload for as long as Juno runs.
+const RELOADS_PER_WINDOW: usize = 5;
+const RELOAD_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+static RELOADS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, Vec<std::time::Instant>>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// Record a reload at `now` and say whether it is within budget.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn reload_allowed(history: &mut Vec<std::time::Instant>, now: std::time::Instant) -> bool {
+    history.retain(|at| now.duration_since(*at) < RELOAD_WINDOW);
+    if history.len() >= RELOADS_PER_WINDOW {
+        return false;
+    }
+    history.push(now);
+    true
+}
+
+/// A window's web process ended (a crash, or macOS reclaiming memory): load
+/// its page again. Without this the window stays blank until Juno is
+/// relaunched, because wry answers the callback itself and WebKit then leaves
+/// the page dead. The bar is also put back on screen at once, rather than
+/// waiting out the startup fallback.
+#[cfg(target_os = "macos")]
+pub fn recover_terminated_webview(webview: &tauri::Webview) {
+    let label = webview.label().to_string();
+    let allowed = {
+        let mut reloads = match RELOADS.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        reload_allowed(
+            reloads.entry(label.clone()).or_default(),
+            std::time::Instant::now(),
+        )
+    };
+    if allowed {
+        warn!(
+            "[Webview] The {} window's web process ended; reloading it",
+            label
+        );
+        if let Err(e) = webview.reload() {
+            warn!("Could not reload the {} window: {}", label, e);
+        }
+    } else {
+        warn!(
+            "[Webview] The {} window's web process keeps ending; not reloading it again",
+            label
+        );
+    }
+    if label == window_labels::FLOATING_BAR {
+        crate::intro::show_bar_with_reveal(webview.app_handle());
+    }
+}
+
 /// Handle window menu events
 pub async fn handle_window_menu_event(app: &AppHandle, event_id: &str) {
     match event_id {
@@ -828,6 +887,38 @@ mod tests {
             serde_json::from_str(raw).expect("tauri.conf.json is not valid JSON");
         serde_json::from_value(value["app"]["windows"].clone())
             .expect("app.windows in tauri.conf.json does not parse as Tauri window configs")
+    }
+
+    #[test]
+    fn a_page_that_keeps_dying_stops_being_reloaded_until_the_window_passes() {
+        let start = std::time::Instant::now();
+        let mut history = Vec::new();
+        for i in 0..RELOADS_PER_WINDOW {
+            let at = start + std::time::Duration::from_secs(i as u64);
+            assert!(reload_allowed(&mut history, at), "reload {i} is in budget");
+        }
+        let soon = start + std::time::Duration::from_secs(RELOADS_PER_WINDOW as u64);
+        assert!(!reload_allowed(&mut history, soon), "budget is spent");
+        // A page that died once a long time ago is not a crash loop.
+        let later =
+            start + RELOAD_WINDOW + std::time::Duration::from_secs(RELOADS_PER_WINDOW as u64);
+        assert!(reload_allowed(&mut history, later));
+    }
+
+    #[test]
+    fn the_process_terminate_hook_recovers_every_window_not_only_the_bar() {
+        let lib = include_str!("lib.rs");
+        let hook = lib
+            .split_once("on_web_content_process_terminate(")
+            .map(|(_, rest)| rest)
+            .and_then(|rest| rest.split_once("});"))
+            .map(|(body, _)| body)
+            .expect("lib.rs installs the hook");
+        assert!(hook.contains("recover_terminated_webview"));
+        assert!(
+            !hook.contains("FLOATING_BAR"),
+            "a label check in the hook leaves every other window blank after a crash"
+        );
     }
 
     #[test]
