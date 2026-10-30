@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.249] - 2026-10-30
+
+### Added
+
+- **demo:** a demo build can carry an ElevenLabs key and speaks with it (#914) (3db7778c)
+- **island:** listening and transcribing are a level mark, not words (#912) (708bf23b)
+- **island:** the composer is always the bottom row; typing anywhere starts a message (#891) (e4c14203)
+
+### Fixed
+
+- **tts:** ElevenLabs speaks with a voice every account can use, on its fastest model (#916) (130dd329)
+- **mcp:** enable switch sticks, approving an enabled server starts it, tool toggle persists (#915) (bc26b790)
+- **browser:** audit fixes, quit cleans up, a closed browser is replaced, MCP edits apply (#900) (3ae2c6a3)
+- **security:** audit fixes, typed text out of logs, MCP approval cannot self-certify, auto-grant never flips another app's switch (#895) (b09bd576)
+- **dictation:** final pass hears the whole utterance with live partials on (#890) (f6fbf9c3)
+- **voice:** one Escape while transcribing visibly ends dictation or a voice turn (#892) (aef0f3ea)
+- **bar:** a click outside never hides the bar; a hidden bar shows for voice work, then leaves (#910) (34e80c47)
+- **island:** Open chat and Show Chat open the full chat themselves (#863) (8bbceb72)
+- **tts:** ElevenLabs and Replicate keys live in Settings; no network probe before each sentence (#911) (6ec078ac)
+- **triggers:** audit fixes, say flag injection, stale sentence after stop, wake engine start/stop race (#898) (ebbbae53)
+- **settings:** audit fixes, reset reaches the running app, notifications switch persists, setup finishes once (#897) (068ccc00)
+- **computer-use:** audit fixes, release a held mouse button, one display per screenshot, native zoom (#894) (006e5ed4)
+- **background:** the CLI's shell keeps the screen under --dangerously-skip-permissions (LAC-5010) (#886) (8b5a4b9e)
+- **chat:** a cancelled computer-use turn no longer mislabels the next action (#875) (24424678)
+
 ## [0.8.248] - 2026-10-30
 
 ### Fixed
@@ -1698,7 +1723,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.248...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.249...HEAD
+[0.8.249]: https://github.com/lacymorrow/juno/compare/cua-v0.8.248...v0.8.249
 [0.8.248]: https://github.com/lacymorrow/juno/compare/cua-v0.8.247...v0.8.248
 [0.8.247]: https://github.com/lacymorrow/juno/compare/cua-v0.8.246...v0.8.247
 [0.8.246]: https://github.com/lacymorrow/juno/compare/cua-v0.8.245...v0.8.246
