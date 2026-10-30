@@ -151,6 +151,12 @@ export function useBackendEvents({
 	const hasCheckedServer = useRef(false);
 	// Single-slot buffer: ax-grounding-audit fires before tool_call_result, so we
 	// store the latest unattached audit here and consume it when the result arrives.
+	//
+	// The two are joined by nothing but their order, so an audit left here when a
+	// run ends would be attached to a later, unrelated action and label it with
+	// the wrong element. Every path that ends a run therefore discards it —
+	// agent-stopping, agent-error, agent-stop-all — synchronously, ahead of any
+	// await in those handlers.
 	const lastAxAudit = useRef<AxGroundingAuditEvent | null>(null);
 
 	// Handle backend responses via event listener.
@@ -254,6 +260,7 @@ export function useBackendEvents({
 		EVENTS.AGENT_STOPPING,
 		async () => {
 			console.log("Agent stopping event received - stopping TTS");
+			lastAxAudit.current = null; // see lastAxAudit
 			try {
 				await stopTTS((msg, level) =>
 					console.log(`[TTS-${level || "info"}] ${msg}`)
@@ -615,6 +622,7 @@ export function useBackendEvents({
 			console.log("Agent error event received:", payload);
 			const { agent_state, error_message } = payload;
 
+			lastAxAudit.current = null; // see lastAxAudit
 			setIsProcessing(false);
 			addSystemMessage(`Agent ${agent_state.toLowerCase()}: ${error_message}`);
 		}
@@ -673,6 +681,7 @@ export function useBackendEvents({
 		EVENTS.AGENT_STOP_ALL,
 		async () => {
 			console.log("Agent stop all event received - performing comprehensive UI cleanup");
+			lastAxAudit.current = null; // see lastAxAudit
 			try {
 				await stopTTS((msg, level) =>
 					console.log(`[Agent Stop All TTS-${level || "info"}] ${msg}`)
