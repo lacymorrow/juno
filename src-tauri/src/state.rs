@@ -1753,6 +1753,8 @@ impl AppState {
             }
         }
 
+        // Launch: every enabled server starts (auto_start is not consulted); the
+        // spawn gate still refuses any that is not approved.
         // Now get enabled server configurations (filter enabled ones manually)
         let all_server_configs = manager_guard.get_server_configs().await;
         let enabled_servers: Vec<_> = all_server_configs
@@ -2055,9 +2057,20 @@ impl AppState {
 
         let servers = manager_guard.get_server_configs().await;
         let statuses = manager_guard.get_server_statuses().await;
-        let tools = manager_guard.get_all_tools().await;
+        let mut tools = manager_guard.get_all_tools().await;
 
         drop(manager_guard);
+
+        // The manager does not know which tools the person switched off; the
+        // tool configuration does. Locks are taken one after the other.
+        {
+            let config_guard = self.tool_config_manager.lock().await;
+            for tool in &mut tools {
+                if let Some(saved) = config_guard.get_tool_config(&tool.tool_definition.name) {
+                    tool.enabled = saved.enabled;
+                }
+            }
+        }
 
         let payload = serde_json::json!({
             "servers": servers,
