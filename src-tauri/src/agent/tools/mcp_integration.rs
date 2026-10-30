@@ -292,14 +292,42 @@ impl MCPServerConnection {
             return Err(err);
         }
 
-        // Start the server process
-        let mut command = Command::new(&self.config.command);
+        // Start the server process. A GUI-launched app has launchd's minimal
+        // PATH, so resolve a bare command (npx, uvx, node) against the
+        // person's login-shell PATH and hand the child that PATH. A PATH in
+        // the server's own env still wins.
+        let login_path = crate::user_env::user_path().await;
+        let user_path =
+            crate::user_env::effective_path(&login_path, &self.config.environment_variables);
+        let program = crate::user_env::resolve_command(&self.config.command, &user_path)
+            .map(|p| p.into_os_string())
+            .unwrap_or_else(|| self.config.command.clone().into());
+        let mut command = Command::new(program);
+        command.env("PATH", &user_path);
         command.args(&self.config.args);
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
 
-        if let Some(working_dir) = &self.config.working_directory {
+        // An empty working directory means none: `current_dir("")` fails the
+        // spawn with ENOENT, which reads as if the command were missing.
+        let working_dir = self
+            .config
+            .working_directory
+            .as_ref()
+            .and_then(|p| normalize_working_directory(&p.to_string_lossy()));
+        if let Some(working_dir) = &working_dir {
+            if !working_dir.is_dir() {
+                let err = format!(
+                    "Failed to start MCP server '{}': working directory '{}' does not exist",
+                    self.config.name,
+                    working_dir.display()
+                );
+                error!("{}", err);
+                self.record_failure();
+                self.status = MCPServerStatus::Error(err.clone());
+                return Err(err);
+            }
             command.current_dir(working_dir);
             info!(
                 "MCP server '{}' working directory: {:?}",
@@ -1662,8 +1690,28 @@ pub fn should_start_after_approval(config: &MCPServerConfig, status: &MCPServerS
         )
 }
 
+/// Empty or whitespace-only means no working directory.
+pub fn normalize_working_directory(raw: &str) -> Option<PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn empty_working_directory_is_none() {
+        assert_eq!(normalize_working_directory(""), None);
+        assert_eq!(normalize_working_directory("   "), None);
+        assert_eq!(
+            normalize_working_directory(" /tmp "),
+            Some(PathBuf::from("/tmp"))
+        );
+    }
+
     use super::*;
 
     fn server() -> MCPServerConfig {
