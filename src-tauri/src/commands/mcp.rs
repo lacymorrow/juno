@@ -1,4 +1,4 @@
-use crate::constants::{errors::templates, timeouts};
+use crate::constants::errors::templates;
 use chrono;
 use std::collections::HashMap;
 use tauri::{AppHandle, State};
@@ -176,6 +176,19 @@ pub async fn get_mcp_tools(state: State<'_, AppState>) -> Result<Vec<MCPToolInfo
     Ok(manager_guard.get_all_tools().await)
 }
 
+/// What a running server is made of. The description, the toggles and the
+/// approval can change under a live server; anything else (command, arguments,
+/// environment, timeouts, headers) means the running process is the old one.
+fn spawn_identity(config: &MCPServerConfig) -> serde_json::Value {
+    let mut value = serde_json::to_value(config).unwrap_or(serde_json::Value::Null);
+    if let Some(fields) = value.as_object_mut() {
+        for key in ["description", "enabled", "auto_start", "approved"] {
+            fields.remove(key);
+        }
+    }
+    value
+}
+
 /// Update MCP server configuration
 #[tauri::command]
 pub async fn update_mcp_server(
@@ -185,18 +198,65 @@ pub async fn update_mcp_server(
 ) -> Result<(), String> {
     info!("Updating MCP server: {}", config.name);
 
-    // Update in tool configuration
-    {
+    // Update in tool configuration. What the store holds afterwards, not what
+    // arrived, is what runs (the store decides about approval).
+    let stored = {
         let tool_config = state.get_tool_config_manager().await;
         let mut config_guard = tool_config.lock().await;
         config_guard.update_mcp_server(config.clone());
-    }
+        config_guard.get_mcp_server(&config.id).unwrap_or(config)
+    };
 
     // Save configuration
     state.save_tool_config(&app_handle).await?;
 
-    // Note: Server will need to be restarted to apply changes
-    info!("MCP server configuration updated. Restart required to apply changes.");
+    // The manager keeps its own copy of every server's config, and a
+    // connection spawns from that copy. Saving the edit alone left the old
+    // command running and "Restart" restarting the old command. A server
+    // whose process-defining fields changed is replaced; one that only
+    // changed a label keeps running.
+    let replaced = {
+        let mcp_manager = state.get_mcp_manager().await;
+        let manager_guard = mcp_manager.lock().await;
+        let running = manager_guard
+            .get_server_configs()
+            .await
+            .into_iter()
+            .find(|c| c.id == stored.id);
+        match running {
+            Some(running) if spawn_identity(&running) != spawn_identity(&stored) => {
+                let was_connected = matches!(
+                    manager_guard.get_server_statuses().await.get(&stored.id),
+                    Some(MCPServerStatus::Connected)
+                );
+                manager_guard.remove_server(&stored.id).await?;
+                // Registered idle, like at launch, then started explicitly so
+                // a failure is reported here and not swallowed by add_server.
+                let idle = MCPServerConfig {
+                    auto_start: false,
+                    ..stored.clone()
+                };
+                manager_guard.add_server(idle).await?;
+                if stored.enabled && (was_connected || stored.auto_start) {
+                    if let Err(e) = manager_guard.start_server(&stored.id).await {
+                        warn!(
+                            "{}",
+                            format_error(templates::FAILED_TO_START, "MCP server", e)
+                        );
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
+    };
+
+    if replaced {
+        state.sync_mcp_tools().await?;
+    } else {
+        info!("MCP server edit changed nothing the running process depends on.");
+    }
+    state.emit_mcp_state_update(&app_handle).await?;
 
     Ok(())
 }
@@ -356,12 +416,8 @@ pub async fn test_mcp_server_connection(
         Ok(_) => {
             info!("Test server added successfully");
 
-            // Wait a moment for the server to start
-            tokio::time::sleep(std::time::Duration::from_millis(
-                timeouts::MCP_SERVER_STARTUP_DELAY_MS,
-            ))
-            .await;
-
+            // add_server has already awaited the start, so the status is
+            // settled; there is nothing to wait for.
             // Check the status
             let statuses = test_manager.get_server_statuses().await;
             // If ID changed inside manager (e.g. via new()), also try by name lookup
@@ -529,21 +585,10 @@ pub async fn restart_mcp_server_with_diagnostics(
         );
     }
 
-    // Wait a moment
-    tokio::time::sleep(std::time::Duration::from_millis(
-        timeouts::MCP_SERVER_STARTUP_DELAY_MS,
-    ))
-    .await;
-
-    // Try to start the server
+    // stop_server returns once the process has exited and start_server once
+    // the handshake is done, so the status below is already final.
     match manager_guard.start_server(&server_id).await {
         Ok(_) => {
-            // Wait for startup
-            tokio::time::sleep(std::time::Duration::from_millis(
-                timeouts::MCP_SERVER_RESTART_DELAY_MS,
-            ))
-            .await;
-
             // Check final status
             let statuses = manager_guard.get_server_statuses().await;
             if let Some(status) = statuses.get(&server_id) {
@@ -943,16 +988,10 @@ pub async fn force_restart_all_mcp_servers(
         drop(manager_guard);
     }
 
-    // Step 2: Wait for cleanup
-    tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
-    results.push("🧹 Cleanup delay completed".to_string());
-
-    // Step 3: Start servers with staggered delays
-    for (index, server_id) in server_ids.iter().enumerate() {
-        if index > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
-        }
-
+    // Step 2: Start the servers one after another. Each stop above waited for
+    // its process to exit, and each start waits for its handshake, so no
+    // pause is needed in between.
+    for server_id in &server_ids {
         let manager_guard = mcp_manager.lock().await;
         match manager_guard.start_server(server_id).await {
             Ok(_) => results.push(format!("✅ Restarted server: {}", server_id)),
@@ -1090,4 +1129,45 @@ pub async fn check_mcp_prerequisites() -> Result<serde_json::Value, String> {
     }
 
     Ok(checks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_what_changes_the_process_counts_as_an_edit() {
+        let base = MCPServerConfig::new(
+            "files".to_string(),
+            "npx".to_string(),
+            vec!["-y".to_string(), "server".to_string()],
+        );
+
+        // Labels, toggles and approval do not restart a running server.
+        let mut relabelled = base.clone();
+        relabelled.description = Some("notes".to_string());
+        relabelled.enabled = false;
+        relabelled.auto_start = false;
+        relabelled.approved = true;
+        assert_eq!(spawn_identity(&base), spawn_identity(&relabelled));
+
+        // Each field the process is built from does.
+        let mut other_args = base.clone();
+        other_args.args.push("--root".to_string());
+        assert_ne!(spawn_identity(&base), spawn_identity(&other_args));
+
+        let mut other_command = base.clone();
+        other_command.command = "node".to_string();
+        assert_ne!(spawn_identity(&base), spawn_identity(&other_command));
+
+        let mut other_env = base.clone();
+        other_env
+            .environment_variables
+            .insert("TOKEN".to_string(), "x".to_string());
+        assert_ne!(spawn_identity(&base), spawn_identity(&other_env));
+
+        let mut slower = base.clone();
+        slower.timeout_seconds = 90;
+        assert_ne!(spawn_identity(&base), spawn_identity(&slower));
+    }
 }

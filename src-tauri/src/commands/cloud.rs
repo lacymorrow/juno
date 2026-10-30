@@ -408,6 +408,15 @@ pub async fn start_production_cloud_connector(
 ) -> Result<(), String> {
     info!("Starting production cloud connector");
 
+    // Starting twice must not leave the first connector's loops running with
+    // nothing holding them: they hold clones of themselves, so replacing the
+    // stored handle stops none of them.
+    if let Some(previous) = app_state.get_production_cloud_connector_async().await {
+        if let Err(e) = previous.disconnect().await {
+            warn!("Failed to stop the previous cloud connector: {}", e);
+        }
+    }
+
     match crate::cloud::ProductionCloudConnector::new(app_handle).await {
         Ok(connector) => {
             match connector.start().await {
@@ -436,7 +445,9 @@ pub async fn stop_production_cloud_connector(
 ) -> Result<(), String> {
     info!("Stopping production cloud connector");
 
-    if let Some(connector) = app_state.get_production_cloud_connector() {
+    // The async getter waits for the lock; the sync one answers None while it
+    // is held, which would report "nothing to stop" for a connector running.
+    if let Some(connector) = app_state.get_production_cloud_connector_async().await {
         match connector.disconnect().await {
             Ok(()) => {
                 app_state.clear_production_cloud_connector().await;

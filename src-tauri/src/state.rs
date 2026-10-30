@@ -1353,14 +1353,32 @@ impl AppState {
     // prevent deadlock from nested async lock acquisition (check-init-recheck).
     pub async fn get_or_init_browser_controller(&self) -> Result<BrowserController, String> {
         // First, check if controller already exists (short lock)
+        let mut stale = None;
         {
-            let controller_guard = self.browser_controller.lock().await;
-            if let Some(controller) = controller_guard.as_ref() {
-                debug!("Reusing existing browser controller from AppState.");
-                return Ok(controller.clone());
+            let mut controller_guard = self.browser_controller.lock().await;
+            match controller_guard.as_ref() {
+                Some(controller) if controller.is_connected() => {
+                    debug!("Reusing existing browser controller from AppState.");
+                    return Ok(controller.clone());
+                }
+                // Its browser quit or crashed. Nothing about that controller
+                // can recover, so it is replaced rather than reused forever.
+                Some(_) => stale = controller_guard.take(),
+                None => {}
             }
         }
         // Lock released here
+
+        if let Some(stale) = stale {
+            info!("Browser connection closed; replacing the browser controller");
+            // Frees what it still owns (a temp profile directory, the pump
+            // task). Bounded: the browser is already gone, so this is quick
+            // unless an interrupted tool call still holds the page.
+            let cleanup = tokio::time::timeout(Duration::from_secs(5), stale.cleanup()).await;
+            if !matches!(cleanup, Ok(Ok(()))) {
+                warn!("Cleanup of the closed browser controller did not finish cleanly");
+            }
+        }
 
         info!("Initializing persistent browser controller (was None in AppState)");
 
@@ -1843,6 +1861,25 @@ impl AppState {
             match result {
                 Ok(Ok(_)) => successful_count += 1,
                 Ok(Err((name, id, _err))) => {
+                    // A command the person never approved was never spawned,
+                    // so its failure says nothing about whether it works.
+                    // Purging it would delete their configuration before they
+                    // have had the chance to approve it. (HTTP servers skip
+                    // the approval gate, so they are judged like any other.)
+                    let never_spawned = |c: &crate::agent::tools::MCPServerConfig| {
+                        !c.approved
+                            && !matches!(c.command.to_lowercase().as_str(), "http" | "https")
+                    };
+                    if all_mcp_configs
+                        .iter()
+                        .any(|c| c.id == id && never_spawned(c))
+                    {
+                        debug!(
+                            "Keeping unapproved MCP server '{}' in the configuration",
+                            name
+                        );
+                        continue;
+                    }
                     failed_names.push(name);
                     failed_server_ids.push(id);
                 }
