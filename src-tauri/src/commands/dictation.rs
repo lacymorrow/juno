@@ -56,47 +56,81 @@ async fn close_audio_session(app_handle: &AppHandle) {
 /// Both are the same shape: half the list. So the list is a function, it is
 /// idempotent, and it is what every exit path calls.
 ///
-/// The session is retired *before* the audio is stopped, deliberately: a
-/// transcript the engine finalises on the way down then finds no owner and is
-/// dropped, rather than being typed into whatever is focused.
+/// The order is [`END_STEPS`]; see [`EndStep`] for why each one sits where
+/// it does.
 pub async fn end_dictation_session(app_handle: &AppHandle, reason: &str) {
     let app_state = app_handle.state::<AppState>();
 
-    match app_state.claim_voice_discard(SessionClaim::Current) {
-        Ok(session) => info!(
-            "[Dictation] Ending voice session {} ({})",
-            session.describe(),
-            reason
-        ),
-        Err(rejection) => info!(
-            "[Dictation] Nothing to retire ({}); unwinding anyway ({})",
-            rejection.reason(),
-            reason
-        ),
-    }
-
-    close_audio_session(app_handle).await;
-
-    if let Err(e) = app_state.set_dictation_active(false) {
-        warn!("[Dictation] Could not clear the dictation flag: {}", e);
-    }
-
-    crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-    crate::commands::ui_commands::handle_dictation_mode_change(app_handle, false).await;
-
-    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
-    if let Err(e) = coordinator
-        .unregister_escape_user(app_handle, DICTATION_ESCAPE_USER)
-        .await
-    {
-        warn!("[Dictation] Could not release the stop key: {}", e);
-    }
-
-    if let Err(e) = app_handle.emit(crate::constants::events::dictation::ACTIVE, false) {
-        error!("[Dictation] Could not announce the end of dictation: {}", e);
+    for step in END_STEPS {
+        match step {
+            EndStep::Retire => match app_state.claim_voice_discard(SessionClaim::Current) {
+                Ok(session) => info!(
+                    "[Dictation] Ending voice session {} ({})",
+                    session.describe(),
+                    reason
+                ),
+                Err(rejection) => info!(
+                    "[Dictation] Nothing to retire ({}); unwinding anyway ({})",
+                    rejection.reason(),
+                    reason
+                ),
+            },
+            EndStep::Unwind => {
+                if let Err(e) = app_state.set_dictation_active(false) {
+                    warn!("[Dictation] Could not clear the dictation flag: {}", e);
+                }
+                crate::dictation_monitor::force_reset_dictation_input_state().await;
+                crate::commands::ui_commands::handle_dictation_mode_change(app_handle, false).await;
+                if let Err(e) = app_handle.emit(crate::constants::events::dictation::ACTIVE, false)
+                {
+                    error!("[Dictation] Could not announce the end of dictation: {}", e);
+                }
+            }
+            EndStep::CloseAudio => close_audio_session(app_handle).await,
+            EndStep::ReleaseStopKey => {
+                let coordinator =
+                    crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+                if let Err(e) = coordinator
+                    .unregister_escape_user(app_handle, DICTATION_ESCAPE_USER)
+                    .await
+                {
+                    warn!("[Dictation] Could not release the stop key: {}", e);
+                }
+            }
+        }
     }
 }
+
+/// One part of ending a dictation session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndStep {
+    /// Retire the session's identity. Before the audio is closed, so a
+    /// transcript the engine finalises on the way down finds no owner and is
+    /// dropped rather than typed into whatever is focused.
+    Retire,
+    /// Everything the person sees: the dictation flag, the input monitor, the
+    /// bar leaving dictation (or transcribing) for rest, and the
+    /// `dictation-active` event. Before the audio is closed, because closing
+    /// can take seconds: a cancel that lands after release waits for the
+    /// final decode already running on the audio thread to finish. With this
+    /// after it, one Escape while transcribing left the bar saying
+    /// "transcribing" for the rest of that decode, so the press looked
+    /// ignored and the person pressed again, which then walked the ladder.
+    Unwind,
+    /// Close the microphone and join the audio thread. Can wait on a decode.
+    CloseAudio,
+    /// Release the stop key. Last, so the key stays armed while the audio
+    /// thread is still live.
+    ReleaseStopKey,
+}
+
+/// The order a dictation session ends in.
+pub const END_STEPS: [EndStep; 4] = [
+    EndStep::Retire,
+    EndStep::Unwind,
+    EndStep::CloseAudio,
+    EndStep::ReleaseStopKey,
+];
 
 /// What one press of the stop key ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -660,6 +694,34 @@ mod tests {
             dictation_open: true,
             ..EscapeLayers::default()
         }
+    }
+
+    /// The first-press bug. Escape while a dictation was transcribing did end
+    /// it (nothing was typed), but the bar only left "transcribing" once the
+    /// audio thread was joined, which waits for the final decode already in
+    /// flight: seconds with Parakeet. The press looked ignored, so the person
+    /// pressed again. What the person sees has to change before anything that
+    /// can wait on a decode.
+    #[test]
+    fn ending_a_dictation_shows_it_ended_before_waiting_on_the_audio() {
+        let at = |step: EndStep| {
+            END_STEPS
+                .iter()
+                .position(|s| *s == step)
+                .expect("every step runs")
+        };
+        assert_eq!(at(EndStep::Retire), 0, "nothing is typed once it starts");
+        assert!(
+            at(EndStep::Unwind) < at(EndStep::CloseAudio),
+            "the bar and flag come down before the wait on the audio thread"
+        );
+        assert!(
+            at(EndStep::CloseAudio) < at(EndStep::ReleaseStopKey),
+            "the stop key stays armed while the audio thread is live"
+        );
+        let mut seen = END_STEPS.to_vec();
+        seen.dedup();
+        assert_eq!(seen.len(), END_STEPS.len(), "each step runs once");
     }
 
     #[test]
