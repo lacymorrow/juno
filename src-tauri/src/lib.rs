@@ -73,6 +73,7 @@ pub mod triggers; // Unified activation model (methods x targets)
 pub mod tts;
 pub mod turn_timing; // One log line per voice turn: where the time between key release and first sound went
 pub mod updater; // Auto-update: which feed, when to look, what to do with it
+pub mod user_env; // The person's login-shell PATH for tools Juno spawns (GUI apps get launchd's)
 pub mod utils;
 pub mod window_management; // Window operations, state management, and positioning
 
@@ -916,6 +917,8 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // Resolve the login-shell PATH off the main thread so spawned tools find npx/claude.
+            crate::user_env::prewarm();
             let app_handle = app.handle().clone();
             startup_timing::mark("setup start");
 

@@ -266,10 +266,11 @@ impl ToolConfigManager {
                 description: settings_server.description.clone(),
                 command: settings_server.command.clone(),
                 args: settings_server.args.clone(),
+                // Old saved configs carry "" for "no directory"; that is None.
                 working_directory: settings_server
                     .working_directory
-                    .as_ref()
-                    .map(std::path::PathBuf::from),
+                    .as_deref()
+                    .and_then(super::mcp_integration::normalize_working_directory),
                 environment_variables: settings_server.environment_variables.clone(),
                 enabled: settings_server.enabled,
                 auto_start: settings_server.auto_start,

@@ -140,6 +140,11 @@ pub fn detect_codex_cli() -> Result<PathBuf, AgentError> {
         }
     }
 
+    if let Some(found) = crate::user_env::find_on_user_path("codex") {
+        debug!("Found Codex CLI via user PATH: {}", found.display());
+        return Ok(found);
+    }
+
     if let Ok(path_var) = std::env::var("PATH") {
         for dir in std::env::split_paths(&path_var) {
             let candidate = dir.join("codex");
