@@ -407,3 +407,43 @@ jobs:
             echo "unsigned build: asserting the window layout only"
             scripts/verify-dmg.sh --skip-gatekeeper "${dmgs[0]}"
           fi
+
+  # A failed release used to be silent. From v0.8.245 to v0.8.249 every build
+  # died at notarization (an Apple app-specific password had been revoked)
+  # and nothing said so: merges kept landing, versions kept being tagged, and
+  # no build reached anyone for a day. A failure now opens one issue, which
+  # GitHub notifies the owner of; later failures comment on it, and the next
+  # release that builds closes it. A tag build the gate skipped is neither.
+  report:
+    needs: [gate, build-tauri]
+    if: always() && needs.build-tauri.result != 'skipped' && needs.build-tauri.result != 'cancelled'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update or close the release-failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RESULT: ${{ needs.build-tauri.result }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="Release builds are failing"
+          open=$(gh issue list --repo "$REPO" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ "$RESULT" = "success" ]; then
+            if [ -n "$open" ]; then
+              gh issue comment "$open" --repo "$REPO" --body "Fixed: $TAG built and published. $RUN_URL"
+              gh issue close "$open" --repo "$REPO"
+            fi
+            exit 0
+          fi
+          body="The release build for $TAG failed, so nothing was published and nobody gets this version. Run: $RUN_URL
+
+          Look at the failed step in that run. Notarization failures (HTTP 401) mean the APPLE_PASSWORD app-specific password needs replacing at appleid.apple.com."
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$title" --body "$body"
+          fi
