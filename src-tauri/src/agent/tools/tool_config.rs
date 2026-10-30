@@ -879,10 +879,15 @@ impl ToolConfigManager {
     /// * `tools` - List of discovered tools from the server
     pub fn add_mcp_tools(&mut self, server_id: &str, tools: Vec<MCPToolInfo>) {
         for tool_info in tools {
+            // A tool the person already switched off stays off when it is rediscovered.
+            let enabled = self
+                .tools
+                .get(&tool_info.tool_definition.name)
+                .map_or(tool_info.enabled, |known| known.enabled);
             let tool_config = ToolConfig::new_mcp_tool(
                 tool_info.tool_definition.name.clone(),
                 server_id.to_string(),
-                tool_info.enabled,
+                enabled,
             )
             .with_description(tool_info.tool_definition.description);
 
@@ -1000,6 +1005,41 @@ mod tests {
         let mut config = MCPServerConfig::new("files".to_string(), command.to_string(), vec![]);
         config.approved = true;
         config
+    }
+
+    #[test]
+    fn rediscovering_a_tool_keeps_it_switched_off() {
+        let mut manager = ToolConfigManager::default();
+        let info = || MCPToolInfo {
+            server_id: "s".to_string(),
+            server_name: "files".to_string(),
+            tool_definition: crate::agent::core::ToolDefinition {
+                name: "files_read".to_string(),
+                description: "read".to_string(),
+                input_schema: serde_json::json!({}),
+                api_type: None,
+                beta_flag: None,
+            },
+            enabled: true,
+        };
+        manager.add_mcp_tools("s", vec![info()]);
+        manager.set_tool_enabled("files_read", false);
+        manager.add_mcp_tools("s", vec![info()]);
+        assert!(!manager
+            .get_tool_config("files_read")
+            .is_some_and(|t| t.enabled));
+    }
+
+    #[test]
+    fn set_mcp_server_enabled_round_trips() {
+        let mut manager = ToolConfigManager::default();
+        let config = MCPServerConfig::new("files".to_string(), "npx".to_string(), vec![]);
+        let id = config.id.clone();
+        manager.add_mcp_server(config);
+        manager.set_mcp_server_enabled(&id, false);
+        assert!(manager.get_mcp_server(&id).is_some_and(|c| !c.enabled));
+        manager.set_mcp_server_enabled(&id, true);
+        assert!(manager.get_mcp_server(&id).is_some_and(|c| c.enabled));
     }
 
     #[test]
