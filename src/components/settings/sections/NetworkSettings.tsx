@@ -151,7 +151,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
           description: config.description || `MCP Server: ${serverName}`,
           command: config.command || "",
           args: config.args || [],
-          working_directory: config.working_directory || "",
+          working_directory: config.working_directory?.trim() || undefined,
           environment_variables: config.env || {},
           enabled: true,
           auto_start: config.auto_start || false,

@@ -167,6 +167,8 @@ pub(super) const VERBOSE_FLAG: &str = "--verbose";
 /// inherited: a memory-less answer still beats no answer.
 pub(crate) fn claude_command(binary: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new(binary);
+    // `claude` is a `#!/usr/bin/env node` script: it needs the person's PATH.
+    cmd.env("PATH", crate::user_env::user_path_now());
     if let Some(home) = dirs::home_dir() {
         cmd.current_dir(home);
     }
@@ -192,6 +194,12 @@ pub fn detect_claude_cli() -> Result<PathBuf, AgentError> {
             debug!("Found Claude CLI at: {}", candidate.display());
             return Ok(candidate);
         }
+    }
+
+    // The person's login-shell PATH (a GUI launch only has launchd's)
+    if let Some(found) = crate::user_env::find_on_user_path("claude") {
+        debug!("Found Claude CLI via user PATH: {}", found.display());
+        return Ok(found);
     }
 
     // Fall back to manual PATH search (avoids spawning a subprocess
