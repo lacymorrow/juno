@@ -479,11 +479,12 @@ mod tests {
 mod command_surface_contract {
     /// The files holding the file-touching commands. A new such file must be
     /// added here, which is itself the point: the list is a declaration.
-    const COMMAND_SOURCES: [(&str, &str); 2] = [
+    const COMMAND_SOURCES: [(&str, &str); 3] = [
         (
             "commands/filesystem.rs",
             include_str!("commands/filesystem.rs"),
         ),
+        ("commands/cost_log.rs", include_str!("commands/cost_log.rs")),
         (
             "commands/text_editor.rs",
             include_str!("commands/text_editor.rs"),

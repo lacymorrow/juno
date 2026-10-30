@@ -1302,7 +1302,12 @@ impl BrowserController {
                     AgentError::ToolError("Missing 'value' argument for type action".to_string())
                 })?;
 
-                log::info!("Typing '{}' into element: {}", value, selector);
+                // Never the value: this is the path a password field takes.
+                log::info!(
+                    "Typing {} chars into element: {}",
+                    value.chars().count(),
+                    selector
+                );
 
                 // Use JavaScript to fill the field
                 let js_fn = format!(
@@ -1356,7 +1361,7 @@ impl BrowserController {
                     AgentError::ToolError("Missing 'value' argument for select action".to_string())
                 })?;
 
-                log::info!("Selecting option '{}' in element: {}", value, selector);
+                log::info!("Selecting an option in element: {}", selector);
 
                 // Use JavaScript for selecting an option
                 let js_fn = format!(

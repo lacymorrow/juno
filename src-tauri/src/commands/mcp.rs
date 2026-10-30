@@ -24,6 +24,11 @@ pub async fn add_mcp_server(
 ) -> Result<(), String> {
     info!("Adding MCP server: {}", config.name);
 
+    // Approval is the person's answer, given through `approve_mcp_server`.
+    // A config never arrives already approved, whoever sends it.
+    let mut config = config;
+    config.approved = false;
+
     // Capture needed fields before moving `config`
     let cfg_enabled = config.enabled;
     let cfg_auto_start = config.auto_start;
@@ -337,6 +342,11 @@ pub async fn test_mcp_server_connection(
     config: MCPServerConfig,
 ) -> Result<String, String> {
     info!("Testing MCP server connection: {}", config.name);
+
+    // A test connection spawns the command too, so it is held to the same
+    // gate: only an approved server runs, and a caller cannot approve itself.
+    let mut config = config;
+    config.approved = false;
 
     // Create a temporary MCP manager for testing
     let test_manager = MCPManager::new();

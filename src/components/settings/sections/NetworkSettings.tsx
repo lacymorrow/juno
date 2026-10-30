@@ -160,6 +160,9 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
         };
 
         await invoke(COMMANDS.MCP_ADD_MCP_SERVER, { config: newServer });
+        // Adding a server here is the person's approval (Lacy, 2026-10-28).
+        // add_mcp_server never approves on its own, so the agent can't.
+        await invoke(COMMANDS.MCP_APPROVE_MCP_SERVER, { serverName });
         toast.success(`MCP server "${serverName}" added successfully`);
         setNewServerJson("");
         // Backend will emit mcp_state_updated event automatically
@@ -182,7 +185,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
 
   const handleToggleServer = async (serverId: string, enabled: boolean) => {
     try {
-      await invoke(COMMANDS.MCP_TOGGLE_MCP_SERVER, { server_id: serverId, enabled });
+      await invoke(COMMANDS.MCP_TOGGLE_MCP_SERVER, { serverId, enabled });
       toast.success(`Server ${enabled ? "enabled" : "disabled"}`);
       // Backend will emit mcp_state_updated event automatically
     } catch (error) {
@@ -198,8 +201,8 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
   ) => {
     try {
       await invoke(COMMANDS.MCP_TOGGLE_MCP_TOOL, {
-        server_id: serverId,
-        tool_name: toolName,
+        serverId,
+        toolName,
         enabled,
       });
       toast.success(`Tool ${toolName} ${enabled ? "enabled" : "disabled"}`);

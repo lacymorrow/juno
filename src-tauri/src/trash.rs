@@ -120,6 +120,12 @@ for target in "${{targets[@]}}"; do
     status=1
     continue
   fi
+  # A name that starts with a dash would reach the Trash tool as one of its
+  # own flags (-s stops on error, -v is verbose) and the file would stay put.
+  # The same file, spelled from the current directory, is just a path.
+  case "$target" in
+    -*) target="./$target" ;;
+  esac
   if ! "$TRASH_BIN" "$target" >/dev/null 2>&1; then
     echo "rm: $target: the Trash cannot take this, so deleting it would be permanent. Nothing was deleted. Ask the person first." >&2
     status=1
@@ -183,6 +189,14 @@ mod tests {
             script.contains("after_dashdash"),
             "a file named -f has to be deletable"
         );
+    }
+
+    #[test]
+    fn a_target_named_like_a_flag_reaches_the_trash_as_a_path() {
+        // `rm -- -v` names a file called -v. Handed to the Trash tool as is,
+        // it would read as the tool's own verbose flag.
+        let script = rm_shim_script();
+        assert!(script.contains(r#"-*) target="./$target" ;;"#));
     }
 
     #[test]

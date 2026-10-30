@@ -383,7 +383,10 @@ impl CloudCommandProcessor {
         // Attempt transcription using the voice transcription plugin
         let transcription_result = match self.transcribe_audio_file(&temp_audio_path_str).await {
             Ok(text) => {
-                info!("Voice transcription successful: '{}'", text);
+                info!(
+                    "Voice transcription successful ({} chars)",
+                    text.chars().count()
+                );
                 text
             }
             Err(e) => {
@@ -530,7 +533,7 @@ impl CloudCommandProcessor {
                     .and_then(|params| params.get("text"))
                     .map(|s| s.as_str())
                     .unwrap_or("");
-                info!("Executing type command: {}", text);
+                info!("Executing type command ({} chars)", text.chars().count());
                 self.execute_type_command(text).await
             }
             "key" => {
@@ -605,7 +608,7 @@ impl CloudCommandProcessor {
 
     /// Execute type command
     async fn execute_type_command(&self, text: &str) -> Result<CommandResult, CloudError> {
-        info!("Executing type command with text: {}", text);
+        info!("Executing type command ({} chars)", text.chars().count());
 
         let app_state = self.app_handle.state::<crate::state::AppState>();
 

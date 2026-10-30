@@ -377,6 +377,17 @@ fn may_ask(capability: Capability, now: Instant) -> bool {
         // A poisoned lock must not cost the person the prompt they need.
         return true;
     };
+    may_ask_in(&mut asked, capability, now)
+}
+
+/// [`may_ask`] against a given history. The rule lives here so tests can hold
+/// their own history: the process-wide one is shared by every test thread,
+/// and one test clearing it under another made the rate-limit tests flaky.
+fn may_ask_in(
+    asked: &mut HashMap<Capability, Instant>,
+    capability: Capability,
+    now: Instant,
+) -> bool {
     let recent = asked
         .get(&capability)
         .is_some_and(|at| now.duration_since(*at) < ASK_AGAIN_AFTER);
@@ -624,44 +635,47 @@ mod tests {
     fn a_person_pressing_again_is_always_answered() {
         // The rate limit is for tool loops, not for someone pressing the mic a
         // second time because the first press appeared to do nothing.
-        clear_ask_history();
+        let mut asked = HashMap::new();
         let now = Instant::now();
-        assert!(may_ask(Capability::Microphone, now));
-        assert!(!may_ask(Capability::Microphone, now));
+        assert!(may_ask_in(&mut asked, Capability::Microphone, now));
+        assert!(!may_ask_in(&mut asked, Capability::Microphone, now));
         // ask_now skips the check entirely, which is what the bar calls.
     }
 
     #[test]
     fn the_same_ask_does_not_repeat_immediately() {
-        clear_ask_history();
+        let mut asked = HashMap::new();
         let now = Instant::now();
-        assert!(may_ask(Capability::Accessibility, now));
-        assert!(!may_ask(Capability::Accessibility, now));
+        assert!(may_ask_in(&mut asked, Capability::Accessibility, now));
+        assert!(!may_ask_in(&mut asked, Capability::Accessibility, now));
     }
 
     #[test]
     fn a_different_capability_is_its_own_question() {
-        clear_ask_history();
+        let mut asked = HashMap::new();
         let now = Instant::now();
-        assert!(may_ask(Capability::Accessibility, now));
-        assert!(may_ask(Capability::ScreenRecording, now));
+        assert!(may_ask_in(&mut asked, Capability::Accessibility, now));
+        assert!(may_ask_in(&mut asked, Capability::ScreenRecording, now));
     }
 
     #[test]
     fn each_automation_target_is_its_own_question() {
         // macOS holds Automation per target app, so Juno asking about System
         // Events must not silence the ask about Safari.
-        clear_ask_history();
+        let mut asked = HashMap::new();
         let now = Instant::now();
-        assert!(may_ask(
+        assert!(may_ask_in(
+            &mut asked,
             Capability::Automation(AutomationTarget::SystemEvents),
             now
         ));
-        assert!(may_ask(
+        assert!(may_ask_in(
+            &mut asked,
             Capability::Automation(AutomationTarget::Safari),
             now
         ));
-        assert!(!may_ask(
+        assert!(!may_ask_in(
+            &mut asked,
             Capability::Automation(AutomationTarget::SystemEvents),
             now
         ));
@@ -669,20 +683,20 @@ mod tests {
 
     #[test]
     fn the_ask_returns_once_enough_time_has_passed() {
-        clear_ask_history();
+        let mut asked = HashMap::new();
         let now = Instant::now();
-        assert!(may_ask(Capability::Accessibility, now));
+        assert!(may_ask_in(&mut asked, Capability::Accessibility, now));
         let later = now + ASK_AGAIN_AFTER + Duration::from_secs(1);
-        assert!(may_ask(Capability::Accessibility, later));
+        assert!(may_ask_in(&mut asked, Capability::Accessibility, later));
     }
 
     #[test]
     fn answering_a_prompt_lets_the_next_need_ask_again() {
-        clear_ask_history();
+        let mut asked = HashMap::new();
         let now = Instant::now();
-        assert!(may_ask(Capability::ScreenRecording, now));
-        clear_ask_history();
-        assert!(may_ask(Capability::ScreenRecording, now));
+        assert!(may_ask_in(&mut asked, Capability::ScreenRecording, now));
+        asked.clear();
+        assert!(may_ask_in(&mut asked, Capability::ScreenRecording, now));
     }
 
     #[test]
