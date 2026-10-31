@@ -95,7 +95,7 @@ $summary = [ordered]@{ started = (Get-Date).ToString('o'); windows = (Get-CimIns
 Get-Process CalculatorApp, Calculator, notepad -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 1
 Start-Process calc.exe
-$calc = Wait-Window { [JunoSpike]::FindWindow($null, 'Calculator') }
+$calc = Wait-Window { [JunoSpike]::FindWindow([NullString]::Value, 'Calculator') }
 [void][JunoSpike]::MoveWindow($calc, 140, 120, 340, 520, $true)
 Start-Sleep -Seconds 2
 # Notepad covers Calculator's whole keypad, so every button juno-cua presses
@@ -157,7 +157,7 @@ New-Item -ItemType Directory -Force $folder | Out-Null
 1..30 | ForEach-Object { Set-Content (Join-Path $folder ("file-{0:D2}.txt" -f $_)) "file $_" }
 New-Item -ItemType Directory -Force (Join-Path $folder 'rename-me') | Out-Null
 Start-Process explorer.exe $folder
-$explorer = Wait-Window { [JunoSpike]::FindWindow('CabinetWClass', $null) }
+$explorer = Wait-Window { [JunoSpike]::FindWindow('CabinetWClass', [NullString]::Value) }
 [void][JunoSpike]::MoveWindow($explorer, 160, 140, 820, 560, $true)
 Start-Sleep -Seconds 3
 $explorerReads = @(1..3 | ForEach-Object { Invoke-Cua 'ui-tree --app "Rename Test"' })
