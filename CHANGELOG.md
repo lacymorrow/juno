@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.252] - 2026-10-31
+
+### Fixed
+
+- **env:** give the login shell probe 10 s, not 3 (#920) (d0151cb0)
+
 ## [0.8.251] - 2026-10-30
 
 ### Added
@@ -1735,7 +1741,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.251...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.252...HEAD
+[0.8.252]: https://github.com/lacymorrow/juno/compare/cua-v0.8.251...v0.8.252
 [0.8.251]: https://github.com/lacymorrow/juno/compare/cua-v0.8.250...v0.8.251
 [0.8.250]: https://github.com/lacymorrow/juno/compare/cua-v0.8.249...v0.8.250
 [0.8.249]: https://github.com/lacymorrow/juno/compare/cua-v0.8.248...v0.8.249
