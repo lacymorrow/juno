@@ -971,6 +971,12 @@ async fn execute_agent_internal(
                             "browser_screenshot" => {
                                 browser_controller_instance.screenshot(&input).await
                             }
+                            "browser_list_page_tools" => {
+                                browser_controller_instance.list_page_tools(&input).await
+                            }
+                            "browser_call_page_tool" => {
+                                browser_controller_instance.call_page_tool(&input).await
+                            }
                             _ => Err(AgentError::ToolNotFound(current_tool_name_captured)),
                         };
 
@@ -1288,6 +1294,12 @@ async fn execute_agent_internal(
                             }
                             "browser_screenshot" => {
                                 browser_controller_instance.screenshot(&input).await
+                            }
+                            "browser_list_page_tools" => {
+                                browser_controller_instance.list_page_tools(&input).await
+                            }
+                            "browser_call_page_tool" => {
+                                browser_controller_instance.call_page_tool(&input).await
                             }
                             _ => Err(AgentError::ToolNotFound(current_tool_name_captured)),
                         };

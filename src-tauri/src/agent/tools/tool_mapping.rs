@@ -38,6 +38,8 @@ static TOOL_CATEGORY_MAP: Lazy<HashMap<&'static str, ToolCategory>> = Lazy::new(
     map.insert(tool_names::BROWSER_INTERACT, ToolCategory::Browser);
     map.insert(tool_names::BROWSER_EXTRACT_CONTENT, ToolCategory::Browser);
     map.insert(tool_names::BROWSER_GET_CURRENT_URL, ToolCategory::Browser);
+    map.insert(tool_names::BROWSER_LIST_PAGE_TOOLS, ToolCategory::Browser);
+    map.insert(tool_names::BROWSER_CALL_PAGE_TOOL, ToolCategory::Browser);
 
     // Safari tools (specialized browser automation for Safari)
     map.insert(tool_names::SAFARI_EXTRACT_DOM, ToolCategory::Browser);
