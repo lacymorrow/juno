@@ -153,6 +153,39 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # Trim stray whitespace off the single-line credentials before
+          # exporting them. A secret pasted into GitHub's web form very easily
+          # carries a trailing newline, and `echo "${!var}"` into the heredoc
+          # below preserves it, so the notary sees a password with an invisible
+          # extra character and answers 401 - indistinguishable in the log from
+          # a revoked password or an unreachable service.
+          #
+          # APPLE_CERTIFICATE is deliberately NOT in this list: it is a
+          # multi-line base64 blob and its internal newlines are load-bearing.
+          for var in APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            raw="${!var-}"
+            [ -n "$raw" ] || continue
+            clean="$(printf '%s' "$raw" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            if [ "${#raw}" -ne "${#clean}" ]; then
+              echo "::warning::${var} carried $(( ${#raw} - ${#clean} )) whitespace character(s), now stripped. A trailing newline from a web paste is the usual cause and is enough on its own to make notarization return 401."
+            fi
+            printf -v "$var" '%s' "$clean" 2>/dev/null || eval "$var=\$clean"
+          done
+
+          # Say whether the stored APPLE_PASSWORD even has the shape of an
+          # app-specific password. Apple's are exactly xxxx-xxxx-xxxx-xxxx
+          # (19 lowercase-and-hyphen characters); a regular Apple ID password
+          # in this secret returns 401 forever and looks identical in the log
+          # to a transient fault. Only the length and a yes/no are printed,
+          # never any part of the value.
+          if [ -n "${APPLE_PASSWORD-}" ]; then
+            if printf '%s' "$APPLE_PASSWORD" | grep -Eq '^[a-z]{4}-[a-z]{4}-[a-z]{4}-[a-z]{4}$'; then
+              echo "APPLE_PASSWORD has the app-specific-password shape (xxxx-xxxx-xxxx-xxxx)."
+            else
+              echo "::warning::APPLE_PASSWORD is ${#APPLE_PASSWORD} characters and does NOT match Apple's app-specific-password shape (xxxx-xxxx-xxxx-xxxx). If this is a regular Apple ID password, every notarization will return 401 no matter how many times the build is retried. Generate an app-specific password at appleid.apple.com."
+            fi
+          fi
+
           for var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
             if [ -n "${!var}" ]; then
               {
