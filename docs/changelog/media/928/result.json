@@ -1,0 +1,181 @@
+{
+    "started":  "2026-10-31T15:42:34.1804187-04:00",
+    "windows":  "Microsoft Windows 11 Pro 10.0.22631.0",
+    "test":  {
+                 "passed":  false,
+                 "checks":  {
+                                "every_press_succeeded":  true,
+                                "display_reads_42":  true,
+                                "cursor_unchanged":  true,
+                                "foreground_unchanged":  false,
+                                "notepad_was_in_front":  true,
+                                "buttons_under_notepad":  true
+                            },
+                 "display":  "Display is 42",
+                 "button_bounds":  {
+                                       "num7Button":  [
+                                                          152.0,
+                                                          423.0,
+                                                          78.0,
+                                                          50.0
+                                                      ],
+                                       "multiplyButton":  [
+                                                              390.0,
+                                                              423.0,
+                                                              78.0,
+                                                              50.0
+                                                          ],
+                                       "num6Button":  [
+                                                          311.0,
+                                                          475.0,
+                                                          78.0,
+                                                          50.0
+                                                      ],
+                                       "equalButton":  [
+                                                           390.0,
+                                                           578.0,
+                                                           78.0,
+                                                           50.0
+                                                       ]
+                                   },
+                 "before":  {
+                                "foreground_hwnd":  197352,
+                                "foreground_title":  "Untitled - Notepad",
+                                "cursor":  [
+                                               1279,
+                                               799
+                                           ]
+                            },
+                 "after":  {
+                               "foreground_hwnd":  721358,
+                               "foreground_title":  "Calculator",
+                               "cursor":  [
+                                              1279,
+                                              799
+                                          ]
+                           },
+                 "focus_before":  {
+                                      "args":  "focused-element",
+                                      "exit":  0,
+                                      "ms":  116,
+                                      "stdout":  "{\"description\":null,\"label\":\"RichEdit Control\",\"properties\":{\"automation_id\":null,\"bounds\":[66.0,402.0,989.0,301.0],\"class_name\":\"RichEditD2DPT\",\"enabled\":true,\"framework_id\":\"Win32\",\"offscreen\":false,\"process_id\":6328},\"role\":\"Document\",\"value\":null}",
+                                      "stderr":  ""
+                                  },
+                 "focus_after":  {
+                                     "args":  "focused-element",
+                                     "exit":  0,
+                                     "ms":  53,
+                                     "stdout":  "{\"description\":null,\"label\":\"Equals\",\"properties\":{\"automation_id\":\"equalButton\",\"bounds\":[390.0,578.0,78.0,50.0],\"class_name\":\"Button\",\"enabled\":true,\"framework_id\":\"XAML\",\"offscreen\":false,\"process_id\":4440},\"role\":\"Button\",\"value\":null}",
+                                     "stderr":  ""
+                                 },
+                 "presses":  [
+                                 {
+                                     "args":  "call --tool click --args \"{\\\"selector\\\":\\\"#clearButton\\\"}\"",
+                                     "exit":  0,
+                                     "ms":  128,
+                                     "stdout":  "{\"coordinates\":null,\"message\":\"Clicked element matching selector \u0027#clearButton\u0027. Method: UIA Invoke, Details: Pressed through UI Automation; no input event was sent\",\"status\":\"success\"}",
+                                     "stderr":  ""
+                                 },
+                                 {
+                                     "args":  "call --tool click --args \"{\\\"selector\\\":\\\"#num7Button\\\"}\"",
+                                     "exit":  0,
+                                     "ms":  142,
+                                     "stdout":  "{\"coordinates\":null,\"message\":\"Clicked element matching selector \u0027#num7Button\u0027. Method: UIA Invoke, Details: Pressed through UI Automation; no input event was sent\",\"status\":\"success\"}",
+                                     "stderr":  ""
+                                 },
+                                 {
+                                     "args":  "call --tool click --args \"{\\\"selector\\\":\\\"#multiplyButton\\\"}\"",
+                                     "exit":  0,
+                                     "ms":  142,
+                                     "stdout":  "{\"coordinates\":null,\"message\":\"Clicked element matching selector \u0027#multiplyButton\u0027. Method: UIA Invoke, Details: Pressed through UI Automation; no input event was sent\",\"status\":\"success\"}",
+                                     "stderr":  ""
+                                 },
+                                 {
+                                     "args":  "call --tool click --args \"{\\\"selector\\\":\\\"#num6Button\\\"}\"",
+                                     "exit":  0,
+                                     "ms":  75,
+                                     "stdout":  "{\"coordinates\":null,\"message\":\"Clicked element matching selector \u0027#num6Button\u0027. Method: UIA Invoke, Details: Pressed through UI Automation; no input event was sent\",\"status\":\"success\"}",
+                                     "stderr":  ""
+                                 },
+                                 {
+                                     "args":  "call --tool click --args \"{\\\"selector\\\":\\\"#equalButton\\\"}\"",
+                                     "exit":  0,
+                                     "ms":  87,
+                                     "stdout":  "{\"coordinates\":null,\"message\":\"Clicked element matching selector \u0027#equalButton\u0027. Method: UIA Invoke, Details: Pressed through UI Automation; no input event was sent\",\"status\":\"success\"}",
+                                     "stderr":  ""
+                                 }
+                             ],
+                 "read_display":  {
+                                      "args":  "call --tool get_element_attributes --args \"{\\\"selector\\\":\\\"#CalculatorResults\\\"}\"",
+                                      "exit":  0,
+                                      "ms":  73,
+                                      "stdout":  "{\"description\":null,\"label\":\"Display is 42\",\"properties\":{\"automation_id\":\"CalculatorResults\",\"bounds\":[148.0,213.0,325.0,74.0],\"class_name\":null,\"enabled\":true,\"framework_id\":\"XAML\",\"offscreen\":false,\"process_id\":4440},\"role\":\"Text\",\"value\":null}",
+                                      "stderr":  ""
+                                  }
+             },
+    "explorer":  {
+                     "tree_reads":  [
+                                        {
+                                            "elapsed_ms":  524,
+                                            "node_count":  176,
+                                            "process_ms":  589
+                                        },
+                                        {
+                                            "elapsed_ms":  497,
+                                            "node_count":  176,
+                                            "process_ms":  560
+                                        },
+                                        {
+                                            "elapsed_ms":  616,
+                                            "node_count":  176,
+                                            "process_ms":  679
+                                        }
+                                    ],
+                     "rename":  {
+                                    "attempted":  true,
+                                    "item_patterns":  [
+                                                          "InvokePatternIdentifiers.Pattern",
+                                                          "ValuePatternIdentifiers.Pattern",
+                                                          "SelectionItemPatternIdentifiers.Pattern",
+                                                          "ScrollItemPatternIdentifiers.Pattern"
+                                                      ],
+                                    "value_target":  "item",
+                                    "read_only":  false,
+                                    "renamed":  true,
+                                    "before":  {
+                                                   "foreground_hwnd":  197352,
+                                                   "foreground_title":  "Untitled - Notepad",
+                                                   "cursor":  [
+                                                                  1279,
+                                                                  799
+                                                              ]
+                                               },
+                                    "after":  {
+                                                  "foreground_hwnd":  132104,
+                                                  "foreground_title":  "",
+                                                  "cursor":  [
+                                                                 1279,
+                                                                 799
+                                                             ]
+                                              }
+                                }
+                 },
+    "vscode":  [
+                   {
+                       "elapsed_ms":  47,
+                       "node_count":  14,
+                       "process_ms":  125
+                   },
+                   {
+                       "elapsed_ms":  429,
+                       "node_count":  193,
+                       "process_ms":  543
+                   },
+                   {
+                       "elapsed_ms":  406,
+                       "node_count":  193,
+                       "process_ms":  566
+                   }
+               ],
+    "finished":  "2026-10-31T15:43:08.7375952-04:00"
+}
