@@ -1,0 +1,81 @@
+name: Windows
+
+# Builds `juno-cua` on Windows (LAC-6321, docs/plans/windows.md). This is the
+# spike's build, not a gate: it is not a required check, and the macOS jobs in
+# ci.yml are unchanged. It becomes required when the Windows port does.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src-tauri/mcp-server-os-level/**"
+      - "crates/juno-cua/**"
+      - "Cargo.lock"
+      - ".github/workflows/windows.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src-tauri/mcp-server-os-level/**"
+      - "crates/juno-cua/**"
+      - "Cargo.lock"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  juno-cua:
+    name: Windows (juno-cua build)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      # rustup on the runner reads rust-toolchain.toml and installs the pinned
+      # toolchain for the host (x86_64-pc-windows-msvc) on first use.
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: ci-windows
+
+      # Only juno-cua and the engine crate. src-tauri still links Apple
+      # frameworks and is the next step of the port, not this one.
+      - name: Build juno-cua
+        run: cargo build -p juno-cua --release
+
+      # Reported, not enforced yet: the shared code still has items that only
+      # the macOS engine uses, which read as dead code on Windows.
+      - name: Clippy (report only)
+        run: cargo clippy -p computer-use-ai-sdk -p juno-cua --release
+        continue-on-error: true
+
+      # The runner has a desktop session, so the engine can start and read a
+      # window. This proves the binary runs; the Calculator test that matters
+      # runs on a Windows 11 machine (see docs/plans/windows.md, "The spike").
+      - name: Smoke test
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $cua = ".\target\release\juno-cua.exe"
+          Start-Process notepad.exe
+          Start-Sleep -Seconds 3
+          & $cua cursor-position
+          & $cua --format pretty focused-element
+          & $cua ui-tree --app notepad | Out-File tree.json
+          Get-Content tree.json -TotalCount 1 | ForEach-Object { $_.Substring(0, [Math]::Min(400, $_.Length)) }
+
+      - name: Upload juno-cua.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: juno-cua-windows-x64
+          path: target/release/juno-cua.exe
+          retention-days: 14
