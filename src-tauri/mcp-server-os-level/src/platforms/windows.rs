@@ -156,8 +156,34 @@ impl WindowsEngine {
             return Ok(current);
         }
         let condition = self.condition(selector)?;
-        root.find_first(TreeScope::Descendants, &condition)
-            .map_err(|_| AutomationError::ElementNotFound(format!("{selector:?}")))
+        let (scopes, scope) = self.search_scopes(root);
+        scopes
+            .iter()
+            .find_map(|window| window.find_first(scope, &condition).ok())
+            .ok_or_else(|| AutomationError::ElementNotFound(format!("{selector:?}")))
+    }
+
+    /// Where a search from `root` runs. A Descendants search from the desktop
+    /// root finds nothing (on Windows 11 it missed every Calculator button),
+    /// so a search from the desktop runs in each top-level window's subtree
+    /// instead, front to back. Any other root is searched directly.
+    fn search_scopes(
+        &self,
+        root: &uiautomation::UIElement,
+    ) -> (Vec<uiautomation::UIElement>, TreeScope) {
+        let automation = &self.uia.automation;
+        let is_desktop = automation
+            .compare_elements(root, &self.root.element)
+            .unwrap_or(false);
+        if !is_desktop {
+            return (vec![root.clone()], TreeScope::Descendants);
+        }
+        let windows = automation
+            .get_control_view_walker()
+            .ok()
+            .and_then(|walker| walker.get_children(root))
+            .unwrap_or_default();
+        (windows, TreeScope::Subtree)
     }
 
     /// The top-level window whose title contains `name`, or whose window class
@@ -249,10 +275,12 @@ impl AccessibilityEngine for WindowsEngine {
             _ => (self.inner(root).clone(), selector),
         };
         let condition = self.condition(last)?;
-        let found = scope_root
-            .find_all(TreeScope::Descendants, &condition)
-            .unwrap_or_default();
-        Ok(found.into_iter().map(|e| self.wrap(e)).collect())
+        let (scopes, scope) = self.search_scopes(&scope_root);
+        Ok(scopes
+            .iter()
+            .flat_map(|window| window.find_all(scope, &condition).unwrap_or_default())
+            .map(|e| self.wrap(e))
+            .collect())
     }
 
     fn open_application(&self, _app_name: &str) -> Result<UIElement, AutomationError> {
