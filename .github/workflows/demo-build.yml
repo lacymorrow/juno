@@ -42,7 +42,7 @@ on:
   workflow_dispatch:
     inputs:
       cohort:
-        description: 'Demo cohort tag, lowercase letters, digits and hyphens (e.g. "alpha-2"). Compiled into the build and shown in Settings.'
+        description: 'Demo cohort tag, lowercase letters, digits and hyphens. Name it after the release the build came from (e.g. "v0-8-112"), so the label says which Anthropic key to revoke with it. Compiled into the build and shown in Settings.'
         required: true
         type: string
       upload:
