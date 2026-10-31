@@ -1,0 +1,20 @@
+{
+  "xaml_num7_fully_covered": {
+    "before": "Untitled - Notepad",
+    "after": "Calculator",
+    "kept_foreground": false,
+    "result": "{\"coordinates\":null,\"message\":\"Clicked element matching selector '#num7Button'. Method: UIA Invoke, Details: Pressed through UI Automation; no input event was s"
+  },
+  "xaml_num6_second_press": {
+    "before": "Untitled - Notepad",
+    "after": "Calculator",
+    "kept_foreground": false,
+    "result": "{\"coordinates\":null,\"message\":\"Clicked element matching selector '#num6Button'. Method: UIA Invoke, Details: Pressed through UI Automation; no input event was s"
+  },
+  "win32_charmap_select": {
+    "before": "Calculator",
+    "after": "Character Map",
+    "kept_foreground": false,
+    "result": "{\"coordinates\":null,\"message\":\"Clicked element matching selector 'button:Select'. Method: UIA Invoke, Details: Pressed through UI Automation; no input event was"
+  }
+}
