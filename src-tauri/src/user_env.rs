@@ -22,7 +22,10 @@ use wait_timeout::ChildExt;
 
 const START_MARKER: &str = "__JUNO_PATH_START__";
 const END_MARKER: &str = "__JUNO_PATH_END__";
-const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+// An interactive login zsh took 3.02 s on a 2019 Intel MacBook Pro
+// (graphite, 2026-10-30), so 3 s fell back every launch. The probe runs off
+// the main thread and its answer is cached, so a generous bound costs nothing.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const LAUNCHD_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 
 /// Where the resolved PATH came from.
