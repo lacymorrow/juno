@@ -37,6 +37,8 @@ pub mod tool_names {
     pub const BROWSER_INTERACT: &str = "browser_interact";
     pub const BROWSER_EXTRACT_CONTENT: &str = "browser_extract_content";
     pub const BROWSER_GET_CURRENT_URL: &str = "browser_get_current_url";
+    pub const BROWSER_LIST_PAGE_TOOLS: &str = "browser_list_page_tools";
+    pub const BROWSER_CALL_PAGE_TOOL: &str = "browser_call_page_tool";
 
     // Safari tools (specialized browser automation for Safari)
     pub const SAFARI_EXTRACT_DOM: &str = "safari_extract_dom";
