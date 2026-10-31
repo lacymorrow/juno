@@ -168,12 +168,66 @@ jobs:
             echo "No Apple signing secrets configured: building unsigned."
           fi
 
+      # Notarization is the last thing a 50-minute build does, and it is the
+      # thing that fails. Six release builds between 2026-10-27 and 2026-10-31
+      # died at a notary call: four on "HTTP status code: 401. Invalid
+      # credentials", one on NSURLErrorDomain -1009 "the Internet connection
+      # appears to be offline" against appstoreconnect.apple.com/notary/v2/asp,
+      # one on an empty notary error. Each burned ~50 minutes of compilation
+      # and published nothing, so v0.8.251 and v0.8.253 have tags and no
+      # release.
+      #
+      # That 401 is not a verdict on the password. notary/v2/asp IS the
+      # app-specific-password token exchange, so a runner that cannot reach it
+      # gets a 401 rather than a network error. The same unchanged credential
+      # succeeded at 2026-10-30T14:18Z and 2026-10-31T00:46Z in between two
+      # 401s, and a replacement password set at 2026-10-31T08:20Z then 401'd at
+      # 10:11Z. Rotating the secret is the one fix that has been tried and has
+      # not worked (LAC-6331).
+      #
+      # So ask first. notarytool history is the smallest authenticated call
+      # there is: a few seconds here turns a sustained outage into a fast red
+      # instead of 50 wasted minutes, and absorbs a brief blip outright. It
+      # cannot catch an outage that starts after the build does, which is what
+      # the retry on the build step is for.
+      - name: Check the notary service
+        if: ${{ env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_PASSWORD != '' && env.APPLE_TEAM_ID != '' }}
+        run: |
+          set -uo pipefail
+          log="$RUNNER_TEMP/notary-preflight.log"
+          for attempt in 1 2 3 4 5; do
+            if xcrun notarytool history \
+                 --apple-id "$APPLE_ID" \
+                 --password "$APPLE_PASSWORD" \
+                 --team-id "$APPLE_TEAM_ID" >"$log" 2>&1; then
+              echo "Notary credentials accepted on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Notary check attempt ${attempt} failed:"
+            sed -e 's/^/  /' "$log" || true
+            [ "$attempt" = 5 ] && break
+            sleep $((attempt * 20))
+          done
+
+          # Which of the two it is decides what a human should do next, and
+          # the error text alone has already misled once, so say both.
+          if grep -q 'status code: 401' "$log"; then
+            echo "::error::Apple returned 401 on 5 attempts over ~3 minutes. That is either a revoked APPLE_PASSWORD or a degraded notary/v2/asp endpoint, and this step cannot tell them apart. Re-dispatch this tag once before touching the secret: a 401 that clears on a later run was the service. Replace APPLE_PASSWORD (an app-specific password for the APPLE_ID account, from appleid.apple.com) only when this step is red on two runs in a row."
+          else
+            echo "::error::Apple's notary service was unreachable on 5 attempts over ~3 minutes; see the log above. Nothing was built. Re-dispatch this tag."
+          fi
+          exit 1
+
       # Universal: both halves of every release, so Intel Macs can install and
       # update. Parakeet is the one thing that is not in both. Its ONNX Runtime
       # (parakeet-rs -> ort-sys) ships an aarch64 build only, so the dependency
       # is gated to Apple Silicon in the voice plugin's Cargo.toml and an Intel
       # Mac dictates with Whisper, which is already the default engine.
       - name: Build Tauri app (universal)
+        id: build
+        # Soft-fails so the retry below gets a turn. If that one fails too it
+        # is a hard failure and the job goes red. See it for why.
+        continue-on-error: true
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -190,6 +244,40 @@ jobs:
           # Finder to drive; GitHub's macOS runners do have one, and the
           # "Verify the DMG" step below fails the release if that ever stops
           # being true, rather than quietly shipping a stock window.
+          TAURI_BUNDLER_DMG_IGNORE_CI: "true"
+        with:
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: "Juno ${{ inputs.tag || github.ref_name }}"
+          releaseBody: |
+            ## Juno ${{ inputs.tag || github.ref_name }}
+
+            See [CHANGELOG](https://github.com/lacymorrow/juno/blob/main/CHANGELOG.md) for details.
+          releaseDraft: false
+          prerelease: ${{ inputs.prerelease == true }}
+          args: --target universal-apple-darwin
+
+      # One retry, because what this guards against is a few seconds of Apple
+      # being unreachable at the very end of a 50-minute build, and the cost of
+      # losing that coin flip is a version that silently never ships.
+      #
+      # It is cheap. The attempt above left ./target populated in this same
+      # job, so this one skips compilation and goes more or less straight back
+      # to bundling and notarizing. That cuts both ways in our favour: a
+      # genuine compile error also fails here in minutes rather than repeating
+      # the full build. tauri-action resolves the release by tag, so a second
+      # run reuses whatever the first created instead of duplicating it.
+      #
+      # GitHub Actions has neither step retry nor YAML anchors, so this block
+      # is a hand copy of the one above and the two MUST be edited together.
+      # Only name, id and continue-on-error may differ.
+      - name: Build Tauri app (universal, retry)
+        if: ${{ steps.build.outcome == 'failure' }}
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Keeps the branded DMG layout on CI; see the attempt above.
           TAURI_BUNDLER_DMG_IGNORE_CI: "true"
         with:
           tagName: ${{ inputs.tag || github.ref_name }}
@@ -420,6 +508,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       issues: write
+      # To name the step that actually failed, below, instead of guessing.
+      actions: read
     steps:
       - name: Open, update or close the release-failure issue
         env:
@@ -439,9 +529,41 @@ jobs:
             fi
             exit 0
           fi
-          body="The release build for $TAG failed, so nothing was published and nobody gets this version. Run: $RUN_URL
+          # Name the step that actually failed instead of guessing at a
+          # cause. The jobs API answers immediately, while run logs are
+          # usually still locked this soon after the failure, so the logs are
+          # deliberately not read here.
+          failed=$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID/jobs" \
+            --jq '.jobs[] | select(.conclusion == "failure") | .steps[] | select(.conclusion == "failure") | .name' \
+            2>/dev/null | head -5 | paste -sd '; ' - || true)
 
-          Look at the failed step in that run. Notarization failures (HTTP 401) mean the APPLE_PASSWORD app-specific password needs replacing at appleid.apple.com."
+          # The paragraph below used to read "Notarization failures (HTTP 401)
+          # mean the APPLE_PASSWORD app-specific password needs replacing". It
+          # asserted a cause this job cannot observe, and it was wrong: that
+          # sentence opened #926, a password was rotated on the strength of it,
+          # and the next build 401'd on the new one (LAC-6331). State the
+          # evidence and let whoever reads the log draw the conclusion.
+          #
+          # A heredoc, not a quoted string: this runs only when the release is
+          # already broken, which is the worst possible moment to find an
+          # escaping bug, so the text carries no shell metacharacters.
+          body=$(cat <<EOF
+          The release build for $TAG failed, so nothing was published and nobody gets this version.
+
+          Run: $RUN_URL
+          Failed step: ${failed:-unknown, see the run}
+
+          Read that step's log before changing anything.
+
+          A notarization "HTTP status code: 401" does not on its own mean APPLE_PASSWORD is wrong. The endpoint behind it, notary/v2/asp, IS the app-specific-password token exchange, so a runner that cannot reach Apple gets a 401 rather than a network error. The same unchanged credential has succeeded within hours of a 401, and one rotation has already failed to fix it (LAC-6331).
+
+          Re-dispatch the tag first:
+
+              gh workflow run release-tauri.yml --ref main -f tag=$TAG -f prerelease=true
+
+          Replace APPLE_PASSWORD only when the "Check the notary service" step is red on two runs in a row.
+          EOF
+          )
           if [ -n "$open" ]; then
             gh issue comment "$open" --repo "$REPO" --body "$body"
           else
