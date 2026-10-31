@@ -273,6 +273,11 @@ pub fn describe_action(tool_name: &str, tool_input: &Value) -> String {
 
         "safari_execute_javascript" => "Run a script on the page you have open".to_string(),
 
+        "browser_call_page_tool" => match field("name") {
+            Some(name) => format!("Use the page's \"{}\" action", clip(name, 60)),
+            None => "Use an action the page offers".to_string(),
+        },
+
         "browser_type" | "safari_type_text" => "Type into the page".to_string(),
         "browser_interact" => match field("action") {
             Some("type") => "Type into the page".to_string(),
