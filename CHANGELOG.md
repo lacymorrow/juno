@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.253] - 2026-10-31
+
+### Fixed
+
+- **release:** move off the shipx that dropped Cargo bumps from the release commit (#925) (47726ce1)
+
 ## [0.8.252] - 2026-10-31
 
 ### Fixed
@@ -1741,7 +1747,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.252...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.253...HEAD
+[0.8.253]: https://github.com/lacymorrow/juno/compare/cua-v0.8.252...v0.8.253
 [0.8.252]: https://github.com/lacymorrow/juno/compare/cua-v0.8.251...v0.8.252
 [0.8.251]: https://github.com/lacymorrow/juno/compare/cua-v0.8.250...v0.8.251
 [0.8.250]: https://github.com/lacymorrow/juno/compare/cua-v0.8.249...v0.8.250
