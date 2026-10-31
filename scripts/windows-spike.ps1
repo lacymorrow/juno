@@ -98,9 +98,11 @@ Start-Process calc.exe
 $calc = Wait-Window { [JunoSpike]::FindWindow($null, 'Calculator') }
 [void][JunoSpike]::MoveWindow($calc, 140, 120, 340, 520, $true)
 Start-Sleep -Seconds 2
+# Notepad covers Calculator's whole keypad, so every button juno-cua presses
+# is hidden. Only the display stays in view, so a recording shows the result.
 Start-Process notepad.exe
 $notepad = Get-NotepadWindow
-[void][JunoSpike]::MoveWindow($notepad, 60, 60, 1000, 700, $true)
+[void][JunoSpike]::MoveWindow($notepad, 60, 330, 1000, 410, $true)
 [void][JunoSpike]::SetForegroundWindow($notepad)
 Start-Sleep -Seconds 2
 
@@ -109,6 +111,7 @@ $focusBefore = Invoke-Cua 'focused-element'
 $presses = @()
 foreach ($id in 'clearButton', 'num7Button', 'multiplyButton', 'num6Button', 'equalButton') {
   $presses += Invoke-CuaTool 'click' "#$id"
+  Start-Sleep -Milliseconds 1200  # so each step shows up in a recording
 }
 $display = Invoke-CuaTool 'get_element_attributes' '#CalculatorResults'
 $after = Get-DesktopState
@@ -116,17 +119,29 @@ $focusAfter = Invoke-Cua 'focused-element'
 
 $label = ''
 try { $label = ($display.stdout | ConvertFrom-Json).label } catch { }
+
+# Each pressed button's bounds, from juno-cua, must sit inside Notepad's
+# rectangle (60,330 to 1060,740), so none of them was ever visible.
+$buttonBounds = [ordered]@{}
+foreach ($id in 'num7Button', 'multiplyButton', 'num6Button', 'equalButton') {
+  try { $buttonBounds[$id] = @(((Invoke-CuaTool 'get_element_attributes' "#$id").stdout | ConvertFrom-Json).properties.bounds) } catch { $buttonBounds[$id] = $null }
+}
+$underNotepad = foreach ($b in $buttonBounds.Values) {
+  $b -and $b[0] -ge 60 -and $b[1] -ge 330 -and ($b[0] + $b[2]) -le 1060 -and ($b[1] + $b[3]) -le 740
+}
 $checks = [ordered]@{
   every_press_succeeded   = -not ($presses | Where-Object { $_.exit -ne 0 })
   display_reads_42        = $label -match '\b42$'
   cursor_unchanged        = ($before.cursor -join ',') -eq ($after.cursor -join ',')
   foreground_unchanged    = $before.foreground_hwnd -eq $after.foreground_hwnd
-  calculator_was_covered  = $before.foreground_hwnd -eq $notepad.ToInt64()
+  notepad_was_in_front    = $before.foreground_hwnd -eq $notepad.ToInt64()
+  buttons_under_notepad   = -not ($underNotepad -contains $false)
 }
 $summary.test = [ordered]@{
   passed       = -not ($checks.Values -contains $false)
   checks       = $checks
   display      = $label
+  button_bounds = $buttonBounds
   before       = $before
   after        = $after
   focus_before = $focusBefore
