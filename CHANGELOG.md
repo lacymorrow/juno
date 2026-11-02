@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **settings:** Claude Opus 5.5 stayed in the model list after you switched off it. Juno's recommended default drives the computer through the newer toolset, and the picker was still treating that as an advanced-only choice, so selecting any other model made Opus 5.5 disappear until you turned on advanced settings.
+
 ## [0.8.253] - 2026-10-31
 
 ### Fixed
