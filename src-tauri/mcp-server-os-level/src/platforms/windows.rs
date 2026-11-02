@@ -39,10 +39,6 @@ const MAX_TREE_DEPTH: usize = 60;
 /// A tree read stops here, so one huge window can't run for minutes.
 const MAX_TREE_NODES: usize = 5_000;
 
-/// How long to wait for a Chromium element's MSAA default action to appear
-/// before pressing it through Invoke, which takes the foreground.
-const CHROMIUM_DEFAULT_ACTION_WAIT: Duration = Duration::from_millis(2_000);
-
 fn unsupported<T>(what: &str) -> Result<T, AutomationError> {
     Err(AutomationError::UnsupportedPlatform(format!(
         "{what} isn't implemented on Windows yet"
@@ -620,25 +616,14 @@ impl WindowsUIElement {
                 return Ok("BM_CLICK");
             }
         }
-        // MSAA's default action pressed covered buttons in Calculator, WPF,
-        // Edge and VS Code without bringing them forward, where Invoke always
-        // did. Only elements that name a default action get it. Chromium
-        // reports none for its first presses after the tree is built, so give
-        // it a moment rather than fall back to Invoke and steal the foreground.
+        // MSAA's default action pressed a covered WPF button 10 times in 10
+        // without bringing it forward, where Invoke always did. Only elements
+        // that name a default action get it.
         if let Ok(legacy) = self.element.get_pattern::<UILegacyIAccessiblePattern>() {
-            let chromium = self.element.get_framework_id().is_ok_and(|f| f == "Chrome");
-            let deadline = Instant::now() + CHROMIUM_DEFAULT_ACTION_WAIT;
-            loop {
-                if legacy.get_default_action().is_ok_and(|a| !a.is_empty()) {
-                    if legacy.do_default_action().is_ok() {
-                        return Ok("MSAA default action");
-                    }
-                    break;
-                }
-                if !chromium || Instant::now() >= deadline {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(100));
+            if legacy.get_default_action().is_ok_and(|a| !a.is_empty())
+                && legacy.do_default_action().is_ok()
+            {
+                return Ok("MSAA default action");
             }
         }
         if let Ok(invoke) = self.element.get_pattern::<UIInvokePattern>() {
