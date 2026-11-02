@@ -1,0 +1,918 @@
+﻿{
+    "windows":  {
+                    "edge":  "131812",
+                    "vscode":  "328144",
+                    "wpf":  "131796",
+                    "cdp_page":  "count 0",
+                    "vscode_checkbox_found":  false
+                },
+    "summary":  [
+                    {
+                        "case":  "edge_cdp_js",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  0,
+                        "cursor_moved":  0,
+                        "methods":  [
+                                        "CDP Runtime.evaluate click()"
+                                    ]
+                    },
+                    {
+                        "case":  "edge_cdp_mouse",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  0,
+                        "cursor_moved":  0,
+                        "methods":  [
+                                        "CDP Input.dispatchMouseEvent"
+                                    ]
+                    },
+                    {
+                        "case":  "wpf_msaa",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  0,
+                        "cursor_moved":  0,
+                        "methods":  [
+                                        "MSAA accDoDefaultAction"
+                                    ]
+                    },
+                    {
+                        "case":  "edge_msaa",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  0,
+                        "took_foreground":  0,
+                        "cursor_moved":  0,
+                        "methods":  [
+                                        "not found"
+                                    ]
+                    },
+                    {
+                        "case":  "vscode_msaa",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  0,
+                        "took_foreground":  0,
+                        "cursor_moved":  0,
+                        "methods":  [
+                                        "MSAA accDoDefaultAction"
+                                    ]
+                    }
+                ],
+    "trials":  [
+                   {
+                       "case":  "edge_cdp_js",
+                       "valid":  true,
+                       "method":  "CDP Runtime.evaluate click()",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 0 - Profile 1 - Microsoft​ Edge",
+                                      "count 1 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_js",
+                       "valid":  true,
+                       "method":  "CDP Runtime.evaluate click()",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 1 - Profile 1 - Microsoft​ Edge",
+                                      "count 2 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_js",
+                       "valid":  true,
+                       "method":  "CDP Runtime.evaluate click()",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 2 - Profile 1 - Microsoft​ Edge",
+                                      "count 3 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_js",
+                       "valid":  true,
+                       "method":  "CDP Runtime.evaluate click()",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 3 - Profile 1 - Microsoft​ Edge",
+                                      "count 4 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_js",
+                       "valid":  true,
+                       "method":  "CDP Runtime.evaluate click()",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 4 - Profile 1 - Microsoft​ Edge",
+                                      "count 5 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_js",
+                       "valid":  true,
+                       "method":  "CDP Runtime.evaluate click()",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 5 - Profile 1 - Microsoft​ Edge",
+                                      "count 6 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_js",
+                       "valid":  true,
+                       "method":  "CDP Runtime.evaluate click()",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 6 - Profile 1 - Microsoft​ Edge",
+                                      "count 7 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_js",
+                       "valid":  true,
+                       "method":  "CDP Runtime.evaluate click()",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 7 - Profile 1 - Microsoft​ Edge",
+                                      "count 8 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_js",
+                       "valid":  true,
+                       "method":  "CDP Runtime.evaluate click()",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 8 - Profile 1 - Microsoft​ Edge",
+                                      "count 9 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_js",
+                       "valid":  true,
+                       "method":  "CDP Runtime.evaluate click()",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 9 - Profile 1 - Microsoft​ Edge",
+                                      "count 10 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_mouse",
+                       "valid":  true,
+                       "method":  "CDP Input.dispatchMouseEvent",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 10 - Profile 1 - Microsoft​ Edge",
+                                      "count 11 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_mouse",
+                       "valid":  true,
+                       "method":  "CDP Input.dispatchMouseEvent",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 11 - Profile 1 - Microsoft​ Edge",
+                                      "count 12 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_mouse",
+                       "valid":  true,
+                       "method":  "CDP Input.dispatchMouseEvent",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 12 - Profile 1 - Microsoft​ Edge",
+                                      "count 13 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_mouse",
+                       "valid":  true,
+                       "method":  "CDP Input.dispatchMouseEvent",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 13 - Profile 1 - Microsoft​ Edge",
+                                      "count 14 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_mouse",
+                       "valid":  true,
+                       "method":  "CDP Input.dispatchMouseEvent",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 14 - Profile 1 - Microsoft​ Edge",
+                                      "count 15 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_mouse",
+                       "valid":  true,
+                       "method":  "CDP Input.dispatchMouseEvent",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 15 - Profile 1 - Microsoft​ Edge",
+                                      "count 16 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_mouse",
+                       "valid":  true,
+                       "method":  "CDP Input.dispatchMouseEvent",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 16 - Profile 1 - Microsoft​ Edge",
+                                      "count 17 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_mouse",
+                       "valid":  true,
+                       "method":  "CDP Input.dispatchMouseEvent",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 17 - Profile 1 - Microsoft​ Edge",
+                                      "count 18 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_mouse",
+                       "valid":  true,
+                       "method":  "CDP Input.dispatchMouseEvent",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 18 - Profile 1 - Microsoft​ Edge",
+                                      "count 19 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_cdp_mouse",
+                       "valid":  true,
+                       "method":  "CDP Input.dispatchMouseEvent",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 19 - Profile 1 - Microsoft​ Edge",
+                                      "count 20 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 0",
+                                      "WPF 1"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 1",
+                                      "WPF 2"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 2",
+                                      "WPF 3"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 3",
+                                      "WPF 4"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 4",
+                                      "WPF 5"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 5",
+                                      "WPF 6"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 6",
+                                      "WPF 7"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 7",
+                                      "WPF 8"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 8",
+                                      "WPF 9"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 9",
+                                      "WPF 10"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 20 - Profile 1 - Microsoft​ Edge",
+                                      "count 20 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 20 - Profile 1 - Microsoft​ Edge",
+                                      "count 20 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 20 - Profile 1 - Microsoft​ Edge",
+                                      "count 20 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 20 - Profile 1 - Microsoft​ Edge",
+                                      "count 20 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 20 - Profile 1 - Microsoft​ Edge",
+                                      "count 20 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 20 - Profile 1 - Microsoft​ Edge",
+                                      "count 20 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 20 - Profile 1 - Microsoft​ Edge",
+                                      "count 20 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 20 - Profile 1 - Microsoft​ Edge",
+                                      "count 20 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 20 - Profile 1 - Microsoft​ Edge",
+                                      "count 20 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 20 - Profile 1 - Microsoft​ Edge",
+                                      "count 20 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  false,
+                       "effect":  [
+                                      "none",
+                                      "none"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  false,
+                       "effect":  [
+                                      "none",
+                                      "none"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  false,
+                       "effect":  [
+                                      "none",
+                                      "none"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  false,
+                       "effect":  [
+                                      "none",
+                                      "none"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  false,
+                       "effect":  [
+                                      "none",
+                                      "none"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  false,
+                       "effect":  [
+                                      "none",
+                                      "none"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  false,
+                       "effect":  [
+                                      "none",
+                                      "none"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  false,
+                       "effect":  [
+                                      "none",
+                                      "none"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  false,
+                       "effect":  [
+                                      "none",
+                                      "none"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  false,
+                       "effect":  [
+                                      "none",
+                                      "none"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   }
+               ]
+}

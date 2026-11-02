@@ -1,0 +1,428 @@
+﻿{
+    "select_hwnd":  393780,
+    "copy_field_found":  true,
+    "summary":  [
+                    {
+                        "case":  "xaml_uia_invoke",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  0,
+                        "restore":  [
+
+                                    ]
+                    },
+                    {
+                        "case":  "win32_juno_cua",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  0,
+                        "restore":  [
+
+                                    ]
+                    },
+                    {
+                        "case":  "win32_bm_click",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  0,
+                        "restore":  [
+
+                                    ]
+                    }
+                ],
+    "trials":  [
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_juno_cua",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_juno_cua",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_juno_cua",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_juno_cua",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_juno_cua",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_juno_cua",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_juno_cua",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_juno_cua",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_juno_cua",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_juno_cua",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   }
+               ]
+}
