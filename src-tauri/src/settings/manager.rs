@@ -743,6 +743,40 @@ impl SettingsManager {
         Ok(())
     }
 
+    /// Change the voice transcription settings in place. See
+    /// [`Self::update_section`].
+    ///
+    /// Prefer this over a `get` then `set` pair: the writer's turn only wraps
+    /// the second call, so two callers that each change one field both start
+    /// from the same old copy and the later write undoes the earlier. This
+    /// reads inside the turn.
+    pub async fn update_voice_transcription_settings(
+        &self,
+        change: impl FnOnce(&mut VoiceTranscriptionSettings),
+    ) -> Result<VoiceTranscriptionSettings, String> {
+        let saved = self
+            .update_section(
+                store_keys::VOICE_TRANSCRIPTION,
+                "voice transcription settings",
+                |s: &mut VoiceTranscriptionSettings| {
+                    change(s);
+                    Ok(())
+                },
+            )
+            .await?;
+
+        self.app_handle
+            .emit(events::VOICE_TRANSCRIPTION_SETTINGS_CHANGED, &saved)
+            .map_err(|e| {
+                format!(
+                    "Failed to emit voice transcription settings changed event: {}",
+                    e
+                )
+            })?;
+        self.emit_settings_changed().await;
+        Ok(saved)
+    }
+
     pub async fn set_voice_transcription_settings(
         &self,
         settings: &VoiceTranscriptionSettings,

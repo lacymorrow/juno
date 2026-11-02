@@ -591,6 +591,14 @@ pub struct VoiceTranscriptionSettings {
     /// directory, which is what every install before TDT had on disk.
     #[serde(default = "default_parakeet_model_dir")]
     pub parakeet_model_dir: String,
+    /// When the active dictation model first scored below this Mac's
+    /// Recommended row, in seconds since the epoch; `None` while it is at or
+    /// above it. Settings > Models says so once it has been true for a day,
+    /// so a downgrade someone just made on purpose is not read back at them
+    /// (LAC-6448). Owned by `commands::stt_models`, which sets it on the way
+    /// down and clears it on the way back up.
+    #[serde(default)]
+    pub below_recommended_since: Option<u64>,
 }
 
 fn default_stt_provider() -> String {
@@ -795,6 +803,7 @@ impl Default for VoiceTranscriptionSettings {
             live_partial_transcription: false,
             parakeet_download_declined: false,
             parakeet_model_dir: default_parakeet_model_dir(),
+            below_recommended_since: None,
         }
     }
 }

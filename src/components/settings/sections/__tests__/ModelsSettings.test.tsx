@@ -58,6 +58,7 @@ function row(
     recommended: false,
     speed: 3,
     accuracy: 3,
+    removal_activates: null,
     ...overrides,
   };
 }
@@ -70,6 +71,7 @@ function status(models: SttModelInfo[], extra: Partial<SttModelsStatus> = {}): S
     active_id: active?.id ?? "tiny-en",
     download: null,
     offer_recommended: false,
+    quality_notice: null,
     ...extra,
   };
 }
@@ -398,5 +400,65 @@ describe("Models pane: a lost connection is a pause, not a dead end", () => {
       "No internet connection. Try again when you're back online.",
     );
     expect(within(parakeet).getByRole("alert")).not.toHaveTextContent(/failed/i);
+  });
+});
+
+describe("LAC-6448: a downgrade is never silent, and never forced", () => {
+  it("offers to remove the active model and says what takes over", async () => {
+    // Lacy's Mac on 10-30: Parakeet active, large-v3 also on disk. Before this
+    // fix the active row had no trash icon at all, so freeing the space meant
+    // tapping Use on the Fast row first — and that is the downgrade that stuck.
+    const models = arm64Models().map((m) =>
+      m.id === "parakeet-ctc"
+        ? { ...m, downloaded: true, active: true, removal_activates: "Most accurate" }
+        : m.id === "tiny-en"
+          ? { ...m, active: false }
+          : m.id === "large-v3"
+            ? { ...m, downloaded: true }
+            : m,
+    );
+    mockBackend(() => status(models), true);
+    await mount();
+
+    const activeRow = screen.getByTestId("model-row-parakeet-ctc");
+    const trash = within(activeRow).getByRole("button", { name: /^Remove Balanced$/ });
+    fireEvent.click(trash);
+
+    expect(
+      within(activeRow).getByText("Remove? Dictation switches to Most accurate."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(within(activeRow).getByRole("button", { name: /Confirm remove Balanced/ }));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith(COMMANDS.STT_MODELS_DELETE, {
+        modelId: "parakeet-ctc",
+      }),
+    );
+    // Nothing asked the person to pick a replacement first.
+    expect(invokeMock).not.toHaveBeenCalledWith(COMMANDS.STT_MODELS_USE, expect.anything());
+  });
+
+  it("still refuses to remove the bundled model", async () => {
+    mockBackend(() => status(arm64Models()), true);
+    await mount();
+    const bundled = screen.getByTestId("model-row-tiny-en");
+    expect(within(bundled).queryByRole("button", { name: /^Remove / })).toBeNull();
+  });
+
+  it("prints the backend's quality notice verbatim, with no popup", async () => {
+    const line = "Dictation has been on Fast for 3 days. Balanced is more accurate.";
+    mockBackend(() => status(arm64Models(), { quality_notice: line }));
+    await mount();
+
+    expect(screen.getByTestId("model-quality-notice")).toHaveTextContent(line);
+    // A notice, not an interruption: nothing modal, and nothing to dismiss.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("shows no notice when the backend sends none", async () => {
+    mockBackend(() => status(arm64Models()));
+    await mount();
+    expect(screen.queryByTestId("model-quality-notice")).toBeNull();
   });
 });

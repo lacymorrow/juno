@@ -23,6 +23,12 @@ export interface SttModelInfo {
 	recommended: boolean;
 	speed: number;
 	accuracy: number;
+	/**
+	 * The name of the model that becomes active if this row is removed, on the
+	 * active row only; null everywhere else. The confirmation says it, so
+	 * removing the model you dictate on is never a silent downgrade.
+	 */
+	removal_activates: string | null;
 }
 
 export interface SttDownloadProgress {
@@ -54,6 +60,12 @@ export interface SttModelsStatus {
 	active_id: string;
 	download: SttDownloadProgress | null;
 	offer_recommended: boolean;
+	/**
+	 * One plain line about a dictation model that has been below this Mac's
+	 * Recommended row for more than a day, or null. The backend owns the
+	 * wording and the threshold; print it verbatim and never as a popup.
+	 */
+	quality_notice: string | null;
 }
 
 export interface SttDownloadError {
