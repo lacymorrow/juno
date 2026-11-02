@@ -1,9 +1,11 @@
 //! Windows engine, built on UI Automation.
 //!
 //! This is the spike for LAC-6321 (docs/plans/windows.md). It does enough to
-//! find an element in a window that isn't in front, press it with the Invoke
-//! pattern, and read values back, all without moving the cursor or changing
-//! the foreground window. Everything that would need real input (mouse,
+//! find an element in a window that isn't in front, press it, and read values
+//! back, all without moving the cursor. Classic Win32 buttons are pressed with
+//! BM_CLICK, which leaves the foreground alone; everything else goes through
+//! the Invoke pattern, which brings the app to the front (see
+//! docs/changelog/media/928). Everything that would need real input (mouse,
 //! keyboard, scrolling) returns `UnsupportedPlatform` until the port gets there.
 
 use crate::element::UIElementImpl;
@@ -23,9 +25,11 @@ use uiautomation::patterns::{
 use uiautomation::types::{ControlType, TreeScope, UIProperty};
 use uiautomation::variants::Variant;
 use uiautomation::UIAutomation;
-use windows::Win32::Foundation::POINT;
+use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
-use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow, GetWindowTextW};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetCursorPos, GetForegroundWindow, GetWindowTextW, PostMessageW, BM_CLICK,
+};
 
 /// Deep enough for a WebView2 or Electron page, which sits 20 to 40 levels
 /// below its window. Same reasoning as the macOS engine's cap.
@@ -584,10 +588,29 @@ impl WindowsUIElement {
             .filter(|v| !v.is_empty())
     }
 
-    /// Press the element the way a screen reader would, through a control
-    /// pattern, so no input event is generated and nothing moves.
+    /// The element's own window, when it is a classic Win32 button.
+    fn win32_button(&self) -> Option<HWND> {
+        if self.element.get_classname().ok()? != "Button" {
+            return None;
+        }
+        let handle = self.element.get_native_window_handle().ok()?;
+        (!handle.is_invalid()).then(|| handle.into())
+    }
+
+    /// Press the element without an input event, so nothing moves.
     fn press(&self) -> Result<&'static str, AutomationError> {
         ensure_com();
+        // In the 11-02 trials, Invoke on a Win32 button brought its app to the
+        // front 10 times in 10, and BM_CLICK posted to the same button never
+        // did. If the post fails (a window at a higher integrity level), fall
+        // through to Invoke.
+        if let Some(hwnd) = self.win32_button() {
+            // SAFETY: posts a message with no pointers in it; a stale handle
+            // only makes the call fail.
+            if unsafe { PostMessageW(Some(hwnd), BM_CLICK, WPARAM(0), LPARAM(0)) }.is_ok() {
+                return Ok("BM_CLICK");
+            }
+        }
         if let Ok(invoke) = self.element.get_pattern::<UIInvokePattern>() {
             invoke.invoke().map_err(|e| uia_error("Invoke failed", e))?;
             return Ok("UIA Invoke");
@@ -711,7 +734,7 @@ impl UIElementImpl for WindowsUIElement {
         Ok(ClickResult {
             method: method.to_string(),
             coordinates: None,
-            details: "Pressed through UI Automation; no input event was sent".to_string(),
+            details: "Pressed without an input event; the pointer didn't move".to_string(),
         })
     }
 
