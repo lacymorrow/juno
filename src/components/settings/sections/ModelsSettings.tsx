@@ -20,10 +20,12 @@ import {
  * behind it are implementation, and they appear only once Advanced is on,
  * alongside the rest of the catalog as more rows in the same list. Each row
  * has exactly one action for its state: Download, a progress bar with a
- * cancel, Use, or an Active check. A trash icon appears only on downloaded,
- * inactive rows; the bundled model is never deletable. The backend decides
- * all of it: which rows exist for this Mac, which one the engine is really
- * running, and what is on disk. This file only draws that.
+ * cancel, Use, or an Active check. A trash icon appears on every downloaded
+ * row, the active one included; the bundled model is never deletable. The
+ * backend decides all of it: which rows exist for this Mac, which one the
+ * engine is really running, what is on disk, which model takes over when the
+ * active one is removed, and whether dictation has been below the Recommended
+ * row long enough to say so. This file only draws that.
  */
 
 const MB = 1024 * 1024;
@@ -122,8 +124,8 @@ function ModelRow({ model, stt, advanced }: RowProps) {
 
   // Leave the inline confirmation if the row stops being deletable underneath it.
   useEffect(() => {
-    if (!model.downloaded || model.active || downloading) setConfirmDelete(false);
-  }, [model.downloaded, model.active, downloading]);
+    if (!model.downloaded || model.bundled || downloading) setConfirmDelete(false);
+  }, [model.downloaded, model.bundled, downloading]);
 
   const runUse = async () => {
     setBusy("use");
@@ -191,7 +193,11 @@ function ModelRow({ model, stt, advanced }: RowProps) {
     );
   }
 
-  const canDelete = model.downloaded && !model.bundled && !model.active && !downloading;
+  // The active row is deletable: the backend moves dictation to the best model
+  // still on disk first, and `removal_activates` names it in the confirmation.
+  // Refusing it is what made someone downgrade by hand to free up space, and
+  // the hand-picked downgrade is what stuck (LAC-6448).
+  const canDelete = model.downloaded && !model.bundled && !downloading;
 
   return (
     <div
@@ -235,7 +241,11 @@ function ModelRow({ model, stt, advanced }: RowProps) {
       <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
         {confirmDelete ? (
           <div className="flex items-center gap-1.5" role="group" aria-label={`Remove ${title}?`}>
-            <span className="text-[12px] text-muted-foreground">Remove?</span>
+            <span className="text-[12px] text-muted-foreground">
+              {model.removal_activates
+                ? `Remove? Dictation switches to ${model.removal_activates}.`
+                : "Remove?"}
+            </span>
             <Button
               size="sm"
               variant="destructive"
@@ -288,6 +298,10 @@ export default function ModelsSettings() {
   const changed = stt.lastChange?.automatic
     ? models.find((m) => m.id === stt.lastChange?.model_id)
     : undefined;
+  // Rust decided both the wording and whether a day has passed; this prints
+  // it. No popup and no badge: the row it points at is already in the list
+  // below with its own Download button.
+  const notice = stt.status?.quality_notice ?? null;
 
   return (
     <div className="space-y-6">
@@ -295,7 +309,7 @@ export default function ModelsSettings() {
         title="Dictation model"
         footer="All models run on your Mac. Your voice never leaves it."
       >
-        {(downloadingModel || changed || !stt.online) && (
+        {(downloadingModel || changed || notice || !stt.online) && (
           <SettingsRow
             below={
               <div className="space-y-1 text-[12px] text-muted-foreground" role="status">
@@ -321,6 +335,7 @@ export default function ModelsSettings() {
                     </Button>
                   </p>
                 )}
+                {notice && <p data-testid="model-quality-notice">{notice}</p>}
                 {!stt.online && <p>No internet connection. Downloaded models still work.</p>}
               </div>
             }
