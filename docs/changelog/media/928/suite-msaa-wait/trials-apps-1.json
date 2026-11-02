@@ -1,0 +1,861 @@
+﻿{
+    "windows":  {
+                    "edge":  "263224",
+                    "vscode":  "262642",
+                    "wpf":  "197750",
+                    "forms":  "394078",
+                    "forms_button":  "",
+                    "vscode_checkbox_found":  true
+                },
+    "summary":  [
+                    {
+                        "case":  "edge_juno_cua",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  2,
+                        "methods":  [
+                                        "MSAA default action",
+                                        "UIA Invoke"
+                                    ]
+                    },
+                    {
+                        "case":  "vscode_juno_cua",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  0,
+                        "methods":  [
+                                        "MSAA default action"
+                                    ]
+                    },
+                    {
+                        "case":  "wpf_juno_cua",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  0,
+                        "methods":  [
+                                        "MSAA default action"
+                                    ]
+                    },
+                    {
+                        "case":  "forms_juno_cua",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  0,
+                        "methods":  [
+                                        "BM_CLICK"
+                                    ]
+                    },
+                    {
+                        "case":  "forms_bm_click",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  0,
+                        "took_foreground":  0,
+                        "methods":  [
+                                        "BM_CLICK (posted by the script)"
+                                    ]
+                    }
+                ],
+    "trials":  [
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 1 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  546,
+                       "foreground_after":  "count 0 and 1 more page - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 1 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 2 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  788,
+                       "foreground_after":  "count 1 and 1 more page - Profile 1 - Microsoft​ Edge",
+                       "restore":  "alt_key"
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 2 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 3 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 3 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 4 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 4 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 5 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 5 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 6 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 6 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 7 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 7 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 8 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 8 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 9 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 9 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 10 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 0",
+                                      "WPF 1"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 1",
+                                      "WPF 2"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 2",
+                                      "WPF 3"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 3",
+                                      "WPF 4"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 4",
+                                      "WPF 5"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 5",
+                                      "WPF 6"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 6",
+                                      "WPF 7"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 7",
+                                      "WPF 8"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 8",
+                                      "WPF 9"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "MSAA default action",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 9",
+                                      "WPF 10"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 0",
+                                      "Forms 1"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 1",
+                                      "Forms 2"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 2",
+                                      "Forms 3"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 3",
+                                      "Forms 4"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 4",
+                                      "Forms 5"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 5",
+                                      "Forms 6"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 6",
+                                      "Forms 7"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 7",
+                                      "Forms 8"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 8",
+                                      "Forms 9"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 9",
+                                      "Forms 10"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 10",
+                                      "Forms 10"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 10",
+                                      "Forms 10"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 10",
+                                      "Forms 10"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 10",
+                                      "Forms 10"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 10",
+                                      "Forms 10"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 10",
+                                      "Forms 10"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 10",
+                                      "Forms 10"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 10",
+                                      "Forms 10"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 10",
+                                      "Forms 10"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 10",
+                                      "Forms 10"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   }
+               ]
+}
