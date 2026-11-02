@@ -20,7 +20,8 @@ use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 use uiautomation::core::UICondition;
 use uiautomation::patterns::{
-    UIInvokePattern, UISelectionItemPattern, UITogglePattern, UIValuePattern,
+    UIInvokePattern, UILegacyIAccessiblePattern, UISelectionItemPattern, UITogglePattern,
+    UIValuePattern,
 };
 use uiautomation::types::{ControlType, TreeScope, UIProperty};
 use uiautomation::variants::Variant;
@@ -613,6 +614,16 @@ impl WindowsUIElement {
             // only makes the call fail.
             if unsafe { PostMessageW(Some(hwnd), BM_CLICK, WPARAM(0), LPARAM(0)) }.is_ok() {
                 return Ok("BM_CLICK");
+            }
+        }
+        // MSAA's default action pressed a covered WPF button 10 times in 10
+        // without bringing it forward, where Invoke always did. Only elements
+        // that name a default action get it.
+        if let Ok(legacy) = self.element.get_pattern::<UILegacyIAccessiblePattern>() {
+            if legacy.get_default_action().is_ok_and(|a| !a.is_empty())
+                && legacy.do_default_action().is_ok()
+            {
+                return Ok("MSAA default action");
             }
         }
         if let Ok(invoke) = self.element.get_pattern::<UIInvokePattern>() {
