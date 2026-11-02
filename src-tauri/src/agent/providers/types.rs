@@ -372,9 +372,14 @@ pub struct ModelInfo {
     /// these unless advanced settings are on, or the model is the active one.
     pub is_legacy: bool,
     /// True when the model can only do computer use through
-    /// `computer_toolset_20260801`. Hidden like a legacy model: the toolset is
-    /// newer, costs roughly 2x the input-token overhead per request, and is not
-    /// what Juno drives by default, so opting into it is an advanced choice.
+    /// `computer_toolset_20260801`.
+    ///
+    /// Reported for display, **not** as a picker gate. It was a gate while Juno
+    /// did not send the toolset and its ~2x input-token overhead was an opt-in;
+    /// Juno sends it now and the model policy accepts that cost for the
+    /// default, so a toolset model is an ordinary current model. Gating the
+    /// picker on this field hid Claude Opus 5.5, the recommended default, from
+    /// anyone whose selection had moved off it (LAC-6396).
     pub requires_computer_toolset: bool,
 }
 

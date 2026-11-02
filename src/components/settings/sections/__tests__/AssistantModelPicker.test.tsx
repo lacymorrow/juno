@@ -22,6 +22,9 @@ type Model = {
   supports_computer_use: boolean;
   is_recommended: boolean;
   is_legacy: boolean;
+  /** `get_providers` always sends this. Omitting it from the fixture is what
+   * made the picker's toolset gate invisible to these tests (LAC-6396). */
+  requires_computer_toolset: boolean;
 };
 
 const CAPABLE: Model = {
@@ -30,6 +33,7 @@ const CAPABLE: Model = {
   supports_computer_use: true,
   is_recommended: true,
   is_legacy: false,
+  requires_computer_toolset: false,
 };
 
 const LEGACY: Model = {
@@ -38,6 +42,7 @@ const LEGACY: Model = {
   supports_computer_use: true,
   is_recommended: false,
   is_legacy: true,
+  requires_computer_toolset: false,
 };
 
 const CHAT_ONLY: Model = {
@@ -46,6 +51,7 @@ const CHAT_ONLY: Model = {
   supports_computer_use: false,
   is_recommended: false,
   is_legacy: false,
+  requires_computer_toolset: false,
 };
 
 /** Drives the computer through `computer_toolset_20260801`. Juno now sends
@@ -56,6 +62,7 @@ const TOOLSET: Model = {
   supports_computer_use: true,
   is_recommended: false,
   is_legacy: false,
+  requires_computer_toolset: true,
 };
 
 const settingsWith = (models: Model[], selectedId = models[0].id) =>
@@ -149,6 +156,23 @@ describe("AssistantModelPicker legacy gating", () => {
     );
 
     expect(within(openModelList()).getByText(LEGACY.name)).toBeInTheDocument();
+  });
+
+  // The production bug this guards (LAC-6396): `get_providers` sends
+  // `requires_computer_toolset: true` for Claude Opus 5.5, the recommended
+  // default, and the picker gated visibility on that field. Select anything
+  // else and the default vanished, unreachable without advanced settings. The
+  // old TOOLSET fixture omitted the field, so `undefined` read as falsy and
+  // every test passed against a shape production never sends.
+  it("shows a toolset model that is not the current one, advanced off", () => {
+    advanced.on = false;
+    render(
+      <AssistantModelPicker
+        settings={settingsWith([CAPABLE, TOOLSET], CAPABLE.id)}
+      />
+    );
+
+    expect(within(openModelList()).getByText(TOOLSET.name)).toBeInTheDocument();
   });
 
   it("always shows the model in use, even when it is an older one", () => {

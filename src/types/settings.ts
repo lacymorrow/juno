@@ -13,7 +13,9 @@ export interface ProviderInfo {
     /** The provider lists this model as legacy. Hidden unless advanced
      * settings are on, or it is the model currently in use. */
     is_legacy: boolean;
-	/** Model drives the computer only through computer_toolset_20260801 (advanced). */
+	/** Model drives the computer only through computer_toolset_20260801.
+	 * Reported for display, not a visibility gate: Juno sends the toolset, so
+	 * these are ordinary current models. See the Rust doc on ModelInfo. */
 	requires_computer_toolset?: boolean;
     /** Drives the computer, but only through a tool version Juno does not
      * send yet. Not a chat-only model — say so accurately. */
