@@ -1470,7 +1470,24 @@ fn stt_provider_from_settings(value: Option<&serde_json::Value>) -> SavedStt {
 /// download starts. A saved model that is not on disk is replaced in settings
 /// by the model actually running, so Settings never names a model dictation
 /// is not using.
+///
+/// Also starts (or clears) the below-Recommended clock, so the notice in
+/// Settings counts from when dictation was actually downgraded rather than
+/// from the first time someone happened to open the Models pane. Lacy went
+/// three days without opening it (LAC-6448).
 pub async fn apply_persisted_stt_model(app: &AppHandle) {
+    honour_saved_model(app).await;
+
+    if let Ok(settings) = load_voice_settings(app).await {
+        let arch = current_arch();
+        let active_id = active_model_id(app, &settings);
+        if let Some(line) = run_quality_clock(app, &arch, &active_id, &settings).await {
+            info!("[SttModels] {}", line);
+        }
+    }
+}
+
+async fn honour_saved_model(app: &AppHandle) {
     let settings = match load_voice_settings(app).await {
         Ok(s) => s,
         Err(e) => {
