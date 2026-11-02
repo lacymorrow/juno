@@ -588,9 +588,11 @@ impl WindowsUIElement {
             .filter(|v| !v.is_empty())
     }
 
-    /// The element's own window, when it is a classic Win32 button.
+    /// The element's own window, when it is a classic Win32 button or a
+    /// WinForms button (which wraps the same control).
     fn win32_button(&self) -> Option<HWND> {
-        if self.element.get_classname().ok()? != "Button" {
+        let class = self.element.get_classname().ok()?;
+        if class != "Button" && !class.starts_with("WindowsForms10.BUTTON.") {
             return None;
         }
         let handle = self.element.get_native_window_handle().ok()?;
@@ -600,9 +602,11 @@ impl WindowsUIElement {
     /// Press the element without an input event, so nothing moves.
     fn press(&self) -> Result<&'static str, AutomationError> {
         ensure_com();
-        // In the 11-02 trials, Invoke on a Win32 button brought its app to the
-        // front 10 times in 10, and BM_CLICK posted to the same button never
-        // did. If the post fails (a window at a higher integrity level), fall
+        // In the 11-02 trials, every UIA pattern press brought its app to the
+        // front (Win32, WinForms, WPF, XAML, Edge, VS Code), and BM_CLICK
+        // posted to a Win32 or WinForms button never did. WPF buttons also
+        // report the class "Button" but have no window of their own, so they
+        // skip this. If the post fails (a window at a higher integrity level), fall
         // through to Invoke.
         if let Some(hwnd) = self.win32_button() {
             // SAFETY: posts a message with no pointers in it; a stale handle
