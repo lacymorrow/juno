@@ -278,6 +278,120 @@ pub fn should_offer_recommended(
         && find_def(recommended_id(arch)).is_some()
 }
 
+/// How long the active model has to sit below the Recommended row before
+/// Settings says so. A day, because a deliberate downgrade for one task is
+/// nobody's business and a week of it is.
+pub const BELOW_RECOMMENDED_GRACE_SECS: u64 = 24 * 60 * 60;
+
+/// The best model to dictate on out of the ids in `on_disk`, for this Mac.
+///
+/// **The bundled tiny.en is a last resort, never a choice** (LAC-6448). It is
+/// the fastest row and the first one in the list, which is exactly why it
+/// cannot be what Juno reaches for on its own: it has the worst word error
+/// rate in the catalog by a wide margin (12.8 against 6.05 for Recommended),
+/// and the person who ends up on it is not told.
+///
+/// Recommended wins whenever it is on disk, because it is the Mac's best
+/// *tradeoff* and not merely its highest pip count: on Intel, large-v3 scores
+/// one more accuracy pip than large-v3-turbo and takes about five times the
+/// compute to do it, which is why turbo is what that Mac is recommended.
+/// Failing that, the highest accuracy, then the fastest at equal accuracy.
+///
+/// Ids the catalog does not list for this architecture are ignored: the files
+/// can be present on a Mac that cannot run them (an Intel Mac restored from
+/// an Apple Silicon backup).
+pub fn best_available_id(arch: &str, on_disk: &[&str]) -> Option<&'static str> {
+    let catalog = catalog_for_arch(arch);
+    let available = || catalog.iter().filter(|def| on_disk.contains(&def.id));
+    if let Some(def) = available().find(|def| def.id == recommended_id(arch)) {
+        return Some(def.id);
+    }
+    available()
+        .max_by_key(|def| (def.accuracy, def.speed))
+        .map(|def| def.id)
+}
+
+/// Which model takes over when `removing` is deleted, given what is on disk.
+/// `None` only when nothing at all would be left, which cannot happen while
+/// the bundled model is undeletable.
+pub fn fallback_after_removing(
+    arch: &str,
+    removing: &str,
+    on_disk: &[&str],
+) -> Option<&'static str> {
+    let remaining: Vec<&str> = on_disk
+        .iter()
+        .copied()
+        .filter(|id| *id != removing)
+        .collect();
+    best_available_id(arch, &remaining)
+}
+
+/// Whether `active_id` is less accurate than this Mac's Recommended row.
+///
+/// Accuracy pips, which come from published word error rates (see
+/// [`ModelDef`]), so this compares measurements and not preferences. "Most
+/// accurate" is never below Recommended, and neither is Recommended itself.
+/// An id the catalog does not list reads as not below: saying otherwise about
+/// a model Juno cannot describe would be a guess.
+pub fn below_recommended(arch: &str, active_id: &str) -> bool {
+    let Some(active) = find_def(active_id).filter(|d| !d.arm64_only || is_arm64(arch)) else {
+        return false;
+    };
+    let Some(recommended) = find_def(recommended_id(arch)) else {
+        return false;
+    };
+    active.accuracy < recommended.accuracy
+}
+
+/// The one line Settings > Models shows when dictation has been running below
+/// the Recommended row for more than [`BELOW_RECOMMENDED_GRACE_SECS`], or
+/// `None`.
+///
+/// No popup and no badge: the Balanced row is already in the list with its own
+/// Download button, so saying it once above the list is the whole fix. The row
+/// is named the way the row names itself (its tier's outcome name, or the
+/// model's own name for the Advanced rows that have no tier), so what the
+/// notice points at is findable. It never names the hardware.
+pub fn quality_notice_line(
+    arch: &str,
+    active_id: &str,
+    since: Option<u64>,
+    now: u64,
+) -> Option<String> {
+    if !below_recommended(arch, active_id) {
+        return None;
+    }
+    // `checked_sub` rather than a subtraction: a clock that went backwards (a
+    // timezone fix, a restored backup) must produce no notice, not a day
+    // count that wrapped around.
+    let elapsed = now.checked_sub(since?)?;
+    if elapsed <= BELOW_RECOMMENDED_GRACE_SECS {
+        return None;
+    }
+    let days = elapsed / BELOW_RECOMMENDED_GRACE_SECS;
+    let active = find_def(active_id)?;
+    let active_name = tier_for(arch, active_id)
+        .map(|t| t.name)
+        .unwrap_or(active.name);
+    let recommended_name = tier_for(arch, recommended_id(arch)).map(|t| t.name)?;
+    Some(format!(
+        "Dictation has been on {} for {} day{}. {} is more accurate.",
+        active_name,
+        days,
+        if days == 1 { "" } else { "s" },
+        recommended_name
+    ))
+}
+
+/// Seconds since the epoch, never panicking (see the root `CLAUDE.md`).
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+        .as_secs()
+}
+
 /// What to say when something asks for a model this Mac's catalog does not
 /// list. The row is absent from every pane, so nothing a person can tap
 /// reaches this; it still never names the hardware, because naming a thing
@@ -308,6 +422,11 @@ pub struct SttModelInfo {
     pub recommended: bool,
     pub speed: u8,
     pub accuracy: u8,
+    /// The name of the model that becomes active if this row is removed, for
+    /// the active row only; `None` on every other row. The confirmation says
+    /// it out loud, so removing the model you are dictating on cannot quietly
+    /// drop you onto a worse one (LAC-6448).
+    pub removal_activates: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -336,6 +455,10 @@ pub struct SttModelsStatus {
     /// Mac: it is not on disk, and the person has not declined or chosen a
     /// model by hand. Parakeet on Apple Silicon, large-v3-turbo on Intel.
     pub offer_recommended: bool,
+    /// One plain line to show above the list when dictation has been running
+    /// below this Mac's Recommended row for more than a day, else `None`.
+    /// Rust decides the wording and the threshold; the UI prints it verbatim.
+    pub quality_notice: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +552,16 @@ fn is_downloaded(app: &AppHandle, def: &ModelDef) -> bool {
             .missing_files(Path::new(&parakeet_dir(app, def)))
             .is_empty(),
     }
+}
+
+/// Every catalog id this Mac has on disk, in catalog order. The input to
+/// [`best_available_id`], kept separate so that choice stays pure.
+fn downloaded_ids(app: &AppHandle, arch: &str) -> Vec<&'static str> {
+    catalog_for_arch(arch)
+        .into_iter()
+        .filter(|def| is_downloaded(app, def))
+        .map(|def| def.id)
+        .collect()
 }
 
 fn whisper_id_for_path(path: &str) -> Option<&'static str> {
@@ -531,16 +664,27 @@ pub async fn stt_models_status(app: &AppHandle) -> Result<SttModelsStatus, Strin
         })
     });
 
+    let on_disk = downloaded_ids(app, &arch);
     let models = catalog_for_arch(&arch)
         .into_iter()
         .map(|def| {
             let tier = tier_for(&arch, def.id);
+            let removal_activates = (def.id == active_id && !def.bundled)
+                .then(|| fallback_after_removing(&arch, def.id, &on_disk))
+                .flatten()
+                .and_then(find_def)
+                .map(|next| {
+                    tier_for(&arch, next.id)
+                        .map(|t| t.name)
+                        .unwrap_or(next.name)
+                        .to_string()
+                });
             SttModelInfo {
                 id: def.id.to_string(),
                 engine: def.engine.as_str().to_string(),
                 name: def.name.to_string(),
                 size_mb: def.size_mb,
-                downloaded: is_downloaded(app, def),
+                downloaded: on_disk.contains(&def.id),
                 bundled: def.bundled,
                 active: def.id == active_id,
                 tier: tier.map(|t| t.key.to_string()),
@@ -548,6 +692,7 @@ pub async fn stt_models_status(app: &AppHandle) -> Result<SttModelsStatus, Strin
                 recommended: tier.is_some_and(|t| t.recommended),
                 speed: def.speed,
                 accuracy: def.accuracy,
+                removal_activates,
             }
         })
         .collect();
@@ -566,13 +711,71 @@ pub async fn stt_models_status(app: &AppHandle) -> Result<SttModelsStatus, Strin
         recommended_on_disk,
     );
 
+    let quality_notice = run_quality_clock(app, &arch, &active_id, &settings).await;
+
     Ok(SttModelsStatus {
         arch,
         models,
         active_id,
         download,
         offer_recommended,
+        quality_notice,
     })
+}
+
+/// Keep `below_recommended_since` true to what is really running, and return
+/// the line Settings should show.
+///
+/// This writes from inside a read command on purpose: the status call is the
+/// one thing that runs at startup, on every Settings open and after every
+/// switch, and the clock has to start somewhere. It writes **only** on a
+/// transition, so a Settings pane left open does not rewrite the store, and
+/// it writes through `update_voice_transcription_settings` so it cannot
+/// clobber a concurrent change to another field. A failure to write is logged
+/// and nothing else: a missing notice is not worth an error in front of
+/// someone.
+async fn run_quality_clock(
+    app: &AppHandle,
+    arch: &str,
+    active_id: &str,
+    settings: &VoiceTranscriptionSettings,
+) -> Option<String> {
+    let now = unix_now();
+    let since = match (
+        below_recommended(arch, active_id),
+        settings.below_recommended_since,
+    ) {
+        (true, Some(since)) => Some(since),
+        (true, None) => {
+            write_below_recommended_since(app, Some(now)).await;
+            Some(now)
+        }
+        (false, Some(_)) => {
+            write_below_recommended_since(app, None).await;
+            None
+        }
+        (false, None) => None,
+    };
+    quality_notice_line(arch, active_id, since, now)
+}
+
+async fn write_below_recommended_since(app: &AppHandle, value: Option<u64>) {
+    let manager = match SettingsManager::new(app.clone()) {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(
+                "[SttModels] Could not open settings for the model clock: {}",
+                e
+            );
+            return;
+        }
+    };
+    if let Err(e) = manager
+        .update_voice_transcription_settings(|s| s.below_recommended_since = value)
+        .await
+    {
+        warn!("[SttModels] Could not record the model clock: {}", e);
+    }
 }
 
 #[tauri::command]
@@ -1138,8 +1341,17 @@ async fn activate_after_download(app: &AppHandle, model_id: &str) -> bool {
 // Delete
 // ---------------------------------------------------------------------------
 
-/// Remove a downloaded model from disk. Refuses the bundled model, the active
-/// model, and a model that is still downloading.
+/// Remove a downloaded model from disk. Refuses the bundled model and a model
+/// that is still downloading. Removing the **active** model is allowed: it
+/// moves dictation to the best model still on disk first.
+///
+/// Refusing it is what caused LAC-6448. Reclaiming the 612 MB a model occupies
+/// meant tapping Use on another row first, the Fast row is the first one in
+/// the list, and `use_stt_model` settles the Parakeet offer — so one piece of
+/// housekeeping put dictation on the catalog's worst model, switched off the
+/// offer that would have moved it back, and said nothing. Juno owns this
+/// choice now, and [`best_available_id`] never answers tiny.en while anything
+/// better is there.
 #[tauri::command]
 pub async fn delete_stt_model(model_id: String, app: AppHandle) -> Result<(), String> {
     let def =
@@ -1147,13 +1359,6 @@ pub async fn delete_stt_model(model_id: String, app: AppHandle) -> Result<(), St
     if def.bundled {
         return Err(format!(
             "{} ships with Juno and can't be removed.",
-            def.name
-        ));
-    }
-    let settings = load_voice_settings(&app).await?;
-    if active_model_id(&app, &settings) == model_id {
-        return Err(format!(
-            "{} is the active model. Switch to another model first.",
             def.name
         ));
     }
@@ -1167,6 +1372,30 @@ pub async fn delete_stt_model(model_id: String, app: AppHandle) -> Result<(), St
             "{} is still downloading. Cancel it first.",
             def.name
         ));
+    }
+
+    let settings = load_voice_settings(&app).await?;
+    if active_model_id(&app, &settings) == model_id {
+        let arch = current_arch();
+        let on_disk = downloaded_ids(&app, &arch);
+        let next = fallback_after_removing(&arch, &model_id, &on_disk)
+            .and_then(find_def)
+            .ok_or_else(|| format!("{} is the only dictation model on this Mac.", def.name))?;
+        // Load the replacement before deleting anything: a failure here must
+        // leave the person on a working model, with their files intact.
+        switch_engine_to(&app, next.id).await?;
+        // `settle_offer: false`. Removing a model is housekeeping, not an
+        // answer to the Parakeet offer, and settling it here is how the offer
+        // that would have put this right got switched off (LAC-6448).
+        persist_choice(&app, next, false).await?;
+        let _ = app.emit(
+            events::CHANGED,
+            serde_json::json!({ "model_id": next.id, "automatic": true }),
+        );
+        info!(
+            "[SttModels] {} is being removed; dictation moved to {}",
+            model_id, next.id
+        );
     }
 
     match def.engine {
@@ -1266,20 +1495,47 @@ pub async fn apply_persisted_stt_model(app: &AppHandle) {
         return;
     }
     if !find_def(id).is_some_and(|d| is_downloaded(app, d)) {
-        // The setting has to name the model that is really running, or
-        // Settings shows one model while dictation uses another.
+        // The saved model is gone: deleted outside the app, or an install that
+        // never had it. The setting has to name the model that is really
+        // running, or Settings shows one model while dictation uses another —
+        // and what runs has to be the best model on disk. `running` is
+        // whatever the voice plugin booted, and when the saved path is missing
+        // the plugin boots the bundled tiny.en regardless of a large-v3 next
+        // to it; recording that as the choice is how a fallback became
+        // permanent (LAC-6448).
+        let arch = current_arch();
+        let on_disk = downloaded_ids(app, &arch);
+        let target = best_available_id(&arch, &on_disk).unwrap_or(BUNDLED_ID);
         warn!(
-            "[SttModels] Saved model '{}' is not on disk; switching the setting to {}",
-            id, running
+            "[SttModels] Saved model '{}' is not on disk; moving dictation to {}",
+            id, target
         );
-        if let Some(def) = find_def(&running) {
+        if target != running {
+            if let Err(e) = switch_engine_to(app, target).await {
+                warn!(
+                    "[SttModels] Could not load {} ({}); recording {} instead",
+                    target, e, running
+                );
+                if let Some(def) = find_def(&running) {
+                    if let Err(e) = persist_choice(app, def, false).await {
+                        warn!("[SttModels] Could not save fallback model: {}", e);
+                    }
+                    let _ = app.emit(
+                        events::CHANGED,
+                        serde_json::json!({ "model_id": running, "automatic": true }),
+                    );
+                }
+                return;
+            }
+        }
+        if let Some(def) = find_def(target) {
             if let Err(e) = persist_choice(app, def, false).await {
                 warn!("[SttModels] Could not save fallback model: {}", e);
                 return;
             }
             let _ = app.emit(
                 events::CHANGED,
-                serde_json::json!({ "model_id": running, "automatic": true }),
+                serde_json::json!({ "model_id": target, "automatic": true }),
             );
         }
         return;
@@ -1623,6 +1879,154 @@ mod tests {
         assert_eq!(
             tauri_plugin_voice_transcription::startup_provider(Some("banana"), true),
             SttProvider::Whisper
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // LAC-6448: tiny.en is a last resort, never a fallback choice
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn the_best_model_on_disk_is_preferred_over_the_bundled_one() {
+        // Lacy's Mac on 10-30: tiny.en bundled, large-v3 downloaded 10-23,
+        // parakeet-ctc being removed. Nothing here may answer "tiny-en".
+        assert_eq!(
+            best_available_id("aarch64", &["tiny-en", "large-v3"]),
+            Some("large-v3")
+        );
+        assert_eq!(
+            best_available_id("aarch64", &["tiny-en", "small-en", "large-v3-turbo"]),
+            Some("large-v3-turbo")
+        );
+    }
+
+    #[test]
+    fn the_recommended_model_wins_even_when_another_row_scores_the_same() {
+        // large-v3 and Parakeet TDT both carry 5 accuracy pips. Balanced is
+        // the recommendation for this Mac, so it is the one chosen.
+        assert_eq!(
+            best_available_id("aarch64", &["tiny-en", "large-v3", "parakeet-tdt"]),
+            Some("parakeet-tdt")
+        );
+        // On Intel the Balanced row is turbo, and Parakeet is not in the
+        // catalog at all even if its files are on disk.
+        assert_eq!(
+            best_available_id("x86_64", &["tiny-en", "large-v3", "large-v3-turbo"]),
+            Some("large-v3-turbo")
+        );
+        assert_eq!(
+            best_available_id("x86_64", &["tiny-en", "parakeet-tdt"]),
+            Some("tiny-en")
+        );
+    }
+
+    #[test]
+    fn tiny_en_is_only_chosen_when_it_is_the_last_thing_left() {
+        assert_eq!(best_available_id("aarch64", &["tiny-en"]), Some("tiny-en"));
+        assert_eq!(best_available_id("aarch64", &[]), None);
+        // An id the catalog does not know never becomes the answer.
+        assert_eq!(best_available_id("aarch64", &["ggml-whatever"]), None);
+    }
+
+    #[test]
+    fn removing_the_active_model_names_what_takes_over() {
+        // The whole incident in one assertion: removing Parakeet lands on the
+        // best model still on disk, not on the smallest one in the list.
+        assert_eq!(
+            fallback_after_removing(
+                "aarch64",
+                "parakeet-ctc",
+                &["tiny-en", "large-v3", "parakeet-ctc"]
+            ),
+            Some("large-v3")
+        );
+        // Removing a model that is not active changes nothing.
+        assert_eq!(
+            fallback_after_removing(
+                "aarch64",
+                "large-v3",
+                &["tiny-en", "large-v3", "parakeet-tdt"]
+            ),
+            Some("parakeet-tdt")
+        );
+    }
+
+    #[test]
+    fn a_model_below_the_recommended_tier_is_recognised_as_such() {
+        // tiny.en (2 pips) against Parakeet TDT (5): plainly below.
+        assert!(below_recommended("aarch64", BUNDLED_ID));
+        assert!(below_recommended("aarch64", "small-en"));
+        assert!(below_recommended("aarch64", "large-v3-turbo"));
+        // Recommended itself, and anything that matches it, is not below.
+        assert!(!below_recommended("aarch64", PARAKEET_ID));
+        assert!(!below_recommended("aarch64", "large-v3"));
+        // Intel's Balanced row is turbo, so turbo is not below there.
+        assert!(below_recommended("x86_64", BUNDLED_ID));
+        assert!(!below_recommended("x86_64", "large-v3-turbo"));
+        assert!(!below_recommended("x86_64", "large-v3"));
+        // An unknown id is never reported as below; it would be a guess.
+        assert!(!below_recommended("aarch64", "ggml-whatever"));
+    }
+
+    #[test]
+    fn the_quality_notice_waits_a_full_day_and_then_says_it_plainly() {
+        let day = 24 * 60 * 60;
+        // Under a day: nothing is shown. A downgrade someone just made on
+        // purpose is not a problem to report back at them.
+        assert_eq!(
+            quality_notice_line("aarch64", BUNDLED_ID, Some(day - 1), day),
+            None
+        );
+        assert_eq!(quality_notice_line("aarch64", BUNDLED_ID, None, day), None);
+        // Past a day it says what is in use, for how long, and what is better.
+        let line = quality_notice_line("aarch64", BUNDLED_ID, Some(0), day + 1)
+            .expect("a day on the Fast row is reported");
+        assert!(line.contains("Fast"), "{}", line);
+        assert!(line.contains("Balanced"), "{}", line);
+        assert!(line.contains("1 day"), "{}", line);
+        // Plural reads correctly, and the day count is whole days.
+        let line = quality_notice_line("aarch64", BUNDLED_ID, Some(0), 3 * day)
+            .expect("three days is reported");
+        assert!(line.contains("3 days"), "{}", line);
+        // A model at or above Recommended is never reported, however long.
+        assert_eq!(
+            quality_notice_line("aarch64", PARAKEET_ID, Some(0), 90 * day),
+            None
+        );
+        assert_eq!(
+            quality_notice_line("aarch64", "large-v3", Some(0), 90 * day),
+            None
+        );
+    }
+
+    #[test]
+    fn the_notice_never_names_the_hardware() {
+        let day = 24 * 60 * 60;
+        for arch in ["aarch64", "x86_64"] {
+            for id in [BUNDLED_ID, "small-en", "large-v3-turbo"] {
+                let Some(line) = quality_notice_line(arch, id, Some(0), 5 * day) else {
+                    continue;
+                };
+                for banned in ["Apple", "Silicon", "Intel", "x86_64", "aarch64", "M1", "M2"] {
+                    assert!(
+                        !line.contains(banned),
+                        "notice names '{}': {}",
+                        banned,
+                        line
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_clock_that_went_backwards_does_not_produce_a_notice() {
+        let day = 24 * 60 * 60;
+        // Saved "since" in the future (clock change, restored backup): no
+        // notice rather than a wrapped-around day count.
+        assert_eq!(
+            quality_notice_line("aarch64", BUNDLED_ID, Some(10 * day), day),
+            None
         );
     }
 }
