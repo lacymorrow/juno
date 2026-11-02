@@ -1,0 +1,484 @@
+﻿{
+    "windows":  {
+                    "edge":  "131740",
+                    "vscode":  "66384",
+                    "wpf":  "131772",
+                    "forms":  "328390",
+                    "forms_button":  "66290",
+                    "vscode_checkbox_found":  true
+                },
+    "summary":  [
+                    {
+                        "case":  "wpf_inproc_invoke",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  10,
+                        "methods":  [
+                                        "UIA Invoke (from this process)"
+                                    ]
+                    },
+                    {
+                        "case":  "edge_inproc_invoke",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  10,
+                        "methods":  [
+                                        "UIA Invoke (from this process)"
+                                    ]
+                    },
+                    {
+                        "case":  "forms_bm_click",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  0,
+                        "methods":  [
+                                        "BM_CLICK (posted by the script)"
+                                    ]
+                    }
+                ],
+    "trials":  [
+                   {
+                       "case":  "wpf_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 20",
+                                      "WPF 21"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  772,
+                       "foreground_after":  "WPF 21",
+                       "restore":  "alt_key"
+                   },
+                   {
+                       "case":  "wpf_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 21",
+                                      "WPF 22"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  509,
+                       "foreground_after":  "WPF 21",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 22",
+                                      "WPF 23"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  511,
+                       "foreground_after":  "WPF 23",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 23",
+                                      "WPF 24"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  525,
+                       "foreground_after":  "WPF 23",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 24",
+                                      "WPF 25"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  528,
+                       "foreground_after":  "WPF 25",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 25",
+                                      "WPF 26"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  527,
+                       "foreground_after":  "WPF 25",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 26",
+                                      "WPF 27"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  509,
+                       "foreground_after":  "WPF 26",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 27",
+                                      "WPF 28"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  538,
+                       "foreground_after":  "WPF 28",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 28",
+                                      "WPF 29"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  520,
+                       "foreground_after":  "WPF 29",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 29",
+                                      "WPF 30"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  504,
+                       "foreground_after":  "WPF 29",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 20 - Profile 1 - Microsoft​ Edge",
+                                      "count 21 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  532,
+                       "foreground_after":  "count 20 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 21 - Profile 1 - Microsoft​ Edge",
+                                      "count 22 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  527,
+                       "foreground_after":  "count 21 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 22 - Profile 1 - Microsoft​ Edge",
+                                      "count 23 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  535,
+                       "foreground_after":  "count 22 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 23 - Profile 1 - Microsoft​ Edge",
+                                      "count 24 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  537,
+                       "foreground_after":  "count 23 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 24 - Profile 1 - Microsoft​ Edge",
+                                      "count 25 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  534,
+                       "foreground_after":  "count 24 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 25 - Profile 1 - Microsoft​ Edge",
+                                      "count 26 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  525,
+                       "foreground_after":  "count 25 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 26 - Profile 1 - Microsoft​ Edge",
+                                      "count 27 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  521,
+                       "foreground_after":  "count 26 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 27 - Profile 1 - Microsoft​ Edge",
+                                      "count 28 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  522,
+                       "foreground_after":  "count 27 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 28 - Profile 1 - Microsoft​ Edge",
+                                      "count 29 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  538,
+                       "foreground_after":  "count 28 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_inproc_invoke",
+                       "valid":  true,
+                       "method":  "UIA Invoke (from this process)",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 29 - Profile 1 - Microsoft​ Edge",
+                                      "count 30 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  522,
+                       "foreground_after":  "count 29 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 20",
+                                      "Forms 21"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 21",
+                                      "Forms 22"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 22",
+                                      "Forms 23"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 23",
+                                      "Forms 24"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 24",
+                                      "Forms 25"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 25",
+                                      "Forms 26"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 26",
+                                      "Forms 27"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 27",
+                                      "Forms 28"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 28",
+                                      "Forms 29"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 29",
+                                      "Forms 30"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   }
+               ]
+}

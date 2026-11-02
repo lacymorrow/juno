@@ -1,0 +1,334 @@
+﻿{
+    "windows":  {
+                    "edge":  "131740",
+                    "vscode":  "66384",
+                    "wpf":  "131772",
+                    "forms":  "328390",
+                    "forms_button":  "66290",
+                    "vscode_checkbox_found":  true
+                },
+    "summary":  [
+                    {
+                        "case":  "forms_juno_cua",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  0,
+                        "methods":  [
+                                        "BM_CLICK"
+                                    ]
+                    },
+                    {
+                        "case":  "wpf_juno_cua",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  10,
+                        "methods":  [
+                                        "UIA Invoke"
+                                    ]
+                    }
+                ],
+    "trials":  [
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 30",
+                                      "Forms 31"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 31",
+                                      "Forms 32"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 32",
+                                      "Forms 33"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 33",
+                                      "Forms 34"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 34",
+                                      "Forms 35"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 35",
+                                      "Forms 36"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 36",
+                                      "Forms 37"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 37",
+                                      "Forms 38"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 38",
+                                      "Forms 39"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "BM_CLICK",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 39",
+                                      "Forms 40"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 30",
+                                      "WPF 31"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  524,
+                       "foreground_after":  "WPF 31",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 31",
+                                      "WPF 32"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  795,
+                       "foreground_after":  "WPF 32",
+                       "restore":  "alt_key"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 32",
+                                      "WPF 33"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  514,
+                       "foreground_after":  "WPF 33",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 33",
+                                      "WPF 34"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  514,
+                       "foreground_after":  "WPF 34",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 34",
+                                      "WPF 35"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  512,
+                       "foreground_after":  "WPF 35",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 35",
+                                      "WPF 36"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  512,
+                       "foreground_after":  "WPF 36",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 36",
+                                      "WPF 37"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  508,
+                       "foreground_after":  "WPF 37",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 37",
+                                      "WPF 38"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  503,
+                       "foreground_after":  "WPF 38",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 38",
+                                      "WPF 39"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  505,
+                       "foreground_after":  "WPF 38",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 39",
+                                      "WPF 40"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  516,
+                       "foreground_after":  "WPF 40",
+                       "restore":  "plain"
+                   }
+               ]
+}

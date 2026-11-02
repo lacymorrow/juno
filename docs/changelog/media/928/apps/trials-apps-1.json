@@ -1,0 +1,784 @@
+﻿{
+    "windows":  {
+                    "edge":  "131740",
+                    "vscode":  "66384",
+                    "wpf":  "131772",
+                    "forms":  "328390",
+                    "forms_button":  "",
+                    "vscode_checkbox_found":  true
+                },
+    "summary":  [
+                    {
+                        "case":  "edge_juno_cua",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  10,
+                        "methods":  [
+                                        "UIA Invoke"
+                                    ]
+                    },
+                    {
+                        "case":  "vscode_juno_cua",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  10,
+                        "methods":  [
+                                        "UIA Toggle"
+                                    ]
+                    },
+                    {
+                        "case":  "wpf_juno_cua",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  10,
+                        "methods":  [
+                                        "UIA Invoke"
+                                    ]
+                    },
+                    {
+                        "case":  "forms_juno_cua",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  10,
+                        "methods":  [
+                                        "UIA Invoke"
+                                    ]
+                    },
+                    {
+                        "case":  "forms_bm_click",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  0,
+                        "took_foreground":  0,
+                        "methods":  [
+                                        "BM_CLICK (posted by the script)"
+                                    ]
+                    }
+                ],
+    "trials":  [
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 10 - Profile 1 - Microsoft​ Edge",
+                                      "count 11 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  534,
+                       "foreground_after":  "count 10 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 11 - Profile 1 - Microsoft​ Edge",
+                                      "count 12 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  762,
+                       "foreground_after":  "count 11 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "alt_key"
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 12 - Profile 1 - Microsoft​ Edge",
+                                      "count 13 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  520,
+                       "foreground_after":  "count 12 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 13 - Profile 1 - Microsoft​ Edge",
+                                      "count 14 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  526,
+                       "foreground_after":  "count 13 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 14 - Profile 1 - Microsoft​ Edge",
+                                      "count 15 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  533,
+                       "foreground_after":  "count 14 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 15 - Profile 1 - Microsoft​ Edge",
+                                      "count 16 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  522,
+                       "foreground_after":  "count 15 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 16 - Profile 1 - Microsoft​ Edge",
+                                      "count 17 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  525,
+                       "foreground_after":  "count 16 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 17 - Profile 1 - Microsoft​ Edge",
+                                      "count 18 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  524,
+                       "foreground_after":  "count 17 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 18 - Profile 1 - Microsoft​ Edge",
+                                      "count 19 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  524,
+                       "foreground_after":  "count 18 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "edge_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "count 19 - Profile 1 - Microsoft​ Edge",
+                                      "count 20 - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  540,
+                       "foreground_after":  "count 19 - Profile 1 - Microsoft​ Edge",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Toggle",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  532,
+                       "foreground_after":  "Welcome - apps - Visual Studio Code",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Toggle",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  539,
+                       "foreground_after":  "Welcome - apps - Visual Studio Code",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Toggle",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  540,
+                       "foreground_after":  "Welcome - apps - Visual Studio Code",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Toggle",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  528,
+                       "foreground_after":  "Welcome - apps - Visual Studio Code",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Toggle",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  521,
+                       "foreground_after":  "Welcome - apps - Visual Studio Code",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Toggle",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  535,
+                       "foreground_after":  "Welcome - apps - Visual Studio Code",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Toggle",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  533,
+                       "foreground_after":  "Welcome - apps - Visual Studio Code",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Toggle",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  523,
+                       "foreground_after":  "Welcome - apps - Visual Studio Code",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Toggle",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  528,
+                       "foreground_after":  "Welcome - apps - Visual Studio Code",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "vscode_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Toggle",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  547,
+                       "foreground_after":  "Welcome - apps - Visual Studio Code",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 10",
+                                      "WPF 11"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  538,
+                       "foreground_after":  "WPF 11",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 11",
+                                      "WPF 12"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  527,
+                       "foreground_after":  "WPF 12",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 12",
+                                      "WPF 13"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  510,
+                       "foreground_after":  "WPF 13",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 13",
+                                      "WPF 14"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  511,
+                       "foreground_after":  "WPF 14",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 14",
+                                      "WPF 15"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  521,
+                       "foreground_after":  "WPF 15",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 15",
+                                      "WPF 16"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  517,
+                       "foreground_after":  "WPF 16",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 16",
+                                      "WPF 17"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  513,
+                       "foreground_after":  "WPF 17",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 17",
+                                      "WPF 18"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  512,
+                       "foreground_after":  "WPF 18",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 18",
+                                      "WPF 19"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  515,
+                       "foreground_after":  "WPF 19",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "wpf_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "WPF 19",
+                                      "WPF 20"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  525,
+                       "foreground_after":  "WPF 20",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 10",
+                                      "Forms 11"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  530,
+                       "foreground_after":  "Forms 11",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 11",
+                                      "Forms 12"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  515,
+                       "foreground_after":  "Forms 12",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 12",
+                                      "Forms 13"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  516,
+                       "foreground_after":  "Forms 13",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 13",
+                                      "Forms 14"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  508,
+                       "foreground_after":  "Forms 14",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 14",
+                                      "Forms 15"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  503,
+                       "foreground_after":  "Forms 15",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 15",
+                                      "Forms 16"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  540,
+                       "foreground_after":  "Forms 16",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 16",
+                                      "Forms 17"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  523,
+                       "foreground_after":  "Forms 17",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 17",
+                                      "Forms 18"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  508,
+                       "foreground_after":  "Forms 18",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 18",
+                                      "Forms 19"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  507,
+                       "foreground_after":  "Forms 19",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "forms_juno_cua",
+                       "valid":  true,
+                       "method":  "UIA Invoke",
+                       "worked":  true,
+                       "effect":  [
+                                      "Forms 19",
+                                      "Forms 20"
+                                  ],
+                       "took_foreground":  true,
+                       "took_after_ms":  510,
+                       "foreground_after":  "Forms 20",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 20",
+                                      "Forms 20"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 20",
+                                      "Forms 20"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 20",
+                                      "Forms 20"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 20",
+                                      "Forms 20"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 20",
+                                      "Forms 20"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 20",
+                                      "Forms 20"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 20",
+                                      "Forms 20"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 20",
+                                      "Forms 20"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 20",
+                                      "Forms 20"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "forms_bm_click",
+                       "valid":  true,
+                       "method":  "BM_CLICK (posted by the script)",
+                       "worked":  false,
+                       "effect":  [
+                                      "Forms 20",
+                                      "Forms 20"
+                                  ],
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   }
+               ]
+}
