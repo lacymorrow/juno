@@ -4272,7 +4272,26 @@ Always name the window (its title, its app's name, or its id). It becomes your w
     }
     tools.push(manager.apply_versioning(str_replace_tool));
 
+    #[cfg(target_os = "windows")]
+    for tool in &mut tools {
+        describe_for_windows(tool);
+    }
+
     tools
+}
+
+/// What the tool descriptions say that isn't so on Windows: `cmd` there is the
+/// Windows key, and the model reaches for whatever key the description names.
+#[cfg(target_os = "windows")]
+fn describe_for_windows(tool: &mut ToolDefinition) {
+    let windows = |text: &str| {
+        text.replace("'cmd+c'", "'ctrl+c'")
+            .replace("through macOS accessibility", "through UI Automation")
+    };
+    tool.description = windows(&tool.description);
+    if let Ok(schema) = serde_json::from_str(&windows(&tool.input_schema.to_string())) {
+        tool.input_schema = schema;
+    }
 }
 
 pub async fn register_anthropic_computer_use_tools(
