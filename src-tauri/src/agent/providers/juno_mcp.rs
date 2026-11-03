@@ -29,6 +29,7 @@
 //! keys. The token is what makes "only the child we spawned" true.
 
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::OnceLock;
 
 use axum::{
@@ -163,6 +164,19 @@ pub fn mcp_config(endpoint: &Endpoint) -> Value {
 /// than their whole turn. Measured on `claude` 2.1.311.
 const HOOK_TIMEOUT_SECS: u32 = 5;
 
+/// The one header that gets `curl` into the hook route, as the entire contents
+/// of the file `curl` reads it from.
+///
+/// A file, and not `-H 'Authorization: Bearer ...'`, because the hook command
+/// is not Juno's own process: Claude Code hands it to `sh -c` on every `Bash`
+/// call, and on macOS `ps` shows every user's argv. A token written into that
+/// command is readable by any process on the machine for as long as each call
+/// lasts, and it is the same token `/mcp` accepts, which moves the mouse and
+/// presses keys (LAC-6475).
+pub fn hook_auth_header(endpoint: &Endpoint) -> String {
+    format!("Authorization: Bearer {}\n", endpoint.token)
+}
+
 /// The `--settings` contents that keep the CLI's own shell off the person's
 /// screen while background mode is on (LAC-5010).
 ///
@@ -172,14 +186,16 @@ const HOOK_TIMEOUT_SECS: u32 = 5;
 /// `~/.claude/settings.json` and in the project still fire alongside this one;
 /// verified on 2.1.311.
 ///
-/// The token rides in the file rather than on the command line, for the same
-/// reason [`crate::agent::providers::claude_cli`] writes the MCP config to a
-/// file: every `ps` on the machine can read a command line.
+/// `header_file` holds [`hook_auth_header`] and nothing else, and is the
+/// caller's to write at mode 0600; no secret appears here. `curl` has read
+/// headers from a file since 7.55, and macOS 12.3, the oldest Juno runs on,
+/// ships 7.79.
 ///
 /// `curl` by absolute path: the hook runs through the person's shell, and a
 /// `curl` shadowed on their `PATH` would turn the screen off silently.
-pub fn shell_screen_settings(endpoint: &Endpoint) -> Value {
-    json!({
+pub fn shell_screen_settings(endpoint: &Endpoint, header_file: &Path) -> Result<Value, AgentError> {
+    let header_file = single_quoted(header_file)?;
+    Ok(json!({
         "hooks": {
             "PreToolUse": [{
                 "matcher": cli_approval::BASH_TOOL,
@@ -187,15 +203,38 @@ pub fn shell_screen_settings(endpoint: &Endpoint) -> Value {
                     "type": "command",
                     "command": format!(
                         "/usr/bin/curl -s --max-time {HOOK_TIMEOUT_SECS} -X POST \
-                         -H 'Authorization: Bearer {}' \
+                         -H @{header_file} \
                          -H 'Content-Type: application/json' \
                          --data-binary @- '{}'",
-                        endpoint.token, endpoint.hook_url
+                        endpoint.hook_url
                     ),
                 }],
             }],
         }
-    })
+    }))
+}
+
+/// Quote a path for the `sh -c` command line the hook becomes.
+///
+/// Refuses rather than escapes. The path is Juno's own, under the temporary
+/// directory, so a single quote or a non-UTF-8 byte in it means something is
+/// wrong that this function cannot fix, and the caller turns a refusal into a
+/// spawn with no shell screen. A command that re-splits is worse than no
+/// command.
+fn single_quoted(path: &Path) -> Result<String, AgentError> {
+    let refuse = |why: &str| {
+        Err(AgentError::ConfigurationError(format!(
+            "Cannot put {} on the shell screen's command line: {why}",
+            path.display()
+        )))
+    };
+    let Some(text) = path.to_str() else {
+        return refuse("the path is not valid UTF-8");
+    };
+    if text.contains('\'') {
+        return refuse("the path contains a single quote");
+    }
+    Ok(format!("'{text}'"))
 }
 
 /// Read one of the CLI's own shell calls before it runs (LAC-5010).
@@ -879,6 +918,8 @@ mod tests {
         assert_eq!(result["content"][0]["text"], "Reminders is off.");
     }
 
+    use std::path::PathBuf;
+
     fn test_endpoint() -> Endpoint {
         Endpoint {
             url: "http://127.0.0.1:51234/mcp".to_string(),
@@ -891,13 +932,10 @@ mod tests {
     /// `--dangerously-skip-permissions`, so `approve` is never called and a
     /// `PreToolUse` hook is the only thing left that still runs. These are the
     /// settings that install it.
-    ///
-    /// The token rides in the file rather than on the command line, for the
-    /// same reason the MCP config does: every `ps` on the machine can read a
-    /// command line.
     #[test]
-    fn the_shell_screen_settings_point_at_the_hook_route_with_the_token() {
-        let settings = shell_screen_settings(&test_endpoint());
+    fn the_shell_screen_settings_point_at_the_hook_route() {
+        let settings = shell_screen_settings(&test_endpoint(), Path::new("/tmp/hdr.txt"))
+            .expect("a plain path is quotable");
         let entry = &settings["hooks"]["PreToolUse"][0];
         assert_eq!(entry["matcher"], "Bash");
 
@@ -908,11 +946,62 @@ mod tests {
             command.contains("http://127.0.0.1:51234/hook/pretooluse"),
             "{command}"
         );
-        assert!(command.contains("Bearer secret"), "{command}");
         // A dead server must not block the person's shell: curl writes
         // nothing on failure and exits non-zero, which the CLI reads as
         // "carry on". Measured on claude 2.1.311.
         assert!(command.contains("--max-time"), "{command}");
+    }
+
+    /// LAC-6475. Claude Code runs this command through `sh -c` on every `Bash`
+    /// call, and on macOS `ps` shows every user's argv, so a token on the
+    /// command line is a token any process on the machine can read for as long
+    /// as the call lasts. The token is the one `/mcp` accepts, which moves the
+    /// mouse. It travels in a 0600 file curl reads instead.
+    #[test]
+    fn the_shell_screen_settings_keep_the_token_off_the_command_line() {
+        let endpoint = test_endpoint();
+        let settings = shell_screen_settings(&endpoint, Path::new("/tmp/hdr.txt"))
+            .expect("a plain path is quotable");
+        let command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(!command.contains(&endpoint.token), "{command}");
+        assert!(!command.contains("Bearer"), "{command}");
+        assert!(!command.contains("Authorization"), "{command}");
+        // Read from the file instead, by a path the shell cannot re-split.
+        assert!(command.contains("-H @'/tmp/hdr.txt'"), "{command}");
+    }
+
+    /// The file's whole contents: one header line, in the shape `curl -H @file`
+    /// reads.
+    #[test]
+    fn the_hook_auth_header_file_carries_the_token() {
+        assert_eq!(
+            hook_auth_header(&test_endpoint()),
+            "Authorization: Bearer secret\n"
+        );
+    }
+
+    /// Fail closed, again: the quoting refuses rather than escapes, so a path
+    /// that would close the quote early gets no settings at all.
+    #[test]
+    fn a_header_path_holding_a_single_quote_is_refused() {
+        let path = PathBuf::from("/tmp/it's-here.txt");
+        assert!(shell_screen_settings(&test_endpoint(), &path).is_err());
+    }
+
+    /// Fail closed: a header path that cannot be quoted for the shell yields no
+    /// settings at all, rather than a command that reads the wrong file or
+    /// splits into something unintended.
+    #[cfg(unix)]
+    #[test]
+    fn a_header_path_that_cannot_be_quoted_is_refused() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        // Not valid UTF-8, so there is no &str to quote.
+        let path = PathBuf::from(OsStr::from_bytes(b"/tmp/\xff\xfehdr.txt"));
+        assert!(shell_screen_settings(&test_endpoint(), &path).is_err());
     }
 
     #[test]
