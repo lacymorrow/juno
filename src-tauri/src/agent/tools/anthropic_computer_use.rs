@@ -4263,7 +4263,13 @@ Always name the window (its title, its app's name, or its id). It becomes your w
     // Apply versioning to all tools
     tools.push(manager.apply_versioning(computer_tool));
     tools.push(app_controls_tool);
-    tools.push(manager.apply_versioning(bash_tool));
+    // Windows has no bash, and a tool that only fails is worse than none. Its
+    // shell is PowerShell, which Anthropic has no versioned type for.
+    if cfg!(target_os = "windows") {
+        tools.push(crate::agent::tools::powershell::tool_definition());
+    } else {
+        tools.push(manager.apply_versioning(bash_tool));
+    }
     tools.push(manager.apply_versioning(str_replace_tool));
 
     tools
@@ -4408,6 +4414,20 @@ pub async fn register_anthropic_computer_use_tools_with_version(
                         move |input: Value| {
                             let handle = handle.clone();
                             async move { execute_bash_tool(&handle, input).await }
+                        }
+                    })
+                    .await;
+            }
+            #[cfg(target_os = "windows")]
+            crate::agent::tools::powershell::TOOL_NAME => {
+                provider
+                    .register_async_tool(tool, {
+                        let handle = app_handle.clone();
+                        move |input: Value| {
+                            let handle = handle.clone();
+                            async move {
+                                crate::agent::tools::powershell::execute(&handle, input).await
+                            }
                         }
                     })
                     .await;
