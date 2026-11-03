@@ -87,17 +87,28 @@ impl LineKey {
     }
 }
 
-/// The key for `text` under these settings, or `None` when the line is not
-/// cached for this engine (speech off, or an engine rendered elsewhere).
+/// The key for `text` rendered by `engine` under these settings, or `None`
+/// when the line is not cached for that engine (speech off, or an engine
+/// rendered elsewhere).
+///
+/// `engine` is a parameter rather than `audio.tts_provider` because the
+/// engine that renders the line is the one that will actually speak it, which
+/// is not always the configured one: a cloud engine with no account key
+/// cannot speak at all, and the line has to be waiting in whatever its chain
+/// falls through to (`tts::effective_engine_now`, LAC-6340). Rendering ahead
+/// in the configured engine meant a key-less ElevenLabs cached nothing and
+/// the greeting was synthesised from cold while the person waited. The voice
+/// and the rate still come from `audio`, resolved for `engine`.
 ///
 /// `elevenlabs_voice` is the ElevenLabs voice id, which lives in the
 /// environment rather than in the settings.
 pub fn key_for(
     audio: &AudioSettings,
+    engine: &str,
     text: &str,
     elevenlabs_voice: Option<&str>,
 ) -> Option<LineKey> {
-    let engine = audio.tts_provider.trim().to_ascii_lowercase();
+    let engine = engine.trim().to_ascii_lowercase();
     let stored_rate = audio.voice_rate;
     let voice = match engine.as_str() {
         // Always the System Voice: there is no Mac voice name to key on.
@@ -151,7 +162,11 @@ fn elevenlabs_voice() -> Option<String> {
 pub(crate) async fn current_key(app: &AppHandle, text: &str) -> Option<LineKey> {
     let manager = crate::settings::manager::SettingsManager::new(app.clone()).ok()?;
     let audio = manager.get_audio_settings().await.ok()?;
-    key_for(&audio, text, elevenlabs_voice().as_deref())
+    // The engine that will actually speak, not the one that is configured;
+    // both the render and the lookup go through here, so they cannot
+    // disagree about which engine the line is cached in.
+    let engine = crate::tts::effective_engine_now(&audio.tts_provider).await?;
+    key_for(&audio, &engine, text, elevenlabs_voice().as_deref())
 }
 
 fn cache_dir(app: &AppHandle) -> Option<PathBuf> {
@@ -455,29 +470,32 @@ fn read_wav(path: &Path) -> Result<(Vec<f32>, f64), String> {
 mod tests {
     use super::*;
 
-    fn audio(engine: &str) -> AudioSettings {
-        AudioSettings {
-            tts_provider: engine.to_string(),
-            ..AudioSettings::default()
-        }
+    /// Settings with no engine in them: which engine renders the line is a
+    /// separate argument, because it is not always the configured one.
+    fn audio() -> AudioSettings {
+        AudioSettings::default()
     }
 
     const LINE: &str = "Juno here. Welcome back.";
 
     #[test]
     fn the_same_settings_find_the_same_file() {
-        let a = key_for(&audio("system"), LINE, None).expect("cached");
-        let b = key_for(&audio("system"), LINE, None).expect("cached");
+        let a = key_for(&audio(), "system", LINE, None).expect("cached");
+        let b = key_for(&audio(), "system", LINE, None).expect("cached");
         assert_eq!(a.stem(), b.stem());
         assert!(a.file_name().ends_with(".wav"));
     }
 
     #[test]
     fn a_new_voice_is_a_new_file() {
-        let mut settings = audio("supertonic");
-        let before = key_for(&settings, LINE, None).expect("cached").stem();
+        let mut settings = audio();
+        let before = key_for(&settings, "supertonic", LINE, None)
+            .expect("cached")
+            .stem();
         settings.supertonic_voice = "F1".to_string();
-        let after = key_for(&settings, LINE, None).expect("cached").stem();
+        let after = key_for(&settings, "supertonic", LINE, None)
+            .expect("cached")
+            .stem();
         assert_ne!(before, after);
     }
 
@@ -485,13 +503,13 @@ mod tests {
     /// Mac's voice is always the System Voice, so the key ignores it.
     #[test]
     fn a_stored_mac_voice_name_is_not_rendered() {
-        let mut named = audio("system");
+        let mut named = audio();
         named.system_voice = Some("Samantha".to_string());
-        let key = key_for(&named, LINE, None).expect("cached");
+        let key = key_for(&named, "system", LINE, None).expect("cached");
         assert_eq!(key.voice, "");
         assert_eq!(
             key.stem(),
-            key_for(&audio("system"), LINE, None)
+            key_for(&audio(), "system", LINE, None)
                 .expect("cached")
                 .stem()
         );
@@ -499,53 +517,88 @@ mod tests {
 
     #[test]
     fn a_new_rate_is_a_new_file() {
-        let mut settings = audio("system");
-        let before = key_for(&settings, LINE, None).expect("cached").stem();
+        let mut settings = audio();
+        let before = key_for(&settings, "system", LINE, None)
+            .expect("cached")
+            .stem();
         settings.voice_rate = 1.5;
-        let after = key_for(&settings, LINE, None).expect("cached").stem();
+        let after = key_for(&settings, "system", LINE, None)
+            .expect("cached")
+            .stem();
         assert_ne!(before, after);
     }
 
     #[test]
     fn a_new_engine_is_a_new_file() {
-        let system = key_for(&audio("system"), LINE, None).expect("cached");
-        let kokoro = key_for(&audio("kokoro"), LINE, None).expect("cached");
+        let system = key_for(&audio(), "system", LINE, None).expect("cached");
+        let kokoro = key_for(&audio(), "kokoro", LINE, None).expect("cached");
         assert_ne!(system.stem(), kokoro.stem());
         assert!(kokoro.file_name().ends_with(".audio"));
     }
 
     #[test]
     fn new_words_are_a_new_file() {
-        let a = key_for(&audio("system"), LINE, None).expect("cached");
-        let b = key_for(&audio("system"), "Hello.", None).expect("cached");
+        let a = key_for(&audio(), "system", LINE, None).expect("cached");
+        let b = key_for(&audio(), "system", "Hello.", None).expect("cached");
         assert_ne!(a.stem(), b.stem());
     }
 
     #[test]
     fn the_macs_own_voice_and_no_voice_are_the_same_render() {
-        let mut own = audio("system");
+        let mut own = audio();
         own.system_voice = Some(crate::tts::voices::SYSTEM_DEFAULT_ID.to_string());
-        let mut none = audio("system");
+        let mut none = audio();
         none.system_voice = None;
         assert_eq!(
-            key_for(&own, LINE, None).expect("cached").stem(),
-            key_for(&none, LINE, None).expect("cached").stem()
+            key_for(&own, "system", LINE, None).expect("cached").stem(),
+            key_for(&none, "system", LINE, None).expect("cached").stem()
         );
     }
 
     #[test]
     fn an_elevenlabs_voice_change_is_a_new_file() {
-        let a = key_for(&audio("elevenlabs"), LINE, Some("voice-a")).expect("cached");
-        let b = key_for(&audio("elevenlabs"), LINE, Some("voice-b")).expect("cached");
+        let a = key_for(&audio(), "elevenlabs", LINE, Some("voice-a")).expect("cached");
+        let b = key_for(&audio(), "elevenlabs", LINE, Some("voice-b")).expect("cached");
         assert_ne!(a.stem(), b.stem());
+    }
+
+    /// LAC-6340. With a cloud engine configured and no key for it, Kokoro is
+    /// what speaks, so the line has to be cached under Kokoro and in
+    /// Kokoro's voice. It used to be keyed on the configured engine, which
+    /// could never render it: nothing was ever cached, and the greeting was
+    /// synthesised from a cold model while the person waited.
+    #[test]
+    fn the_line_is_cached_under_the_engine_that_will_speak() {
+        let settings = audio();
+        let engine = crate::tts::effective_engine(
+            "elevenlabs",
+            true,
+            true,
+            crate::tts::AccountKeys::default(),
+        )
+        .expect("something speaks");
+        let key = key_for(&settings, engine, LINE, None).expect("cached");
+        assert_eq!(key.engine, "kokoro");
+        assert_eq!(
+            key.voice,
+            crate::tts::voices::resolve_kokoro_voice(settings.voice_for("kokoro")),
+            "Kokoro's voice, not whatever the cloud engine was set to"
+        );
+        assert_ne!(
+            key.stem(),
+            key_for(&settings, "elevenlabs", LINE, None)
+                .expect("cached")
+                .stem(),
+            "the file is not the one the configured engine would have named"
+        );
     }
 
     #[test]
     fn silence_and_cloud_only_engines_are_not_cached() {
-        assert_eq!(key_for(&audio("off"), LINE, None), None);
-        assert_eq!(key_for(&audio(""), LINE, None), None);
-        assert_eq!(key_for(&audio("replicate"), LINE, None), None);
-        assert_eq!(key_for(&audio("chatterbox"), LINE, None), None);
+        assert_eq!(key_for(&audio(), "off", LINE, None), None);
+        assert_eq!(key_for(&audio(), "", LINE, None), None);
+        assert_eq!(key_for(&audio(), "replicate", LINE, None), None);
+        assert_eq!(key_for(&audio(), "chatterbox", LINE, None), None);
     }
 
     /// The launch race: the refresh and the greeting start together, so on a
