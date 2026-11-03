@@ -941,7 +941,11 @@ pub fn run() {
             // Juno's speaking level goes to every window from here on.
             tts::speech_level::bind(app_handle.clone());
             // The launch greeting, rendered in parallel with the rest of
-            // startup so it plays the moment the bar appears.
+            // startup so it plays the moment the bar appears. It renders in
+            // the engine that will actually speak, which means reading the
+            // account keys out of Settings, so the handle those reads need
+            // has to be set first (LAC-6340). Setting it twice is a no-op.
+            tts::account_keys::remember_app(&app_handle);
             greeting::refresh_cache(&app_handle);
 
             // --- Initialize Settings Manager ---

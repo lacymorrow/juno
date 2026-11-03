@@ -924,7 +924,7 @@ pub async fn set_tts_account_key_command(
         .ok_or_else(|| format!("{engine} does not take an account key"))?;
     let key = Some(key.trim().to_string()).filter(|k| !k.is_empty());
 
-    let manager = crate::settings::manager::SettingsManager::new(app_handle)
+    let manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
     manager
         .update_audio_settings(|audio| match which {
@@ -934,6 +934,15 @@ pub async fn set_tts_account_key_command(
         .await
         .map_err(|e| format!("Failed to save the key: {}", e))?;
     info!("[TTS] Account key for {:?} saved", which);
+
+    // This key decides which engine gets prepared: without it the chosen
+    // cloud engine cannot speak, so Kokoro is what is kept warm and what the
+    // greeting is cached in (`effective_engine`, LAC-6340). Adding or
+    // clearing a key moves that answer, so it is resolved again here.
+    match manager.get_audio_settings().await {
+        Ok(audio) => voices::sync_engine_model(&app_handle, &audio.tts_provider),
+        Err(e) => warn!("[TTS] Could not re-check which engine speaks: {e}"),
+    }
     Ok(())
 }
 
@@ -1055,7 +1064,6 @@ pub async fn invoke_tts(
         .get_tts_provider()
         .map_err(|e| format!("Failed to get tts_provider for invoke_tts: {}", e))?;
     crate::turn_timing::mark(crate::turn_timing::Stage::FirstTtsText);
-    crate::turn_timing::note_tts_engine(&provider);
 
     if provider.is_empty() || provider.to_lowercase() == "off" {
         let short_text = text.chars().take(30).collect::<String>();
@@ -1119,7 +1127,6 @@ pub async fn speak_prerendered(
         return Ok("TTS_DISABLED_BY_SETTING".to_string());
     }
     crate::turn_timing::mark(crate::turn_timing::Stage::FirstTtsText);
-    crate::turn_timing::note_tts_engine(&provider);
 
     set_tts_playing(true);
     register_tts_escape_key(&app_handle).await;
@@ -1195,9 +1202,6 @@ fn enqueue(text: String, app_handle: AppHandle, part_of_turn: bool) {
                 // First chunk of the turn reaching the queue; the tracker
                 // keeps only the first mark.
                 crate::turn_timing::mark(crate::turn_timing::Stage::FirstTtsText);
-                if let Ok(provider) = state.get_tts_provider() {
-                    crate::turn_timing::note_tts_engine(&provider);
-                }
                 spawn
             }
             None => {
@@ -1612,6 +1616,133 @@ pub(crate) fn fallback_chain(
     chain
 }
 
+/// Which account keys are present. Everything a cloud engine needs before it
+/// can speak at all.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct AccountKeys {
+    pub elevenlabs: bool,
+    pub replicate: bool,
+}
+
+impl AccountKeys {
+    /// Whether `engine` has the account it speaks with, which local engines
+    /// do not need. Pure.
+    ///
+    /// A cloud engine with no key anywhere fails instantly, every time, with
+    /// no network call, which makes it the one thing about an engine that is
+    /// knowable before it is asked. A network that is down, a spent quota or
+    /// a revoked key are all either unknowable here or temporary, and count
+    /// as able to speak.
+    fn has_key_for(self, engine: &str) -> bool {
+        match account_keys::KeyedEngine::from_id(engine) {
+            Some(account_keys::KeyedEngine::ElevenLabs) => self.elevenlabs,
+            Some(account_keys::KeyedEngine::Replicate) => self.replicate,
+            None => true,
+        }
+    }
+
+    /// Whether `engine` can speak *now*, for an engine nobody chose. Pure.
+    ///
+    /// Kokoro with no model on disk is an 82 MB download: a minute of
+    /// waiting, which is the engine's own business when somebody picked it
+    /// and not something to start behind a fallback. See
+    /// [`effective_engine`], which exempts the chosen engine from this.
+    fn can_stand_in(self, engine: &str, kokoro_on_disk: bool) -> bool {
+        if engine.eq_ignore_ascii_case("kokoro") && !kokoro_on_disk {
+            return false;
+        }
+        self.has_key_for(engine)
+    }
+
+    /// The keys that matter to `configured`, read from Settings.
+    ///
+    /// One key at most, and none when the choice is local: the only keyed
+    /// engine in any chain is the primary itself, because every chain falls
+    /// through to Kokoro and the Mac's voice, which need no account. A test
+    /// holds that invariant (`no_chain_falls_through_to_a_second_keyed_engine`),
+    /// since a chain that gained a second cloud engine would have its key
+    /// read as absent here.
+    async fn present_for(configured: &str) -> Self {
+        let mut keys = Self::default();
+        if let Some(keyed) = account_keys::KeyedEngine::from_id(configured.trim()) {
+            let present = account_keys::key(keyed).await.is_ok();
+            match keyed {
+                account_keys::KeyedEngine::ElevenLabs => keys.elevenlabs = present,
+                account_keys::KeyedEngine::Replicate => keys.replicate = present,
+            }
+        }
+        keys
+    }
+}
+
+/// The engine that will actually speak, which is not always the configured
+/// one. Pure.
+///
+/// This is the engine to *prepare*. Everything that gets audio ready before
+/// it is wanted has to ask this rather than read the setting: the Kokoro
+/// model is kept warm for this engine (`kokoro::sync_with_engine`) and the
+/// launch line is rendered ahead in it (`prerender`).
+///
+/// Preparing the configured engine instead is LAC-6340. With a key-less
+/// ElevenLabs selected, Juno released the Kokoro model *and* cached nothing,
+/// then paid a 2.0 s model load and a 2.2 s synthesis on the launch
+/// greeting: 4.3 s from the line being ready to the first word, every
+/// launch, on the first thing anybody hears.
+///
+/// The chosen engine is judged only on whether it has its account, never on
+/// what it will cost to get ready. Choosing an engine is a statement that
+/// its cost is acceptable, which is why selecting Kokoro on a new Mac starts
+/// the download at launch rather than on the first sentence. An engine
+/// standing in for it has to be ready now ([`AccountKeys::can_stand_in`]):
+/// a minute of downloading is not a fallback.
+///
+/// `None` when nothing can speak at all: speech is off, or the chain is
+/// empty (a System Voice that is not Siri, with no Kokoro on disk).
+pub(crate) fn effective_engine(
+    configured: &str,
+    mac_voice_allowed: bool,
+    kokoro_on_disk: bool,
+    keys: AccountKeys,
+) -> Option<&'static str> {
+    let configured = configured.trim();
+    if configured.is_empty() || configured.eq_ignore_ascii_case("off") {
+        return None;
+    }
+    let chain = fallback_chain(configured, mac_voice_allowed, kokoro_on_disk);
+    let primary = chain.first().copied()?;
+    if keys.has_key_for(primary) {
+        return Some(primary);
+    }
+    chain
+        .iter()
+        .skip(1)
+        .copied()
+        .find(|engine| keys.can_stand_in(engine, kokoro_on_disk))
+        // Nothing can stand in. The chosen engine stands as it did before
+        // any of this: it will fail, but a silent `None` here would mean
+        // nothing was prepared at all.
+        .or(Some(primary))
+}
+
+/// [`effective_engine`] for the engine configured now, reading the System
+/// Voice, the Kokoro model and the account keys.
+pub(crate) async fn effective_engine_now(configured: &str) -> Option<String> {
+    let keys = AccountKeys::present_for(configured).await;
+    let effective = effective_engine(
+        configured,
+        mac_voice_allowed_logged().await,
+        voices::kokoro_model_on_disk(),
+        keys,
+    )?;
+    if !effective.eq_ignore_ascii_case(configured.trim()) {
+        info!(
+            "[TTS] {} cannot speak (no account key); {effective} is what gets ready instead",
+            configured.trim()
+        );
+    }
+    Some(effective.to_string())
+}
+
 /// The local engine that speaks when the chosen one cannot (offline, or a
 /// network error): the Mac's own voice when it may speak, else Kokoro when its
 /// model is on disk, else nothing. Pure.
@@ -1655,11 +1786,36 @@ async fn mac_voice_allowed_logged() -> bool {
     allowed
 }
 
+/// Whether what an engine returned means it actually said the words: audio
+/// to play, or `TTS_COMPLETED`, which is the Mac's voice having already
+/// spoken it straight out of `say`. Every other `TTS_*` status (filtered,
+/// disabled, already playing, no voice) means nothing was said. Pure.
+fn rendered_was_spoken(rendered: &str) -> bool {
+    !rendered.starts_with("TTS_") || rendered == "TTS_COMPLETED"
+}
+
+/// Record which engine actually said it, for the TurnTiming line.
+///
+/// The configured engine is a guess, and it used to be what the line
+/// reported: a turn where ElevenLabs failed and Kokoro spoke read
+/// `tts=elevenlabs`, so a slow row was blamed on an engine that never ran
+/// (LAC-6340). Only the chain knows which engine produced the audio, so only
+/// the chain says.
+fn note_engine_that_spoke(engine: &str, rendered: &str) {
+    if rendered_was_spoken(rendered) {
+        crate::turn_timing::note_tts_engine(engine);
+    }
+}
+
 /// Speak with the local floor (see [`local_floor`]), or stay silent.
 async fn speak_with_local_floor(text: String, app_state: AppState) -> Result<String, String> {
     let mac_allowed = mac_voice_allowed_logged().await;
     match local_floor(mac_allowed, voices::kokoro_model_on_disk()) {
-        Some(engine) => invoke_tts_for_provider(text, Some(app_state), engine).await,
+        Some(engine) => {
+            let rendered = invoke_tts_for_provider(text, Some(app_state), engine).await?;
+            note_engine_that_spoke(engine, &rendered);
+            Ok(rendered)
+        }
         None => Ok(NO_VOICE.to_string()),
     }
 }
@@ -1719,7 +1875,9 @@ async fn execute_tts_with_fallback(
         }
         info!("[Kokoro] Still downloading; the Mac's voice stands in");
         let line = kokoro::stand_in(&text);
-        return invoke_tts_for_provider(line, Some(app_state), "system").await;
+        let rendered = invoke_tts_for_provider(line, Some(app_state), "system").await?;
+        note_engine_that_spoke("system", &rendered);
+        return Ok(rendered);
     }
 
     let mac_allowed = mac_voice_allowed_logged().await;
@@ -1763,6 +1921,7 @@ async fn execute_tts_with_fallback(
                 if result == "TTS_STOPPED_BY_USER" {
                     return Ok(result);
                 }
+                note_engine_that_spoke(fallback_provider, &result);
                 if !is_primary {
                     warn!(
                         "Primary TTS provider '{}' failed, but fallback '{}' succeeded",
@@ -2089,6 +2248,157 @@ mod tests {
             vec!["elevenlabs", "kokoro"]
         );
         assert_eq!(fallback_chain("system", true, true), vec!["system"]);
+    }
+
+    /// LAC-6340. ElevenLabs with no key cannot speak, so the engine that
+    /// actually speaks the next line is Kokoro, and Kokoro is what has to be
+    /// warm and cached. Juno used to prepare the configured engine and
+    /// release Kokoro, which cost a 2.0 s model load on the launch greeting
+    /// every launch.
+    #[test]
+    fn a_keyless_cloud_engine_prepares_the_engine_that_speaks() {
+        for engine in ["elevenlabs", "replicate", "chatterbox"] {
+            assert_eq!(
+                effective_engine(engine, true, true, AccountKeys::default()),
+                Some("kokoro"),
+                "{engine}"
+            );
+        }
+    }
+
+    /// A key present means the cloud engine is what gets ready, so the
+    /// memory the release was built to free stays free. Whether the call
+    /// then succeeds is not knowable here, and a network failure still costs
+    /// one load; a missing key is the case that costs it on every launch.
+    #[test]
+    fn a_cloud_engine_with_its_key_is_what_gets_ready() {
+        let keys = AccountKeys {
+            elevenlabs: true,
+            replicate: false,
+        };
+        assert_eq!(
+            effective_engine("elevenlabs", true, true, keys),
+            Some("elevenlabs")
+        );
+        assert_eq!(
+            effective_engine("chatterbox", true, true, keys),
+            Some("kokoro"),
+            "Chatterbox speaks with the Replicate key, which is not set here"
+        );
+    }
+
+    /// Kokoro with nothing on disk is still prepared when it is the engine
+    /// somebody chose: preparing it is what starts the download, which is
+    /// the point of warming at launch.
+    #[test]
+    fn the_chosen_engine_is_prepared_whatever_it_costs() {
+        for on_disk in [true, false] {
+            assert_eq!(
+                effective_engine("kokoro", true, on_disk, AccountKeys::default()),
+                Some("kokoro")
+            );
+        }
+    }
+
+    /// But Kokoro with nothing on disk never stands in for somebody else's
+    /// engine: that is an 82 MB download started behind a fallback, and the
+    /// greeting would wait on it before speaking. The Mac's voice is ready
+    /// now, so it is what gets prepared.
+    #[test]
+    fn a_download_is_not_a_fallback() {
+        assert_eq!(
+            effective_engine("elevenlabs", true, false, AccountKeys::default()),
+            Some("system")
+        );
+        assert_eq!(
+            effective_engine("elevenlabs", true, true, AccountKeys::default()),
+            Some("kokoro"),
+            "on disk, Kokoro stands in and the Mac's voice is not needed"
+        );
+    }
+
+    /// Nothing can stand in and the chosen engine cannot speak: it is still
+    /// what gets prepared, exactly as before this existed. It will fail, and
+    /// preparing nothing at all would be worse.
+    #[test]
+    fn the_chosen_engine_stands_when_nothing_can_replace_it() {
+        assert_eq!(
+            effective_engine("elevenlabs", false, false, AccountKeys::default()),
+            Some("elevenlabs"),
+            "no Siri voice, no Kokoro on disk: the chain has no stand-in"
+        );
+    }
+
+    /// Nothing to prepare: speech off, no engine at all, or a chain that is
+    /// empty because the System Voice is not Siri and Kokoro is not on disk.
+    #[test]
+    fn nothing_is_prepared_when_nothing_can_speak() {
+        let keys = AccountKeys {
+            elevenlabs: true,
+            replicate: true,
+        };
+        assert_eq!(effective_engine("off", true, true, keys), None);
+        assert_eq!(effective_engine("", true, true, keys), None);
+        assert_eq!(effective_engine("  ", true, true, keys), None);
+        assert_eq!(effective_engine("system", false, false, keys), None);
+    }
+
+    /// The Mac's voice and Kokoro need no account, so a missing key is never
+    /// the reason a chain moves past them.
+    #[test]
+    fn the_local_engines_need_no_account() {
+        let no_keys = AccountKeys::default();
+        assert!(no_keys.has_key_for("system"));
+        assert!(no_keys.has_key_for("kokoro"));
+        assert!(no_keys.has_key_for("supertonic"));
+        assert!(!no_keys.has_key_for("elevenlabs"));
+        assert!(!no_keys.has_key_for("chatterbox"));
+    }
+
+    /// `AccountKeys::present_for` reads the primary's key and no other, on
+    /// the grounds that nothing a chain falls through to needs an account.
+    /// A chain that gained a second cloud engine would have that engine's
+    /// key read as absent, and would be prepared as if it could never speak.
+    #[test]
+    fn no_chain_falls_through_to_a_second_keyed_engine() {
+        for engine in crate::tts::voices::ENGINES
+            .iter()
+            .copied()
+            .chain(["KOKORO", "unknown"])
+        {
+            for mac_allowed in [true, false] {
+                for kokoro_on_disk in [true, false] {
+                    let chain = fallback_chain(engine, mac_allowed, kokoro_on_disk);
+                    for later in chain.iter().skip(1) {
+                        assert!(
+                            account_keys::KeyedEngine::from_id(later).is_none(),
+                            "{engine} falls through to {later}, which needs an account key"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// LAC-6340. The TurnTiming line has to name the engine that produced
+    /// the audio, and the Mac's voice produces a status rather than audio
+    /// because `say` speaks it directly. Reading that as "nothing spoke"
+    /// would leave `tts=-` on every turn the Mac's voice took, which is the
+    /// commonest fallback there is.
+    #[test]
+    fn the_macs_voice_counts_as_having_spoken() {
+        assert!(rendered_was_spoken("TTS_COMPLETED"));
+        assert!(rendered_was_spoken("UklGRiQAAABXQVZF"));
+        for status in [
+            "TTS_DISABLED_BY_SETTING",
+            "TTS_CONTENT_FILTERED",
+            "TTS_ALREADY_PLAYING",
+            "TTS_SOUND_DISABLED",
+            "TTS_STOPPED_BY_USER",
+            NO_VOICE,
+        ] {
+            assert!(!rendered_was_spoken(status), "{status}");
+        }
     }
 
     /// Offline or on a network error: the Mac's voice when it is Siri, then
