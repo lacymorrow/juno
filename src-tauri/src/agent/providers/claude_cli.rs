@@ -714,9 +714,28 @@ For music, directions, the person's own shortcuts and Do Not Disturb use music_p
 maps_directions, shortcuts_run and focus_set from the same server. For a mood or genre pick a well-known \
 song or artist yourself and pass that to music_play. A tool's `observed` read-back is the truth: never narrate what you could not see on screen, and never tell the person a result is unconfirmed when the tool observed it. A tool's limits are never the end of the request: when a typed tool cannot do part of it, finish that part with AppleScript or computer use in the app itself, and never tell the person you can't.";
 
-/// Off macOS the server offers no desktop or Mac app tools yet
-/// (docs/plans/windows.md), only Juno's settings and the approval prompt.
-#[cfg(not(target_os = "macos"))]
+/// The same steer on Windows. It names what a Windows person's shell tools would
+/// be instead of Juno, and says what to do about an administrator window.
+#[cfg(target_os = "windows")]
+pub(super) const MCP_TOOL_GUIDANCE: &str =
+    "You have a desktop automation tool from the \"juno\" MCP \
+server: `computer`. For ANY desktop or GUI automation use it. Do NOT drive the desktop from a \
+shell with SendKeys, UIAutomationClient or mouse_event: they bypass Juno and take the person's \
+cursor and keyboard. \
+Work through accessibility first: list a window's controls with {\"action\": \"elements\", \
+\"window\": \"<app or window title>\"} and press them by id ({\"action\": \"left_click\", \
+\"element\": \"e7\"}); read results from the listed values. Name the window on every action. \
+Only fall back to screenshots and coordinates when a window lists no controls, and then take \
+the screenshot with 'window' so it shows just that window. The person keeps using their \
+computer while you work: never bring a window to the front or click into their apps to get \
+focus. If a tool result says a window is running as administrator, tell the person exactly \
+that and stop trying it. For Juno's own settings (its voice, shortcuts, devices, or where a \
+setting is) use the `settings` tool from the same server: it changes them live and points the \
+Settings window at them.";
+
+/// Elsewhere the server offers no desktop tools, only Juno's settings and the
+/// approval prompt.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub(super) const MCP_TOOL_GUIDANCE: &str = "For Juno's own settings (its voice, shortcuts, \
 devices, or where a setting is) use the `settings` tool from the \"juno\" MCP server: it changes \
 them live and points the Settings window at them.";

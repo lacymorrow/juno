@@ -63,11 +63,12 @@ pub struct ProviderInfo {
     pub needs_sign_in: bool,
 }
 
-/// Whether the desktop, browser, shell and Mac app tools are registered on
-/// this platform. macOS only until the Windows engine lands
-/// (docs/plans/windows.md, step 2); `register_computer_use_tools_for_session`
-/// gates each of them the same way.
-pub(crate) const DESKTOP_TOOLS_REGISTERED: bool = cfg!(target_os = "macos");
+/// Whether the desktop tools are registered on this platform: macOS, and
+/// Windows through its UI Automation engine (docs/plans/windows.md, step 2).
+/// `register_computer_use_tools_for_session` gates each of them the same way;
+/// the Mac app and Safari tools stay macOS only.
+pub(crate) const DESKTOP_TOOLS_REGISTERED: bool =
+    cfg!(any(target_os = "macos", target_os = "windows"));
 
 /// What a person is told when the provider they are on has nothing to run
 /// with. Plain words and one thing to do, never a configuration error.
@@ -667,9 +668,9 @@ impl BrainFactory {
         }
 
         // Register the official Anthropic Computer Use tools (per-provider instance).
-        // This and the other desktop tools below are macOS-only until the
-        // Windows engine lands (docs/plans/windows.md, step 2).
-        #[cfg(target_os = "macos")]
+        // This and the other desktop tools below run on macOS and Windows
+        // (docs/plans/windows.md, step 2).
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         match session {
             Some(ctx) => {
                 crate::agent::tools::anthropic_computer_use::register_anthropic_computer_use_tools_for_session(
@@ -683,7 +684,7 @@ impl BrainFactory {
         }
 
         // Register additional desktop automation tools (per-provider instance)
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         crate::agent::tools::desktop_tools::register_desktop_tools(
             provider,
             state_manager.clone(),
@@ -692,7 +693,7 @@ impl BrainFactory {
         .await;
 
         // Register display information tools for screen resolution and display info (per-provider instance)
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         crate::agent::tools::display_info_tools::register_display_info_tools(
             provider,
             app_handle.clone(),
@@ -700,7 +701,7 @@ impl BrainFactory {
         .await?;
 
         // Register lightweight window listing tool (per-provider instance)
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         crate::agent::tools::visible_windows::register_visible_windows_tools(
             provider,
             app_handle.clone(),
@@ -726,7 +727,7 @@ impl BrainFactory {
         crate::agent::tools::register_self_awareness_tools(provider).await;
 
         // Register native accessibility tools for element-level interaction
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         Self::register_accessibility_tools(provider, app_handle.clone()).await?;
 
         // Register Safari tools for fast Safari DOM automation

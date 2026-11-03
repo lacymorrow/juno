@@ -865,6 +865,10 @@ impl BrowserController {
                     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
                 ),
                 (
+                    "msedge",
+                    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                ),
+                (
                     "chrome",
                     r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
                 ),

@@ -193,8 +193,8 @@ pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
         }
     }
 
-    // There is no desktop engine off macOS yet (docs/plans/windows.md, step 2),
-    // so there is nothing to try and nothing to warn about.
+    // Only macOS and Windows have a desktop engine (docs/plans/windows.md, step
+    // 2). Elsewhere there is nothing to try and nothing to warn about.
     if !crate::agent::providers::factory::DESKTOP_TOOLS_REGISTERED {
         debug!("Desktop automation engine: none on this platform yet");
         return None;
