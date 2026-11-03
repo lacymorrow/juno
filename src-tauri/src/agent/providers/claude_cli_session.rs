@@ -1114,8 +1114,13 @@ fn spawn_args(launch: &LaunchConfig, session_id: &str, session_is_new: bool) -> 
     }
 
     if let Some(prompt) = launch.system_prompt.as_ref() {
-        args.push("--system-prompt".to_string());
-        args.push(prompt.clone());
+        #[cfg(not(windows))]
+        {
+            args.push("--system-prompt".to_string());
+            args.push(prompt.clone());
+        }
+        #[cfg(windows)]
+        args.extend(super::claude_cli::windows_system_prompt_args(prompt));
     }
 
     args

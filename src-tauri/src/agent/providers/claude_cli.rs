@@ -165,8 +165,16 @@ pub(super) const VERBOSE_FLAG: &str = "--verbose";
 /// Rooting at home loads the same memory an interactive `claude` run from a
 /// home-directory terminal would. If home cannot be resolved the cwd is left
 /// inherited: a memory-less answer still beats no answer.
+///
+/// On Windows an npm `claude.cmd` is started through what it runs (see
+/// `user_env::windows_command`), and no console window opens.
 pub(crate) fn claude_command(binary: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
+    use crate::platform::console_window::HideConsoleWindow;
+    #[cfg(windows)]
+    let mut cmd = crate::user_env::windows_command(binary.as_ref());
+    #[cfg(not(windows))]
     let mut cmd = tokio::process::Command::new(binary);
+    cmd.hide_console_window();
     // `claude` is a `#!/usr/bin/env node` script: it needs the person's PATH.
     cmd.env("PATH", crate::user_env::user_path_now());
     if let Some(home) = dirs::home_dir() {
@@ -175,10 +183,41 @@ pub(crate) fn claude_command(binary: impl AsRef<std::ffi::OsStr>) -> tokio::proc
     cmd
 }
 
+/// The flag and value that carry the system prompt on Windows.
+///
+/// Windows caps a whole command line at 32,767 characters and Juno's system
+/// prompt alone can pass that, which fails the spawn with "The filename or
+/// extension is too long". So the prompt goes in a file, named by its
+/// contents so concurrent spawns never share one, and the CLI reads it with
+/// `--system-prompt-file`. If the file cannot be written the prompt goes
+/// inline, which still works for a short one.
+#[cfg(windows)]
+pub(super) fn windows_system_prompt_args(prompt: &str) -> [String; 2] {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    prompt.hash(&mut hasher);
+    let path = std::env::temp_dir().join(format!(
+        "juno-claude-system-prompt-{}-{:016x}.txt",
+        std::process::id(),
+        hasher.finish()
+    ));
+    match std::fs::write(&path, prompt) {
+        Ok(()) => [
+            "--system-prompt-file".to_string(),
+            path.to_string_lossy().into_owned(),
+        ],
+        Err(e) => {
+            warn!("Could not write the system prompt file, passing it inline: {e}");
+            ["--system-prompt".to_string(), prompt.to_string()]
+        }
+    }
+}
+
 /// Detect the Claude CLI binary on PATH.
 /// Returns the path if found, or an error describing what to do.
 pub fn detect_claude_cli() -> Result<PathBuf, AgentError> {
     // Check common locations in order of preference (macOS-specific paths)
+    #[cfg(not(windows))]
     let candidates = [
         // User-local install (most common for Claude Code)
         dirs::home_dir().map(|h| h.join(".local/bin/claude")),
@@ -187,6 +226,13 @@ pub fn detect_claude_cli() -> Result<PathBuf, AgentError> {
         Some(PathBuf::from("/opt/homebrew/bin/claude")),
         // System-wide
         Some(PathBuf::from("/usr/bin/claude")),
+    ];
+    // Windows: the native installer's exe first, then npm's global shim.
+    #[cfg(windows)]
+    let candidates = [
+        dirs::home_dir().map(|h| h.join(".local").join("bin").join("claude.exe")),
+        std::env::var_os("APPDATA")
+            .map(|appdata| PathBuf::from(appdata).join("npm").join("claude.cmd")),
     ];
 
     for candidate in candidates.into_iter().flatten() {
@@ -1079,8 +1125,13 @@ impl ClaudeCliBrain {
         }
 
         if let Some(ref prompt) = self.system_prompt {
-            args.push("--system-prompt".to_string());
-            args.push(prompt.clone());
+            #[cfg(not(windows))]
+            {
+                args.push("--system-prompt".to_string());
+                args.push(prompt.clone());
+            }
+            #[cfg(windows)]
+            args.extend(windows_system_prompt_args(prompt));
         }
 
         // The query itself is the final positional argument

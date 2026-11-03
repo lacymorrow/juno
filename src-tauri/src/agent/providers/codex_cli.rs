@@ -125,6 +125,7 @@ impl CliStatus {
 /// path people reach for before Homebrew.
 pub fn detect_codex_cli() -> Result<PathBuf, AgentError> {
     let home = dirs::home_dir();
+    #[cfg(not(windows))]
     let candidates = [
         home.as_ref().map(|h| h.join(".local/bin/codex")),
         Some(PathBuf::from("/opt/homebrew/bin/codex")),
@@ -132,6 +133,10 @@ pub fn detect_codex_cli() -> Result<PathBuf, AgentError> {
         Some(PathBuf::from("/usr/bin/codex")),
         home.as_ref().map(|h| h.join(".bun/bin/codex")),
     ];
+    // Windows: npm's global shim; anything else is found on PATH below.
+    #[cfg(windows)]
+    let candidates = [std::env::var_os("APPDATA")
+        .map(|appdata| PathBuf::from(appdata).join("npm").join("codex.cmd"))];
 
     for candidate in candidates.into_iter().flatten() {
         if candidate.exists() {
@@ -737,7 +742,12 @@ fn parse_exec_line(line: &str) -> ExecEvent {
 /// roots `claude`: a GUI app starts in `/`, and a cwd is the first thing a
 /// coding agent reads.
 pub(crate) fn codex_command(binary: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
+    use crate::platform::console_window::HideConsoleWindow;
+    #[cfg(windows)]
+    let mut command = crate::user_env::windows_command(binary.as_ref());
+    #[cfg(not(windows))]
     let mut command = tokio::process::Command::new(binary);
+    command.hide_console_window();
     if let Some(home) = dirs::home_dir() {
         command.current_dir(home);
     }
