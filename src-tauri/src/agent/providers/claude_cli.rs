@@ -2722,7 +2722,10 @@ mod tests {
             assert!(!written.contains(&endpoint.token), "{written}");
 
             let header = std::fs::read_to_string(header_file_in(&settings)).expect("header file");
-            assert_eq!(header, format!("Authorization: Bearer {}\n", endpoint.token));
+            assert_eq!(
+                header,
+                format!("Authorization: Bearer {}\n", endpoint.token)
+            );
         }
 
         /// The path is predictable, so a stale file can already be sitting
