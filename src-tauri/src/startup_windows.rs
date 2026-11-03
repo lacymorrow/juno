@@ -77,11 +77,15 @@ pub fn create_bar(app: &AppHandle) -> Result<(), String> {
         bar_config: crate::commands::ui_commands::bar_config_now(app),
         bar_position: crate::commands::bar_position::stored_bar_position(app),
     };
-    WebviewWindowBuilder::from_config(app, &config)
+    let bar = WebviewWindowBuilder::from_config(app, &config)
         .map_err(|e| e.to_string())?
         .initialization_script(boot_script(&boot))
         .build()
         .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    crate::platform::windows::make_bar_non_activating(&bar);
+    #[cfg(not(target_os = "windows"))]
+    let _ = bar;
     crate::startup_timing::mark("bar window created");
     Ok(())
 }
