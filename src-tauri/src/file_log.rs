@@ -80,7 +80,17 @@ struct OpenDay {
     written: u64,
     /// The cap notice has been written; nothing more goes to the file today.
     capped: bool,
+    #[cfg(windows)]
+    opened_at: std::time::Instant,
 }
+
+/// Windows: how long one handle stays open before the next line reopens the
+/// file. NTFS updates the size a directory listing shows only when a handle
+/// closes, so a log held open all session reads as 0 bytes in Explorer and
+/// `dir` while it fills. Reopening every few seconds keeps the listed size
+/// current without a close (and an antivirus scan) on every line.
+#[cfg(windows)]
+const REOPEN_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl DailyLog {
     /// Create the log folder and drop expired files. `None` if the folder cannot be created.
@@ -100,6 +110,15 @@ impl DailyLog {
 
     fn write_on(&self, today: NaiveDate, buf: &[u8]) -> io::Result<usize> {
         let mut current = self.current.lock().unwrap_or_else(|e| e.into_inner());
+        #[cfg(windows)]
+        if current
+            .as_ref()
+            .is_some_and(|open| open.day == today && open.opened_at.elapsed() >= REOPEN_AFTER)
+        {
+            // Dropping the handle is what publishes the size; the file is
+            // reopened just below, with `written` read back from disk.
+            *current = None;
+        }
         if !matches!(current.as_ref(), Some(open) if open.day == today) {
             let file = OpenOptions::new()
                 .create(true)
@@ -115,6 +134,8 @@ impl DailyLog {
                 file,
                 written,
                 capped: written >= self.cap,
+                #[cfg(windows)]
+                opened_at: std::time::Instant::now(),
             });
         }
         let Some(open) = current.as_mut() else {
