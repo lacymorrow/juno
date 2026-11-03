@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.256] - 2026-11-03
+
+### Fixed
+
+- **security:** the shell screen's token leaves curl's argv, and its files are born 0600 (LAC-6475) (#931) (b7300f4b)
+- **release:** survive a transient Apple notary fault, and diagnose the credential (#927) (211f909c)
+
 ## [0.8.255] - 2026-11-02
 
 ### Fixed
@@ -1753,7 +1760,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.255...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.256...HEAD
+[0.8.256]: https://github.com/lacymorrow/juno/compare/cua-v0.8.255...v0.8.256
 [0.8.255]: https://github.com/lacymorrow/juno/compare/cua-v0.8.254...v0.8.255
 [0.8.253]: https://github.com/lacymorrow/juno/compare/cua-v0.8.252...v0.8.253
 [0.8.252]: https://github.com/lacymorrow/juno/compare/cua-v0.8.251...v0.8.252
