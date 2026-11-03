@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use uiautomation::patterns::{UITextPattern, UIValuePattern};
 use uiautomation::types::ControlType;
 use uiautomation::UIAutomation;
-use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+use windows::Win32::System::Com::CoIncrementMTAUsage;
 
 /// Deep enough for a WebView2 or Electron page, which sits 20 to 40 levels
 /// below its window. Same reasoning as the macOS engine's cap.
@@ -27,20 +27,21 @@ pub(super) fn uia_error(context: &str, e: uiautomation::Error) -> AutomationErro
     AutomationError::PlatformError(format!("{context}: {e}"))
 }
 
-thread_local! {
-    // UI Automation is COM, and COM has to be initialised on every thread that
-    // calls it. The result is ignored on purpose: a thread that is already in
-    // a single-threaded apartment (a GUI thread) returns RPC_E_CHANGED_MODE,
-    // and UI Automation works there too.
-    static COM_READY: () = {
-        // SAFETY: plain COM initialisation for the calling thread, with no
-        // pointers passed in.
-        let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-    };
-}
+static MTA_USAGE: OnceLock<bool> = OnceLock::new();
 
+/// Keeps the process's multithreaded apartment alive, so a thread with no COM
+/// state of its own can call UI Automation.
+///
+/// Never `CoInitializeEx` here. The engine is created on the main thread before
+/// tao makes its first window, and tao's `OleInitialize` panics with
+/// RPC_E_CHANGED_MODE if that thread has already joined the multithreaded
+/// apartment. This call leaves the calling thread's apartment alone. Its cookie
+/// is dropped unused, which never releases the apartment.
 pub fn ensure_com() {
-    COM_READY.with(|_| {});
+    MTA_USAGE.get_or_init(|| {
+        // SAFETY: takes no pointers from us and returns a cookie by value.
+        unsafe { CoIncrementMTAUsage() }.is_ok()
+    });
 }
 
 /// The UI Automation client.
