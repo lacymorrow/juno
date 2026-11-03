@@ -142,9 +142,9 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
 any-tts = { version = "0.1", default-features = false, features = ["kokoro", "download", "metal"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# The bar's own activation (platform/windows.rs): foreground window, thread
-# input and keyboard focus, without tao's synthetic Alt press.
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+# The bar's focus on Windows (platform/windows.rs): which window is in front,
+# and a subclass that keeps a lone Alt out of keyboard menu mode.
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 # CPU-only fallback for non-macOS (no Metal framework available)

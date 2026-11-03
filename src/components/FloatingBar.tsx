@@ -1175,6 +1175,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     setInputOpen(true);
   }, [activateWindow]);
 
+  /**
+   * The Open chat button: the chat comes up ready to type, so the bar takes
+   * the keyboard on this click, as it does for the type button.
+   */
+  const openChatFromClick = useCallback(() => {
+    activateWindow();
+    reopenPane();
+  }, [activateWindow, reopenPane]);
+
   /** Escape / empty blur: back to the pill. */
   const closeInput = useCallback(() => {
     setInputOpen(false);
@@ -1941,7 +1950,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               <button
                 ref={chatRef}
                 type="button"
-                onClick={reopenPane}
+                onClick={openChatFromClick}
                 aria-label="Open chat"
                 title="Open chat"
                 data-phover={hoveredButton === "chat" ? "" : undefined}
@@ -2050,7 +2059,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               {showExpand && !isIdle && (
                 <button
                   type="button"
-                  onClick={reopenPane}
+                  onClick={openChatFromClick}
                   aria-label="Open chat"
                   title="Open chat"
                   className={inputControlButton}
@@ -2123,7 +2132,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             {showExpand && (
               <button
                 type="button"
-                onClick={reopenPane}
+                onClick={openChatFromClick}
                 aria-label="Open chat"
                 title="Open chat"
                 className={inputControlButton}
