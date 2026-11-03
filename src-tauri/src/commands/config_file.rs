@@ -121,13 +121,9 @@ pub async fn open_config_file(app_handle: AppHandle, file_name: String) -> Resul
             .map_err(|e| format!("Failed to open file: {}", e))?;
     }
 
+    // ShellExecute, not `cmd /C start`, which opens a console window.
     #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &file_path.to_string_lossy()])
-            .spawn()
-            .map_err(|e| format!("Failed to open file: {}", e))?;
-    }
+    open::that_detached(&file_path).map_err(|e| format!("Failed to open file: {}", e))?;
 
     Ok(())
 }

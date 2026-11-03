@@ -531,7 +531,9 @@ impl BrowserController {
         {
             log::info!("Checking if Chrome is already running...");
 
+            use crate::platform::console_window::HideConsoleWindow;
             let output = tokio::process::Command::new("tasklist")
+                .hide_console_window()
                 .arg("/FI")
                 .arg("IMAGENAME eq chrome.exe")
                 .output()
@@ -929,25 +931,12 @@ impl BrowserController {
             }
         }
 
+        // ShellExecute, not `cmd /C start`: cmd.exe splits a URL at `&` and
+        // opens a console window to do it.
         #[cfg(target_os = "windows")]
-        {
-            let output = tokio::process::Command::new(system_url_commands::OPEN_URL_COMMAND)
-                .args(system_url_commands::WINDOWS_START_ARGS)
-                .arg(url)
-                .output()
-                .await
-                .map_err(|e| {
-                    AgentError::ToolError(format!("Failed to execute start command: {}", e))
-                })?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(AgentError::ToolError(format!(
-                    "Failed to open URL with system handler: {}",
-                    stderr
-                )));
-            }
-        }
+        open::that_detached(url).map_err(|e| {
+            AgentError::ToolError(format!("Failed to open URL with system handler: {}", e))
+        })?;
 
         #[cfg(target_os = "linux")]
         {

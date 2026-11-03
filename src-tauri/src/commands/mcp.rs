@@ -1,8 +1,19 @@
 use crate::constants::errors::templates;
+use crate::platform::console_window::HideConsoleWindow;
 use chrono;
 use std::collections::HashMap;
 use tauri::{AppHandle, State};
 use tracing::{error, info, warn};
+
+/// npm and npx are `.cmd` files on Windows, which a bare name never finds.
+#[cfg(windows)]
+const NPM: &str = "npm.cmd";
+#[cfg(not(windows))]
+const NPM: &str = "npm";
+#[cfg(windows)]
+const NPX: &str = "npx.cmd";
+#[cfg(not(windows))]
+const NPX: &str = "npx";
 
 /// Helper function to format error messages with proper template substitution
 fn format_error(template: &str, context: &str, error: impl std::fmt::Display) -> String {
@@ -685,6 +696,7 @@ pub async fn troubleshoot_mcp_issues(
 
     // Check if Node.js tools are available
     if let Ok(output) = tokio::process::Command::new("node")
+        .hide_console_window()
         .arg("--version")
         .output()
         .await
@@ -697,7 +709,8 @@ pub async fn troubleshoot_mcp_issues(
         }
     }
 
-    if let Ok(output) = tokio::process::Command::new("npm")
+    if let Ok(output) = tokio::process::Command::new(NPM)
+        .hide_console_window()
         .arg("--version")
         .output()
         .await
@@ -710,7 +723,8 @@ pub async fn troubleshoot_mcp_issues(
         }
     }
 
-    if let Ok(output) = tokio::process::Command::new("npx")
+    if let Ok(output) = tokio::process::Command::new(NPX)
+        .hide_console_window()
         .arg("--version")
         .output()
         .await
@@ -1065,7 +1079,10 @@ pub async fn check_mcp_prerequisites() -> Result<serde_json::Value, String> {
     });
 
     // Check Node.js
-    let node_version = std::process::Command::new("node").arg("--version").output();
+    let node_version = std::process::Command::new("node")
+        .hide_console_window()
+        .arg("--version")
+        .output();
 
     match node_version {
         Ok(output) if output.status.success() => {
@@ -1086,7 +1103,10 @@ pub async fn check_mcp_prerequisites() -> Result<serde_json::Value, String> {
     }
 
     // Check npm
-    let npm_version = std::process::Command::new("npm").arg("--version").output();
+    let npm_version = std::process::Command::new(NPM)
+        .hide_console_window()
+        .arg("--version")
+        .output();
 
     match npm_version {
         Ok(output) if output.status.success() => {
@@ -1106,7 +1126,10 @@ pub async fn check_mcp_prerequisites() -> Result<serde_json::Value, String> {
     }
 
     // Check npx
-    let npx_check = std::process::Command::new("npx").arg("--version").output();
+    let npx_check = std::process::Command::new(NPX)
+        .hide_console_window()
+        .arg("--version")
+        .output();
 
     match npx_check {
         Ok(output) if output.status.success() => {
@@ -1132,7 +1155,8 @@ pub async fn check_mcp_prerequisites() -> Result<serde_json::Value, String> {
     ];
 
     for package in &mcp_packages {
-        let package_check = std::process::Command::new("npm")
+        let package_check = std::process::Command::new(NPM)
+            .hide_console_window()
             .args(["info", package, "version"])
             .output();
 
