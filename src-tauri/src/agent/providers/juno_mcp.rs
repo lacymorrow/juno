@@ -879,6 +879,8 @@ mod tests {
         assert_eq!(result["content"][0]["text"], "Reminders is off.");
     }
 
+    use std::path::PathBuf;
+
     fn test_endpoint() -> Endpoint {
         Endpoint {
             url: "http://127.0.0.1:51234/mcp".to_string(),
@@ -940,6 +942,14 @@ mod tests {
             hook_auth_header(&test_endpoint()),
             "Authorization: Bearer secret\n"
         );
+    }
+
+    /// Fail closed, again: the quoting refuses rather than escapes, so a path
+    /// that would close the quote early gets no settings at all.
+    #[test]
+    fn a_header_path_holding_a_single_quote_is_refused() {
+        let path = PathBuf::from("/tmp/it's-here.txt");
+        assert!(shell_screen_settings(&test_endpoint(), &path).is_err());
     }
 
     /// Fail closed: a header path that cannot be quoted for the shell yields no
