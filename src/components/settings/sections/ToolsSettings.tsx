@@ -68,7 +68,7 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
       toast.success(
         enabled
           ? "Companion mode on. Juno will watch and answer, but not act."
-          : "Companion mode off. Juno can act on your Mac again."
+          : "Companion mode off. Juno can act on your computer again."
       );
     } catch (error) {
       console.error("Failed to toggle companion mode:", error);
