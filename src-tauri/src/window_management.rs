@@ -525,6 +525,25 @@ fn apply_settings_vibrancy(app: &AppHandle) {
     });
 }
 
+/// Windows: Mica behind the settings window, as Windows 11's own Settings
+/// app has, so the sidebar the page leaves translucent for the macOS blur is
+/// not see-through. Acrylic where Mica is missing (Windows 10). Best-effort.
+#[cfg(target_os = "windows")]
+fn apply_settings_vibrancy(app: &AppHandle) {
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        let Some(window) = app.get_webview_window(window_labels::SETTINGS) else {
+            return;
+        };
+        if window_vibrancy::apply_mica(&window, None).is_ok() {
+            return;
+        }
+        if let Err(e) = window_vibrancy::apply_acrylic(&window, Some((18, 18, 18, 200))) {
+            warn!("Failed to apply settings window backdrop: {}", e);
+        }
+    });
+}
+
 /// Open the native settings window.
 ///
 /// Settings is declared at the ordinary window level, the same as the chat
@@ -544,7 +563,7 @@ pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
     // Give the settings window the native translucent-sidebar look. Applied
     // after the window exists/shows; idempotent across repeated opens, and
     // necessary on every open now that closing settings destroys it.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     apply_settings_vibrancy(&app);
 
     #[cfg(target_os = "macos")]
