@@ -172,14 +172,12 @@ export const settingsCategories: MacCategory[] = [
 /**
  * What Settings leaves out on Windows, hidden rather than disabled: whole
  * sections and single rows that only drive things that are off there for now
- * (voice and dictation, the agent's pointer, the Dock, macOS permissions;
- * docs/plans/windows.md). The rows themselves are left out where they render.
+ * (voice and dictation, the agent's pointer overlay, the Dock, macOS
+ * permissions; docs/plans/windows.md). The rows themselves are left out where they render.
  */
 const HIDDEN_ON_WINDOWS = {
   sections: new Set(["voice", "models", "tools"]),
   rows: new Set([
-    "background-mode",
-    "mouse-control",
     "show-juno-in",
     "follow-cursor-display",
     "cursor-color",
