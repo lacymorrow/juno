@@ -184,6 +184,22 @@ fn build_plugin<R: Runtime + 'static>(
 
             // Get model path from config or use default
             let config = VoiceTranscriptionConfig::default();
+
+            // Voice is macOS-only until the Windows voice step
+            // (docs/plans/windows.md, step 3). The controllers are managed, so
+            // every command still answers, but no model is looked for and no
+            // engine loads.
+            if cfg!(not(target_os = "macos")) {
+                app.manage(Arc::new(Mutex::new(VoiceController::new_uninitialized(
+                    &config.model_path,
+                    "Voice is not available on this platform yet".to_string(),
+                ))));
+                app.manage(Arc::new(Mutex::new(AlwaysListeningController::new_uninitialized(
+                    &config.model_path,
+                ))));
+                tracing::info!("[VoicePlugin] Voice is not available on this platform yet; no engine loaded");
+                return Ok(());
+            }
             tracing::info!("Default config model path: {}", config.model_path);
 
             // Try to resolve the model path for both development and production
@@ -205,14 +221,11 @@ fn build_plugin<R: Runtime + 'static>(
                 } else {
                     tracing::warn!("Could not read models directory");
                 }
-                // Notify frontend so it can offer to download the preferred model.
-                // Not off macOS, where voice is not on yet (see below).
-                if cfg!(target_os = "macos") {
-                    let _ = app.emit(crate::constants::engine::WHISPER_MODEL_NOT_FOUND, serde_json::json!({
-                        "preferred": &config.model_path,
-                        "resolved": &resolved_model_path
-                    }));
-                }
+                // Notify frontend so it can offer to download the preferred model
+                let _ = app.emit(crate::constants::engine::WHISPER_MODEL_NOT_FOUND, serde_json::json!({
+                    "preferred": &config.model_path,
+                    "resolved": &resolved_model_path
+                }));
             }
 
             // Fallback: if preferred model missing, try tiny.en as a working fallback
@@ -243,14 +256,6 @@ fn build_plugin<R: Runtime + 'static>(
             )));
             app.manage(voice_arc.clone());
             app.manage(alc_arc.clone());
-
-            // Voice is macOS-only until the Windows voice step
-            // (docs/plans/windows.md, step 3). The controllers above stay
-            // managed, so every command still answers, but no engine loads.
-            if cfg!(not(target_os = "macos")) {
-                tracing::info!("[VoicePlugin] Voice is not available on this platform yet; no engine loaded");
-                return Ok(());
-            }
 
             // Load the STT model in a background task — model files can be >1 GB
             // and would freeze the Tauri startup if loaded on the setup thread.
