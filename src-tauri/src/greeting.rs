@@ -43,6 +43,10 @@ const BAR_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
 /// it plays the moment the reveal starts. Called at launch, in parallel with
 /// startup, and after any change of engine, voice or rate.
 pub fn refresh_cache(app: &AppHandle) {
+    // Off macOS nothing speaks yet (docs/plans/windows.md, step 3).
+    if cfg!(not(target_os = "macos")) {
+        return;
+    }
     crate::tts::prerender::refresh_in_background(app, HELLO);
 }
 
@@ -153,6 +157,11 @@ fn spoken(combo: &str) -> String {
 
 /// Speak a line, unless this launch is one where speaking would be rude.
 async fn speak(app: &AppHandle, line: String, rendered_ahead: bool) {
+    // Off macOS nothing speaks yet (docs/plans/windows.md, step 3), so there is
+    // no greeting to try and fail.
+    if cfg!(not(target_os = "macos")) {
+        return;
+    }
     if booted_just_now() {
         debug!("[Greeting] Machine just booted; this is a login item, staying quiet");
         return;
