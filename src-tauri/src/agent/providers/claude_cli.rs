@@ -386,45 +386,17 @@ pub async fn cli_status() -> CliStatus {
 /// rename is atomic and keeps the mode, so a hook reading the old file reads a
 /// whole one (LAC-6475).
 fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), AgentError> {
-    use std::io::Write;
-
-    // Unique per call, not just per process: a turn and the warm spare can
-    // both be writing their inputs, and a shared staging name would make one
-    // of them fail for no reason.
-    static STAGING: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let nonce = STAGING.fetch_add(1, Ordering::Relaxed);
-
-    let failed = |what: &str, target: &Path, e: std::io::Error| {
-        AgentError::ConfigurationError(format!("Failed to {what} {}: {e}", target.display()))
-    };
-
-    let mut staging = path.as_os_str().to_os_string();
-    staging.push(format!(".tmp{}-{nonce}", std::process::id()));
-    let staging = PathBuf::from(staging);
-
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
+    // MUTATION (not for merge): defect B restored. Creates at the umask, then
+    // chmods, and only warns if the chmod fails.
+    std::fs::write(path, bytes).map_err(|e| {
+        AgentError::ConfigurationError(format!("Failed to write {}: {e}", path.display()))
+    })?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-
-    let mut file = options
-        .open(&staging)
-        .map_err(|e| failed("create", &staging, e))?;
-    let written = file
-        .write_all(bytes)
-        .and_then(|()| file.flush())
-        .map_err(|e| failed("write", &staging, e));
-    drop(file);
-
-    if let Err(e) = written.and_then(|()| {
-        std::fs::rename(&staging, path).map_err(|e| failed("move into place", path, e))
-    }) {
-        // Nothing else knows this name, so there is nobody to take it over.
-        let _ = std::fs::remove_file(&staging);
-        return Err(e);
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+            warn!("Could not restrict {} to this user: {}", path.display(), e);
+        }
     }
     Ok(())
 }
