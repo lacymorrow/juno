@@ -17,11 +17,13 @@ use serde::Serialize;
 /// Hard ceilings on one walk, so a huge tree (a long web page, a table with
 /// thousands of rows) costs a bounded amount of time and tokens.
 pub const MAX_NODES_VISITED: usize = 5_000;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const MAX_DEPTH: usize = 50;
 /// Longest value reported for an element, in characters.
 const MAX_VALUE_CHARS: usize = 200;
 /// Nodes read for one window fingerprint. Smaller than a full listing: it runs
 /// twice around every background click.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const FINGERPRINT_MAX_NODES: usize = 1_500;
 
 /// Roles whose value changes by itself (a playback position, a progress bar),
