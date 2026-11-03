@@ -109,7 +109,7 @@ const PHRASES: &[(&str, &str)] = &[
     ),
     (
         "**Playback example** (correct — live card, honest text):\n```xml\n<TTS>Paused.</TTS>\n\n<NowPlayingCard app=\"Spotify\" />\n```",
-        "**Playback example** (correct — honest text):\n```xml\n<TTS>Paused.</TTS>\n```",
+        "**Playback example** (correct, honest text):\n```xml\n<TTS>Paused.</TTS>\n```",
     ),
     (
         "<TTS>Playing. Midnight by 1991.</TTS>\n\n<NowPlayingCard app=\"Spotify\" />\n",
