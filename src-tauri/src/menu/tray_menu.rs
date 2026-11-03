@@ -283,9 +283,25 @@ impl TrayIconManager {
 /// second it reads as the icon flashing. The combined call assigns the image
 /// once, already marked as a template. On Windows and Linux, where there is no
 /// such flag, it falls through to a plain `set_icon`.
+#[cfg(not(target_os = "windows"))]
 fn apply_tray_frame(tray_icon: &TrayIcon<tauri::Wry>, image: TauriImage<'_>) -> tauri::Result<()> {
     tray_icon.set_icon_with_as_template(Some(image), true)
 }
+
+/// Windows keeps the colored app icon (`WINDOWS_TRAY_ICON`) in every state:
+/// the waveform is a black template glyph that Windows does not tint, so on
+/// a dark taskbar it all but disappears. The tooltip still says the state.
+#[cfg(target_os = "windows")]
+fn apply_tray_frame(
+    _tray_icon: &TrayIcon<tauri::Wry>,
+    _image: TauriImage<'_>,
+) -> tauri::Result<()> {
+    Ok(())
+}
+
+/// The notification-area icon on Windows: the app's own, in color.
+#[cfg(target_os = "windows")]
+const WINDOWS_TRAY_ICON: &[u8] = include_bytes!("../../icons/32x32.png");
 
 /// One frame decoded to raw RGBA, so a running animation never has to touch a
 /// PNG decoder again.
@@ -895,7 +911,10 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
 
     // Load the idle frame. Template mode lets macOS tint it for the menu bar.
     let idle_frame = FRAMES_IDLE.first().ok_or("idle tray icon has no frames")?;
+    #[cfg(not(target_os = "windows"))]
     let default_icon = load_tray_icon_from_data(idle_frame)?;
+    #[cfg(target_os = "windows")]
+    let default_icon = load_tray_icon_from_data(WINDOWS_TRAY_ICON)?;
 
     // Left click opens the menu, the Mac convention for a menu bar extra;
     // right click climbs the ladder (`handle_tray_icon_event`).
@@ -903,7 +922,7 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
         .menu(&tray_menu)
         .show_menu_on_left_click(true)
         .icon(default_icon)
-        .icon_as_template(true)
+        .icon_as_template(cfg!(not(target_os = "windows")))
         .tooltip(TrayIconState::Idle.tooltip())
         .on_tray_icon_event(|tray, event| {
             handle_tray_icon_event(tray.app_handle(), event);
