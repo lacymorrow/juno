@@ -34,6 +34,7 @@ import {
   type PermissionMode,
 } from "@/lib/permissions";
 import { SettingsGroup, SettingsRow } from "../ui";
+import { IS_WINDOWS } from "@/lib/platform";
 
 const permissions = [
   {
@@ -438,79 +439,81 @@ export default function SecuritySettings() {
 
       <ApprovalsGroup />
 
-      <SettingsGroup
-        title="macOS Permissions"
-      >
-        {permissionsError && (
-          <SettingsRow
-            destructive
-            label="Error checking permissions"
-            description={permissionsError}
-          />
-        )}
-
-        {/* Permission Rows */}
-        {permissions.map((permission) => {
-          const permissionKey = permission.id.replace(
-            "-",
-            "_"
-          ) as keyof PermissionsState;
-          const permissionStatus =
-            (permissionsState?.[permissionKey] as AppPermissionStatus) || null;
-
-          return (
-            <PermissionCard
-              key={permission.id}
-              permission={permission}
-              permissionStatus={permissionStatus}
-              onRequest={() =>
-                requestPermission(permission.id.replace("-", "_"))
-              }
-              isRequesting={
-                isRequestingPermission === permission.id.replace("-", "_")
-              }
-              isLoading={isLoadingPermissions}
-            />
-          );
-        })}
-
-        {/* Summary */}
-        {isLoadingPermissions ? (
-          <SettingsRow label="Checking permissions…">
-            <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />
-          </SettingsRow>
-        ) : (
-          permissionsState && (
+      {!IS_WINDOWS && (
+        <SettingsGroup
+          title="macOS Permissions"
+        >
+          {permissionsError && (
             <SettingsRow
-              label={
-                permissionsState.all_granted ? (
-                  <span className="flex items-center gap-2 font-medium text-green-600 dark:text-green-400">
-                    <CheckCircle className="w-4 h-4" />
-                    All required permissions granted!
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2 font-medium text-yellow-600 dark:text-yellow-400">
-                    <AlertCircle className="w-4 h-4" />
-                    Some permissions still needed
-                  </span>
-                )
-              }
-            >
-              <Button
-                onClick={() => {
-                  checkPermissionsStatus();
-                }}
-                variant="outline"
-                size="sm"
-                className="flex items-center gap-1"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Refresh
-              </Button>
+              destructive
+              label="Error checking permissions"
+              description={permissionsError}
+            />
+          )}
+
+          {/* Permission Rows */}
+          {permissions.map((permission) => {
+            const permissionKey = permission.id.replace(
+              "-",
+              "_"
+            ) as keyof PermissionsState;
+            const permissionStatus =
+              (permissionsState?.[permissionKey] as AppPermissionStatus) || null;
+
+            return (
+              <PermissionCard
+                key={permission.id}
+                permission={permission}
+                permissionStatus={permissionStatus}
+                onRequest={() =>
+                  requestPermission(permission.id.replace("-", "_"))
+                }
+                isRequesting={
+                  isRequestingPermission === permission.id.replace("-", "_")
+                }
+                isLoading={isLoadingPermissions}
+              />
+            );
+          })}
+
+          {/* Summary */}
+          {isLoadingPermissions ? (
+            <SettingsRow label="Checking permissions…">
+              <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" />
             </SettingsRow>
-          )
-        )}
-      </SettingsGroup>
+          ) : (
+            permissionsState && (
+              <SettingsRow
+                label={
+                  permissionsState.all_granted ? (
+                    <span className="flex items-center gap-2 font-medium text-green-600 dark:text-green-400">
+                      <CheckCircle className="w-4 h-4" />
+                      All required permissions granted!
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2 font-medium text-yellow-600 dark:text-yellow-400">
+                      <AlertCircle className="w-4 h-4" />
+                      Some permissions still needed
+                    </span>
+                  )
+                }
+              >
+                <Button
+                  onClick={() => {
+                    checkPermissionsStatus();
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-1"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Refresh
+                </Button>
+              </SettingsRow>
+            )
+          )}
+        </SettingsGroup>
+      )}
     </div>
   );
 }

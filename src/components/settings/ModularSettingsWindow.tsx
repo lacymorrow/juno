@@ -47,6 +47,7 @@ import {
   useAdvancedSettings,
 } from "./AdvancedSettingsContext";
 import { SettingsCategory } from "./types";
+import { IS_WINDOWS } from "@/lib/platform";
 
 /**
  * Where the agent's `settings` tool wants the window (Rust:
@@ -168,9 +169,35 @@ export const settingsCategories: MacCategory[] = [
   },
 ];
 
+/**
+ * What Settings leaves out on Windows, hidden rather than disabled: whole
+ * sections and single rows that only drive things that are off there for now
+ * (voice and dictation, the agent's pointer, the Dock, macOS permissions;
+ * docs/plans/windows.md). The rows themselves are left out where they render.
+ */
+const HIDDEN_ON_WINDOWS = {
+  sections: new Set(["voice", "models", "tools"]),
+  rows: new Set([
+    "background-mode",
+    "mouse-control",
+    "show-juno-in",
+    "follow-cursor-display",
+    "cursor-color",
+  ]),
+};
+
+/** Whether a section, or a row in it, exists on this platform. */
+function onThisPlatform(sectionId: string, rowId?: string): boolean {
+  if (!IS_WINDOWS) return true;
+  if (HIDDEN_ON_WINDOWS.sections.has(sectionId)) return false;
+  return rowId === undefined || !HIDDEN_ON_WINDOWS.rows.has(rowId);
+}
+
 /** Categories visible for the given toggle state. Exported for tests. */
 export function visibleCategories(showAdvanced: boolean): MacCategory[] {
-  return settingsCategories.filter((c) => showAdvanced || !c.advanced);
+  return settingsCategories.filter(
+    (c) => onThisPlatform(c.id) && (showAdvanced || !c.advanced),
+  );
 }
 
 /** Categories matching a search query (name + keywords). Exported for tests. */
@@ -263,6 +290,7 @@ export function searchRows(query: string, showAdvanced = true): SettingsRowEntry
     settingsCategories.filter((c) => c.advanced).map((c) => c.id),
   );
   return settingsRowIndex.filter((r) => {
+    if (!onThisPlatform(r.sectionId, r.rowId)) return false;
     if (!showAdvanced && (r.advanced || hiddenSections.has(r.sectionId))) return false;
     const haystack = `${r.label} ${r.keywords}`.toLowerCase();
     return terms.every((t) => haystack.includes(t));
