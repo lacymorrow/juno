@@ -10,6 +10,7 @@ import { useBarAppearance } from "../useBarAppearance";
 import { UpdatesGroup } from "../UpdatesGroup";
 import { NotificationsGroup } from "../NotificationsGroup";
 import { CursorColorPicker } from "../CursorColorPicker";
+import { IS_WINDOWS } from "@/lib/platform";
 
 export default function GeneralSettings(_props: SettingsSectionProps) {
   const [autoLaunchEnabled, setAutoLaunchEnabled] = useState(false);
@@ -143,37 +144,45 @@ export default function GeneralSettings(_props: SettingsSectionProps) {
             />
           }
         />
-        <SettingsRow
-          htmlFor="follow-cursor-display"
-          label="Follow me across displays"
-          description="The bar moves to whichever display your cursor is on."
-        >
-          <Switch
-            id="follow-cursor-display"
-            checked={followCursorDisplay}
-            onCheckedChange={handleFollowCursorChange}
-            disabled={followCursorLoading}
-          />
-        </SettingsRow>
-        <SettingsRow
-          id="cursor-color"
-          label={<span id="cursor-color-label">Cursor color</span>}
-          description="The glow that shows where Juno is working on your screen."
-        >
-          <CursorColorPicker
-            value={cursorColor}
-            onChange={handleCursorColorChange}
-            disabled={cursorColorSaving}
-            labelledBy="cursor-color-label"
-          />
-        </SettingsRow>
+        {!IS_WINDOWS && (
+          <>
+            <SettingsRow
+              htmlFor="follow-cursor-display"
+              label="Follow me across displays"
+              description="The bar moves to whichever display your cursor is on."
+            >
+              <Switch
+                id="follow-cursor-display"
+                checked={followCursorDisplay}
+                onCheckedChange={handleFollowCursorChange}
+                disabled={followCursorLoading}
+              />
+            </SettingsRow>
+            <SettingsRow
+              id="cursor-color"
+              label={<span id="cursor-color-label">Cursor color</span>}
+              description="The glow that shows where Juno is working on your screen."
+            >
+              <CursorColorPicker
+                value={cursorColor}
+                onChange={handleCursorColorChange}
+                disabled={cursorColorSaving}
+                labelledBy="cursor-color-label"
+              />
+            </SettingsRow>
+          </>
+        )}
       </SettingsGroup>
 
       <SettingsGroup title="Startup">
         <SettingsRow
           htmlFor="auto-launch"
           label="Open at login"
-          description="Juno is in the menu bar as soon as you log in."
+          description={
+            IS_WINDOWS
+              ? "Juno is in the notification area as soon as you sign in."
+              : "Juno is in the menu bar as soon as you log in."
+          }
         >
           <Switch
             id="auto-launch"
