@@ -105,9 +105,11 @@ pub fn init_environment() {
                 }
             }
 
+            // A released app has no .env, and keys live in Settings, so this
+            // is development detail, not a warning.
             if !loaded {
-                warn!("No .env file found in any expected location");
-                info!("Environment variables will be loaded from system environment");
+                debug!("No .env file found in any expected location");
+                debug!("Environment variables will be loaded from system environment");
             }
         }
     }
@@ -134,10 +136,10 @@ pub fn validate_environment_variables() {
         }
     }
 
+    // Keys normally come from Settings, not the environment, so a missing
+    // variable is the usual case for a released app: debug, not a warning.
     if !missing_vars.is_empty() {
-        warn!("Missing environment variables: {:?}", missing_vars);
-        warn!("Some AI provider features may not work without proper API keys");
-        info!("You can set these in a .env file or as system environment variables");
+        debug!("Environment variables not set: {:?}", missing_vars);
     } else {
         info!("All critical environment variables are available");
     }
