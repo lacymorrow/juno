@@ -920,7 +920,9 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
     // right click climbs the ladder (`handle_tray_icon_event`).
     let tray_icon = TrayIconBuilder::new()
         .menu(&tray_menu)
-        .show_menu_on_left_click(true)
+        // Windows is the other way round: left click shows Juno, right click
+        // opens the menu (`CLIMB_BUTTON`).
+        .show_menu_on_left_click(cfg!(not(target_os = "windows")))
         .icon(default_icon)
         .icon_as_template(cfg!(not(target_os = "windows")))
         .tooltip(TrayIconState::Idle.tooltip())
@@ -930,6 +932,8 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
         .build(app)?;
     // Tauri only exposes the left-click switch. tray-icon also opens the menu
     // on a right click by default, which would leave nothing for the climb.
+    // On Windows the right click is the menu's, as it is for every tray icon.
+    #[cfg(not(target_os = "windows"))]
     if let Err(e) =
         tray_icon.with_inner_tray_icon(|inner| inner.set_show_menu_on_right_click(false))
     {
@@ -1438,17 +1442,25 @@ pub fn quit_app(app_handle: &AppHandle) {
 }
 
 /// Handle TrayIconEvents like clicks on the icon itself
+/// The button that climbs the ladder. The Mac's menu bar convention opens the
+/// menu on a left click and leaves the right one for this; on Windows a left
+/// click on a tray icon shows the app and the right one opens its menu.
+#[cfg(not(target_os = "windows"))]
+const CLIMB_BUTTON: MouseButton = MouseButton::Right;
+#[cfg(target_os = "windows")]
+const CLIMB_BUTTON: MouseButton = MouseButton::Left;
+
 pub fn handle_tray_icon_event(app_handle: &AppHandle, event: tauri::tray::TrayIconEvent) {
     match event {
         // On press, not release: menu bar extras act on the press, and the
         // release never arrives for a click posted by automation (juno-cua,
         // cliclick), which is how Juno records her own demos.
         tauri::tray::TrayIconEvent::Click {
-            button: MouseButton::Right,
+            button: CLIMB_BUTTON,
             button_state: MouseButtonState::Down,
             ..
         } => {
-            info!("[TrayIcon] Right click detected on tray icon");
+            info!("[TrayIcon] {:?} click detected on tray icon", CLIMB_BUTTON);
             // One rung up the ladder per click, the same as the Dock icon:
             // hidden to the text input, the idle bar or the text input to the
             // floating chat, the floating chat to the big chat. Putting Juno
@@ -1459,11 +1471,10 @@ pub fn handle_tray_icon_event(app_handle: &AppHandle, event: tauri::tray::TrayIc
             });
         }
         tauri::tray::TrayIconEvent::Click {
-            button: MouseButton::Left,
             button_state: MouseButtonState::Down,
             ..
         } => {
-            info!("[TrayIcon] Left click detected on tray icon");
+            info!("[TrayIcon] Menu click detected on tray icon");
             // The menu opens on its own (`show_menu_on_left_click`).
         }
         // The pointer has to cross the icon before it can open the menu, so
