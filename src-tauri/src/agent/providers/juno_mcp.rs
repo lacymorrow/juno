@@ -891,13 +891,10 @@ mod tests {
     /// `--dangerously-skip-permissions`, so `approve` is never called and a
     /// `PreToolUse` hook is the only thing left that still runs. These are the
     /// settings that install it.
-    ///
-    /// The token rides in the file rather than on the command line, for the
-    /// same reason the MCP config does: every `ps` on the machine can read a
-    /// command line.
     #[test]
-    fn the_shell_screen_settings_point_at_the_hook_route_with_the_token() {
-        let settings = shell_screen_settings(&test_endpoint());
+    fn the_shell_screen_settings_point_at_the_hook_route() {
+        let settings = shell_screen_settings(&test_endpoint(), Path::new("/tmp/hdr.txt"))
+            .expect("a plain path is quotable");
         let entry = &settings["hooks"]["PreToolUse"][0];
         assert_eq!(entry["matcher"], "Bash");
 
@@ -908,11 +905,54 @@ mod tests {
             command.contains("http://127.0.0.1:51234/hook/pretooluse"),
             "{command}"
         );
-        assert!(command.contains("Bearer secret"), "{command}");
         // A dead server must not block the person's shell: curl writes
         // nothing on failure and exits non-zero, which the CLI reads as
         // "carry on". Measured on claude 2.1.311.
         assert!(command.contains("--max-time"), "{command}");
+    }
+
+    /// LAC-6475. Claude Code runs this command through `sh -c` on every `Bash`
+    /// call, and on macOS `ps` shows every user's argv, so a token on the
+    /// command line is a token any process on the machine can read for as long
+    /// as the call lasts. The token is the one `/mcp` accepts, which moves the
+    /// mouse. It travels in a 0600 file curl reads instead.
+    #[test]
+    fn the_shell_screen_settings_keep_the_token_off_the_command_line() {
+        let endpoint = test_endpoint();
+        let settings = shell_screen_settings(&endpoint, Path::new("/tmp/hdr.txt"))
+            .expect("a plain path is quotable");
+        let command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(!command.contains(&endpoint.token), "{command}");
+        assert!(!command.contains("Bearer"), "{command}");
+        assert!(!command.contains("Authorization"), "{command}");
+        // Read from the file instead, by a path the shell cannot re-split.
+        assert!(command.contains("-H @'/tmp/hdr.txt'"), "{command}");
+    }
+
+    /// The file's whole contents: one header line, in the shape `curl -H @file`
+    /// reads.
+    #[test]
+    fn the_hook_auth_header_file_carries_the_token() {
+        assert_eq!(
+            hook_auth_header(&test_endpoint()),
+            "Authorization: Bearer secret\n"
+        );
+    }
+
+    /// Fail closed: a header path that cannot be quoted for the shell yields no
+    /// settings at all, rather than a command that reads the wrong file or
+    /// splits into something unintended.
+    #[cfg(unix)]
+    #[test]
+    fn a_header_path_that_cannot_be_quoted_is_refused() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        // Not valid UTF-8, so there is no &str to quote.
+        let path = PathBuf::from(OsStr::from_bytes(b"/tmp/\xff\xfehdr.txt"));
+        assert!(shell_screen_settings(&test_endpoint(), &path).is_err());
     }
 
     #[test]
