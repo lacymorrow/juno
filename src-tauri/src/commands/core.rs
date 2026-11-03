@@ -324,6 +324,7 @@ fn get_display_dimensions() -> Result<(u32, u32, f64, f64, u32), String> {
 #[tauri::command]
 pub(crate) async fn capture_screenshot_command(
     _app: DummyAppHandle,
+    _state: State<'_, AppState>,
 ) -> Result<ScreenshotResult, String> {
     // Use alias
     Err("Screenshot capture is only supported on macOS currently.".to_string())

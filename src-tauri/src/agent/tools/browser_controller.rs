@@ -932,7 +932,7 @@ impl BrowserController {
         #[cfg(target_os = "windows")]
         {
             let output = tokio::process::Command::new(system_url_commands::OPEN_URL_COMMAND)
-                .args(&system_url_commands::WINDOWS_START_ARGS)
+                .args(system_url_commands::WINDOWS_START_ARGS)
                 .arg(url)
                 .output()
                 .await

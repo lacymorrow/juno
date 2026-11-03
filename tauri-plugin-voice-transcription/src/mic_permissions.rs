@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -29,6 +30,7 @@ static PERMISSION_CACHED: AtomicBool = AtomicBool::new(false);
 static PERMISSION_GRANTED: AtomicBool = AtomicBool::new(false);
 
 /// Guard against concurrent permission requests
+#[cfg(target_os = "macos")]
 static PERMISSION_REQUEST_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 /// Track whether we already attempted a TCC request this session.

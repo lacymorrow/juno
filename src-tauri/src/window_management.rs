@@ -547,6 +547,7 @@ pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     apply_settings_vibrancy(&app);
 
+    #[cfg(target_os = "macos")]
     crate::platform::macos::raise_above_chat_window(&app, window_labels::SETTINGS);
 
     // Raising settings above the chat window was never the whole fix: the
