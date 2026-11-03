@@ -1,6 +1,6 @@
 {
   "name": "tauri-plugin-voice-transcription-api",
-  "version": "0.8.255",
+  "version": "0.8.256",
   "description": "TypeScript bindings for the Tauri voice transcription plugin",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
