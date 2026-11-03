@@ -307,7 +307,7 @@ export default function ModelsSettings() {
     <div className="space-y-6">
       <SettingsGroup
         title="Dictation model"
-        footer="All models run on your Mac. Your voice never leaves it."
+        footer="All models run on your computer. Your voice never leaves it."
       >
         {(downloadingModel || changed || notice || !stt.online) && (
           <SettingsRow

@@ -116,9 +116,9 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
             savedAt !== null
               ? "Saved."
               : settings.activeProvider === "claude_cli"
-                ? "Nothing to enter. Juno talks to Claude Code on this Mac."
+                ? "Nothing to enter. Juno talks to Claude Code on this computer."
                 : settings.activeProvider === "codex_cli"
-                  ? "Nothing to enter. Juno talks to Codex on this Mac."
+                  ? "Nothing to enter. Juno talks to Codex on this computer."
                   : "Changes save when you leave a field."
           }
         >

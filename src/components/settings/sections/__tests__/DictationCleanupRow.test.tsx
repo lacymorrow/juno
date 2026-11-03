@@ -38,7 +38,7 @@ describe("DictationCleanupRow", () => {
     expect(toggle).toBeEnabled();
     expect(toggle).toBeChecked();
     expect(
-      screen.getByText("Fixes grammar and punctuation on your Mac."),
+      screen.getByText("Fixes grammar and punctuation on your computer."),
     ).toBeInTheDocument();
     expect(screen.getByText("Beta")).toBeInTheDocument();
   });

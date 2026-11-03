@@ -36,7 +36,7 @@ export function VoicePicker({ list, onChange, onReplay, audition }: VoicePickerP
   if (!list) {
     return (
       <p className="px-0.5 text-[12px] leading-snug text-muted-foreground" aria-live="polite">
-        Reading this Mac's voices.
+        Reading this computer's voices.
       </p>
     );
   }

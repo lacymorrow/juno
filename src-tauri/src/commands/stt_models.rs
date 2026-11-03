@@ -704,12 +704,15 @@ pub async fn stt_models_status(app: &AppHandle) -> Result<SttModelsStatus, Strin
     // large-v3-turbo on Intel, which the offer UI already renders.
     let recommended_on_disk =
         find_def(recommended_id(&arch)).is_some_and(|d| is_downloaded(app, d));
-    let offer_recommended = should_offer_recommended(
-        &arch,
-        settings.parakeet_download_declined,
-        &settings.stt_provider,
-        recommended_on_disk,
-    );
+    // Voice is macOS-only until the Windows voice step (docs/plans/windows.md,
+    // step 3), so nothing is offered for download anywhere else.
+    let offer_recommended = cfg!(target_os = "macos")
+        && should_offer_recommended(
+            &arch,
+            settings.parakeet_download_declined,
+            &settings.stt_provider,
+            recommended_on_disk,
+        );
 
     let quality_notice = run_quality_clock(app, &arch, &active_id, &settings).await;
 

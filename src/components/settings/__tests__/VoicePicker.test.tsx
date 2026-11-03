@@ -216,7 +216,7 @@ describe("VoicePicker", () => {
   /// Waiting on Rust is a designed state, not a blank card.
   it("says so before Rust has answered", () => {
     renderPicker(null);
-    expect(screen.getByText(/Reading this Mac's voices/)).toBeInTheDocument();
+    expect(screen.getByText(/Reading this computer's voices/)).toBeInTheDocument();
     expect(screen.queryByRole("radiogroup")).toBeNull();
   });
 });

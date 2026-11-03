@@ -13,7 +13,7 @@ interface CleanupStatus {
   can_open_settings: boolean;
 }
 
-const COPY = "Fixes grammar and punctuation on your Mac.";
+const COPY = "Fixes grammar and punctuation on your computer.";
 
 /**
  * "Clean up dictation": one switch. Whether Apple's on-device model can run is

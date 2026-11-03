@@ -151,7 +151,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
     : undefined;
 
   const speakerNote = audioDevices?.missing_output
-    ? `${audioDevices.missing_output.name} is not connected. Juno is using your Mac's output instead.`
+    ? `${audioDevices.missing_output.name} is not connected. Juno is using your computer's output instead.`
     : undefined;
 
   const audioDevicesNeedAttention = Boolean(
@@ -360,7 +360,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
         <SettingsRow
           htmlFor="audio-output-device"
           label="Speak through"
-          description="Cloud voices use your Mac's output."
+          description="Cloud voices use your computer's output."
         >
           <Select
             value={audioDevices?.chosen_output ?? FOLLOW_SYSTEM}

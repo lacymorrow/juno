@@ -168,7 +168,7 @@ describe("Models pane: one list, three tiers, full catalog under Advanced", () =
   it("says once, for the whole section, that models run on the Mac", async () => {
     mockBackend(() => status(arm64Models()));
     await mount();
-    expect(screen.getAllByText(/run on your Mac/)).toHaveLength(1);
+    expect(screen.getAllByText(/run on your computer/)).toHaveLength(1);
   });
 });
 
