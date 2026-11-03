@@ -549,8 +549,11 @@ fn live_window_origin(window_id: u32) -> Option<(f64, f64)> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn live_window_origin(_window_id: u32) -> Option<(f64, f64)> {
-    None
+fn live_window_origin(window_id: u32) -> Option<(f64, f64)> {
+    computer_use_ai_sdk::window_target::native::window_records()
+        .into_iter()
+        .find(|w| w.id == window_id)
+        .map(|w| (w.bounds.0, w.bounds.1))
 }
 
 /// Transforms coordinates from original screen space to scaled screenshot space (LEGACY)

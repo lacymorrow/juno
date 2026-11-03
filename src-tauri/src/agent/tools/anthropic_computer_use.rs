@@ -223,9 +223,15 @@ fn capture_display_native(display_id: u32) -> Result<image::RgbaImage, String> {
         .map_err(|e| format!("Zoom capture failed: {}", e))
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn capture_display_native(display_id: u32) -> Result<image::RgbaImage, String> {
+    computer_use_ai_sdk::platforms::windows::capture::capture_display_screenshot_buffer(display_id)
+        .map_err(|e| format!("Zoom capture failed: {}", e))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn capture_display_native(_display_id: u32) -> Result<image::RgbaImage, String> {
-    Err("Zoom is only available on macOS".to_string())
+    Err("Zoom is not available on this platform".to_string())
 }
 
 /// Extract [x, y] from a computer tool input's "coordinate" field.
@@ -712,7 +718,7 @@ fn get_frontmost_app_name() -> Option<String> {
 
 #[cfg(not(target_os = "macos"))]
 fn get_frontmost_app_name() -> Option<String> {
-    None
+    computer_use_ai_sdk::window_target::native::frontmost().map(|window| window.owner)
 }
 
 /// Localized name of a running application, by pid.
@@ -749,8 +755,8 @@ fn app_name_for_pid(pid: i32) -> Option<String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn app_name_for_pid(_pid: i32) -> Option<String> {
-    None
+fn app_name_for_pid(pid: i32) -> Option<String> {
+    computer_use_ai_sdk::window_target::native::process_name(pid)
 }
 
 /// The app a consent prompt should name: the one the agent has been acting on,
@@ -902,8 +908,10 @@ fn click_target(x: f64, y: f64, window_pin: Option<PinnedWindow>) -> Option<(i32
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (x, y);
-        None
+        use computer_use_ai_sdk::window_target::{native, window_at_point};
+        let records = native::window_records();
+        window_at_point(&records, x, y, std::process::id() as i32)
+            .map(|window| (window.pid, Some(window.id)))
     }
 }
 
@@ -1242,7 +1250,9 @@ fn activate_app(pid: i32) {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn activate_app(_pid: i32) {}
+fn activate_app(pid: i32) {
+    computer_use_ai_sdk::window_target::native::activate(pid);
+}
 
 /// Run one click and check the app reacted.
 ///
@@ -1400,8 +1410,14 @@ fn resolve_named_window(input: &Value) -> Result<Option<NamedWindow>, String> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = selector;
-        Err("Window targeting is only available on macOS".to_string())
+        let records = computer_use_ai_sdk::window_target::native::window_records();
+        let own_pid = std::process::id() as i32;
+        let window =
+            computer_use_ai_sdk::window_target::select_window(&records, &selector, own_pid)?;
+        Ok(Some(NamedWindow {
+            pid: window.pid,
+            id: window.id,
+        }))
     }
 }
 
@@ -1635,7 +1651,7 @@ fn frontmost_app_pid() -> Option<i32> {
 
 #[cfg(not(target_os = "macos"))]
 fn frontmost_app_pid() -> Option<i32> {
-    None
+    computer_use_ai_sdk::window_target::native::frontmost().map(|window| window.pid)
 }
 
 /// Why keyboard input must not be sent, if it must not.
@@ -2478,6 +2494,22 @@ pub async fn execute_computer_tool(
                 );
                 return Ok(create_anthropic_error_response(refusal));
             }
+        }
+    }
+    // Windows drops input to an administrator window with no error at all, so
+    // the agent is told here and says so, rather than reporting a success that
+    // never happened.
+    #[cfg(not(target_os = "macos"))]
+    if is_ui_modifying_action(action) {
+        let aimed_at = window_pin.map(|pin| pin.pid).or_else(|| {
+            let (x, y) = extract_coordinate(&input)?;
+            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+            click_target(screen_x, screen_y, None).map(|(pid, _)| pid)
+        });
+        if aimed_at.is_some_and(computer_use_ai_sdk::window_target::native::runs_elevated) {
+            return Ok(create_anthropic_error_response(
+                computer_use_ai_sdk::AutomationError::ElevatedWindow.to_string(),
+            ));
         }
     }
     // An `element` from the latest listing: act on the control itself. Typing
