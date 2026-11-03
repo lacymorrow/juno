@@ -448,15 +448,19 @@ impl EscapeKeyCoordinator {
             return Ok(());
         }
         let binding = current_binding(app_handle);
+        if takes_key_from_every_app(&binding) {
+            info!(
+                "[EscapeKeyCoordinator] Stop key {} not registered globally on Windows; \
+                 Juno's own windows read it",
+                binding.describe()
+            );
+            *self.active() = Some(binding);
+            return Ok(());
+        }
         info!(
             "[EscapeKeyCoordinator] Activating stop key: {}",
             binding.describe()
         );
-        if takes_key_from_every_app(&binding) {
-            debug!("[EscapeKeyCoordinator] Bare stop key on Windows: Juno's own windows read it");
-            *self.active() = Some(binding);
-            return Ok(());
-        }
         match &binding {
             StopKeyBinding::PassiveMonitor { key_code, .. } => {
                 crate::platform::stop_key_monitor::install(app_handle, *key_code)?;
