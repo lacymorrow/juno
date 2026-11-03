@@ -315,7 +315,7 @@ const CHAT_SPECS: &[StarterSpec] = &[
 
 /// Whether every tool a starter needs is registered on this platform. The
 /// desktop, browser and shell tools these starters name are registered on
-/// macOS only for now (`BrainFactory::register_computer_use_tools_for_session`).
+/// macOS and Windows (`BrainFactory::register_computer_use_tools_for_session`).
 fn runs_here(spec: &StarterSpec) -> bool {
     spec.tools.is_empty() || crate::agent::providers::factory::DESKTOP_TOOLS_REGISTERED
 }
