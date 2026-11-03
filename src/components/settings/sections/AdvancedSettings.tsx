@@ -283,45 +283,45 @@ export default function AdvancedSettings({
 
   return (
     <div className="space-y-6">
-      {!IS_WINDOWS && (
-        <SettingsGroup
-          title="Background"
-          footer={
-            backgroundError
-              ? "These settings could not be loaded. Reopen Settings to try again."
-              : undefined
-          }
+      <SettingsGroup
+        title="Background"
+        footer={
+          backgroundError
+            ? "These settings could not be loaded. Reopen Settings to try again."
+            : undefined
+        }
+      >
+        <SettingsRow
+          htmlFor="background-mode"
+          label="Work in the background"
+          description="Work in other apps without taking your cursor."
+          info="Juno acts on other apps without taking your cursor or your active window, so you can keep working."
         >
-          <SettingsRow
-            htmlFor="background-mode"
-            label="Work in the background"
-            description="Work in other apps without taking your cursor."
-            info="Juno acts on other apps without taking your cursor or your active window, so you can keep working."
-          >
-            <Switch
-              id="background-mode"
-              checked={backgroundMode}
-              onCheckedChange={handleBackgroundModeChange}
-              disabled={backgroundLoading || backgroundError}
-            />
-          </SettingsRow>
+          <Switch
+            id="background-mode"
+            checked={backgroundMode}
+            onCheckedChange={handleBackgroundModeChange}
+            disabled={backgroundLoading || backgroundError}
+          />
+        </SettingsRow>
 
-          <SettingsRow
+        <SettingsRow
+          id="mouse-control"
+          label="Mouse control"
+          description="When a step needs the real pointer."
+          info="Some steps need the real pointer. Ask each time, or let Juno take it whenever it needs to."
+        >
+          <SegmentedChoice
             id="mouse-control"
             label="Mouse control"
-            description="When a step needs the real pointer."
-            info="Some steps need the real pointer. Ask each time, or let Juno take it whenever it needs to."
-          >
-            <SegmentedChoice
-              id="mouse-control"
-              label="Mouse control"
-              value={mouseControl}
-              options={MOUSE_CONTROL_OPTIONS}
-              disabled={backgroundLoading || backgroundError}
-              onChange={handleMouseControlChange}
-            />
-          </SettingsRow>
+            value={mouseControl}
+            options={MOUSE_CONTROL_OPTIONS}
+            disabled={backgroundLoading || backgroundError}
+            onChange={handleMouseControlChange}
+          />
+        </SettingsRow>
 
+        {!IS_WINDOWS && (
           <SettingsRow
             id="show-juno-in"
             label="Show Juno in"
@@ -337,8 +337,8 @@ export default function AdvancedSettings({
               onChange={handlePresenceChange}
             />
           </SettingsRow>
-        </SettingsGroup>
-      )}
+        )}
+      </SettingsGroup>
 
       <SettingsGroup title="Claude CLI">
         <SettingsRow
