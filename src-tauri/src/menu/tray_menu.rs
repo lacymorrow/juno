@@ -927,13 +927,16 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
         .icon_as_template(cfg!(not(target_os = "windows")))
         .tooltip(TrayIconState::Idle.tooltip())
         .on_tray_icon_event(|tray, event| {
+            #[cfg(target_os = "windows")]
+            open_menu_on_right_release(tray, &event);
             handle_tray_icon_event(tray.app_handle(), event);
         })
         .build(app)?;
     // Tauri only exposes the left-click switch. tray-icon also opens the menu
-    // on a right click by default, which would leave nothing for the climb.
-    // On Windows the right click is the menu's, as it is for every tray icon.
-    #[cfg(not(target_os = "windows"))]
+    // on a right click by default, which would leave nothing for the climb on
+    // the Mac. On Windows the right click is the menu's, as it is for every
+    // tray icon, and Juno opens it itself (`open_menu_on_right_release`):
+    // tray-icon's own right-click menu did not appear there.
     if let Err(e) =
         tray_icon.with_inner_tray_icon(|inner| inner.set_show_menu_on_right_click(false))
     {
@@ -1442,6 +1445,22 @@ pub fn quit_app(app_handle: &AppHandle) {
 }
 
 /// Handle TrayIconEvents like clicks on the icon itself
+/// Windows: open the tray menu when the right button is released, the way
+/// every notification-area icon does.
+#[cfg(target_os = "windows")]
+fn open_menu_on_right_release(tray: &TrayIcon<tauri::Wry>, event: &tauri::tray::TrayIconEvent) {
+    if let tauri::tray::TrayIconEvent::Click {
+        button: MouseButton::Right,
+        button_state: MouseButtonState::Up,
+        ..
+    } = event
+    {
+        if let Err(e) = tray.with_inner_tray_icon(|inner| inner.show_menu()) {
+            warn!("[TrayIcon] Could not open the menu: {e}");
+        }
+    }
+}
+
 /// The button that climbs the ladder. The Mac's menu bar convention opens the
 /// menu on a left click and leaves the right one for this; on Windows a left
 /// click on a tray icon shows the app and the right one opens its menu.
