@@ -280,6 +280,62 @@ pub fn pinned() -> Option<PinnedWindow> {
     PINNED.with(|p| p.get())
 }
 
+/// What the app asks the platform about windows, off macOS. macOS has its own
+/// calls behind its own gates, which stay as they are.
+#[cfg(not(target_os = "macos"))]
+pub mod native {
+    use super::WindowRecord;
+
+    #[cfg(target_os = "windows")]
+    use crate::platforms::windows::{activate_pid, window_list as list};
+
+    /// Every window on screen, front to back.
+    pub fn window_records() -> Vec<WindowRecord> {
+        #[cfg(target_os = "windows")]
+        return list::list_window_records();
+        #[cfg(not(target_os = "windows"))]
+        Vec::new()
+    }
+
+    /// The window in front.
+    pub fn frontmost() -> Option<WindowRecord> {
+        #[cfg(target_os = "windows")]
+        return list::foreground_record();
+        #[cfg(not(target_os = "windows"))]
+        None
+    }
+
+    /// A process's name.
+    pub fn process_name(pid: i32) -> Option<String> {
+        #[cfg(target_os = "windows")]
+        return list::process_name(pid);
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = pid;
+            None
+        }
+    }
+
+    /// Bring an app's frontmost window forward.
+    pub fn activate(pid: i32) {
+        #[cfg(target_os = "windows")]
+        activate_pid(pid);
+        #[cfg(not(target_os = "windows"))]
+        let _ = pid;
+    }
+
+    /// Whether Windows will refuse Juno's input to this process.
+    pub fn runs_elevated(pid: i32) -> bool {
+        #[cfg(target_os = "windows")]
+        return list::process_is_elevated(pid);
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = pid;
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

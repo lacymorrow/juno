@@ -119,7 +119,15 @@ fn process_is_alive(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn process_is_alive(pid: i32) -> bool {
+    // A running process's name can be read, or it refuses with access denied
+    // when it's protected. A dead one is neither.
+    crate::platforms::windows::window_list::process_name(pid).is_some()
+        || crate::platforms::windows::window_list::process_is_elevated(pid)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn process_is_alive(_pid: i32) -> bool {
     false
 }
