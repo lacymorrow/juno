@@ -1177,21 +1177,43 @@ fn settings_manager(
         .map_err(|e| format!("Failed to create settings manager: {e}"))
 }
 
+/// Which call to [`sync_engine_model`] is the current one. Resolving the
+/// engine reads the settings, so the decision is made after an `await` and
+/// two quick switches could otherwise land out of order and leave the model
+/// matched to the engine nobody chose. The newest call wins; an older one
+/// finding a newer generation does nothing.
+static ENGINE_SYNC_GENERATION: AtomicU64 = AtomicU64::new(0);
+
 /// Keep the local model matched to the engine in force: warm Kokoro when it
 /// is speaking, free it when it is not. Called only after a change has been
 /// written, so it acts on the engine that is actually in force. When a load
 /// finishes the pane is told, because Kokoro's voices are on disk only once
 /// it has.
+///
+/// `provider` is the configured engine, which is not always the engine that
+/// speaks: a cloud engine with no account key falls straight through to
+/// Kokoro on every sentence, so Kokoro is what gets warmed
+/// (`tts::effective_engine_now`, LAC-6340). Returns immediately.
 pub fn sync_engine_model(app_handle: &AppHandle, provider: &str) {
     crate::tts::kokoro::remember_app(app_handle);
     crate::tts::account_keys::remember_app(app_handle);
     // The greeting rendered ahead follows the engine and voice in force.
     crate::greeting::refresh_cache(app_handle);
+    let generation = ENGINE_SYNC_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     let app = app_handle.clone();
-    crate::tts::kokoro::sync_with_engine(provider, move || {
-        if let Err(e) = app.emit(ENGINE_READY_EVENT, "kokoro") {
-            warn!("[Voices] Could not report that Kokoro is ready: {e}");
+    let provider = provider.to_string();
+    tauri::async_runtime::spawn(async move {
+        let engine = crate::tts::effective_engine_now(&provider)
+            .await
+            .unwrap_or_else(|| "no engine".to_string());
+        if ENGINE_SYNC_GENERATION.load(Ordering::SeqCst) != generation {
+            return;
         }
+        crate::tts::kokoro::sync_with_engine(&engine, move || {
+            if let Err(e) = app.emit(ENGINE_READY_EVENT, "kokoro") {
+                warn!("[Voices] Could not report that Kokoro is ready: {e}");
+            }
+        });
     });
 }
 
