@@ -195,6 +195,13 @@ pub fn hook_auth_header(endpoint: &Endpoint) -> String {
 /// `curl` shadowed on their `PATH` would turn the screen off silently.
 pub fn shell_screen_settings(endpoint: &Endpoint, header_file: &Path) -> Result<Value, AgentError> {
     let header_file = single_quoted(header_file)?;
+    // Windows has no /usr/bin; Windows 10 and later ship curl.exe on PATH, and
+    // so does the Git Bash the CLI runs its hooks in.
+    let curl = if cfg!(windows) {
+        "curl"
+    } else {
+        "/usr/bin/curl"
+    };
     Ok(json!({
         "hooks": {
             "PreToolUse": [{
@@ -202,7 +209,7 @@ pub fn shell_screen_settings(endpoint: &Endpoint, header_file: &Path) -> Result<
                 "hooks": [{
                     "type": "command",
                     "command": format!(
-                        "/usr/bin/curl -s --max-time {HOOK_TIMEOUT_SECS} -X POST \
+                        "{curl} -s --max-time {HOOK_TIMEOUT_SECS} -X POST \
                          -H @{header_file} \
                          -H 'Content-Type: application/json' \
                          --data-binary @- '{}'",
