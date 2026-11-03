@@ -526,6 +526,24 @@ fn hand_foreground_back(front_before: Option<HWND>) {
     }
 }
 
+/// How long a launched app gets to take the foreground. Slower than a press:
+/// the process has to start first.
+const LAUNCH_WATCH: Duration = Duration::from_millis(1500);
+
+/// Watch for a launched app taking the foreground from `window_id`, and give it
+/// back the moment it does. True if it had to.
+pub fn keep_foreground_on(window_id: u32) -> bool {
+    let before = hwnd_from_id(window_id);
+    let started = Instant::now();
+    while started.elapsed() < LAUNCH_WATCH {
+        if foreground_window() != Some(before) {
+            return window_exists(before) && super::window_list::activate_window(before);
+        }
+        std::thread::sleep(Duration::from_millis(15));
+    }
+    false
+}
+
 // ── The field to type in ────────────────────────────────────────────────────
 
 /// The field the agent last pressed or named, and the top-level window it's in.

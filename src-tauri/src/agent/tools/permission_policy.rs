@@ -215,7 +215,7 @@ pub fn describe_action(tool_name: &str, tool_input: &Value) -> String {
 
     match tool_name {
         "bash" | "execute_bash" | "run_bash_command" | "shell_execute" | "execute_command"
-        | "run_command" => {
+        | "run_command" | "powershell" => {
             let cmd = clip(shell(), 160);
             if cmd.is_empty() {
                 "Run a command in the terminal".to_string()
@@ -362,7 +362,7 @@ pub fn describe_batch(first_sentence: &str, batch_size: usize) -> String {
 pub fn friendly_tool_name(tool_name: &str) -> String {
     match tool_name {
         "bash" | "execute_bash" | "run_bash_command" | "shell_execute" | "execute_command"
-        | "run_command" => "terminal commands".to_string(),
+        | "run_command" | "powershell" => "terminal commands".to_string(),
         "computer" => "your mouse and keyboard".to_string(),
         name if name.starts_with("safari_") || name.starts_with("browser_") => {
             "the browser".to_string()

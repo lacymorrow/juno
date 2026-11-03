@@ -39,6 +39,10 @@ const SHELL_TOOLS: &[&str] = &[
     "run_command",
 ];
 
+/// The Windows shell. Same question as [`SHELL_TOOLS`], different language, so
+/// it reads through `agent::tools::powershell`.
+const POWERSHELL_TOOLS: &[&str] = &[crate::agent::tools::powershell::TOOL_NAME];
+
 /// Tools that write, create, edit or revert a file that they name.
 ///
 /// Where each one comes from: `write_file`, `text_editor_insert`,
@@ -272,6 +276,7 @@ pub const DELIBERATELY_UNGATED_TOOLS: &[&str] = &[
 pub fn guarded_tool_names() -> Vec<&'static str> {
     let mut names: Vec<&'static str> = SHELL_TOOLS
         .iter()
+        .chain(POWERSHELL_TOOLS)
         .chain(FILE_WRITE_TOOLS)
         .chain(FILE_DELETE_TOOLS)
         .chain(ARBITRARY_SCRIPT_TOOLS)
@@ -296,6 +301,15 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
     match tool_name {
         // Shell execution — highest-variance category
         name if SHELL_TOOLS.contains(&name) => classify_shell_risk(tool_input),
+
+        // The same on Windows, where a command is unreadable to the bash
+        // patterns. A call with no command is refused by the tool.
+        name if POWERSHELL_TOOLS.contains(&name) => crate::agent::tools::powershell::classify(
+            tool_input
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or(""),
+        ),
 
         // Computer use actions (screenshot/cursor are safe; keyboard combos vary)
         "computer" => classify_computer_use_risk(tool_input),
@@ -467,7 +481,7 @@ pub fn needs_approval(risk_level: &RiskLevel) -> bool {
 /// Extract a human-readable target app hint from tool input, if present.
 pub fn extract_target_app(tool_name: &str, tool_input: &Value) -> Option<String> {
     match tool_name {
-        name if SHELL_TOOLS.contains(&name) => {
+        name if SHELL_TOOLS.contains(&name) || POWERSHELL_TOOLS.contains(&name) => {
             let cmd = tool_input
                 .get("command")
                 .or_else(|| tool_input.get("cmd"))
@@ -1495,6 +1509,35 @@ mod tests {
 /// runtime by servers and cannot be enumerated at build time at all. What the
 /// second half needs is written up in the pull request.
 #[cfg(test)]
+mod powershell_gate {
+    use super::*;
+    use serde_json::json;
+
+    /// The tool reaches its own reading through the gate every tool call
+    /// passes, on every platform. The commands themselves are tested in
+    /// `agent::tools::powershell`.
+    #[test]
+    fn the_gate_reads_a_powershell_command() {
+        for (command, level) in [
+            ("Get-Date", RiskLevel::Low),
+            ("Get-Content a.txt", RiskLevel::Medium),
+            ("del a.txt", RiskLevel::High),
+            ("Remove-Item -Recurse x", RiskLevel::Critical),
+        ] {
+            assert_eq!(
+                classify_risk("powershell", &json!({"command": command})),
+                level
+            );
+        }
+        assert!(guarded_tool_names().contains(&"powershell"));
+        assert_eq!(
+            extract_target_app("powershell", &json!({"command": "winget install x"})).as_deref(),
+            Some("winget")
+        );
+    }
+}
+
+#[cfg(test)]
 mod gate_name_truth {
     use super::*;
     use crate::agent::tools::anthropic_computer_use::create_versioned_tools;
@@ -1520,6 +1563,7 @@ mod gate_name_truth {
         for definition in crate::agent::tools::mac_apps::tool_definitions() {
             names.insert(definition.name);
         }
+        names.insert(crate::agent::tools::powershell::tool_definition().name);
         for definition in
             create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124))
         {
