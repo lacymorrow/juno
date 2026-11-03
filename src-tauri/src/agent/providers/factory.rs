@@ -63,6 +63,12 @@ pub struct ProviderInfo {
     pub needs_sign_in: bool,
 }
 
+/// Whether the desktop, browser, shell and Mac app tools are registered on
+/// this platform. macOS only until the Windows engine lands
+/// (docs/plans/windows.md, step 2); `register_computer_use_tools_for_session`
+/// gates each of them the same way.
+pub(crate) const DESKTOP_TOOLS_REGISTERED: bool = cfg!(target_os = "macos");
+
 /// What a person is told when the provider they are on has nothing to run
 /// with. Plain words and one thing to do, never a configuration error.
 pub(crate) const NO_PROVIDER_MESSAGE: &str =

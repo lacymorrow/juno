@@ -256,6 +256,80 @@ const SPECS: &[StarterSpec] = &[
     ),
 ];
 
+/// Starters that need nothing but the conversation. They fill in only where
+/// fewer than [`SHOWN`] of the starters above can run, which is where the
+/// desktop, browser and shell tools are not registered (Windows, step 1 of
+/// docs/plans/windows.md). On the Mac every starter above runs, so these never
+/// appear there.
+const CHAT_SPECS: &[StarterSpec] = &[
+    spec(
+        Level::First,
+        "chess-chat",
+        "Play chess with me",
+        "Let's play chess. Draw the board in text and make the first move as white.",
+        &[],
+    ),
+    spec(
+        Level::First,
+        "email",
+        "Help me write an email",
+        "Help me write a short, friendly email asking to move a meeting to next week.",
+        &[],
+    ),
+    spec(
+        Level::First,
+        "explain",
+        "Explain something simply",
+        "Explain how Wi-Fi works like I'm twelve, in a few short paragraphs.",
+        &[],
+    ),
+    spec(
+        Level::Regular,
+        "plan-week",
+        "Plan my week",
+        "Help me plan my week. Ask me what's on it, then lay it out day by day.",
+        &[],
+    ),
+    spec(
+        Level::Regular,
+        "decide",
+        "Help me decide",
+        "Help me make a decision. Ask me what I'm choosing between, then weigh it up with me.",
+        &[],
+    ),
+    spec(
+        Level::Seasoned,
+        "trip-plan",
+        "Plan a weekend away",
+        "Plan a weekend in Asheville with me: where to stay, three things to do, and what to pack.",
+        &[],
+    ),
+    spec(
+        Level::Seasoned,
+        "learn",
+        "Teach me something new",
+        "Teach me the basics of a skill I pick, one short lesson at a time, and quiz me as we go.",
+        &[],
+    ),
+];
+
+/// Whether every tool a starter needs is registered on this platform. The
+/// desktop, browser and shell tools these starters name are registered on
+/// macOS only for now (`BrainFactory::register_computer_use_tools_for_session`).
+fn runs_here(spec: &StarterSpec) -> bool {
+    spec.tools.is_empty() || crate::agent::providers::factory::DESKTOP_TOOLS_REGISTERED
+}
+
+/// The starters that can run here: every one whose tools are registered, and
+/// the conversation-only ones when those come to fewer than [`SHOWN`].
+fn available_specs() -> Vec<&'static StarterSpec> {
+    let mut specs: Vec<&'static StarterSpec> = SPECS.iter().filter(|s| runs_here(s)).collect();
+    if specs.len() < SHOWN {
+        specs.extend(CHAT_SPECS.iter());
+    }
+    specs
+}
+
 /// A saved conversation's title is its first query cut to the title length,
 /// so a starter that opened one has a title equal to its prompt, cut the same.
 fn opened_by(spec: &StarterSpec, titles: &HashSet<String>) -> bool {
@@ -280,11 +354,27 @@ fn shuffle_key(seed: u64, id: &str) -> u64 {
 /// Two come from their level and one from the next (three Seasoned at the
 /// top). A level that runs dry borrows from the nearest one, untried first; if
 /// they have tried everything, everything is fair game again.
+#[cfg(test)]
 fn pick(conversations: usize, tried_titles: &HashSet<String>, seed: u64) -> Vec<Starter> {
+    pick_from(
+        &SPECS.iter().collect::<Vec<_>>(),
+        conversations,
+        tried_titles,
+        seed,
+    )
+}
+
+/// [`pick`] from the given starters.
+fn pick_from(
+    specs: &[&StarterSpec],
+    conversations: usize,
+    tried_titles: &HashSet<String>,
+    seed: u64,
+) -> Vec<Starter> {
     let level = Level::for_conversations(conversations);
     let stretch = level.next();
 
-    let mut ranked: Vec<&StarterSpec> = SPECS.iter().collect();
+    let mut ranked: Vec<&StarterSpec> = specs.to_vec();
     ranked.sort_by_key(|s| {
         let tried = opened_by(s, tried_titles);
         // Distance from where they are: their level, then the stretch, then
@@ -324,7 +414,7 @@ pub fn get_starters(app: AppHandle) -> Vec<Starter> {
     let conversations = history.iter().filter(|m| m.message_count >= 2).count();
     let titles: HashSet<String> = history.into_iter().map(|m| m.title).collect();
     let seed = uuid::Uuid::new_v4().as_u64_pair().0;
-    pick(conversations, &titles, seed)
+    pick_from(&available_specs(), conversations, &titles, seed)
 }
 
 #[cfg(test)]
@@ -338,6 +428,15 @@ mod tests {
 
     fn level_of(id: &str) -> Level {
         SPECS.iter().find(|s| s.starter.id == id).unwrap().level
+    }
+
+    #[test]
+    fn conversation_starters_can_fill_a_row_alone() {
+        assert!(available_specs().len() >= SHOWN);
+        let chat: Vec<&StarterSpec> = CHAT_SPECS.iter().collect();
+        for conversations in [0, 10, 100] {
+            assert_eq!(pick_from(&chat, conversations, &none(), 3).len(), SHOWN);
+        }
     }
 
     #[test]
