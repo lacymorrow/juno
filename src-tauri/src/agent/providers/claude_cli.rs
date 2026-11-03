@@ -488,7 +488,10 @@ fn write_shell_screen_settings_in(
 
     // Header first: settings that point at a file which is not there yet turn
     // the screen off silently for as long as the gap lasts.
-    write_private_file(&header_path, juno_mcp::hook_auth_header(endpoint).as_bytes())?;
+    write_private_file(
+        &header_path,
+        juno_mcp::hook_auth_header(endpoint).as_bytes(),
+    )?;
 
     let path = dir.join(format!("juno-cli-hooks-{}.json", std::process::id()));
     write_private_file(&path, &bytes)?;
@@ -2790,7 +2793,10 @@ mod tests {
             assert!(!written.contains(&endpoint.token), "{written}");
 
             let header = std::fs::read_to_string(header_file_in(&settings)).expect("header file");
-            assert_eq!(header, format!("Authorization: Bearer {}\n", endpoint.token));
+            assert_eq!(
+                header,
+                format!("Authorization: Bearer {}\n", endpoint.token)
+            );
         }
 
         /// The path is predictable, so a stale file can already be sitting

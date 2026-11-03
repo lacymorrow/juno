@@ -193,10 +193,7 @@ pub fn hook_auth_header(endpoint: &Endpoint) -> String {
 ///
 /// `curl` by absolute path: the hook runs through the person's shell, and a
 /// `curl` shadowed on their `PATH` would turn the screen off silently.
-pub fn shell_screen_settings(
-    endpoint: &Endpoint,
-    header_file: &Path,
-) -> Result<Value, AgentError> {
+pub fn shell_screen_settings(endpoint: &Endpoint, header_file: &Path) -> Result<Value, AgentError> {
     let header_file = single_quoted(header_file)?;
     Ok(json!({
         "hooks": {
