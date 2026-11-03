@@ -36,11 +36,11 @@ export interface ShapeSize {
 /** Every face past idle is this wide, so the composer never changes width. */
 export const ISLAND_WIDTH = 360;
 
-/** The resting capsule: a mark, not a bar. */
-export const IDLE_SHAPE: ShapeSize = { width: 92, height: 28, radius: 14 };
+/** The resting capsule: a mark, not a bar. The Pill's size, room for the dot and no more. */
+export const IDLE_SHAPE: ShapeSize = { width: 56, height: 16, radius: 8 };
 
-/** The capsule with its controls showing: barely bigger, so it reads as the same object. */
-export const HOVER_SHAPE: ShapeSize = { width: 104, height: 32, radius: 16 };
+/** The capsule with its controls showing: only as tall as a 24px control and its margin. */
+export const HOVER_SHAPE: ShapeSize = { width: 92, height: 28, radius: 14 };
 
 /** One hover control and the gap after it. */
 const HOVER_BUTTON_PX = 26;
@@ -49,7 +49,7 @@ const HOVER_FRAME_PX = 40;
 
 /**
  * The hover capsule for a number of controls (Talk, Open chat, the wake
- * phrase). Two fit the 104 capsule; each one past that widens it by one.
+ * phrase). Two fit the 92 capsule; each one past that widens it by one.
  */
 export function hoverShapeFor(buttons: number): ShapeSize {
   return { ...HOVER_SHAPE, width: Math.max(HOVER_SHAPE.width, HOVER_FRAME_PX + buttons * HOVER_BUTTON_PX) };
@@ -342,7 +342,7 @@ export function composeIsCompact({ face, state, provisional, composerActive, liv
 // === THE MINI VOICE CAPSULE ===
 
 /** The mini capsule at rest: room for the level bars and nothing else. */
-export const MINI_SHAPE: ShapeSize = { width: 56, height: IDLE_SHAPE.height, radius: IDLE_SHAPE.radius };
+export const MINI_SHAPE: ShapeSize = { width: 44, height: 20, radius: 10 };
 
 /** What the mini capsule is showing: the mic is open, or the words are being decoded. */
 export type MiniVoice = "listening" | "transcribing";
@@ -382,12 +382,17 @@ const MINI_BUTTON_PX = 26;
 const MINI_FRAME_PX = 32;
 
 /**
- * The mini capsule: the resting mark, or, when hovered or focused, wide
- * enough for its controls (Send and Cancel while listening, Stop after).
+ * The mini capsule: the resting mark, or, when hovered or focused, big
+ * enough for its controls (Send and Cancel while listening, Stop after), at
+ * the hover capsule's height because they are the same 24px controls.
  */
 export function miniShapeFor(revealed: boolean, buttons: number): ShapeSize {
   if (!revealed || buttons <= 0) return { ...MINI_SHAPE };
-  return { ...MINI_SHAPE, width: Math.max(MINI_SHAPE.width, MINI_FRAME_PX + buttons * MINI_BUTTON_PX) };
+  return {
+    width: Math.max(MINI_SHAPE.width, MINI_FRAME_PX + buttons * MINI_BUTTON_PX),
+    height: HOVER_SHAPE.height,
+    radius: HOVER_SHAPE.radius,
+  };
 }
 
 export interface ShapeInput {
