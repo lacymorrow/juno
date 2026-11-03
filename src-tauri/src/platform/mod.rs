@@ -40,6 +40,12 @@ pub mod synthetic_events;
 /// The system cursor's shape, for the agent cursor glow (macOS; no-op elsewhere).
 pub mod system_cursor;
 
+/// Whether this platform has a voice engine: talking to Juno, dictation and
+/// speech. macOS only until the Windows voice step (docs/plans/windows.md,
+/// step 3); the voice plugin loads no engine elsewhere, and nothing offers a
+/// microphone there.
+pub const VOICE_AVAILABLE: bool = cfg!(target_os = "macos");
+
 #[cfg(target_os = "windows")]
 pub mod windows;
 

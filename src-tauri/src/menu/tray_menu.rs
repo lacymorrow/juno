@@ -454,7 +454,8 @@ pub struct TrayMenu {
     pub menu: tauri::menu::Menu<tauri::Wry>,
     pub status_item: MenuItem<tauri::Wry>,
     pub chat_toggle_item: MenuItem<tauri::Wry>,
-    pub talk_item: MenuItem<tauri::Wry>,
+    /// `None` where there is no voice (`platform::VOICE_AVAILABLE`).
+    pub talk_item: Option<MenuItem<tauri::Wry>>,
 }
 
 /// What the chat row should say about the surface it is going to act on.
@@ -723,6 +724,10 @@ pub fn tray_menu_spec(juno_label: &str, busy: bool) -> Vec<MenuEntry> {
         MenuEntry::Separator,
         row(tray_menu_ids::QUIT, quit_label(), Some("CmdOrCtrl+Q")),
     ];
+    // No talk row where there is no voice to talk with.
+    if !crate::platform::VOICE_AVAILABLE {
+        entries.retain(|entry| !matches!(entry, MenuEntry::Row(r) if r.id == tray_menu_ids::TALK));
+    }
     if super::SHOW_DEVELOPER_MENUS {
         let at = entries
             .iter()
@@ -887,7 +892,7 @@ pub fn create_state_aware_tray_menu(
     };
     let status_item = take(tray_menu_ids::STATUS)?;
     let show_hide_item = take(tray_menu_ids::SHOW_HIDE)?;
-    let talk_item = take(tray_menu_ids::TALK)?;
+    let talk_item = take(tray_menu_ids::TALK).ok();
 
     info!("✅ State-aware tray menu created successfully");
     Ok(TrayMenu {
@@ -951,7 +956,9 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
         manager_guard.set_tray_icon(tray_icon);
         manager_guard.set_status_item(status_item);
         manager_guard.set_chat_toggle_item(chat_toggle_item);
-        manager_guard.set_talk_item(talk_item);
+        if let Some(talk_item) = talk_item {
+            manager_guard.set_talk_item(talk_item);
+        }
         // Honour the saved "show tray icon" preference. Shown is the default,
         // so only a hidden icon needs applying.
         let visible = read_tray_icon_visible(&app_handle).await;

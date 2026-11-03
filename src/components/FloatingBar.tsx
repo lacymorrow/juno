@@ -97,7 +97,7 @@ function warmChatPane() {
   void loadChatPane().catch((error) => console.debug("FloatingBar: pane preload failed:", error));
 }
 import type { BarAppearance } from "@/components/bar/barAppearance";
-import { BAR_SURFACE_BG } from "@/lib/platform";
+import { BAR_SURFACE_BG, VOICE_AVAILABLE } from "@/lib/platform";
 import { focusBarForTyping } from "@/lib/barFocus";
 
 /**
@@ -1901,25 +1901,27 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             className="flex items-center gap-1"
             style={{ animation: "fbar-reveal 0.18s ease-out both" }}
           >
-            <PillTooltip
-              label="Talk to Juno"
-              detail={talkShortcut}
-              forcedOpen={hoveredButton === "mic"}
-              blocked={hoveredButton === "dot"}
-              side={tooltipSide}
-            >
-              <button
-                ref={micRef}
-                type="button"
-                onClick={startTalking}
-                aria-label="Talk to Juno"
-                title="Talk to Juno"
-                data-phover={hoveredButton === "mic" ? "" : undefined}
-                className={cn(pillButton, hoveredButton === "mic" && "bg-white/[0.12] text-white")}
+            {VOICE_AVAILABLE && (
+              <PillTooltip
+                label="Talk to Juno"
+                detail={talkShortcut}
+                forcedOpen={hoveredButton === "mic"}
+                blocked={hoveredButton === "dot"}
+                side={tooltipSide}
               >
-                <Mic className="size-3.5" />
-              </button>
-            </PillTooltip>
+                <button
+                  ref={micRef}
+                  type="button"
+                  onClick={startTalking}
+                  aria-label="Talk to Juno"
+                  title="Talk to Juno"
+                  data-phover={hoveredButton === "mic" ? "" : undefined}
+                  className={cn(pillButton, hoveredButton === "mic" && "bg-white/[0.12] text-white")}
+                >
+                  <Mic className="size-3.5" />
+                </button>
+              </PillTooltip>
+            )}
             <PillTooltip
               label="Type to Juno"
               forcedOpen={hoveredButton === "type"}
@@ -2042,7 +2044,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
                   Juno works there is nothing to open, so nothing is offered. */}
               {isVoice || isRecording ? (
                 <AudioLevelBars audioLevel={barState.audioLevel} />
-              ) : isWorking ? null : (
+              ) : isWorking || !VOICE_AVAILABLE ? null : (
                 <button
                   type="button"
                   onClick={switchToTalking}
