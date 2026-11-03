@@ -64,3 +64,20 @@ jobs:
           name: juno-windows-x64-setup
           path: target/release/bundle/nsis/*-setup.exe
           if-no-files-found: error
+
+      # A panic at launch compiles fine. The upload comes first so a failed
+      # launch still leaves the installer to look at.
+      - name: Install and launch it
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList '/S' -Wait
+          $env:RUST_BACKTRACE = '1'
+          $p = Start-Process "$env:LOCALAPPDATA\Juno\juno.exe" -PassThru -RedirectStandardError juno-err.txt -RedirectStandardOutput juno-out.txt
+          Start-Sleep 30
+          if ($p.HasExited) {
+            Get-Content juno-err.txt -Tail 40
+            throw "Juno exited with code $($p.ExitCode) within 30 seconds of launch"
+          }
+          Stop-Process -Id $p.Id -Force
+          Write-Output "Juno stayed up for 30 seconds"
