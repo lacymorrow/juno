@@ -97,6 +97,7 @@ function warmChatPane() {
   void loadChatPane().catch((error) => console.debug("FloatingBar: pane preload failed:", error));
 }
 import type { BarAppearance } from "@/components/bar/barAppearance";
+import { BAR_SURFACE_BG } from "@/lib/platform";
 
 /**
  * UI State enumeration — values emitted by the backend UIManager in
@@ -1819,7 +1820,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
           // `isolate` scopes the flame border's z-index -1 to the pill, so it
           // sits above the pill's dark face but behind its content.
           "relative isolate flex shrink-0 items-center gap-2 rounded-full",
-          "border border-white/10 bg-neutral-950/90 text-white backdrop-blur-xl",
+          "border border-white/10 text-white backdrop-blur-xl",
+          BAR_SURFACE_BG,
           // Juno has the pointer: a hairline in system blue, nothing louder.
           isDriving && "border-[#0A84FF]/70",
           "transition-[width,height,padding] duration-200 ease-out motion-reduce:transition-none",
