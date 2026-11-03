@@ -440,7 +440,22 @@ pub(crate) async fn resize_window(
                 }
             }
 
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(target_os = "windows")]
+            {
+                use computer_use_ai_sdk::platforms::windows::{ax, window_list};
+                ax::window_id_of(&window)
+                    .ok_or_else(|| "Couldn't find that window".to_string())
+                    .and_then(|id| {
+                        window_list::resize_window(id, width, height).map_err(|e| e.to_string())
+                    })
+                    .map_err(|e| {
+                        let error_msg = format!("Failed to resize window '{}': {}", window_id, e);
+                        error!("{}", error_msg);
+                        error_msg
+                    })
+            }
+
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
             {
                 let error_msg = "Window resizing is only supported on macOS".to_string();
                 error!("{}", error_msg);
@@ -555,7 +570,20 @@ pub(crate) async fn move_window(
                 }
             }
 
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(target_os = "windows")]
+            {
+                use computer_use_ai_sdk::platforms::windows::{ax, window_list};
+                ax::window_id_of(&window)
+                    .ok_or_else(|| "Couldn't find that window".to_string())
+                    .and_then(|id| window_list::move_window(id, x, y).map_err(|e| e.to_string()))
+                    .map_err(|e| {
+                        let error_msg = format!("Failed to move window '{}': {}", window_id, e);
+                        error!("{}", error_msg);
+                        error_msg
+                    })
+            }
+
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
             {
                 let error_msg = "Window moving is only supported on macOS".to_string();
                 error!("{}", error_msg);
@@ -662,7 +690,20 @@ pub(crate) async fn close_window(
                 }
             }
 
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(target_os = "windows")]
+            {
+                use computer_use_ai_sdk::platforms::windows::{ax, window_list};
+                ax::window_id_of(&window)
+                    .ok_or_else(|| "Couldn't find that window".to_string())
+                    .and_then(|id| window_list::close_window(id).map_err(|e| e.to_string()))
+                    .map_err(|e| {
+                        let error_msg = format!("Failed to close window '{}': {}", window_id, e);
+                        error!("{}", error_msg);
+                        error_msg
+                    })
+            }
+
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
             {
                 let error_msg = "Window closing is only supported on macOS".to_string();
                 error!("{}", error_msg);

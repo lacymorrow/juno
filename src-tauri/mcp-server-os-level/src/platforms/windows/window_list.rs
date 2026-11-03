@@ -8,12 +8,13 @@
 //! for the headless CLI), so UI Automation, `SendInput` and these calls all
 //! agree.
 
+use crate::errors::AutomationError;
 use crate::window_target::WindowRecord;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use windows::core::{BOOL, PWSTR};
 use windows::Win32::Foundation::{
-    CloseHandle, E_ACCESSDENIED, HANDLE, HWND, LPARAM, POINT, RECT, TRUE,
+    CloseHandle, E_ACCESSDENIED, HANDLE, HWND, LPARAM, POINT, RECT, TRUE, WPARAM,
 };
 use windows::Win32::Graphics::Dwm::{
     DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS,
@@ -31,8 +32,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, ChildWindowFromPointEx, EnumChildWindows, EnumWindows, GetAncestor,
     GetClassNameW, GetCursorPos, GetForegroundWindow, GetGUIThreadInfo, GetWindowLongPtrW,
     GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible,
-    SetForegroundWindow, ShowWindow, CWP_SKIPINVISIBLE, CWP_SKIPTRANSPARENT, GA_ROOT,
-    GUITHREADINFO, GWL_EXSTYLE, MONITORINFOF_PRIMARY, SW_RESTORE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow, CWP_SKIPINVISIBLE,
+    CWP_SKIPTRANSPARENT, GA_ROOT, GUITHREADINFO, GWL_EXSTYLE, MONITORINFOF_PRIMARY,
+    SET_WINDOW_POS_FLAGS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_RESTORE,
+    WM_CLOSE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
 };
 
 /// The layer of ordinary app windows.
@@ -475,6 +478,54 @@ pub fn process_is_elevated(pid: i32) -> bool {
     // SAFETY: `process` came from OpenProcess and is closed once.
     let _ = unsafe { CloseHandle(process) };
     elevated
+}
+
+/// Resize a window where it is, without raising it.
+pub fn resize_window(window_id: u32, width: i32, height: i32) -> Result<(), AutomationError> {
+    set_window_pos(window_id, 0, 0, width, height, SWP_NOMOVE)
+}
+
+/// Move a window at its size, without raising it.
+pub fn move_window(window_id: u32, x: i32, y: i32) -> Result<(), AutomationError> {
+    set_window_pos(window_id, x, y, 0, 0, SWP_NOSIZE)
+}
+
+fn set_window_pos(
+    window_id: u32,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    keep: SET_WINDOW_POS_FLAGS,
+) -> Result<(), AutomationError> {
+    // SAFETY: takes values only; a stale handle makes the call fail.
+    unsafe {
+        SetWindowPos(
+            hwnd_from_id(window_id),
+            None,
+            x,
+            y,
+            width,
+            height,
+            keep | SWP_NOACTIVATE | SWP_NOZORDER,
+        )
+    }
+    .map_err(|e| AutomationError::PlatformError(format!("Couldn't change the window: {e}")))
+}
+
+/// Ask a window to close, the way its close button does: it can still ask to
+/// save. Doesn't raise it.
+pub fn close_window(window_id: u32) -> Result<(), AutomationError> {
+    // SAFETY: posts plain values; a stale handle only makes the call fail.
+    unsafe {
+        PostMessageW(
+            Some(hwnd_from_id(window_id)),
+            WM_CLOSE,
+            WPARAM(0),
+            LPARAM(0),
+        )
+    }
+    .map_err(|e| AutomationError::PlatformError(format!("Couldn't close the window: {e}")))
 }
 
 /// One display, in physical pixels of the virtual desktop.

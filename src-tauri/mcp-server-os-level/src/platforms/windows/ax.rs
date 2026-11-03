@@ -526,6 +526,34 @@ fn hand_foreground_back(front_before: Option<HWND>) {
     }
 }
 
+/// The top-level window an element belongs to, as a window id.
+pub fn window_id_of(element: &crate::UIElement) -> Option<u32> {
+    let element = element.as_any().downcast_ref::<WindowsUIElement>()?;
+    element_window(element).map(|hwnd| id_from_hwnd(root_of(hwnd)))
+}
+
+/// The text selected in the focused control, empty when nothing is selected or
+/// the control doesn't offer a selection. Reading changes nothing.
+pub fn selected_text() -> Result<String, crate::errors::AutomationError> {
+    use crate::errors::AutomationError;
+    super::element::ensure_com();
+    let focused = super::element::uia()?
+        .automation
+        .get_focused_element()
+        .map_err(|e| AutomationError::NoFocusedElement(e.to_string()))?;
+    let Ok(pattern) = focused.get_pattern::<uiautomation::patterns::UITextPattern>() else {
+        return Ok(String::new());
+    };
+    let ranges = pattern
+        .get_selection()
+        .map_err(|e| AutomationError::PlatformError(format!("Couldn't read the selection: {e}")))?;
+    Ok(ranges
+        .iter()
+        .filter_map(|range| range.get_text(-1).ok())
+        .collect::<Vec<_>>()
+        .join("\n"))
+}
+
 /// How long a launched app gets to take the foreground. Slower than a press:
 /// the process has to start first.
 const LAUNCH_WATCH: Duration = Duration::from_millis(1500);
