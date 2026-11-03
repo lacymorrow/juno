@@ -175,7 +175,10 @@ pub use macos_impl::{element_owner, CheckedField};
 #[cfg(target_os = "macos")]
 pub(crate) use macos_impl::window_id_of_window;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+pub use crate::platforms::windows::ax::{describe_target, element_owner, type_verified};
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn element_owner(_element: &crate::UIElement) -> (Option<i32>, Option<u32>) {
     (None, None)
 }
@@ -188,12 +191,12 @@ pub fn type_verified(target: &TypeTarget, text: &str) -> Result<AxTypeReport, Ax
     insert_text(field, text)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn type_verified(_target: &TypeTarget, _text: &str) -> Result<AxTypeReport, AxTypeSkip> {
     Err(AxTypeSkip::Unsupported)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn describe_target(pid: Option<i32>, window_id: Option<u32>) -> TargetInfo {
     TargetInfo {
         pid,

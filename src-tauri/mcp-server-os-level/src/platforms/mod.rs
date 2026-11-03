@@ -386,7 +386,7 @@ pub mod macos;
 #[cfg(target_os = "macos")]
 pub mod tree_search;
 #[cfg(target_os = "windows")]
-mod windows;
+pub mod windows;
 
 /// Create the appropriate engine for the current platform
 #[cfg_attr(
@@ -406,9 +406,12 @@ pub fn create_engine(
     }
     #[cfg(target_os = "windows")]
     {
-        return Err(AutomationError::UnsupportedPlatform(
-            "Windows not yet supported".to_string(),
-        ));
+        // UI Automation needs no permission on Windows, so there is no settings
+        // page to send anyone to.
+        Ok(Box::new(self::windows::WindowsEngine::new(
+            use_background_apps,
+            activate_app,
+        )?))
     }
     #[cfg(target_os = "linux")]
     {
@@ -444,9 +447,12 @@ pub fn create_engine_with_auto_redirect(
     }
     #[cfg(target_os = "windows")]
     {
-        return Err(AutomationError::UnsupportedPlatform(
-            "Windows not yet supported".to_string(),
-        ));
+        // UI Automation needs no permission on Windows, so there is no settings
+        // page to send anyone to.
+        Ok(Box::new(self::windows::WindowsEngine::new(
+            use_background_apps,
+            activate_app,
+        )?))
     }
     #[cfg(target_os = "linux")]
     {
