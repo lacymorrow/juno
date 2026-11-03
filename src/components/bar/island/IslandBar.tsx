@@ -99,6 +99,7 @@ import {
   stopControl,
   type Face,
 } from "./islandModel";
+import { focusBarForTyping } from "@/lib/barFocus";
 
 /**
  * Island: one surface that flips between the idle bar, the composer, an
@@ -180,9 +181,7 @@ function reportEscape(): void {
 }
 
 function activateWindow(): void {
-  getCurrentWindow()
-    .setFocus()
-    .catch((error) => console.debug("Island: window activation failed:", error));
+  focusBarForTyping();
 }
 
 // === SMALL PARTS ===

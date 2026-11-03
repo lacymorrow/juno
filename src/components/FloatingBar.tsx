@@ -98,6 +98,7 @@ function warmChatPane() {
 }
 import type { BarAppearance } from "@/components/bar/barAppearance";
 import { BAR_SURFACE_BG } from "@/lib/platform";
+import { focusBarForTyping } from "@/lib/barFocus";
 
 /**
  * UI State enumeration — values emitted by the backend UIManager in
@@ -1141,9 +1142,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
    * afterwards asks for activation explicitly.
    */
   const activateWindow = useCallback(() => {
-    getCurrentWindow()
-      .setFocus()
-      .catch((error) => console.debug("FloatingBar: window activation failed:", error));
+    focusBarForTyping();
   }, []);
 
   const [localInputValue, setLocalInputValue] = useState("");

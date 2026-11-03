@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 import { useEventListener } from "@/hooks/useEventListener";
 import {
@@ -18,6 +17,7 @@ import {
   type ClimbTarget,
   type LadderStep,
 } from "@/lib/barEscape";
+import { focusBarForTyping } from "@/lib/barFocus";
 
 /**
  * Which path a press arrived on: the bar's own `document` keydown, or Rust's
@@ -288,8 +288,6 @@ export type { ClimbTarget } from "@/lib/barEscape";
  * to its input state. For the looks whose composer is Rust's input state.
  */
 export function openComposerThroughRust(sendClick: () => void): void {
-  getCurrentWindow()
-    .setFocus()
-    .catch((error) => console.debug("Bar: window activation failed:", error));
+  focusBarForTyping();
   sendClick();
 }

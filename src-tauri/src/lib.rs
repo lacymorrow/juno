@@ -821,6 +821,7 @@ pub fn run() {
             commands::bar_position::bar_order_above_snap_wells,
             commands::bar_position::ensure_snap_wells_overlays,
             commands::bar_position::show_bar_when_ready,
+            commands::bar_position::focus_bar_for_typing,
             // Auto-update commands (the whole bridge; policy lives in `updater`)
             commands::updates::get_update_status,
             commands::updates::check_for_updates_now,
