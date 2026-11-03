@@ -369,6 +369,66 @@ pub async fn cli_status() -> CliStatus {
     }
 }
 
+/// Write `bytes` to `path` as a file only this user can read, or fail.
+///
+/// Every file in this module carries the tool server's bearer token, which
+/// moves the mouse and presses keys, and the temporary directory they live in
+/// is a place other processes can look. So the mode is set when the file is
+/// created, not after: `std::fs::write` creates at the umask, which on a
+/// default macOS account is 0644, and a `chmod` afterwards leaves a window
+/// where the token is world-readable. A failed `chmod` used to be a warning
+/// the spawn then ignored; a failure here is an error the spawn honours.
+///
+/// Written to a private neighbour and renamed into place. `create_new` on a
+/// name no other call uses means this never opens, and so never writes
+/// through, whatever already sits at `path`: a stale file from an earlier run,
+/// or a symlink somebody planted at a name as predictable as this one. The
+/// rename is atomic and keeps the mode, so a hook reading the old file reads a
+/// whole one (LAC-6475).
+fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), AgentError> {
+    use std::io::Write;
+
+    // Unique per call, not just per process: a turn and the warm spare can
+    // both be writing their inputs, and a shared staging name would make one
+    // of them fail for no reason.
+    static STAGING: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nonce = STAGING.fetch_add(1, Ordering::Relaxed);
+
+    let failed = |what: &str, target: &Path, e: std::io::Error| {
+        AgentError::ConfigurationError(format!("Failed to {what} {}: {e}", target.display()))
+    };
+
+    let mut staging = path.as_os_str().to_os_string();
+    staging.push(format!(".tmp{}-{nonce}", std::process::id()));
+    let staging = PathBuf::from(staging);
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+
+    let mut file = options
+        .open(&staging)
+        .map_err(|e| failed("create", &staging, e))?;
+    let written = file
+        .write_all(bytes)
+        .and_then(|()| file.flush())
+        .map_err(|e| failed("write", &staging, e));
+    drop(file);
+
+    if let Err(e) = written.and_then(|()| {
+        std::fs::rename(&staging, path).map_err(|e| failed("move into place", path, e))
+    }) {
+        // Nothing else knows this name, so there is nobody to take it over.
+        let _ = std::fs::remove_file(&staging);
+        return Err(e);
+    }
+    Ok(())
+}
+
 /// Write the `--mcp-config` file pointing the CLI at Juno's own tool server.
 ///
 /// When "Load account MCP connectors" is off, `--strict-mcp-config` makes
@@ -379,17 +439,17 @@ pub async fn cli_status() -> CliStatus {
 /// carries the bearer token, which is why it goes to a file the CLI reads
 /// rather than onto a command line every `ps` on the machine can see.
 fn write_mcp_config(endpoint: &juno_mcp::Endpoint) -> Result<PathBuf, AgentError> {
-    let path = std::env::temp_dir().join(format!("juno-mcp-{}.json", std::process::id()));
+    write_mcp_config_in(&std::env::temp_dir(), endpoint)
+}
+
+/// [`write_mcp_config`], told where to put it, so a test can read the result
+/// without writing the token into a shared directory.
+fn write_mcp_config_in(dir: &Path, endpoint: &juno_mcp::Endpoint) -> Result<PathBuf, AgentError> {
+    let path = dir.join(format!("juno-mcp-{}.json", std::process::id()));
     let bytes = serde_json::to_vec(&juno_mcp::mcp_config(endpoint)).map_err(|e| {
         AgentError::ConfigurationError(format!("Failed to serialize MCP config: {}", e))
     })?;
-    std::fs::write(&path, bytes).map_err(|e| {
-        AgentError::ConfigurationError(format!(
-            "Failed to write MCP config to {}: {}",
-            path.display(),
-            e
-        ))
-    })?;
+    write_private_file(&path, &bytes)?;
     Ok(path)
 }
 
@@ -401,29 +461,37 @@ fn write_mcp_config(endpoint: &juno_mcp::Endpoint) -> Result<PathBuf, AgentError
 /// actually passes it is `permission_args`' decision, and that is where it is
 /// tested.
 ///
-/// Mode 0600 because it carries the tool server's bearer token and the
-/// temporary directory is readable by every process on the machine. The MCP
-/// config next to it carries the same token and does not do this yet; that is
-/// its own fix, not this one's.
+/// Two files, because the hook command inside this one runs through `sh -c` on
+/// every `Bash` call the CLI makes, where `ps` can read it: the settings name
+/// a second file that holds the `Authorization` header, and `curl` reads the
+/// token from there instead of from its own argv (LAC-6475).
 fn write_shell_screen_settings(endpoint: &juno_mcp::Endpoint) -> Result<PathBuf, AgentError> {
-    let path = std::env::temp_dir().join(format!("juno-cli-hooks-{}.json", std::process::id()));
-    let bytes = serde_json::to_vec(&juno_mcp::shell_screen_settings(endpoint)).map_err(|e| {
+    write_shell_screen_settings_in(&std::env::temp_dir(), endpoint)
+}
+
+/// [`write_shell_screen_settings`], told where to put it.
+///
+/// Returns the settings path; the header file it names is a neighbour, and the
+/// CLI learns of it only by reading the settings.
+fn write_shell_screen_settings_in(
+    dir: &Path,
+    endpoint: &juno_mcp::Endpoint,
+) -> Result<PathBuf, AgentError> {
+    let header_path = dir.join(format!("juno-cli-hook-auth-{}.txt", std::process::id()));
+    // Built before either file is written: this is what refuses a header path
+    // the hook's shell would mangle, and refusing before writing leaves no
+    // token behind for settings that are never going to exist.
+    let settings = juno_mcp::shell_screen_settings(endpoint, &header_path)?;
+    let bytes = serde_json::to_vec(&settings).map_err(|e| {
         AgentError::ConfigurationError(format!("Failed to serialize the shell screen: {}", e))
     })?;
-    std::fs::write(&path, bytes).map_err(|e| {
-        AgentError::ConfigurationError(format!(
-            "Failed to write the shell screen to {}: {}",
-            path.display(),
-            e
-        ))
-    })?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Err(e) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)) {
-            warn!("Could not restrict {} to this user: {}", path.display(), e);
-        }
-    }
+
+    // Header first: settings that point at a file which is not there yet turn
+    // the screen off silently for as long as the gap lasts.
+    write_private_file(&header_path, juno_mcp::hook_auth_header(endpoint).as_bytes())?;
+
+    let path = dir.join(format!("juno-cli-hooks-{}.json", std::process::id()));
+    write_private_file(&path, &bytes)?;
     Ok(path)
 }
 
