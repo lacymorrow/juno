@@ -16,3 +16,13 @@ CARGO_CACHE_RUSTC_INFO = "1"
 
 # Skip documentation builds during development
 RUSTDOCFLAGS = "--cfg docsrs"
+
+# Link the C runtime statically on Windows. A fresh Windows 11 install has no
+# vcruntime140.dll, so a dynamically linked exe exits with 0xC0000135 before
+# main runs (LAC-6321 spike). It also builds whisper.cpp with /MT through
+# cmake, to match the static runtime the rest of the app links.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
