@@ -27,6 +27,20 @@ use tracing::{error, info};
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::display::{get_active_displays, get_main_display};
+#[cfg(target_os = "windows")]
+use computer_use_ai_sdk::platforms::windows::window_list::{list_displays, DisplayRecord};
+
+/// The main display. Windows always has one marked; the first will do if not.
+#[cfg(target_os = "windows")]
+fn main_display_record() -> Result<DisplayRecord, String> {
+    let displays = list_displays();
+    displays
+        .iter()
+        .find(|d| d.is_main)
+        .or(displays.first())
+        .copied()
+        .ok_or_else(|| "Windows reports no display".to_string())
+}
 
 /// Registers display information tools with the tool provider.
 ///
@@ -171,7 +185,33 @@ async fn get_screen_info_impl() -> Result<Value, String> {
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let display = main_display_record()?;
+        let (standard_width, standard_height) =
+            get_current_standard_resolution().unwrap_or((display.width, display.height));
+        Ok(json!({
+            "resolution": {
+                "width": standard_width,
+                "height": standard_height,
+                "actual_width": display.width,
+                "actual_height": display.height
+            },
+            "center": {
+                "x": standard_width / 2,
+                "y": standard_height / 2
+            },
+            "bounds": {
+                "origin": { "x": display.x, "y": display.y },
+                "size": { "width": display.width, "height": display.height }
+            },
+            "display_id": display.id,
+            "is_main": display.is_main,
+            "coordinate_system": "standard_resolution"
+        }))
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         // Fallback for non-macOS platforms
         let (width, height) = get_current_standard_resolution().unwrap_or((1366, 768)); // Common fallback resolution
@@ -245,7 +285,20 @@ async fn get_screen_center_impl() -> Result<Value, String> {
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let display = main_display_record()?;
+        let (width, height) =
+            get_current_standard_resolution().unwrap_or((display.width, display.height));
+        Ok(json!({
+            "x": width / 2,
+            "y": height / 2,
+            "resolution": { "width": width, "height": height },
+            "coordinate_system": "standard_resolution"
+        }))
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let (width, height) = get_current_standard_resolution().unwrap_or((1366, 768));
 
@@ -328,7 +381,39 @@ async fn get_display_list_impl() -> Result<Value, String> {
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let display_list: Vec<Value> = list_displays()
+            .into_iter()
+            .map(|display| {
+                let (standard_width, standard_height) =
+                    get_current_standard_resolution().unwrap_or((display.width, display.height));
+                json!({
+                    "id": display.id,
+                    "is_main": display.is_main,
+                    "bounds": {
+                        "origin": { "x": display.x, "y": display.y },
+                        "size": { "width": display.width, "height": display.height }
+                    },
+                    "resolution": {
+                        "actual_width": display.width,
+                        "actual_height": display.height,
+                        "standard_width": standard_width,
+                        "standard_height": standard_height
+                    },
+                    "center": { "x": standard_width / 2, "y": standard_height / 2 }
+                })
+            })
+            .collect();
+        info!("Found {} active displays", display_list.len());
+        Ok(json!({
+            "count": display_list.len(),
+            "displays": display_list,
+            "coordinate_system": "standard_resolution"
+        }))
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let (width, height) = get_current_standard_resolution().unwrap_or((1366, 768));
 

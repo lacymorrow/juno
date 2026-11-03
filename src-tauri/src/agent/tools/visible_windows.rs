@@ -3,8 +3,8 @@
 //! Provides `list_visible_windows` — a lightweight tool that returns all
 //! on-screen application windows without taking a screenshot.
 //!
-//! Uses CGWindowListCopyWindowInfo (~1 ms) and requires only Screen Recording
-//! permission (not Accessibility).
+//! Uses CGWindowListCopyWindowInfo (~1 ms) on macOS, which requires only Screen
+//! Recording permission (not Accessibility), and EnumWindows on Windows.
 //!
 //! ## Usage
 //! Used by: computer-use agents that need spatial context before deciding
@@ -102,8 +102,22 @@ pub async fn window_titles_for_app(app_name: &str) -> Result<Vec<String>, String
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = app_name;
-        Ok(vec![])
+        // Matches a process (`msedge`) or part of a window title ("Edge"), since
+        // a person's name for an app is rarely its executable's.
+        let target = app_name.to_lowercase();
+        let records = tokio::task::spawn_blocking(windows_of_apps)
+            .await
+            .map_err(|e| format!("get_app_windows task panicked: {}", e))?;
+        Ok(records
+            .into_iter()
+            .filter(|w| {
+                w.owner.to_lowercase().contains(&target)
+                    || w.title
+                        .as_deref()
+                        .is_some_and(|t| t.to_lowercase().contains(&target))
+            })
+            .filter_map(|w| w.title)
+            .collect())
     }
 }
 
@@ -161,6 +175,34 @@ async fn list_visible_windows_impl() -> Result<Value, String> {
 
     #[cfg(not(target_os = "macos"))]
     {
-        Ok(json!({ "windows": [], "count": 0, "note": "only supported on macOS" }))
+        let frontmost = computer_use_ai_sdk::window_target::native::frontmost().map(|w| w.id);
+        let windows = tokio::task::spawn_blocking(windows_of_apps)
+            .await
+            .map_err(|e| format!("list_visible_windows task panicked: {}", e))?;
+        let items: Vec<Value> = windows
+            .iter()
+            .map(|w| {
+                json!({
+                    "app_name": w.owner,
+                    "window_title": w.title,
+                    "window_id": w.id,
+                    "position": { "x": w.bounds.0, "y": w.bounds.1 },
+                    "size": { "w": w.bounds.2, "h": w.bounds.3 },
+                    "is_frontmost": frontmost == Some(w.id),
+                    "layer": w.layer,
+                })
+            })
+            .collect();
+        Ok(json!({ "windows": items, "count": items.len() }))
     }
+}
+
+/// Other apps' ordinary windows, front to back: not Juno, not the shell.
+#[cfg(not(target_os = "macos"))]
+fn windows_of_apps() -> Vec<computer_use_ai_sdk::window_target::WindowRecord> {
+    let own_pid = std::process::id() as i32;
+    computer_use_ai_sdk::window_target::native::window_records()
+        .into_iter()
+        .filter(|w| w.pid != own_pid && w.is_user_layer())
+        .collect()
 }

@@ -175,11 +175,12 @@ fn frame_to_image(
     })
 }
 
-/// A picture of one window and its frame on screen (x, y, width, height), drawn
-/// even when other windows cover it.
-pub fn capture_window_buffer(
-    window_id: u32,
-) -> Result<(RgbaImage, (f64, f64, f64, f64)), AutomationError> {
+/// A window's frame on screen: x, y, width, height.
+type WindowFrame = (f64, f64, f64, f64);
+
+/// A picture of one window and its frame on screen, drawn even when other
+/// windows cover it.
+pub fn capture_window_buffer(window_id: u32) -> Result<(RgbaImage, WindowFrame), AutomationError> {
     ensure_com();
     let hwnd = hwnd_from_id(window_id);
     if !window_exists(hwnd) {

@@ -113,7 +113,7 @@ fn window_records() -> Vec<computer_use_ai_sdk::window_target::WindowRecord> {
 
 #[cfg(not(target_os = "macos"))]
 fn window_records() -> Vec<computer_use_ai_sdk::window_target::WindowRecord> {
-    Vec::new()
+    computer_use_ai_sdk::window_target::native::window_records()
 }
 
 fn window_on_screen(window_id: u32) -> bool {
@@ -387,15 +387,18 @@ pub struct WindowPicture {
 /// Capture one window on its own, even when other windows cover it.
 /// Blocking: call it from a blocking thread, then hand the result to
 /// [`adopt_picture`] back on the agent's task.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn capture_window(pin: PinnedWindow) -> Result<WindowPicture, String> {
     use base64::Engine;
     use image::DynamicImage;
     use std::io::Cursor;
 
-    let (buffer, frame) =
-        computer_use_ai_sdk::platforms::macos::utils::capture_window_buffer(pin.window_id)
-            .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    use computer_use_ai_sdk::platforms::macos::utils::capture_window_buffer;
+    #[cfg(target_os = "windows")]
+    use computer_use_ai_sdk::platforms::windows::capture::capture_window_buffer;
+
+    let (buffer, frame) = capture_window_buffer(pin.window_id).map_err(|e| e.to_string())?;
     let image = DynamicImage::ImageRgba8(buffer);
     let (width, height) = picture_size(image.width(), image.height());
     let image = if (width, height) == (image.width(), image.height()) {
@@ -455,9 +458,9 @@ pub fn capture_window(pin: PinnedWindow) -> Result<WindowPicture, String> {
     })
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn capture_window(_pin: PinnedWindow) -> Result<WindowPicture, String> {
-    Err("Window pictures are only available on macOS".to_string())
+    Err("Window pictures are not available on this platform".to_string())
 }
 
 /// Make the agent's coordinates relative to a window picture it is about to

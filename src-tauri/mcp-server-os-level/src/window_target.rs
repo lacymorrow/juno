@@ -37,7 +37,7 @@ impl WindowRecord {
 
     /// Ordinary app windows and their panels. Menu bar, Dock and overlays at
     /// system levels are never input targets.
-    fn is_user_layer(&self) -> bool {
+    pub fn is_user_layer(&self) -> bool {
         (-1..20).contains(&self.layer)
     }
 }
