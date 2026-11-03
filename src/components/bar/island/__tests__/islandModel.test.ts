@@ -96,11 +96,13 @@ describe("face", () => {
 describe("shape", () => {
   const base = { hovered: false, composerHeight: composerHeightFor(COMPOSER_LINE_PX), contentHeight: 0 };
 
-  it("the capsule is a mark, and hover barely grows it", () => {
+  it("the capsule is a mark, and hover grows it only as far as its controls need", () => {
     expect(shapeFor("idle", base)).toEqual(IDLE_SHAPE);
     expect(shapeFor("idle", { ...base, hovered: true })).toEqual(HOVER_SHAPE);
     expect(IDLE_SHAPE.radius).toBe(IDLE_SHAPE.height / 2);
-    expect(HOVER_SHAPE.height - IDLE_SHAPE.height).toBeLessThanOrEqual(4);
+    // The 24px controls, with 2px above and below.
+    expect(HOVER_SHAPE.height).toBe(28);
+    expect(IDLE_SHAPE.height).toBeLessThan(HOVER_SHAPE.height);
   });
 
   it("every face past idle is one width, so the composer never changes width", () => {
@@ -560,5 +562,8 @@ describe("the mini voice capsule", () => {
     expect(miniShapeFor(true, 2).width).toBeGreaterThan(MINI_SHAPE.width);
     expect(miniShapeFor(true, 2).width).toBeLessThan(COMPACT_COMPOSE_WIDTH);
     expect(miniShapeFor(true, 0)).toEqual(MINI_SHAPE);
+    // The rest is too thin for a 24px control: revealed, it is the hover capsule's height.
+    expect(miniShapeFor(true, 2).height).toBe(HOVER_SHAPE.height);
+    expect(miniShapeFor(true, 2).radius).toBe(HOVER_SHAPE.radius);
   });
 });

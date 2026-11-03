@@ -429,7 +429,7 @@ describe("IslandBar: one surface", () => {
   it("reports the drawn shape as the only part that takes the mouse", async () => {
     render(<IslandBar />);
     const last = () => frameReport.mock.calls[frameReport.mock.calls.length - 1];
-    expect(last()[1][0]).toMatchObject({ width: 92, height: 28 });
+    expect(last()[1][0]).toMatchObject({ width: 56, height: 16 });
     await send(UI.BAR_STATES_INPUT);
     expect(last()[1][0]).toMatchObject({ width: 360, height: 36 });
     // The docked top edge never moves: idle and compose start on the same line.
@@ -1316,7 +1316,7 @@ describe("IslandBar: Open chat from the hover capsule", () => {
     expect(screen.getByRole("button", { name: "Open chat" })).toBeInTheDocument();
     const shapeHit = (frameReport.mock.calls[frameReport.mock.calls.length - 1][1] as Array<{ width: number }>)[0];
     // Talk and Open chat.
-    expect(shapeHit.width).toBe(104);
+    expect(shapeHit.width).toBe(92);
     // No answer yet: the full chat, empty, without waiting on Rust to answer
     // a click (when it did not, the button did nothing at all).
     fireEvent.click(screen.getByRole("button", { name: "Open chat" }));

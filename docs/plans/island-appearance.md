@@ -24,7 +24,7 @@ A dark capsule sits at the top of the screen with one breathing dot. They hold t
 
 | Face | Shape | What is in it |
 |---|---|---|
-| idle | 92 x 28 capsule, radius 14. Under the pointer 104 x 32 with Talk, Open chat and (when a wake phrase is set) the wake phrase toggle; each control past two widens it by 26 (118 for three). A click on the capsule itself opens the composer, so typing has no button of its own | the dot |
+| idle | 56 x 16 capsule, radius 8 (the Pill's resting size; Lacy, 2026-11-03: too big beside Superwhisper and Wispr Flow, a smaller default instead of a size setting). Under the pointer 92 x 28 with Talk, Open chat and (when a wake phrase is set) the wake phrase toggle; each control past two widens it by 26 (118 for three). A click on the capsule itself opens the composer, so typing has no button of its own | the dot |
 | compose | 360 wide; 36 tall, growing with the text to four lines (90). The small bar (248 x 36) while nobody is writing, see below | the composer only |
 | answer | 360 wide; composer plus content, up to 400 tall, then the body scrolls | question line (dot, your words dimmed, speaker toggle when there is both text and speech, linger ring), the answer body, the composer as the follow-up field |
 | component | 360 wide, same height rule | caption line (the prose folded to one line, click to expand), the component edge to edge, the composer |
