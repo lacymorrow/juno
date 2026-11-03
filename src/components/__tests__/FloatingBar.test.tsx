@@ -637,7 +637,9 @@ describe("FloatingBar", () => {
 
     expect(bar()).toHaveAttribute("data-layout", "full");
     expect(input).toHaveFocus();
-    expect(windowSetFocus).toHaveBeenCalledTimes(1);
+    expect(
+      invoke.mock.calls.filter(([command]) => command === "focus_bar_for_typing"),
+    ).toHaveLength(1);
     expect(invoke).toHaveBeenCalledWith(
       "ui_handle_interaction",
       interaction("focus", { isFocused: true }),

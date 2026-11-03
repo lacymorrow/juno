@@ -154,6 +154,29 @@ pub async fn show_bar_when_ready(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Give the bar the keyboard because the person is about to type in it (the
+/// Pill's T button, a click in its input, the Island's input).
+///
+/// On Windows the bar is non-activating at rest, and the click that asks for
+/// this landed in WebView2's own process, so Juno is not allowed to take the
+/// foreground the ordinary way. tao's `set_focus` then falls back to a
+/// synthetic Alt press, and that Alt puts the window in menu mode, which eats
+/// the next key the person types. `platform::windows` activates it without it.
+/// Elsewhere this is the window's ordinary `set_focus`.
+#[command]
+pub async fn focus_bar_for_typing(app_handle: AppHandle) -> Result<(), String> {
+    let bar = app_handle
+        .get_webview_window(crate::constants::ui::window_labels::FLOATING_BAR)
+        .ok_or("floating-bar window not found")?;
+    #[cfg(target_os = "windows")]
+    {
+        crate::platform::windows::activate_bar_for_typing(&bar);
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    bar.set_focus().map_err(|e| e.to_string())
+}
+
 /// Where `set_bar_frame` left the bar's top-left, in global desktop points,
 /// and what became of the drag it was asked to start.
 #[derive(Debug, Clone, Copy, Serialize)]
