@@ -660,7 +660,10 @@ impl BrainFactory {
             return Ok(());
         }
 
-        // Register the official Anthropic Computer Use tools (per-provider instance)
+        // Register the official Anthropic Computer Use tools (per-provider instance).
+        // This and the other desktop tools below are macOS-only until the
+        // Windows engine lands (docs/plans/windows.md, step 2).
+        #[cfg(target_os = "macos")]
         match session {
             Some(ctx) => {
                 crate::agent::tools::anthropic_computer_use::register_anthropic_computer_use_tools_for_session(
@@ -674,6 +677,7 @@ impl BrainFactory {
         }
 
         // Register additional desktop automation tools (per-provider instance)
+        #[cfg(target_os = "macos")]
         crate::agent::tools::desktop_tools::register_desktop_tools(
             provider,
             state_manager.clone(),
@@ -682,6 +686,7 @@ impl BrainFactory {
         .await;
 
         // Register display information tools for screen resolution and display info (per-provider instance)
+        #[cfg(target_os = "macos")]
         crate::agent::tools::display_info_tools::register_display_info_tools(
             provider,
             app_handle.clone(),
@@ -689,6 +694,7 @@ impl BrainFactory {
         .await?;
 
         // Register lightweight window listing tool (per-provider instance)
+        #[cfg(target_os = "macos")]
         crate::agent::tools::visible_windows::register_visible_windows_tools(
             provider,
             app_handle.clone(),
@@ -703,6 +709,7 @@ impl BrainFactory {
             .await;
 
         // Register Reminders, Calendar and Contacts tools (per-provider instance)
+        #[cfg(target_os = "macos")]
         crate::agent::tools::mac_apps::register_mac_apps_tools(provider).await;
 
         // Register image generation + editing tools (LAC-4206). Both declare
@@ -713,9 +720,11 @@ impl BrainFactory {
         crate::agent::tools::register_self_awareness_tools(provider).await;
 
         // Register native accessibility tools for element-level interaction
+        #[cfg(target_os = "macos")]
         Self::register_accessibility_tools(provider, app_handle.clone()).await?;
 
         // Register Safari tools for fast Safari DOM automation
+        #[cfg(target_os = "macos")]
         Self::register_safari_tools(provider, app_handle.clone()).await?;
 
         // MCP tools are handled separately and loaded only when needed:

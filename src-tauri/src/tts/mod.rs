@@ -530,6 +530,10 @@ async fn play_base64_audio_with_tracking(
     info!("Playing TTS audio from temporary file: {:?}", temp_path);
 
     // Platform-specific audio playback with proper completion tracking and error propagation
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "linux")),
+        allow(clippy::diverging_sub_expression)
+    )]
     let task_handle = {
         #[cfg(target_os = "macos")]
         {
@@ -1852,6 +1856,13 @@ pub async fn invoke_tts_for_provider(
     provider: &str,
 ) -> Result<String, String> {
     info!("Invoking TTS for provider: {}", provider);
+
+    // Speech is macOS-only until the Windows voice step (docs/plans/windows.md,
+    // step 3): nothing plays it there, so a cloud engine would bill for audio
+    // nobody hears.
+    if cfg!(not(target_os = "macos")) {
+        return Err("Speech is not available on this platform yet".to_string());
+    }
 
     // Check if stop was requested before starting
     if is_tts_stop_requested() {

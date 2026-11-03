@@ -1,4 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Off macOS, whole features are compiled out (computer use, voice, the Mac
+// apps tools: docs/plans/windows.md, step 1), which strands the imports,
+// helpers and arguments that only fed them. They come back as each step lands.
+#![cfg_attr(
+    not(target_os = "macos"),
+    allow(unused_imports, unused_variables, dead_code, unreachable_code)
+)]
 
 // Import necessary external crates and standard library items
 use tauri::{AppHandle, Listener, Manager};
@@ -1222,6 +1229,7 @@ pub fn run() {
             // Run with callback to handle macOS dock icon click and window lifecycle events
             app.run(|app_handle, event| {
                 match event {
+                    #[cfg(target_os = "macos")]
                     tauri::RunEvent::Reopen { .. } => {
                         // macOS: the Dock icon climbs the same ladder as the
                         // tray icon, one rung per click. From hidden, Juno

@@ -272,6 +272,7 @@ pub fn is_usable_workspace_cwd(cwd: &Path) -> bool {
 
 /// True when the process can write to `path` (POSIX `access(2)` with W_OK,
 /// which honors the effective uid/gid, unlike permission-bit inspection).
+#[cfg(unix)]
 fn is_writable_dir(path: &Path) -> bool {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
@@ -283,6 +284,28 @@ fn is_writable_dir(path: &Path) -> bool {
     // SAFETY: c_path is a valid NUL-terminated C string that outlives the
     // call; access() only reads the pointer and touches no other memory.
     unsafe { libc::access(c_path.as_ptr(), libc::W_OK) == 0 }
+}
+
+/// True when the process can write to `path`. Windows ACLs are not visible
+/// in permission bits, so the only honest test is creating a file there.
+#[cfg(windows)]
+fn is_writable_dir(path: &Path) -> bool {
+    path.is_dir() && tempfile::tempfile_in(path).is_ok()
+}
+
+/// Do not follow a symlink in the final component: `O_NOFOLLOW` on Unix,
+/// `FILE_FLAG_OPEN_REPARSE_POINT` on Windows (opens the link itself).
+#[cfg(unix)]
+fn no_follow(options: &mut std::fs::OpenOptions) -> &mut std::fs::OpenOptions {
+    use std::os::unix::fs::OpenOptionsExt;
+    options.custom_flags(libc::O_NOFOLLOW)
+}
+
+#[cfg(windows)]
+fn no_follow(options: &mut std::fs::OpenOptions) -> &mut std::fs::OpenOptions {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
 }
 
 /// The process working directory, if it is usable as a workspace root.
@@ -413,11 +436,7 @@ fn verify_handle_within_roots(file: &File, roots: &[PathBuf]) -> Result<(), Stri
 /// Open an already-validated canonical path for reading without following a
 /// symlink swapped into the final component.
 fn open_no_follow_read(canonical: &Path) -> std::io::Result<File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(canonical)
+    no_follow(std::fs::OpenOptions::new().read(true)).open(canonical)
 }
 
 /// Read a validated file to a string through a boundary-verified handle.
@@ -438,15 +457,15 @@ pub fn read_to_string_checked(canonical: &Path, roots: &[PathBuf]) -> Result<Str
 /// `canonical` must come from [`resolve_within_roots`] with the same `roots`.
 pub fn write_checked(canonical: &Path, contents: &[u8], roots: &[PathBuf]) -> Result<(), String> {
     use std::io::Write as _;
-    use std::os::unix::fs::OpenOptionsExt;
 
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false) // truncate only after the handle is verified
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(canonical)
-        .map_err(|e| format!("Failed to open file '{}': {}", canonical.display(), e))?;
+    let mut file = no_follow(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false), // truncate only after the handle is verified
+    )
+    .open(canonical)
+    .map_err(|e| format!("Failed to open file '{}': {}", canonical.display(), e))?;
     verify_handle_within_roots(&file, roots)?;
 
     file.set_len(0)
@@ -541,6 +560,7 @@ mod tests {
         assert!(result.is_err(), "empty roots must deny access");
     }
 
+    #[cfg(unix)]
     #[test]
     fn parent_traversal_pops_a_symlinks_real_parent_not_its_lexical_one() {
         // The ordering that makes a lexical normalizer wrong. `inside/link`
@@ -617,6 +637,7 @@ mod tests {
         assert!(is_usable_workspace_cwd(dir.path()));
     }
 
+    #[cfg(unix)]
     #[test]
     fn non_writable_directory_is_not_a_usable_workspace_cwd() {
         use std::os::unix::fs::PermissionsExt;

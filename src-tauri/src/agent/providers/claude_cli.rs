@@ -642,6 +642,7 @@ pub async fn prewarm_persistent_session(app: tauri::AppHandle) {
 /// System-prompt guidance appended when Juno's tool server is wired in.
 /// Without this, models tend to fall back to `cliclick`/`screencapture` via
 /// Bash even when MCP computer-use tools are available (LAC-3692).
+#[cfg(target_os = "macos")]
 pub(super) const MCP_TOOL_GUIDANCE: &str =
     "You have a desktop automation tool from the \"juno\" MCP \
 server: `computer`. For ANY desktop or GUI automation use it. Do NOT use shell commands like \
@@ -666,6 +667,13 @@ tools, never AppleScript, osascript or other shell commands. \
 For music, directions, the person's own shortcuts and Do Not Disturb use music_play, \
 maps_directions, shortcuts_run and focus_set from the same server. For a mood or genre pick a well-known \
 song or artist yourself and pass that to music_play. A tool's `observed` read-back is the truth: never narrate what you could not see on screen, and never tell the person a result is unconfirmed when the tool observed it. A tool's limits are never the end of the request: when a typed tool cannot do part of it, finish that part with AppleScript or computer use in the app itself, and never tell the person you can't.";
+
+/// Off macOS the server offers no desktop or Mac app tools yet
+/// (docs/plans/windows.md), only Juno's settings and the approval prompt.
+#[cfg(not(target_os = "macos"))]
+pub(super) const MCP_TOOL_GUIDANCE: &str = "For Juno's own settings (its voice, shortcuts, \
+devices, or where a setting is) use the `settings` tool from the \"juno\" MCP server: it changes \
+them live and points the Settings window at them.";
 
 /// Check if Claude CLI is both installed and authenticated.
 /// Runs `claude auth status --json` and returns Ok(()) if logged in.
@@ -3407,6 +3415,7 @@ mod tests {
     /// Write an executable shell script that stands in for the `claude` binary.
     /// Answers the `auth status` pre-check with a logged-in response, then runs
     /// `body` for the actual query invocation.
+    #[cfg(unix)] // The stand-in CLI is a shell script
     fn write_fake_cli_script(body: &str) -> PathBuf {
         use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
@@ -3445,6 +3454,7 @@ mod tests {
     /// global AppState channel. `run_streaming` must observe it, kill the
     /// subprocess promptly, and surface `AgentError::Terminated` so the
     /// response is never rendered or spoken.
+    #[cfg(unix)] // The stand-in CLI is a shell script
     #[tokio::test]
     async fn test_run_streaming_session_cancel_kills_subprocess() {
         let script =
@@ -3480,6 +3490,7 @@ mod tests {
 
     /// A cancel that is already signalled before the query starts must
     /// short-circuit without waiting on the subprocess.
+    #[cfg(unix)] // The stand-in CLI is a shell script
     #[tokio::test]
     async fn test_run_streaming_pre_cancelled_returns_terminated() {
         let script = write_fake_cli_script("sleep 30");
@@ -3507,6 +3518,7 @@ mod tests {
 
     /// Sanity check: an uncancelled run with a live session receiver streams
     /// to completion and returns the CLI's result text.
+    #[cfg(unix)] // The stand-in CLI is a shell script
     #[tokio::test]
     async fn test_run_streaming_completes_when_not_cancelled() {
         let script =
@@ -3567,6 +3579,7 @@ mod tests {
     /// The CLI explains itself on stderr. Juno used to report the exit status
     /// alone, so "requires --verbose" reached the person as "exited with
     /// status 1 and no output" and there was nothing to act on (LAC-4612).
+    #[cfg(unix)] // The stand-in CLI is a shell script
     #[tokio::test]
     async fn cli_failure_reports_what_the_cli_said() {
         let script = write_fake_cli_script(
@@ -3620,6 +3633,7 @@ mod tests {
     /// Paused time: the runtime auto-advances to the next timer whenever it is
     /// idle, which is exactly what it is while the fake CLI sleeps, so the
     /// 10-minute window elapses without the test taking 10 minutes.
+    #[cfg(unix)] // The stand-in CLI is a shell script
     #[tokio::test(start_paused = true)]
     async fn a_silent_cli_eventually_times_out() {
         let script = write_fake_cli_script("sleep 3600");
@@ -3691,6 +3705,7 @@ mod tests {
 
     /// The whole point of the fallback: a `claude` too old for
     /// --include-partial-messages must still answer, not fail every query.
+    #[cfg(unix)] // The stand-in CLI is a shell script
     #[tokio::test]
     async fn an_old_cli_degrades_instead_of_failing() {
         let log = std::env::temp_dir().join(format!("juno-old-cli-{}.log", uuid::Uuid::new_v4()));

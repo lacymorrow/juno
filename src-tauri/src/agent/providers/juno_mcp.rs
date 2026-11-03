@@ -314,6 +314,11 @@ fn authorized(headers: &HeaderMap, token: &str) -> bool {
 fn tool_list() -> Vec<Value> {
     // Only the schema is served here. The CLI picks its own tool types, so the
     // Anthropic tool version on these definitions is never sent anywhere.
+    // `computer` and the Mac app tools are macOS-only until the Windows
+    // engine lands (docs/plans/windows.md, step 2).
+    #[cfg(not(target_os = "macos"))]
+    let mut tools: Vec<Value> = Vec::new();
+    #[cfg(target_os = "macos")]
     let mut tools: Vec<Value> =
         create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124))
             .into_iter()
@@ -327,6 +332,7 @@ fn tool_list() -> Vec<Value> {
             })
             .collect();
     // The same definitions the API providers register: one schema, two roads.
+    #[cfg(target_os = "macos")]
     tools.extend(mac_apps::tool_definitions().into_iter().map(|tool| {
         json!({
             "name": tool.name,
