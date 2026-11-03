@@ -17,6 +17,8 @@ pub mod automation;
 pub mod bar_drag_follow;
 /// Click-through for a steady bar window: hit-test the cursor against what the page draws.
 pub mod bar_hit_test;
+/// Child processes without a console window on Windows; a no-op elsewhere.
+pub mod console_window;
 /// Tauri's mixed-scale screen numbers, converted to global desktop points.
 pub mod desktop_points;
 pub mod file_panels;

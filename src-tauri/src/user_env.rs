@@ -8,6 +8,10 @@
 //! `$SHELL`) it falls back to the launchd PATH plus well-known tool dirs that
 //! exist.
 //!
+//! On Windows there is no login shell to ask and nothing to fix: a GUI app
+//! inherits the person's full PATH from Explorer, so that is the answer, and
+//! a bare name is looked up with PATHEXT the way cmd.exe does.
+//!
 //! Nothing here mutates the process environment: callers set `PATH` on the
 //! child they spawn.
 
@@ -33,6 +37,9 @@ const LAUNCHD_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 pub enum PathSource {
     LoginShell,
     Fallback,
+    /// Windows: the PATH this process inherited, which is already complete.
+    #[cfg(windows)]
+    Inherited,
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +109,7 @@ fn push_unique(parts: &mut Vec<String>, p: &str) {
     }
 }
 
+#[cfg(unix)]
 fn build_fallback() -> String {
     let launchd = std::env::var("PATH")
         .ok()
@@ -111,7 +119,15 @@ fn build_fallback() -> String {
     fallback_path(&launchd, home.as_deref(), |p| p.is_dir())
 }
 
+/// Windows: the inherited PATH is the person's own, so there is nothing to
+/// fall back from.
+#[cfg(windows)]
+fn build_fallback() -> String {
+    std::env::var("PATH").unwrap_or_default()
+}
+
 /// Run the login shell and read PATH. Blocking, bounded by `PROBE_TIMEOUT`.
+#[cfg(unix)]
 fn probe_login_shell() -> Option<String> {
     let shell = std::env::var("SHELL")
         .ok()
@@ -156,6 +172,7 @@ fn probe_login_shell() -> Option<String> {
     parse_marked_path(&out)
 }
 
+#[cfg(unix)]
 fn resolve_blocking() -> UserPath {
     let resolved = match probe_login_shell() {
         Some(path) => UserPath {
@@ -166,6 +183,17 @@ fn resolve_blocking() -> UserPath {
             path: build_fallback(),
             source: PathSource::Fallback,
         },
+    };
+    info!("User PATH resolved from {:?}", resolved.source);
+    debug!("User PATH: {}", resolved.path);
+    resolved
+}
+
+#[cfg(windows)]
+fn resolve_blocking() -> UserPath {
+    let resolved = UserPath {
+        path: build_fallback(),
+        source: PathSource::Inherited,
     };
     info!("User PATH resolved from {:?}", resolved.source);
     debug!("User PATH: {}", resolved.path);
@@ -218,6 +246,7 @@ pub fn effective_path(user_path: &str, overrides: &HashMap<String, String>) -> S
 
 /// Resolve a bare command name (no `/`) against `path`. A command containing a
 /// path separator is returned unchanged. `None` if a bare name is not found.
+#[cfg(unix)]
 pub fn resolve_command(command: &str, path: &str) -> Option<PathBuf> {
     if command.contains('/') {
         return Some(PathBuf::from(command));
@@ -225,6 +254,122 @@ pub fn resolve_command(command: &str, path: &str) -> Option<PathBuf> {
     std::env::split_paths(path)
         .map(|d| d.join(command))
         .find(|c| is_executable_file(c))
+}
+
+/// Windows: as cmd.exe resolves a name. `/` and `\\` both separate paths, and
+/// a name without an extension is tried with each PATHEXT one (`.exe`,
+/// `.cmd`, `.bat`, ...) in each directory, in order.
+#[cfg(windows)]
+pub fn resolve_command(command: &str, path: &str) -> Option<PathBuf> {
+    if command.contains(['/', '\\']) {
+        return Some(PathBuf::from(command));
+    }
+    let pathext = std::env::var("PATHEXT").unwrap_or_default();
+    let candidates = windows_candidates(command, &pathext);
+    std::env::split_paths(path).find_map(|dir| {
+        candidates
+            .iter()
+            .map(|name| dir.join(name))
+            .find(|c| is_executable_file(c))
+    })
+}
+
+/// The file names `command` may be on disk: itself when it already has an
+/// extension, else itself with each PATHEXT extension. `.COM;.EXE;.BAT;.CMD`
+/// when PATHEXT is unset.
+#[cfg(windows)]
+fn windows_candidates(command: &str, pathext: &str) -> Vec<String> {
+    if Path::new(command).extension().is_some() {
+        return vec![command.to_string()];
+    }
+    let pathext = if pathext.trim().is_empty() {
+        ".COM;.EXE;.BAT;.CMD"
+    } else {
+        pathext
+    };
+    pathext
+        .split(';')
+        .map(str::trim)
+        .filter(|ext| ext.starts_with('.'))
+        .map(|ext| format!("{command}{}", ext.to_ascii_lowercase()))
+        .collect()
+}
+
+/// Windows: a tokio command that starts `binary`, looking through an npm
+/// `.cmd` shim to what it runs.
+///
+/// Rust starts a `.cmd` through cmd.exe and refuses any argument with a line
+/// break in it, and Juno's prompts always have one. So a shim is unwrapped:
+/// its target `.exe` is started directly, or `node` with its script. Anything
+/// else, or a shim this cannot read, is started as it is.
+#[cfg(windows)]
+pub fn windows_command(binary: &std::ffi::OsStr) -> tokio::process::Command {
+    let path = Path::new(binary);
+    let is_shim = path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"));
+    if is_shim {
+        if let Some((program, script)) = unwrap_cmd_shim(path) {
+            debug!("{} runs {}", path.display(), program.display());
+            let mut cmd = tokio::process::Command::new(program);
+            if let Some(script) = script {
+                cmd.arg(script);
+            }
+            return cmd;
+        }
+        warn!(
+            "Could not read the npm shim {}; starting it through cmd.exe",
+            path.display()
+        );
+    }
+    tokio::process::Command::new(binary)
+}
+
+/// What an npm cmd-shim runs: `(program, None)` for an executable target,
+/// `(node, Some(script))` for a script. `None` when the file is not one.
+#[cfg(windows)]
+fn unwrap_cmd_shim(shim: &Path) -> Option<(PathBuf, Option<PathBuf>)> {
+    let text = std::fs::read_to_string(shim).ok()?;
+    let dir = shim.parent()?;
+    let target = shim_target(&text)?;
+    let target = dir.join(target);
+    if !target.is_file() {
+        return None;
+    }
+    let is_exe = target
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"));
+    if is_exe {
+        return Some((target, None));
+    }
+    // The shim prefers a node.exe beside itself, as npm's own does.
+    let local_node = dir.join("node.exe");
+    let node = if local_node.is_file() {
+        local_node
+    } else {
+        resolve_command("node", &user_path_now())?
+    };
+    Some((node, Some(target)))
+}
+
+/// The target path inside an npm shim, relative to the shim's directory:
+/// the last `"%dp0%\\..."` (or older `"%~dp0\\..."`) quoted path in the file.
+#[cfg(windows)]
+fn shim_target(text: &str) -> Option<String> {
+    let mut found = None;
+    for prefix in ["\"%dp0%\\", "\"%~dp0\\"] {
+        let mut rest = text;
+        while let Some(at) = rest.find(prefix) {
+            let after = &rest[at + prefix.len()..];
+            let end = after.find('"')?;
+            found = Some(after[..end].to_string());
+            rest = &after[end..];
+        }
+        if found.is_some() {
+            break;
+        }
+    }
+    found.filter(|t| !t.is_empty())
 }
 
 #[cfg(unix)]
@@ -299,6 +444,33 @@ mod tests {
         assert_eq!(effective_path("/user", &env), "/mine");
         env.insert("PATH".to_string(), String::new());
         assert_eq!(effective_path("/user", &env), "/user");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_names_follow_pathext() {
+        assert_eq!(
+            windows_candidates("claude", ".EXE;.CMD"),
+            vec!["claude.exe".to_string(), "claude.cmd".to_string()]
+        );
+        assert_eq!(windows_candidates("claude.cmd", ".EXE"), vec!["claude.cmd"]);
+        assert_eq!(windows_candidates("npx", "").len(), 4);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn reads_the_target_of_an_npm_shim() {
+        let node = "@ECHO off\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js\" %*\r\n";
+        assert_eq!(
+            shim_target(node).as_deref(),
+            Some("node_modules\\@anthropic-ai\\claude-code\\cli.js")
+        );
+        let exe = "\"%~dp0\\node_modules\\pkg\\bin\\tool.exe\"   %*\r\n";
+        assert_eq!(
+            shim_target(exe).as_deref(),
+            Some("node_modules\\pkg\\bin\\tool.exe")
+        );
+        assert_eq!(shim_target("@echo off\r\nnode %*"), None);
     }
 
     #[cfg(unix)]
