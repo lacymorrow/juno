@@ -389,6 +389,10 @@ pub mod tree_search;
 mod windows;
 
 /// Create the appropriate engine for the current platform
+#[cfg_attr(
+    not(target_os = "macos"),
+    allow(unused_variables, clippy::needless_return)
+)]
 pub fn create_engine(
     use_background_apps: bool,
     activate_app: bool,
@@ -421,6 +425,10 @@ pub fn create_engine(
 }
 
 /// Create the appropriate engine for the current platform with auto-redirect permission handling
+#[cfg_attr(
+    not(target_os = "macos"),
+    allow(unused_variables, clippy::needless_return)
+)]
 pub fn create_engine_with_auto_redirect(
     use_background_apps: bool,
     activate_app: bool,
