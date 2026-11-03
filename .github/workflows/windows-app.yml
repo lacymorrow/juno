@@ -6,7 +6,7 @@ name: Windows app
 on:
   workflow_dispatch:
   push:
-    branches: [LAC-6321-windows-app]
+    branches: [LAC-6321-windows-app, LAC-6321-windows-computer-use]
 
 concurrency:
   group: windows-app-${{ github.ref }}
