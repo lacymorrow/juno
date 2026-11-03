@@ -234,7 +234,7 @@ impl AccessibilityTools {
         vec![
             json!({
                 "name": "accessibility_scan",
-                "description": "Scan the frontmost application for clickable UI elements using native macOS accessibility APIs. This provides element-level interaction as an alternative to coordinate-based clicking. Returns a list of elements with IDs that can be clicked.",
+                "description": "Scan the frontmost application for clickable UI elements using native macOS accessibility APIs. This provides element-level interaction as an alternative to coordinate-based clicking. Returns a list of elements with IDs that can be clicked.".replace("native macOS accessibility APIs", if cfg!(target_os = "windows") { "Windows UI Automation" } else { "native macOS accessibility APIs" }),
                 "input_schema": {
                     "type": "object",
                     "properties": {},

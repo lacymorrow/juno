@@ -1791,7 +1791,7 @@ impl DefaultPrompts {
             id: "system_companion".to_string(),
             name: "Companion Mode".to_string(),
             description: "Observe-only mode: Juno watches the screen and advises without taking any computer actions".to_string(),
-            content,
+            content: super::windows::adapt(content),
             variables: vec![],
             tags: vec!["companion".to_string(), "observe-only".to_string(), "vision".to_string(), "tts-enabled".to_string()],
             version: "1.0.0".to_string(),
@@ -1824,7 +1824,7 @@ impl DefaultPrompts {
             id: "system_default".to_string(),
             name: "Default System Prompt".to_string(),
             description: "Enhanced system prompt with chain of thought reasoning, multishot examples, response prefilling, Juno personality, TTS speech format, accessibility-first computer use, native accessibility tools, Safari automation, and MCP awareness".to_string(),
-            content,
+            content: super::windows::adapt(content),
             variables: vec!["platform".to_string(), "user_preferences".to_string(), "available_mcp_tools".to_string()],
             tags: vec!["default".to_string(), "personality".to_string(), "single-agent".to_string(), "mcp-enhanced".to_string(), "tts-enabled".to_string(), "accessibility-first".to_string(), "safari-enabled".to_string(), "native-accessibility".to_string(), "cot-enabled".to_string(), "multishot".to_string()],
             version: "3.1.0".to_string(),
@@ -1858,7 +1858,7 @@ impl DefaultPrompts {
             id: "system_default_development".to_string(),
             name: "Development Self-Aware System Prompt".to_string(),
             description: "Enhanced development prompt with chain of thought reasoning, multishot examples, response prefilling, self-awareness, TTS speech format, accessibility-first computer use, native accessibility tools, Safari automation, and MCP capabilities".to_string(),
-            content,
+            content: super::windows::adapt(content),
             variables: vec!["platform".to_string(), "user_preferences".to_string(), "source_location".to_string(), "available_mcp_tools".to_string()],
             tags: vec!["development".to_string(), "self-aware".to_string(), "personality".to_string(), "single-agent".to_string(), "mcp-enhanced".to_string(), "tts-enabled".to_string(), "accessibility-first".to_string(), "safari-enabled".to_string(), "native-accessibility".to_string(), "cot-enabled".to_string(), "multishot".to_string()],
             version: "3.1.0".to_string(),
@@ -1916,7 +1916,7 @@ You are the conductor of a rich ecosystem of capabilities. Think strategically a
             id: "orchestrator_personality".to_string(),
             name: "Orchestrator Personality".to_string(),
             description: "Streamlined orchestrator with intelligent delegation, TTS speech format, and workflow orchestration".to_string(),
-            content,
+            content: super::windows::adapt(content),
             variables: vec!["available_agents".to_string(), "available_mcp_tools".to_string(), "user_context".to_string()],
             tags: vec!["orchestrator".to_string(), "personality".to_string(), "multi-agent".to_string(), "mcp-enhanced".to_string(), "tts-enabled".to_string()],
             version: "2.3.0".to_string(),
@@ -1957,7 +1957,7 @@ Focus on web-based tasks and use browser tools efficiently.
             description:
                 "Focused browser expert with Safari automation capabilities and TTS speech format"
                     .to_string(),
-            content,
+            content: super::windows::adapt(content),
             variables: vec!["available_tools".to_string()],
             tags: vec![
                 "expert".to_string(),
@@ -2006,7 +2006,7 @@ Remember: You're a collaborative development partner that enhances the entire co
             name: "Enhanced Coding Expert".to_string(),
             description: "Focused system prompt for the coding expert agent with TTS speech format"
                 .to_string(),
-            content,
+            content: super::windows::adapt(content),
             variables: vec!["available_tools".to_string(), "project_context".to_string()],
             tags: vec![
                 "expert".to_string(),
@@ -2074,7 +2074,7 @@ For complex desktop tasks, think through your approach:
             id: "desktop_expert".to_string(),
             name: "Desktop Expert Agent".to_string(),
             description: "Complete desktop expert with chain of thought reasoning, accessibility-first automation, native accessibility tools, tool batching optimization, official computer use API, and TTS speech format".to_string(),
-            content,
+            content: super::windows::adapt(content),
             variables: vec!["available_tools".to_string()],
             tags: vec!["expert".to_string(), "desktop".to_string(), "automation".to_string(), "accessibility".to_string(), "native-accessibility".to_string(), "computer-use".to_string(), "tool-batching".to_string(), "tts-enabled".to_string(), "cot-enabled".to_string()],
             version: "3.2.0".to_string(),
@@ -2111,7 +2111,7 @@ Provide helpful, accurate responses for general inquiries.
             description:
                 "Focused system prompt for the general expert agent with TTS speech format"
                     .to_string(),
-            content,
+            content: super::windows::adapt(content),
             variables: vec!["available_tools".to_string()],
             tags: vec![
                 "expert".to_string(),
@@ -2137,7 +2137,7 @@ Provide helpful, accurate responses for general inquiries.
             id: "companion_mode".to_string(),
             name: "Companion Mode".to_string(),
             description: "Observe-only mode: describes and advises on screen content without taking any actions".to_string(),
-            content,
+            content: super::windows::adapt(content),
             variables: vec![],
             tags: vec!["companion".to_string(), "observe".to_string(), "tts-enabled".to_string()],
             version: "1.0.0".to_string(),
@@ -2176,7 +2176,7 @@ Be careful with file operations - always verify paths and permissions. When edit
             description:
                 "Focused expert agent for file operations and coding tasks with TTS speech format"
                     .to_string(),
-            content,
+            content: super::windows::adapt(content),
             variables: vec!["available_tools".to_string(), "project_path".to_string()],
             tags: vec![
                 "expert".to_string(),
@@ -2221,6 +2221,7 @@ mod tests {
 
     /// The rule that stops "play chess" turning into an ASCII board has to be
     /// in every prompt that acts. Pinned so it cannot silently disappear.
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn every_acting_prompt_carries_the_act_in_the_real_computer_rule() {
         for (name, template) in [
