@@ -444,7 +444,16 @@ pub(crate) async fn get_selected_text(
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        computer_use_ai_sdk::platforms::windows::ax::selected_text().map_err(|e| {
+            let error_msg = format!("Failed to get selected text: {}", e);
+            error!("{}", error_msg);
+            error_msg
+        })
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         Err("Get selected text is only supported on macOS currently.".to_string())
     }
