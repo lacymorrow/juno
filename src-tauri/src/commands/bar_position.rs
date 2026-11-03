@@ -157,12 +157,9 @@ pub async fn show_bar_when_ready(app_handle: AppHandle) -> Result<(), String> {
 /// Give the bar the keyboard because the person is about to type in it (the
 /// Pill's T button, a click in its input, the Island's input).
 ///
-/// On Windows the bar is non-activating at rest, and the click that asks for
-/// this landed in WebView2's own process, so Juno is not allowed to take the
-/// foreground the ordinary way. tao's `set_focus` then falls back to a
-/// synthetic Alt press, and that Alt puts the window in menu mode, which eats
-/// the next key the person types. `platform::windows` activates it without it.
-/// Elsewhere this is the window's ordinary `set_focus`.
+/// On Windows the bar is non-activating while collapsed, so this also makes it
+/// activatable (`platform::windows`). Elsewhere it is the window's ordinary
+/// `set_focus`, which is what the page called before.
 #[command]
 pub async fn focus_bar_for_typing(app_handle: AppHandle) -> Result<(), String> {
     let bar = app_handle
@@ -565,6 +562,9 @@ pub async fn set_bar_over_menu_bar(app_handle: AppHandle, over: bool) -> Result<
 #[command]
 pub async fn set_bar_chat_open(app_handle: AppHandle, open: bool) -> Result<(), String> {
     crate::bar_stacking::note_bar_chat_open(&app_handle, open);
+    // Windows: an open chat makes the bar an ordinary activatable window.
+    #[cfg(target_os = "windows")]
+    crate::platform::windows::bar_chat_open_changed(&app_handle, open);
     Ok(())
 }
 
