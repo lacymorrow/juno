@@ -534,7 +534,9 @@ fn parakeet_id_for_dir(dir: &str) -> Option<&'static str> {
 
 /// Absolute path of a Whisper model if it is on disk (bundled or downloaded).
 fn whisper_path_on_disk(app: &AppHandle, def: &ModelDef) -> Option<PathBuf> {
-    if def.bundled {
+    // The bundled model ships on macOS only (tauri.windows.conf.json leaves it
+    // out while voice is off there), so elsewhere there is nothing to look up.
+    if def.bundled && cfg!(target_os = "macos") {
         let resolved = resolve_model_path(app, &format!("models/{}", def.filename));
         let path = PathBuf::from(resolved);
         if path.is_file() {
