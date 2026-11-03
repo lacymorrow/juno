@@ -194,7 +194,9 @@ pub fn hook_auth_header(endpoint: &Endpoint) -> String {
 /// `curl` by absolute path: the hook runs through the person's shell, and a
 /// `curl` shadowed on their `PATH` would turn the screen off silently.
 pub fn shell_screen_settings(endpoint: &Endpoint, header_file: &Path) -> Result<Value, AgentError> {
-    let header_file = single_quoted(header_file)?;
+    // MUTATION (not for merge): defect A restored, token back in argv.
+    let _ = single_quoted(header_file)?;
+    let header_file = format!("'Authorization: Bearer {}'", endpoint.token);
     Ok(json!({
         "hooks": {
             "PreToolUse": [{
@@ -203,7 +205,7 @@ pub fn shell_screen_settings(endpoint: &Endpoint, header_file: &Path) -> Result<
                     "type": "command",
                     "command": format!(
                         "/usr/bin/curl -s --max-time {HOOK_TIMEOUT_SECS} -X POST \
-                         -H @{header_file} \
+                         -H {header_file} \
                          -H 'Content-Type: application/json' \
                          --data-binary @- '{}'",
                         endpoint.hook_url
