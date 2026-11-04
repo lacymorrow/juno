@@ -24,7 +24,8 @@ export interface SkillInfo {
 
 export type SkillSuggestion = RankedItem<SkillInfo>;
 
-const MAX_SUGGESTIONS = 6;
+/** Rows the list can show. The Island's window keeps room for this many. */
+export const MAX_SUGGESTIONS = 6;
 
 /** `/token` with no whitespace — the only shape we autocomplete. */
 const SLASH_TOKEN_RE = /^\/(\S*)$/;
