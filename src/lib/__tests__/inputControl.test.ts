@@ -61,10 +61,10 @@ describe("describeRequest", () => {
       describeRequest({
         request_id: "r1",
         tool: "computer",
-        reason: "drag the file onto the timeline",
+        reason: "This drag cannot be done without moving the real pointer.",
         target_app: "Final Cut Pro",
       }),
-    ).toBe("drag the file onto the timeline in Final Cut Pro");
+    ).toBe("Final Cut Pro: This drag cannot be done without moving the real pointer.");
   });
 
   it("drops the app when the backend did not name one", () => {
@@ -72,15 +72,15 @@ describe("describeRequest", () => {
       describeRequest({
         request_id: "r1",
         tool: "computer",
-        reason: "drag the file onto the timeline",
+        reason: "This drag cannot be done without moving the real pointer.",
       }),
-    ).toBe("drag the file onto the timeline");
+    ).toBe("This drag cannot be done without moving the real pointer.");
   });
 
-  it("still reads like a sentence when there is no reason", () => {
+  it("still says why when there is no reason", () => {
     expect(
       describeRequest({ request_id: "r1", tool: "computer", reason: "" }),
-    ).toBe("finish what you asked for");
+    ).toBe("This step can't be done in the background.");
   });
 });
 

@@ -1436,6 +1436,25 @@ fn element_param(input: &Value) -> Option<String> {
     }
 }
 
+/// Controls that can't hold text. Posted characters aimed at one go nowhere and
+/// would still report success. A document stays out of this list: VS Code's
+/// editor is one, it has no value to write, and posted characters do reach it.
+fn never_takes_typing(role: &str) -> bool {
+    matches!(
+        role,
+        "statictext"
+            | "button"
+            | "menubutton"
+            | "menuitem"
+            | "row"
+            | "tab"
+            | "link"
+            | "image"
+            | "checkbox"
+            | "radiobutton"
+    )
+}
+
 /// Act on a control from the latest `elements` listing: press it or open its
 /// menu (`type` is handled in [`execute_computer_tool`], which focuses the
 /// field and types through the verified typing path). Accessibility first:
@@ -1458,6 +1477,13 @@ async fn run_element_action(
         Ok(resolved) => resolved,
         Err(message) => return Ok(create_anthropic_error_response(message)),
     };
+    // MSAA's default action reports success on a disabled control and does
+    // nothing, so this is said before anything is pressed.
+    if cfg!(windows) && !resolved.info.enabled {
+        return Ok(create_anthropic_error_response(
+            "That control was disabled in your last listing, so nothing was pressed. List again if it may have changed.".to_string(),
+        ));
+    }
     let pin = resolved.pin;
     let (mut center_x, mut center_y) = resolved.screen_center();
     ax_targeting::set_working_window(pin);
@@ -2523,6 +2549,12 @@ pub async fn execute_computer_tool(
             Ok(resolved) => resolved,
             Err(message) => return Ok(create_anthropic_error_response(message)),
         };
+        if cfg!(windows) && never_takes_typing(&resolved.info.role) {
+            return Ok(create_anthropic_error_response(format!(
+                "That control is a {}, so nothing was typed. Choose a textfield or textarea from a fresh elements listing.",
+                resolved.info.role
+            )));
+        }
         if let Err(reason) = computer_use_ai_sdk::ax_elements::focus(&resolved.element) {
             tracing::info!(
                 "[AX] Focus before typing failed ({}); typing into the window",
@@ -4477,6 +4509,16 @@ pub async fn register_anthropic_computer_use_tools_with_version(
 
 #[cfg(test)]
 mod hold_key_duration_tests {
+    #[test]
+    fn a_document_can_be_typed_into_and_a_label_cannot() {
+        use super::never_takes_typing;
+        assert!(!never_takes_typing("textarea"));
+        assert!(!never_takes_typing("textfield"));
+        assert!(!never_takes_typing("combobox"));
+        assert!(never_takes_typing("statictext"));
+        assert!(never_takes_typing("button"));
+    }
+
     use super::*;
 
     #[test]

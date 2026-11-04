@@ -81,7 +81,7 @@ describe("InputControlNotices", () => {
     expect(screen.getByTestId("input-control-prompt")).toBeInTheDocument();
     expect(screen.getByText("Juno needs your mouse")).toBeInTheDocument();
     expect(
-      screen.getByText(/drag the clip onto the timeline in Final Cut Pro/),
+      screen.getByText(/Final Cut Pro: drag the clip onto the timeline/),
     ).toBeInTheDocument();
   });
 

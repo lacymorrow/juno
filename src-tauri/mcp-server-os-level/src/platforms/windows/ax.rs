@@ -20,8 +20,9 @@ use crate::ax_elements::{
 use crate::ax_text::{insertion_verified, AxTypeReport, AxTypeSkip, TargetInfo, TypeTarget};
 use crate::click_verify::ClickKind;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use uiautomation::patterns::{
     UIExpandCollapsePattern, UIInvokePattern, UILegacyIAccessiblePattern, UIPatternType,
@@ -47,6 +48,9 @@ const FINGERPRINT_MAX_NODES: usize = 1_500;
 const TREE_WAKE_DEADLINE: Duration = Duration::from_millis(2_000);
 /// How long a window has to answer the wake-up message.
 const WAKE_MESSAGE_TIMEOUT_MS: u32 = 200;
+/// Chromium windows whose tree has already had its wait.
+static WOKEN_WINDOWS: LazyLock<Mutex<HashSet<isize>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
 /// UI Automation's own object id for WM_GETOBJECT.
 const UIA_ROOT_OBJECT_ID: i32 = -25;
 
@@ -123,6 +127,16 @@ fn wake_chromium_tree(uia: &Uia, window: HWND) {
             )
         };
     }
+    // Only the first read of a window waits. Chromium keeps the tree up after
+    // that, and a page with an empty document would otherwise cost the whole
+    // deadline on every read.
+    let first_touch = WOKEN_WINDOWS
+        .lock()
+        .map(|mut woken| woken.insert(window.0 as isize))
+        .unwrap_or(true);
+    if !first_touch {
+        return;
+    }
     let Ok(document_type) = uia.automation.create_property_condition(
         UIProperty::ControlType,
         Variant::from(ControlType::Document as i32),
@@ -130,7 +144,9 @@ fn wake_chromium_tree(uia: &Uia, window: HWND) {
     ) else {
         return;
     };
-    let Ok(root) = uia.automation.element_from_handle(host.into()) else {
+    // The whole window, not `host`: with several tabs open, the first renderer
+    // found can belong to a hidden tab whose document never fills in.
+    let Ok(root) = uia.automation.element_from_handle(window.into()) else {
         return;
     };
     let Ok(walker) = uia.automation.get_control_view_walker() else {
@@ -431,7 +447,10 @@ impl WindowsUIElement {
                 | ControlType::TabItem,
             ) => {
                 if let Ok(item) = self.element.get_pattern::<UISelectionItemPattern>() {
+                    let front = foreground_window();
                     if item.select().is_ok() {
+                        // Selecting a row brought VS Code to the front.
+                        hand_foreground_back(front);
                         return Ok("UIA SelectionItem");
                     }
                 }

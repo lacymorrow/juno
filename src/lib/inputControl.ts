@@ -72,12 +72,12 @@ export function shouldShowMouseControlOffer(input: {
   );
 }
 
-/** One line naming what Juno is about to do, with the app it will do it in. */
+/** Why Juno needs the pointer, with the app it needs it in. The backend sends a whole sentence. */
 export function describeRequest(request: InputControlRequest): string {
   const reason = request.reason?.trim();
   const app = request.target_app?.trim();
-  const what = reason && reason.length > 0 ? reason : "finish what you asked for";
-  return app ? `${what} in ${app}` : what;
+  const why = reason && reason.length > 0 ? reason : "This step can't be done in the background.";
+  return app ? `${app}: ${why}` : why;
 }
 
 /** The floating bar's label while Juno holds the physical cursor. */
