@@ -21,8 +21,12 @@ The TypeScript frontend renders backend state and sends user interactions to Rus
 - Make HTTP requests to AI providers
 - Store persistent data in `localStorage` (use Tauri Store via backend)
 
+Most of that list is enforced by `bun run lint`, which runs as the first step of CI's Frontend job and fails on `localStorage`, `sessionStorage`, `WebSocket`, `AudioContext`, `navigator.mediaDevices` / `getUserMedia`, an `@tauri-apps/plugin-websocket` import, or a `data-tauri-drag-region` attribute. Run it before you push; it takes ~9s. Rules and reasoning: `eslint.config.js`. **Do not add new suppressions** — a boundary breach means the logic belongs in Rust. (Shortcuts and HTTP-to-providers are not lintable patterns, so those two still rely on review.)
+
 ### Third-party library rule
 Web-oriented libraries (e.g., ElevenLabs React SDK) are only used for their **rendering/layout** components. Any component that accesses browser APIs (`getUserMedia`, `AudioContext`, `WebSocket`, `navigator.mediaDevices`) is off-limits. The native Rust backend handles all I/O.
+
+This is the rule that was actually being broken: the installed-and-forgotten `ui/live-waveform.tsx` carried a full `getUserMedia` + `AudioContext` pipeline from 2026-02-08 to 2026-10-15 with no importers, until the lint gate found it (LAC-3998). When you install a web-oriented shadcn component, delete the parts that reach for browser I/O **at install time**, not later.
 
 ### The pattern
 ```

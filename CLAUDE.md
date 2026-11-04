@@ -24,6 +24,7 @@ scripts/juno-build.sh promote    # Ship the newest prerelease to users
 gh pr checks --watch             # fmt + clippy + cargo test run on the PR
 
 # Frontend (cheap, fine locally)
+bun run lint                     # ESLint, ~9s (react-hooks + the boundary below)
 bun run build                    # Frontend build (tsc + vite)
 bun run test                     # Vitest
 
@@ -79,6 +80,14 @@ The frontend may ONLY:
 - Read from Tauri Store for cached settings display
 - Render UI based on data received from the backend
 - Manage local UI state (modals open/closed, scroll position, animations)
+
+### Part of this is now a lint gate, not just a convention
+
+`bun run lint` fails the build on `localStorage`, `sessionStorage`, `WebSocket`, `AudioContext`, `navigator.mediaDevices` / `getUserMedia`, an `@tauri-apps/plugin-websocket` import, or a `data-tauri-drag-region` attribute, and it runs as the first step of CI's Frontend job. Each message names the Rust that owns the thing. It exists because the prose above did not hold on its own: when the rules were first switched on they found a dead vendored component with a whole `getUserMedia` microphone pipeline in it, nine `localStorage` writes, and two banned drag regions (LAC-3998).
+
+The remaining violations carry an inline `eslint-disable-next-line` naming the issue that will fix them (LAC-4501 localStorage, LAC-4502 drag regions). **Do not add new suppressions** — a boundary breach means the logic belongs in Rust.
+
+The same gate enforces the `eslint-plugin-react-hooks` rules that report zero findings today. It is a **ratchet**: eight further rules are deferred with their finding counts listed in `eslint.config.js`, and each is enabled by the PR that fixes its findings (LAC-4500). Never enable a rule and suppress its findings, and never lower the gate to land a branch — being green on `main` is the whole point, because it makes the first red check meaningful.
 
 ---
 

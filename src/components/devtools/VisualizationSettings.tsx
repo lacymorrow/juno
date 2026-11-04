@@ -21,16 +21,20 @@ import { toast } from "sonner";
 import { LOCAL_STORAGE_KEYS } from "@/lib/constants.generated";
 const VisualizationSettings = () => {
   const [showKeyPressOverlay, setShowKeyPressOverlay] = useState(
+    // eslint-disable-next-line no-restricted-globals -- Boundary debt, LAC-4501: move to Tauri Store.
     localStorage.getItem(LOCAL_STORAGE_KEYS.SHOW_KEY_PRESS_OVERLAY) === "true"
   );
   const [showCommandOverlay, setShowCommandOverlay] = useState(
+    // eslint-disable-next-line no-restricted-globals -- Boundary debt, LAC-4501: move to Tauri Store.
     localStorage.getItem(LOCAL_STORAGE_KEYS.SHOW_COMMAND_OVERLAY) === "true"
   );
   const [showClickVisualization, setShowClickVisualization] = useState(
+    // eslint-disable-next-line no-restricted-globals -- Boundary debt, LAC-4501: move to Tauri Store.
     localStorage.getItem(LOCAL_STORAGE_KEYS.SHOW_CLICK_VISUALIZATION) !== "false" // Default to true
   );
   const [showDesktopCursorVisualization, setShowDesktopCursorVisualization] =
     useState(
+      // eslint-disable-next-line no-restricted-globals -- Boundary debt, LAC-4501: move to Tauri Store.
       localStorage.getItem(LOCAL_STORAGE_KEYS.SHOW_DESKTOP_CURSOR_VISUALIZATION) !== "false" // Default to true
     );
 
@@ -82,6 +86,7 @@ const VisualizationSettings = () => {
     setting: (typeof visualizationSettings)[0],
     enabled: boolean
   ) => {
+    // eslint-disable-next-line no-restricted-globals -- Boundary debt, LAC-4501: move to Tauri Store.
     localStorage.setItem(setting.storageKey, enabled.toString());
     setting.setValue(enabled);
     toast.success(`${setting.title} ${enabled ? "enabled" : "disabled"}`);
