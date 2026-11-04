@@ -13,12 +13,14 @@ type KeyPressInfo = {
 const KeyPressOverlay = () => {
   const [keyPresses, setKeyPresses] = useState<KeyPressInfo[]>([]);
   const [isEnabled, setIsEnabled] = useState(
+    // eslint-disable-next-line no-restricted-globals -- Boundary debt, LAC-4501: move to Tauri Store.
     localStorage.getItem(LOCAL_STORAGE_KEYS.SHOW_KEY_PRESS_OVERLAY) === 'true'
   );
 
   // Check localStorage periodically for setting changes
   useEffect(() => {
     const checkSettings = () => {
+      // eslint-disable-next-line no-restricted-globals -- Boundary debt, LAC-4501: Tauri Store + an event removes this poll.
       const enabled = localStorage.getItem(LOCAL_STORAGE_KEYS.SHOW_KEY_PRESS_OVERLAY) === 'true';
       setIsEnabled(enabled);
     };
