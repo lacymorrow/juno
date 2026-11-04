@@ -50,7 +50,8 @@ const IDLE_BLOCK = {
 };
 
 /** IslandBar reports from a layout effect, before the frame is painted. */
-let lastFull: { width: number; height: number } | null = null;
+/** The full window the hook last handed the page. */
+const seen: { full: { width: number; height: number } | null } = { full: null };
 
 function Harness({ hit, rest = islandRestFrame(0), settled = true }: { hit: Rect; rest?: Size; settled?: boolean }) {
   const frame = useIslandFrame();
@@ -58,7 +59,9 @@ function Harness({ hit, rest = islandRestFrame(0), settled = true }: { hit: Rect
   useLayoutEffect(() => {
     report(IDLE_BLOCK, hit, rest, settled);
   }, [report, hit, rest, settled]);
-  lastFull = frame.full.size;
+  useLayoutEffect(() => {
+    seen.full = frame.full.size;
+  });
   return null;
 }
 
@@ -233,7 +236,7 @@ describe("useIslandFrame keeps the window to what the moment needs", () => {
     });
     expect(frameCalls().at(-1)?.width).toBe(rest.width);
     // The chat face is sized from this, so it must still be the largest window.
-    expect(lastFull).toMatchObject({ width: full.width, height: full.height });
+    expect(seen.full).toMatchObject({ width: full.width, height: full.height });
     await settle(view, <Harness hit={capsule} rest={card} />);
     expect(frameCalls().at(-1)?.width).toBe(card.width);
   });
