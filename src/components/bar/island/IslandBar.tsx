@@ -42,7 +42,7 @@ import { InputControlNotices } from "@/components/input-control/InputControlNoti
 import { drivingLabel, type InputControlStatePayload } from "@/lib/inputControl";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 import { cancelVoiceTurn, sendVoiceTurn } from "@/lib/voiceTurn";
-import { contentPlacement, contentRect, roomForContent } from "@/lib/steadyFrame";
+import { contentPlacement, contentRect, roomForContent, type Size } from "@/lib/steadyFrame";
 import type { ChatMessage } from "@/types/chat";
 import { IslandDot, IslandShell, IslandWords, ISLAND_EASE, ISLAND_GLOW } from "./IslandShell";
 import { LingerRing } from "./LingerRing";
@@ -75,8 +75,12 @@ import {
   chatSizeInWindow,
   escapeIsRusts,
   islandEscapeStep,
+  islandFrameFor,
   rosterShown,
   rosterWidthFor,
+  SUGGESTION_GAP,
+  SUGGESTION_LIST_PAD,
+  SUGGESTION_ROW_H,
   ISLAND_WIDTH,
   LINGER_MS,
   SHADOW_PAD,
@@ -124,10 +128,6 @@ const COMPONENT_ID = UI.ELEMENT_IDS_DYNAMIC_BAR;
 const HEADER_H = 36;
 /** Room under the answer body, above the composer's hairline. */
 const BODY_PAD_BOTTOM = 12;
-/** One row of the skill suggestions, and the list's own padding. */
-const SUGGESTION_ROW_H = 29;
-const SUGGESTION_LIST_PAD = 20;
-const SUGGESTION_GAP = 8;
 
 interface BarStateData {
   barState: string;
@@ -829,7 +829,7 @@ export function IslandBar() {
   const shape = shapeFor(face, {
     hovered: hoverShown,
     hoverButtons,
-    chat: chatSizeInWindow(layout.size, roomForContent(layout)),
+    chat: chatSizeInWindow(frame.full.size, roomForContent(frame.full)),
     compact,
     mini: miniVoice ? { revealed: hovered || focusWithin, buttons: (recording ? 1 : 0) + (stopKind ? 1 : 0) } : null,
     composerHeight: composerH,
@@ -864,10 +864,26 @@ export function IslandBar() {
         height: ROSTER_HEIGHT,
       }
     : null;
+  // The window this moment needs, and no more (LAC-4832).
+  const windowFrame = islandFrameFor({
+    face,
+    shape,
+    small: compact || !!miniVoice,
+    agents: agentSessions.length,
+    suggestions: suggestionsH > 0,
+  });
+  const [settledAt, setSettledAt] = useState<Size | null>(null);
+  const settled = settledAt?.width === shape.width && settledAt?.height === shape.height;
   const { report } = frame;
   useLayoutEffect(() => {
-    report({ width: block.width, height: block.height }, rosterHit ? [hit, rosterHit] : [hit]);
-  }, [report, block.width, block.height, hit.x, hit.y, hit.width, hit.height, rosterHit?.x, rosterHit?.y, rosterHit?.width]); // eslint-disable-line react-hooks/exhaustive-deps
+    report({ width: block.width, height: block.height }, rosterHit ? [hit, rosterHit] : [hit], windowFrame, settled);
+  }, [report, block.width, block.height, hit.x, hit.y, hit.width, hit.height, rosterHit?.x, rosterHit?.y, rosterHit?.width, windowFrame.width, windowFrame.height, settled]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The window grows after this paint (`useIslandFrame`), so the render that
+  // first draws a bigger face still has the smaller window around it. Drawn
+  // nothing beats drawn clipped, and this clears itself the moment the frame
+  // has grown. Only growing can clip: the window shrinks after the shape has,
+  // and a drag window is the block.
+  const clipped = block.width > layout.size.width || block.height > layout.size.height;
   const place = contentPlacement(layout);
   // Tooltips open toward the side the island grows: the frame always has room there.
   const tooltipSide = growUp ? "top" : "bottom";
@@ -1469,8 +1485,10 @@ export function IslandBar() {
             transform: place.translateX ? "translateX(-50%)" : undefined,
             padding: SHADOW_PAD,
             gap: suggestionsH ? SUGGESTION_GAP : 0,
-            // A drop into a well that draws differently swaps behind this.
-            opacity: frame.hidden ? 0 : 1,
+            // A drop into a well that draws differently swaps behind this, and
+            // so does the one render between a face needing the full window
+            // and the window being it (LAC-4832).
+            opacity: frame.hidden || clipped ? 0 : 1,
           }}
         >
           {/* The shape and its roster bubble move as one: the bubble rides the
@@ -1483,6 +1501,7 @@ export function IslandBar() {
               layerStyle={layerStyle}
               reducedMotion={reducedMotion}
               flame={flame}
+              onSettled={setSettledAt}
               onClick={idle ? onShapeClick : undefined}
             >
               {composerNode}

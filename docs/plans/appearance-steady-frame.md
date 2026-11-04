@@ -72,11 +72,24 @@ These come from the #728 crash and the drag audit (`docs/audits/bar-drag-audit-2
 
 A drop into a well on the other side, or a display hop, cannot move the frame and the drawing in the same display frame either. That swap is hidden rather than shown. It happens only on a drop or a hop, never on a state change. The alternative was to keep the webview fixed and move it natively inside the window in the same AppKit transaction as the frame change, which would be seamless. It means repositioning WKWebView inside Tauri's content view, which wry may fight on resize. That is a possible follow-up, not a prerequisite.
 
+### The one exception: a window the size of the display (LAC-4832)
+
+"Never resize the window" is about state changes inside a turn, and it stands. It assumed a window a few hundred points across, which is true of the Pill and the Notch. The Island breaks that assumption: its chat face is a share of the display, so `islandMaxFor` makes its window 1364 x 788 on a 1440 x 900 display, 83% of its area.
+
+That is a bug no amount of click-through can reach. **`ignoresMouseEvents` routes mouse events; it does not take the window out of macOS's window list.** A screen-share picker hit-tests the window list, so an invisible, click-through, display-sized Juno rectangle is still offered instead of the app behind it, and no app behind it can be picked. Measured with a probe window (transparent, always on top, `ignoresMouseEvents = true`): `CGWindowList` and `SCShareableContent` both report it at full size. `sharingType = .none` does **not** help: the window stays in both lists, that flag only blanks the content inside a capture. The frame is the only lever there is.
+
+So the Island, and only the Island, sizes its window to the moment (`islandFrameFor`), because any window bigger than what is drawn breaks other apps' pickers. Lacy, 2026-11-04, on a version that fixed this only at rest: "this is unacceptable, it breaks other apps." There are four sizes on a 1440 x 900 with no roster: small, 296 x 100, for the capsule, hover, the mini voice capsule and the small bar; a card, 408 x 224, for the composer and a short answer; a tall card, 408 x 464, for a long answer; and the chat face plus its shadow. The full window (`islandMaxFor`) is no longer ever on screen in a state: it is the budget those are placed inside and what the chat face's share is read from, and a drop's settle passes through it. Changing size uses this document's own hidden swap (`swapSteadyLayout`). Growing happens at once; shrinking waits for the shape to arrive (`IslandShell` measures it), or the window's edge would cut the shape.
+
+The cost, stated plainly: two hidden frames (~70ms) at each size change. A spoken turn crosses twice: small to card for the answer, and back. Listening, transcribing and working cross nothing, because they share the small window, which is why the small window is wide enough for the small bar rather than exactly the capsule. Launch and the tray's re-centre place the right size directly. A drop or a display hop blinks twice, because the shared settle grows the window back to full before this shrinks it again. Both are deliberate gestures nobody makes often, so the settle every look shares was left alone.
+
+A look whose window is a modest fixed size needs none of this. Do not copy it into one.
+
 ### Alternatives considered and cut
 
 - **A full-screen overlay window per display** (pill offset is just its screen position, no swap ever). Cut: the OS window drag would drag the whole overlay, so cross-display drag would need a rewrite of the shared drag, and a display-sized transparent WKWebView costs backing-store memory for nothing.
 - **Better anchoring of per-state resizes.** Cut: this is what the last five PRs did, and it cannot cross the AppKit/WebKit seam.
-- **Hiding the resize behind an alpha dip on every state change.** Cut: it turns a jump into a blink, many times per turn.
+- **Hiding the resize behind an alpha dip on every state change.** Cut: it turns a jump into a blink, many times per turn. (At two crossings a turn it is the right answer; see the exception above.)
+- **Moving the Island's chat face into its own window**, so the bar window never scales with the display and never resizes. Cut: the Island's whole conceit is one continuous shape, and the capsule growing into the chat face is the animation it exists for. Two windows cannot share a shadow or a morph, and they tear against each other on a drag. Sizing one window to the moment keeps the shape and pays ~70ms at each size change instead.
 
 ## What changed for the Pill
 

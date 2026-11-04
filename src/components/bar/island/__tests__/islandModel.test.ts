@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { UI } from "@/lib/constants.generated";
+import { MAX_SUGGESTIONS } from "@/hooks/useSkillAutocomplete";
 import type { ChatMessage } from "@/types/chat";
 import {
   COMPACT_COMPOSE_WIDTH,
@@ -39,7 +40,16 @@ import {
   hoverShapeFor,
   islandEscapeStep,
   escapeIsRusts,
+  HOVER_BUTTONS_MAX,
   islandMaxFor,
+  SUGGESTION_GAP,
+  SUGGESTION_LIST_PAD,
+  SUGGESTION_ROOM,
+  SUGGESTION_ROWS,
+  SUGGESTION_ROW_H,
+  islandRestFrame,
+  islandFrameFor,
+  ROSTER_GAP,
   rosterShown,
   rosterWidthFor,
 } from "../islandModel";
@@ -285,6 +295,132 @@ describe("hover, dot and roster", () => {
     expect(rosterShown(2)).toBe(true);
     expect(rosterWidthFor(3)).toBeGreaterThan(rosterWidthFor(2));
     expect(rosterWidthFor(20)).toBeLessThanOrEqual(ROSTER_ROOM);
+  });
+});
+
+/**
+ * LAC-4832: the window the Island rests in. macOS lists a window by its frame,
+ * so the resting frame is what a screen-share picker sees nearly all the time.
+ */
+const displaysForFrame = { position: { x: 0, y: 0 }, size: { width: 1440, height: 900 }, scaleFactor: 1 };
+
+describe("islandRestFrame", () => {
+  const displays = [
+    { position: { x: 0, y: 0 }, size: { width: 1440, height: 900 }, scaleFactor: 1 },
+    { position: { x: 0, y: 0 }, size: { width: 3840, height: 2160 }, scaleFactor: 2 },
+    { position: { x: 0, y: 0 }, size: { width: 1280, height: 800 }, scaleFactor: 1 },
+  ];
+
+  it("is a small fraction of every display the full window would fill", () => {
+    const rest = islandRestFrame(0);
+    for (const display of displays) {
+      const full = islandMaxFor(display);
+      expect(rest.width).toBeLessThan(full.width);
+      expect(rest.height).toBeLessThan(full.height);
+      const area = display.size.width * display.size.height;
+      expect((rest.width * rest.height) / area).toBeLessThan(0.03);
+    }
+  });
+
+  it("holds the hover capsule with every control, so hover is never a window change", () => {
+    const rest = islandRestFrame(0);
+    const widest = hoverShapeFor(HOVER_BUTTONS_MAX);
+    expect(rest.width).toBeGreaterThanOrEqual(widest.width + 2 * SHADOW_PAD);
+    expect(rest.height).toBeGreaterThanOrEqual(widest.height + 2 * SHADOW_PAD);
+    // And the capsule itself, which is wider than the hover shape in neither
+    // direction today but must not be able to outgrow the frame unnoticed.
+    expect(rest.width).toBeGreaterThanOrEqual(IDLE_SHAPE.width + 2 * SHADOW_PAD);
+    expect(rest.height).toBeGreaterThanOrEqual(IDLE_SHAPE.height + 2 * SHADOW_PAD);
+  });
+
+  it("keeps the roster bubble's room on both sides once a roster shows", () => {
+    expect(islandRestFrame(1)).toEqual(islandRestFrame(0));
+    const two = islandRestFrame(2);
+    expect(two.width).toBe(islandRestFrame(0).width + 2 * (ROSTER_GAP + rosterWidthFor(2)));
+    expect(two.height).toBe(islandRestFrame(0).height);
+    expect(islandRestFrame(9).width).toBeGreaterThan(two.width);
+  });
+
+  it("leaves room for the tallest face with a full suggestion list", () => {
+    // The invariant the clipped-render guard depends on: if the tallest thing
+    // the island can draw does not fit its own window, that guard hides the
+    // island instead of clipping it by a pixel. SUGGESTION_ROOM was 200
+    // against a list needing 202, which is exactly that.
+    // The window's budget must cover the list's own cap.
+    expect(SUGGESTION_ROWS).toBeGreaterThanOrEqual(MAX_SUGGESTIONS);
+    const fullList = SUGGESTION_GAP + MAX_SUGGESTIONS * SUGGESTION_ROW_H + SUGGESTION_LIST_PAD;
+    expect(SUGGESTION_ROOM).toBeGreaterThanOrEqual(fullList);
+    for (const display of displays) {
+      const window = islandMaxFor(display);
+      const chat = chatSizeInWindow(window);
+      const tallest = Math.max(chat.height, SHAPE_MAX_HEIGHT) + 2 * SHADOW_PAD + fullList;
+      expect(tallest).toBeLessThanOrEqual(window.height);
+    }
+  });
+
+  it("still fits inside the full window with the widest roster on a small display", () => {
+    const full = islandMaxFor(displays[2]);
+    const rest = islandRestFrame(99);
+    expect(rest.width).toBeLessThanOrEqual(full.width);
+    expect(rest.height).toBeLessThanOrEqual(full.height);
+  });
+});
+
+describe("islandFrameFor: the window is only what the moment needs", () => {
+  const base = { small: false, agents: 0, suggestions: false };
+  const fits = (shape: { width: number; height: number }, frame: { width: number; height: number }) => {
+    expect(frame.width).toBeGreaterThanOrEqual(shape.width + 2 * SHADOW_PAD);
+    expect(frame.height).toBeGreaterThanOrEqual(shape.height + 2 * SHADOW_PAD);
+  };
+  const small = islandRestFrame(0);
+
+  it("holds a whole spoken turn up to the answer in one window", () => {
+    const moments = [
+      { face: "idle" as const, shape: IDLE_SHAPE, small: false },
+      { face: "idle" as const, shape: hoverShapeFor(HOVER_BUTTONS_MAX), small: false },
+      { face: "compose" as const, shape: miniShapeFor(true, 2), small: true },
+      { face: "compose" as const, shape: { width: COMPACT_COMPOSE_WIDTH, height: 36 }, small: true },
+    ];
+    for (const m of moments) {
+      const frame = islandFrameFor({ ...base, ...m });
+      expect(frame).toEqual(small);
+      fits(m.shape, frame);
+    }
+  });
+
+  it("the composer and a short answer share a card a fraction of the display", () => {
+    const composer = islandFrameFor({ ...base, face: "compose", shape: { width: ISLAND_WIDTH, height: 36 } });
+    const short = islandFrameFor({ ...base, face: "answer", shape: { width: ISLAND_WIDTH, height: 120 } });
+    expect(short).toEqual(composer);
+    fits({ width: ISLAND_WIDTH, height: composerHeightFor(COMPOSER_MAX_TEXT_PX, 3) }, composer);
+    expect((composer.width * composer.height) / (1440 * 900)).toBeLessThan(0.08);
+  });
+
+  it("a long answer gets the tall card, never more", () => {
+    const tall = islandFrameFor({ ...base, face: "component", shape: { width: ISLAND_WIDTH, height: 300 } });
+    fits({ width: ISLAND_WIDTH, height: SHAPE_MAX_HEIGHT }, tall);
+    expect((tall.width * tall.height) / (1440 * 900)).toBeLessThan(0.16);
+  });
+
+  it("the chat face has no room beside it that nothing is using", () => {
+    const shape = { width: 864, height: 540 };
+    const chat = islandFrameFor({ ...base, face: "chat", shape });
+    fits(shape, chat);
+    expect(chat.width).toBe(shape.width + 2 * SHADOW_PAD);
+    expect(chat.width).toBeLessThan(islandMaxFor(displaysForFrame).width);
+    const withRoster = islandFrameFor({ ...base, face: "chat", shape, agents: 3 });
+    expect(withRoster.width).toBe(chat.width + 2 * (ROSTER_GAP + rosterWidthFor(3)));
+  });
+
+  it("makes room for the suggestions only while they are open", () => {
+    const shut = islandFrameFor({ ...base, face: "compose", shape: { width: ISLAND_WIDTH, height: 36 } });
+    const open = islandFrameFor({ ...base, face: "compose", shape: { width: ISLAND_WIDTH, height: 36 }, suggestions: true });
+    expect(open.height).toBe(shut.height + SUGGESTION_ROOM);
+  });
+
+  it("still holds a shape that outgrows the small window", () => {
+    const shape = { width: 400, height: 90 };
+    fits(shape, islandFrameFor({ ...base, face: "compose", shape, small: true }));
   });
 });
 
