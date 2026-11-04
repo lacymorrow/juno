@@ -39,7 +39,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 import { useIslandFrame } from "../useIslandFrame";
-import { IDLE_SHAPE, SHADOW_PAD, islandMaxFor, islandRestFrame } from "../islandModel";
+import { IDLE_SHAPE, ISLAND_WIDTH, SHADOW_PAD, islandFrameFor, islandMaxFor, islandRestFrame } from "../islandModel";
 import { resetSteady, steadySwapsSettled, type Size } from "@/lib/steadyFrame";
 import { resetBarSnapState } from "@/hooks/useBarSnapWells";
 
@@ -50,12 +50,15 @@ const IDLE_BLOCK = {
 };
 
 /** IslandBar reports from a layout effect, before the frame is painted. */
-function Harness({ hit, rest = null }: { hit: Rect; rest?: Size | null }) {
+let lastFull: { width: number; height: number } | null = null;
+
+function Harness({ hit, rest = islandRestFrame(0), settled = true }: { hit: Rect; rest?: Size; settled?: boolean }) {
   const frame = useIslandFrame();
   const { report } = frame;
   useLayoutEffect(() => {
-    report(IDLE_BLOCK, hit, rest);
-  }, [report, hit, rest]);
+    report(IDLE_BLOCK, hit, rest, settled);
+  }, [report, hit, rest, settled]);
+  lastFull = frame.full.size;
   return null;
 }
 
@@ -127,10 +130,17 @@ describe("useIslandFrame reports what the island draws", () => {
  * and no app behind it can be picked. The window must therefore be the capsule
  * while the capsule is all that is drawn.
  */
-describe("useIslandFrame rests in a window the size of the capsule", () => {
+describe("useIslandFrame keeps the window to what the moment needs", () => {
   const capsule: Rect = { x: 100, y: 24, width: IDLE_SHAPE.width, height: IDLE_SHAPE.height };
   const rest = islandRestFrame(0);
   const full = islandMaxFor(A_MONITOR);
+  const card = islandFrameFor({
+    face: "compose",
+    shape: { width: ISLAND_WIDTH, height: 36 },
+    small: false,
+    agents: 0,
+    suggestions: false,
+  });
 
   it("places the resting frame at launch, never the display-sized one", async () => {
     await act(async () => {
@@ -153,7 +163,7 @@ describe("useIslandFrame rests in a window the size of the capsule", () => {
     const f = frameCalls().at(-1);
     expect(f).toBeDefined();
     const share = ((f?.width ?? 0) * (f?.height ?? 0)) / (A_MONITOR.size.width * A_MONITOR.size.height);
-    expect(share).toBeLessThan(0.02);
+    expect(share).toBeLessThan(0.03);
     // And the regression it guards: the window it would otherwise have been.
     const was = (full.width * full.height) / (A_MONITOR.size.width * A_MONITOR.size.height);
     expect(was).toBeGreaterThan(0.5);
@@ -182,22 +192,55 @@ describe("useIslandFrame rests in a window the size of the capsule", () => {
     });
   };
 
-  it("grows to the full window when a face needs it, and shrinks back after", async () => {
+  it("grows for a face that needs it and shrinks back after, never to the display-sized window", async () => {
     const view = await act(async () => render(<Harness hit={capsule} rest={rest} />));
     expect(frameCalls().at(-1)?.width).toBe(rest.width);
 
-    // The island leaves rest: the composer, listening, an answer, the chat face.
-    await settle(view, <Harness hit={capsule} rest={null} />);
-    expect(frameCalls().at(-1)).toMatchObject({ width: full.width, height: full.height });
+    await settle(view, <Harness hit={capsule} rest={card} />);
+    expect(frameCalls().at(-1)).toMatchObject({ width: card.width, height: card.height });
 
-    // And back to rest when the turn is over.
     await settle(view, <Harness hit={capsule} rest={rest} />);
     expect(frameCalls().at(-1)).toMatchObject({ width: rest.width, height: rest.height });
+
+    // The bug: at no point in that turn was the big window on screen.
+    for (const f of frameCalls()) expect(f.width).toBeLessThan(full.width);
+  });
+
+  it("grows at once, but shrinks only after the shape has", async () => {
+    const view = await act(async () => render(<Harness hit={capsule} rest={rest} />));
+    // Growing does not wait: the shape is about to need the room.
+    await settle(view, <Harness hit={capsule} rest={card} settled={false} />);
+    expect(frameCalls().at(-1)?.width).toBe(card.width);
+
+    // Shrinking waits: the window's edge would cut a shape still on its way down.
+    await settle(view, <Harness hit={capsule} rest={rest} settled={false} />);
+    expect(frameCalls().at(-1)?.width).toBe(card.width);
+
+    await settle(view, <Harness hit={capsule} rest={rest} settled />);
+    expect(frameCalls().at(-1)?.width).toBe(rest.width);
+  });
+
+  it("reversing before a swap lands does not take a small window for the full one", async () => {
+    const view = await act(async () => render(<Harness hit={capsule} rest={rest} />));
+    await act(async () => {
+      view.rerender(<Harness hit={capsule} rest={card} />);
+    });
+    await act(async () => {
+      view.rerender(<Harness hit={capsule} rest={rest} />);
+    });
+    await act(async () => {
+      await steadySwapsSettled("floating-bar");
+    });
+    expect(frameCalls().at(-1)?.width).toBe(rest.width);
+    // The chat face is sized from this, so it must still be the largest window.
+    expect(lastFull).toMatchObject({ width: full.width, height: full.height });
+    await settle(view, <Harness hit={capsule} rest={card} />);
+    expect(frameCalls().at(-1)?.width).toBe(card.width);
   });
 
   it("keeps reporting hit regions across a frame change", async () => {
     const view = await act(async () => render(<Harness hit={capsule} rest={rest} />));
-    await settle(view, <Harness hit={capsule} rest={null} />);
+    await settle(view, <Harness hit={capsule} rest={card} />);
     // Whatever the frame, Rust still knows what is drawn: the transparent
     // acreage of the grown window must not start swallowing clicks.
     expect(regionCalls().at(-1)).toEqual([capsule]);

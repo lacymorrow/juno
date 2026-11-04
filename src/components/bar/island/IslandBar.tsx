@@ -42,7 +42,7 @@ import { InputControlNotices } from "@/components/input-control/InputControlNoti
 import { drivingLabel, type InputControlStatePayload } from "@/lib/inputControl";
 import { safeCleanupEventListener } from "@/lib/safeEventCleanup";
 import { cancelVoiceTurn, sendVoiceTurn } from "@/lib/voiceTurn";
-import { contentPlacement, contentRect, roomForContent } from "@/lib/steadyFrame";
+import { contentPlacement, contentRect, roomForContent, type Size } from "@/lib/steadyFrame";
 import type { ChatMessage } from "@/types/chat";
 import { IslandDot, IslandShell, IslandWords, ISLAND_EASE, ISLAND_GLOW } from "./IslandShell";
 import { LingerRing } from "./LingerRing";
@@ -75,7 +75,7 @@ import {
   chatSizeInWindow,
   escapeIsRusts,
   islandEscapeStep,
-  islandRestFrame,
+  islandFrameFor,
   rosterShown,
   rosterWidthFor,
   SUGGESTION_GAP,
@@ -829,7 +829,7 @@ export function IslandBar() {
   const shape = shapeFor(face, {
     hovered: hoverShown,
     hoverButtons,
-    chat: chatSizeInWindow(layout.size, roomForContent(layout)),
+    chat: chatSizeInWindow(frame.full.size, roomForContent(frame.full)),
     compact,
     mini: miniVoice ? { revealed: hovered || focusWithin, buttons: (recording ? 1 : 0) + (stopKind ? 1 : 0) } : null,
     composerHeight: composerH,
@@ -864,19 +864,25 @@ export function IslandBar() {
         height: ROSTER_HEIGHT,
       }
     : null;
-  // The window the island can rest in while the capsule is all it draws. Null
-  // for every other face: those need the whole window. Hover is not a face, so
-  // it is inside the resting frame and never changes the window (LAC-4832).
-  const restFrame = face === "idle" ? islandRestFrame(agentSessions.length) : null;
+  // The window this moment needs, and no more (LAC-4832).
+  const windowFrame = islandFrameFor({
+    face,
+    shape,
+    small: compact || !!miniVoice,
+    agents: agentSessions.length,
+    suggestions: suggestionsH > 0,
+  });
+  const [settledAt, setSettledAt] = useState<Size | null>(null);
+  const settled = settledAt?.width === shape.width && settledAt?.height === shape.height;
   const { report } = frame;
   useLayoutEffect(() => {
-    report({ width: block.width, height: block.height }, rosterHit ? [hit, rosterHit] : [hit], restFrame);
-  }, [report, block.width, block.height, hit.x, hit.y, hit.width, hit.height, rosterHit?.x, rosterHit?.y, rosterHit?.width, restFrame?.width, restFrame?.height]); // eslint-disable-line react-hooks/exhaustive-deps
+    report({ width: block.width, height: block.height }, rosterHit ? [hit, rosterHit] : [hit], windowFrame, settled);
+  }, [report, block.width, block.height, hit.x, hit.y, hit.width, hit.height, rosterHit?.x, rosterHit?.y, rosterHit?.width, windowFrame.width, windowFrame.height, settled]); // eslint-disable-line react-hooks/exhaustive-deps
   // The window grows after this paint (`useIslandFrame`), so the render that
-  // first draws a full face still has the resting window around it. Drawn
+  // first draws a bigger face still has the smaller window around it. Drawn
   // nothing beats drawn clipped, and this clears itself the moment the frame
-  // has grown. Only growing can clip: resting draws a small shape in a window
-  // that is already the right size for it, and a drag window is the block.
+  // has grown. Only growing can clip: the window shrinks after the shape has,
+  // and a drag window is the block.
   const clipped = block.width > layout.size.width || block.height > layout.size.height;
   const place = contentPlacement(layout);
   // Tooltips open toward the side the island grows: the frame always has room there.
@@ -1495,6 +1501,7 @@ export function IslandBar() {
               layerStyle={layerStyle}
               reducedMotion={reducedMotion}
               flame={flame}
+              onSettled={setSettledAt}
               onClick={idle ? onShapeClick : undefined}
             >
               {composerNode}

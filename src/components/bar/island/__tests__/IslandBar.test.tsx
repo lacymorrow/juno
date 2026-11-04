@@ -156,6 +156,7 @@ vi.mock("../useIslandFrame", async () => {
       hidden: false,
       region: { current: null },
       report: frameReport,
+      full: anchor.edge === "top" ? top : bottom,
     }),
   };
 });

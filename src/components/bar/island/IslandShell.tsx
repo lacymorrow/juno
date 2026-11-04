@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { cn } from "@/lib/utils";
+import type { Size } from "@/lib/steadyFrame";
 import type { DotLook, ShapeSize, Words } from "./islandModel";
 import { VOICE_TRANSITION, voiceScale } from "../voiceLevel";
 import { BarFlameBorder } from "../BarFlameBorder";
@@ -66,6 +67,8 @@ interface IslandShellProps {
   flame?: ReturnType<typeof flameForState>;
   onClick?: () => void;
   className?: string;
+  /** The shape has reached this size, or null while it is still moving. */
+  onSettled?: (reached: Size | null) => void;
 }
 
 export function IslandShell({
@@ -78,10 +81,31 @@ export function IslandShell({
   flame = null,
   onClick,
   className,
+  onSettled,
 }: IslandShellProps) {
   const m = layerMotion(reducedMotion);
+  const shellRef = useRef<HTMLDivElement>(null);
+  // Measured, not timed: the spring's length depends on where it started, and
+  // an interrupted one has no end of its own to wait for.
+  const onSettledRef = useRef(onSettled);
+  onSettledRef.current = onSettled;
+  useEffect(() => {
+    const el = shellRef.current;
+    if (!el) return;
+    const target = { width: size.width, height: size.height };
+    const check = () => {
+      const there = Math.abs(el.offsetWidth - target.width) < 1 && Math.abs(el.offsetHeight - target.height) < 1;
+      onSettledRef.current?.(there ? target : null);
+    };
+    check();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [size.width, size.height]);
   return (
     <motion.div
+      ref={shellRef}
       data-testid="island-shell"
       data-face={layerKey}
       onClick={onClick}

@@ -189,39 +189,82 @@ export function islandMaxFor(monitor: MonitorRect): Size {
 export const HOVER_BUTTONS_MAX = 3;
 
 /**
- * The window the Island rests in: the capsule, the hover capsule it becomes,
- * the roster bubble beside it, and the shadow room around all of it.
- *
- * Why this exists when the steady frame says a window is never resized per
- * state (`docs/plans/appearance-steady-frame.md`). macOS lists a window by its
- * frame, not by what it draws, and `islandMaxFor` makes that frame most of the
- * display (1364 x 788 of a 1440 x 900, 83% of its area). So an invisible,
- * click-through, display-sized Juno rectangle still sits over every app behind
- * it, and a screen-share picker (which hit-tests the window list rather than
- * routing mouse events) offers Juno instead of the app underneath (LAC-4832). `sharingType = .none` does not help: the window
- * stays in both `CGWindowList` and `SCShareableContent`, that flag only blanks
- * the content inside a capture. The frame itself is the only lever.
- *
- * So the window holds the full face only while a full face is drawn. Resting
- * is where the Island spends nearly all of its time, and the only state
- * someone is in while reaching for another window. Every state change inside a
- * turn still happens in one unchanging window; see `useIslandFrame` for the
- * one boundary this crosses and what it costs.
+ * The compose face as a small bar: one line, narrow. Listening, working, an
+ * error, a reply being spoken: none of these needs a 360px box, only the words
+ * that say what is happening and the controls. Lacy, 2026-10-15.
  */
-export function islandRestFrame(agents: number): Size {
-  const hover = hoverShapeFor(HOVER_BUTTONS_MAX);
-  const shape = {
-    width: Math.max(IDLE_SHAPE.width, hover.width),
-    height: Math.max(IDLE_SHAPE.height, hover.height),
-  };
-  // The bubble sits on whichever side the well leaves free, so the resting
-  // window keeps its room on both: a drop into a well that docks the other
-  // way must not need the window resized again.
+export const COMPACT_COMPOSE_WIDTH = 248;
+
+/**
+ * Why the Island's window follows what it draws, when the steady frame says a
+ * window is not resized per state (`docs/plans/appearance-steady-frame.md`).
+ * macOS lists a window by its frame, not by what it draws, and `islandMaxFor`
+ * is most of the display (83% of a 1440 x 900). An invisible, click-through
+ * Juno rectangle that size sits over every app behind it, and a screen-share
+ * picker (which hit-tests the window list rather than routing mouse events)
+ * offers Juno instead of the app underneath (LAC-4832). `sharingType = .none`
+ * does not help: the window stays in both `CGWindowList` and
+ * `SCShareableContent`. The frame itself is the only lever, so in every state
+ * the window is only as big as that state needs.
+ *
+ * A few sizes rather than one per shape, because each change is a hidden swap
+ * (`useIslandFrame`): the small window holds a whole spoken turn up to the
+ * answer, and a card holds the composer and a short answer.
+ */
+
+/** Past the shadow room, on the side the island grows: a tooltip and its gap. */
+const TOOLTIP_ROOM_Y = 16;
+/** The height of the smaller card window: the tallest composer, and a short answer. */
+const CARD_HEIGHT = 160;
+
+/** The window around a shape: its shadow, a tooltip, and the roster's room on both sides. */
+function frameAround(shape: Size, agents: number): Size {
+  // The bubble sits on whichever side the well leaves free, so the window
+  // keeps its room on both: a drop into a well that docks the other way must
+  // not need the window resized again.
   const roster = rosterShown(agents) ? 2 * (ROSTER_GAP + rosterWidthFor(agents)) : 0;
   return {
     width: shape.width + roster + 2 * SHADOW_PAD,
-    height: shape.height + 2 * SHADOW_PAD,
+    height: shape.height + 2 * SHADOW_PAD + TOOLTIP_ROOM_Y,
   };
+}
+
+/** What the small window holds: the capsule, its hover controls, the mini voice capsule, the small bar. */
+const SMALL_BOUNDS: Size = {
+  width: Math.max(hoverShapeFor(HOVER_BUTTONS_MAX).width, COMPACT_COMPOSE_WIDTH),
+  height: Math.max(HOVER_SHAPE.height, composerHeightFor(COMPOSER_LINE_PX)),
+};
+
+/** The small window, where the island spends nearly all of its time. */
+export function islandRestFrame(agents: number): Size {
+  return frameAround(SMALL_BOUNDS, agents);
+}
+
+export interface FrameInput {
+  face: Face;
+  /** The shape as drawn (`shapeFor`). */
+  shape: Size;
+  /** The small bar (`composeIsCompact`) or the mini voice capsule is showing. */
+  small: boolean;
+  agents: number;
+  /** The skill suggestions are open under the shape. */
+  suggestions: boolean;
+}
+
+/** The window this moment needs, and no more. */
+export function islandFrameFor({ face, shape, small, agents, suggestions }: FrameInput): Size {
+  const extra = suggestions ? SUGGESTION_ROOM : 0;
+  if (face === "idle" || small) {
+    const fits = shape.width <= SMALL_BOUNDS.width && shape.height <= SMALL_BOUNDS.height;
+    if (fits && !extra) return islandRestFrame(agents);
+    return frameAround(
+      { width: Math.max(SMALL_BOUNDS.width, shape.width), height: Math.max(SMALL_BOUNDS.height, shape.height) + extra },
+      agents,
+    );
+  }
+  if (face === "chat") return frameAround({ width: shape.width, height: shape.height + extra }, agents);
+  const height = shape.height > CARD_HEIGHT ? SHAPE_MAX_HEIGHT : CARD_HEIGHT;
+  return frameAround({ width: ISLAND_WIDTH, height: height + extra }, agents);
 }
 
 /**
@@ -375,13 +418,6 @@ export function faceFor({
   if (isRestingState(state)) return composerActive ? "compose" : "idle";
   return "compose";
 }
-
-/**
- * The compose face as a small bar: one line, narrow. Listening, working, an
- * error, a reply being spoken: none of these needs a 360px box, only the words
- * that say what is happening and the controls. Lacy, 2026-10-15.
- */
-export const COMPACT_COMPOSE_WIDTH = 248;
 
 export interface CompactInput {
   face: Face;
