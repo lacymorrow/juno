@@ -351,6 +351,7 @@ mod presenter {
 ///
 /// Called once from setup. Does nothing where there is no Juno.app to post as,
 /// because the notification center raises without a bundle.
+#[cfg_attr(not(target_os = "macos"), allow(clippy::needless_return))]
 pub fn install_presenter() {
     if let Some(reason) = unavailable_reason() {
         info!("Notification presenter not installed: {}", reason);

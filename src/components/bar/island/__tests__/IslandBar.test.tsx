@@ -761,7 +761,7 @@ describe("IslandBar: idle and hover", () => {
     expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(false);
 
     fireEvent.click(screen.getByTestId("island-dot-target"));
-    expect(setFocus).toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith("focus_bar_for_typing");
     expect(invoke.mock.calls.filter(([cmd]) => cmd === "ui_handle_interaction")).toHaveLength(1);
     expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(true);
   });
@@ -1332,7 +1332,7 @@ describe("IslandBar: Open chat from the hover capsule", () => {
     expect(sentInteraction(UI.INTERACTION_TYPES_CLICK)).toBe(false);
     // The caret is in the box under the answer, and the window is key.
     expect(document.activeElement).toBe(composer());
-    expect(setFocus).toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith("focus_bar_for_typing");
     expect(screen.getByTestId("answer")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("island-expand"));
     expect(face()).toBe("chat");

@@ -97,6 +97,8 @@ function warmChatPane() {
   void loadChatPane().catch((error) => console.debug("FloatingBar: pane preload failed:", error));
 }
 import type { BarAppearance } from "@/components/bar/barAppearance";
+import { BAR_SURFACE_BG, VOICE_AVAILABLE } from "@/lib/platform";
+import { focusBarForTyping } from "@/lib/barFocus";
 
 /**
  * UI State enumeration — values emitted by the backend UIManager in
@@ -1140,9 +1142,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
    * afterwards asks for activation explicitly.
    */
   const activateWindow = useCallback(() => {
-    getCurrentWindow()
-      .setFocus()
-      .catch((error) => console.debug("FloatingBar: window activation failed:", error));
+    focusBarForTyping();
   }, []);
 
   const [localInputValue, setLocalInputValue] = useState("");
@@ -1174,6 +1174,15 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
     activateWindow();
     setInputOpen(true);
   }, [activateWindow]);
+
+  /**
+   * The Open chat button: the chat comes up ready to type, so the bar takes
+   * the keyboard on this click, as it does for the type button.
+   */
+  const openChatFromClick = useCallback(() => {
+    activateWindow();
+    reopenPane();
+  }, [activateWindow, reopenPane]);
 
   /** Escape / empty blur: back to the pill. */
   const closeInput = useCallback(() => {
@@ -1819,7 +1828,8 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
           // `isolate` scopes the flame border's z-index -1 to the pill, so it
           // sits above the pill's dark face but behind its content.
           "relative isolate flex shrink-0 items-center gap-2 rounded-full",
-          "border border-white/10 bg-neutral-950/90 text-white backdrop-blur-xl",
+          "border border-white/10 text-white backdrop-blur-xl",
+          BAR_SURFACE_BG,
           // Juno has the pointer: a hairline in system blue, nothing louder.
           isDriving && "border-[#0A84FF]/70",
           "transition-[width,height,padding] duration-200 ease-out motion-reduce:transition-none",
@@ -1891,25 +1901,27 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             className="flex items-center gap-1"
             style={{ animation: "fbar-reveal 0.18s ease-out both" }}
           >
-            <PillTooltip
-              label="Talk to Juno"
-              detail={talkShortcut}
-              forcedOpen={hoveredButton === "mic"}
-              blocked={hoveredButton === "dot"}
-              side={tooltipSide}
-            >
-              <button
-                ref={micRef}
-                type="button"
-                onClick={startTalking}
-                aria-label="Talk to Juno"
-                title="Talk to Juno"
-                data-phover={hoveredButton === "mic" ? "" : undefined}
-                className={cn(pillButton, hoveredButton === "mic" && "bg-white/[0.12] text-white")}
+            {VOICE_AVAILABLE && (
+              <PillTooltip
+                label="Talk to Juno"
+                detail={talkShortcut}
+                forcedOpen={hoveredButton === "mic"}
+                blocked={hoveredButton === "dot"}
+                side={tooltipSide}
               >
-                <Mic className="size-3.5" />
-              </button>
-            </PillTooltip>
+                <button
+                  ref={micRef}
+                  type="button"
+                  onClick={startTalking}
+                  aria-label="Talk to Juno"
+                  title="Talk to Juno"
+                  data-phover={hoveredButton === "mic" ? "" : undefined}
+                  className={cn(pillButton, hoveredButton === "mic" && "bg-white/[0.12] text-white")}
+                >
+                  <Mic className="size-3.5" />
+                </button>
+              </PillTooltip>
+            )}
             <PillTooltip
               label="Type to Juno"
               forcedOpen={hoveredButton === "type"}
@@ -1940,7 +1952,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               <button
                 ref={chatRef}
                 type="button"
-                onClick={reopenPane}
+                onClick={openChatFromClick}
                 aria-label="Open chat"
                 title="Open chat"
                 data-phover={hoveredButton === "chat" ? "" : undefined}
@@ -2032,7 +2044,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
                   Juno works there is nothing to open, so nothing is offered. */}
               {isVoice || isRecording ? (
                 <AudioLevelBars audioLevel={barState.audioLevel} />
-              ) : isWorking ? null : (
+              ) : isWorking || !VOICE_AVAILABLE ? null : (
                 <button
                   type="button"
                   onClick={switchToTalking}
@@ -2049,7 +2061,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
               {showExpand && !isIdle && (
                 <button
                   type="button"
-                  onClick={reopenPane}
+                  onClick={openChatFromClick}
                   aria-label="Open chat"
                   title="Open chat"
                   className={inputControlButton}
@@ -2122,7 +2134,7 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
             {showExpand && (
               <button
                 type="button"
-                onClick={reopenPane}
+                onClick={openChatFromClick}
                 aria-label="Open chat"
                 title="Open chat"
                 className={inputControlButton}

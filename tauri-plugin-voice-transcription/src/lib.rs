@@ -184,6 +184,22 @@ fn build_plugin<R: Runtime + 'static>(
 
             // Get model path from config or use default
             let config = VoiceTranscriptionConfig::default();
+
+            // Voice is macOS-only until the Windows voice step
+            // (docs/plans/windows.md, step 3). The controllers are managed, so
+            // every command still answers, but no model is looked for and no
+            // engine loads.
+            if cfg!(not(target_os = "macos")) {
+                app.manage(Arc::new(Mutex::new(VoiceController::new_uninitialized(
+                    &config.model_path,
+                    "Voice is not available on this platform yet".to_string(),
+                ))));
+                app.manage(Arc::new(Mutex::new(AlwaysListeningController::new_uninitialized(
+                    &config.model_path,
+                ))));
+                tracing::info!("[VoicePlugin] Voice is not available on this platform yet; no engine loaded");
+                return Ok(());
+            }
             tracing::info!("Default config model path: {}", config.model_path);
 
             // Try to resolve the model path for both development and production

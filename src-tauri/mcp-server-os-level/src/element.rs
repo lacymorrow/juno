@@ -72,6 +72,7 @@ impl<T: UIElementImpl + ?Sized + 'static> AsAny for T {
 
 impl UIElement {
     /// Create a new UI element from a platform-specific implementation
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn new(impl_: Box<dyn UIElementImpl>) -> Self {
         Self { inner: impl_ }
     }

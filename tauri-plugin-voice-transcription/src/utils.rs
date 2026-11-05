@@ -397,6 +397,15 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
     }
 
     // Strategy 7: Final fallback - return original path (will likely fail, but preserves error handling)
+    // Off macOS voice is not on yet (docs/plans/windows.md, step 3) and no
+    // model ships, so a missing one is expected there, not a fault.
+    if cfg!(not(target_os = "macos")) {
+        tracing::debug!(
+            "Model file '{}' not found; voice is off on this platform",
+            model_path
+        );
+        return model_path.to_string();
+    }
     tracing::warn!(
         "Model file '{}' not found in any standard location. Locations checked:",
         model_path

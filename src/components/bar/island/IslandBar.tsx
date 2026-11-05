@@ -103,6 +103,8 @@ import {
   stopControl,
   type Face,
 } from "./islandModel";
+import { focusBarForTyping } from "@/lib/barFocus";
+import { VOICE_AVAILABLE } from "@/lib/platform";
 
 /**
  * Island: one surface that flips between the idle bar, the composer, an
@@ -180,9 +182,7 @@ function reportEscape(): void {
 }
 
 function activateWindow(): void {
-  getCurrentWindow()
-    .setFocus()
-    .catch((error) => console.debug("Island: window activation failed:", error));
+  focusBarForTyping();
 }
 
 // === SMALL PARTS ===
@@ -975,14 +975,15 @@ export function IslandBar() {
       <div className="flex h-full w-full items-center gap-2 pl-2.5 pr-1" data-testid="island-hover">
         {dotTarget}
         <div className="ml-auto flex items-center gap-0.5">
-          {tip(
-            "mic",
-            "Talk to Juno",
-            <button type="button" {...named("mic")} onClick={startTalking} aria-label="Talk to Juno" title="Talk to Juno" className={control("mic")}>
-              <Mic className="size-3.5" />
-            </button>,
-            talkShortcut,
-          )}
+          {VOICE_AVAILABLE &&
+            tip(
+              "mic",
+              "Talk to Juno",
+              <button type="button" {...named("mic")} onClick={startTalking} aria-label="Talk to Juno" title="Talk to Juno" className={control("mic")}>
+                <Mic className="size-3.5" />
+              </button>,
+              talkShortcut,
+            )}
           {/* The Pill's hover expand, always offered: one size up, the small
               chat (or the composer before any turn), never straight to the
               full chat. */}
@@ -1360,7 +1361,7 @@ export function IslandBar() {
             <LevelBars level={bar.audioLevel} />
           ) : working ? (
             miniVoice ? <QuietWork /> : null
-          ) : (
+          ) : !VOICE_AVAILABLE ? null : (
             tip(
               "compose-mic",
               "Talk to Juno",

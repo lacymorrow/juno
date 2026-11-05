@@ -23,7 +23,7 @@ crate-type = ["cdylib", "rlib"]
 tauri = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-whisper-rs = { version = "0.11.0", features = ["metal"] }
+whisper-rs = "0.11.0"
 cpal = "0.15"
 rubato = "0.14.1"
 hound = "3.5"
@@ -46,6 +46,8 @@ chrono = "0.4"
 parakeet-rs = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Whisper on the GPU through Metal. Other platforms run it on the CPU.
+whisper-rs = { version = "0.11.0", features = ["metal"] }
 objc = "0.2"
 objc-foundation = "0.1"
 cocoa = "0.25"

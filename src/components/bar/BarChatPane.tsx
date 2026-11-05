@@ -7,6 +7,7 @@ import type { ShareAnchor } from "@/hooks/useConversation";
 import { cn } from "@/lib/utils";
 import { BAR_DEPTH_GLOW } from "@/components/bar/barAppearance";
 import { COMMANDS } from "@/lib/constants.generated";
+import { BAR_SURFACE_BG } from "@/lib/platform";
 
 interface BarChatPaneProps {
   messages: ChatMessage[];
@@ -73,7 +74,8 @@ export function BarChatPane({
       data-testid="bar-chat-pane"
       className={cn(
         "dark flex w-[419px] flex-col overflow-hidden rounded-2xl",
-        "border border-white/10 bg-neutral-950/90 text-foreground backdrop-blur-xl",
+        "border border-white/10 text-foreground backdrop-blur-xl",
+        BAR_SURFACE_BG,
       )}
       // Same depth glow as the pill so the pane never vanishes on a dark
       // background either.
