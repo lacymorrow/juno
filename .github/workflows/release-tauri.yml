@@ -648,6 +648,16 @@ jobs:
             scripts/verify-dmg.sh --skip-gatekeeper "${dmgs[0]}"
           fi
 
+      # The decoded App Store Connect key sits at $APPLE_API_KEY_PATH from the
+      # signing step on, readable by every step in between, third-party
+      # tauri-action included. Nothing after this point needs it, and
+      # always() removes it on a red job too. demo-build.yml deletes its copy
+      # the moment store-credentials returns; this is the same hygiene at the
+      # first point this job can afford it (LAC-7134).
+      - name: Remove the App Store Connect key from the runner
+        if: ${{ always() && env.APPLE_API_KEY_PATH != '' }}
+        run: rm -f "$APPLE_API_KEY_PATH"
+
   # A failed release used to be silent. From v0.8.245 to v0.8.249 every build
   # died at notarization (an Apple app-specific password had been revoked)
   # and nothing said so: merges kept landing, versions kept being tagged, and
