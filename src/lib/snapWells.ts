@@ -118,6 +118,16 @@ export function screenInsets(
   };
 }
 
+/**
+ * How far down from the display's top a window at the bar's level has to stay:
+ * the menu bar itself, without the gap the wells keep from it. macOS pushes any
+ * window below `NSMainMenuWindowLevel` out of the menu bar on every frame change.
+ */
+export function menuBarDepth(m: MonitorRect): number {
+  const wa = m.workArea;
+  return wa ? Math.max(0, wa.position.y - m.position.y) : FALLBACK_TOP_INSET - MENU_BAR_GAP;
+}
+
 /** Corner and edge slots for the default well, by name. */
 export const SLOT = {
   topLeft: { fx: 0, fy: 0 },
