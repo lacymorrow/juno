@@ -84,6 +84,8 @@ The cost, stated plainly: two hidden frames (~70ms) at each size change. A spoke
 
 A look whose window is a modest fixed size needs none of this. Do not copy it into one.
 
+**The flame's room.** The activity flame rises up to 53 points above the shape (43 for the bright part, measured frame by frame in the preview). With the window's top edge at the top of the shadow room, 24 points up, a top-row Island's flame was cut in a straight line in mid-air, 12 points under the menu bar. `SteadySpec.headroom` keeps room above the footprint without moving it: the footprint stays on its well and the window's top moves up, stopping at the menu bar rather than at the wells' gap under it. That gives 36 points on the top row, and the tips pass behind the menu bar like any other window's content. Going over the menu bar was weighed and left out. It needs the Notch's level (27) on the Island, which sits above other apps' alerts and needs every frame to know whether the bar has stepped aside, or two more hidden swaps per turn to raise and lower it. The cost today is the window: 12 points taller on the top row (296 x 112 on a 1440 x 900).
+
 ### Alternatives considered and cut
 
 - **A full-screen overlay window per display** (pill offset is just its screen position, no swap ever). Cut: the OS window drag would drag the whole overlay, so cross-display drag would need a rewrite of the shared drag, and a display-sized transparent WKWebView costs backing-store memory for nothing.

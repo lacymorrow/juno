@@ -217,6 +217,18 @@ const TOOLTIP_ROOM_Y = 16;
 /** The height of the smaller card window: the tallest composer, and a short answer. */
 const CARD_HEIGHT = 160;
 
+/**
+ * The activity flame rises up to 53 points above the shape (measured frame by
+ * frame in the preview, faintest smoke included; the bright part stops at 43).
+ * The shadow room gives it 24, and a window edge there cuts it in a hard line in
+ * mid-air. So the window keeps this much more above the shape, on every well.
+ * On the top row the menu bar stops the window first, 36 points above the shape,
+ * and the tips pass behind the menu bar like any other window's content.
+ */
+export const FLAME_HEADROOM = 32;
+/** Growing up, the tooltip room is already above the shape and counts toward it. */
+export const FLAME_HEADROOM_GROWING_UP = FLAME_HEADROOM - TOOLTIP_ROOM_Y;
+
 /** The window around a shape: its shadow, a tooltip, and the roster's room on both sides. */
 function frameAround(shape: Size, agents: number): Size {
   // The bubble sits on whichever side the well leaves free, so the window
@@ -296,6 +308,7 @@ export const ISLAND_STEADY_SPEC: SteadySpec = {
   rest: { width: IDLE_SHAPE.width + 2 * SHADOW_PAD, height: IDLE_SHAPE.height + 2 * SHADOW_PAD },
   max: islandMaxFor({ position: { x: 0, y: 0 }, size: { width: 1440, height: 900 } }),
   maxFor: islandMaxFor,
+  headroom: FLAME_HEADROOM,
   stage: {
     width: ISLAND_WIDTH + 2 * SHADOW_PAD,
     height: COMPOSER_LINE_PX + 2 * COMPOSER_PAD_Y + 2 * SHADOW_PAD,

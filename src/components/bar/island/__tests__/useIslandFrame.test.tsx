@@ -39,7 +39,17 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 import { useIslandFrame } from "../useIslandFrame";
-import { IDLE_SHAPE, ISLAND_WIDTH, SHADOW_PAD, islandFrameFor, islandMaxFor, islandRestFrame } from "../islandModel";
+import {
+  FLAME_HEADROOM,
+  FLAME_HEADROOM_GROWING_UP,
+  IDLE_SHAPE,
+  ISLAND_WIDTH,
+  SHADOW_PAD,
+  islandFrameFor,
+  islandMaxFor,
+  islandRestFrame,
+} from "../islandModel";
+import { MENU_BAR_GAP } from "@/lib/snapWells";
 import { resetSteady, steadySwapsSettled, type Size } from "@/lib/steadyFrame";
 import { resetBarSnapState } from "@/hooks/useBarSnapWells";
 
@@ -155,7 +165,7 @@ describe("useIslandFrame keeps the window to what the moment needs", () => {
     // would be cosmetic, but a display-sized frame on screen is the bug.
     for (const f of placed) {
       expect(f.width).toBe(rest.width);
-      expect(f.height).toBe(rest.height);
+      expect(f.height).toBe(rest.height + MENU_BAR_GAP);
     }
   });
 
@@ -195,15 +205,68 @@ describe("useIslandFrame keeps the window to what the moment needs", () => {
     });
   };
 
+  describe("the flame's room above the shape", () => {
+    const flameRoom = async (saved: { x: number; y: number } | null, monitor: unknown = A_MONITOR) => {
+      monitors.list = [monitor];
+      invoke.mockImplementation((command: unknown) =>
+        Promise.resolve(command === COMMANDS.BAR_GET_BAR_POSITION ? saved : null),
+      );
+      await act(async () => {
+        render(<Harness hit={capsule} rest={rest} />);
+      });
+      invoke.mockImplementation(() => Promise.resolve(null));
+      const f = frameCalls().at(-1);
+      const well = invoke.mock.calls.filter((c) => c[0] === COMMANDS.BAR_SET_BAR_POSITION).at(-1)?.[1] as {
+        x: number;
+        y: number;
+      };
+      return { f: f as NonNullable<typeof f>, well };
+    };
+
+    it("reaches the menu bar on the top row and no lower than it has to", async () => {
+      const { f, well } = await flameRoom(null);
+      expect(f.y).toBe(24);
+      expect(well.y - f.y).toBe(MENU_BAR_GAP);
+      expect(f.height).toBe(rest.height + MENU_BAR_GAP);
+    });
+
+    it("follows the display's real menu bar under a notch", async () => {
+      const notched = {
+        position: { x: 0, y: 0 },
+        size: { width: 1512, height: 982 },
+        scaleFactor: 1,
+        workArea: { position: { x: 0, y: 38 }, size: { width: 1512, height: 944 } },
+      };
+      const { f, well } = await flameRoom(null, notched);
+      expect(f.y).toBe(38);
+      expect(well.y - f.y).toBe(MENU_BAR_GAP);
+    });
+
+    it("gets all of it on a well that grows down, away from the menu bar", async () => {
+      // A display 2000 points tall has a stop a quarter of the way down, the one such well.
+      const tall = { position: { x: 0, y: 0 }, size: { width: 1200, height: 2000 }, scaleFactor: 1 };
+      const { f, well } = await flameRoom({ x: 16, y: 500 }, tall);
+      expect(well.y).toBeGreaterThan(300);
+      expect(well.y - f.y).toBe(FLAME_HEADROOM);
+      expect(f.height).toBe(rest.height + FLAME_HEADROOM);
+    });
+
+    it("grows the window upward on a well that grows up, leaving the shape where it was", async () => {
+      const { f, well } = await flameRoom({ x: 700, y: 880 });
+      expect(f.height).toBe(rest.height + FLAME_HEADROOM_GROWING_UP);
+      expect(f.y + f.height).toBe(well.y + IDLE_BLOCK.height);
+    });
+  });
+
   it("grows for a face that needs it and shrinks back after, never to the display-sized window", async () => {
     const view = await act(async () => render(<Harness hit={capsule} rest={rest} />));
     expect(frameCalls().at(-1)?.width).toBe(rest.width);
 
     await settle(view, <Harness hit={capsule} rest={card} />);
-    expect(frameCalls().at(-1)).toMatchObject({ width: card.width, height: card.height });
+    expect(frameCalls().at(-1)).toMatchObject({ width: card.width, height: card.height + MENU_BAR_GAP });
 
     await settle(view, <Harness hit={capsule} rest={rest} />);
-    expect(frameCalls().at(-1)).toMatchObject({ width: rest.width, height: rest.height });
+    expect(frameCalls().at(-1)).toMatchObject({ width: rest.width, height: rest.height + MENU_BAR_GAP });
 
     // The bug: at no point in that turn was the big window on screen.
     for (const f of frameCalls()) expect(f.width).toBeLessThan(full.width);

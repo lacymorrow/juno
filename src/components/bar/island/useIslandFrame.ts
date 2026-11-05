@@ -28,7 +28,7 @@ import {
 } from "@/hooks/useBarSnapWells";
 import { useEventListener } from "@/hooks/useEventListener";
 import type { HoverRegion } from "./useIslandHover";
-import { ISLAND_STEADY_SPEC } from "./islandModel";
+import { FLAME_HEADROOM, FLAME_HEADROOM_GROWING_UP, ISLAND_STEADY_SPEC } from "./islandModel";
 
 /** Where a fresh install puts the Island: top centre, where an island belongs. */
 const HOME_SLOT = { fx: 0.5, fy: 0 } as const;
@@ -98,18 +98,23 @@ function sameWell(a: SteadyLayout, b: SteadyLayout): boolean {
 }
 
 /**
- * A window of `size` on the full window's well, kept inside the full window.
- * The full window is already clamped to the display, so staying inside it
- * keeps this one off the menu bar, where AppKit would push it and move the
- * well. The shift is absorbed by the anchor, as `steadyLayout`'s clamp is.
+ * A window of `size` on the full window's well, with the flame's room above the
+ * shape, kept inside the full window. The full window is already clamped to the
+ * display, so staying inside it keeps this one off the menu bar, where AppKit
+ * would push it and move the well. The shift is absorbed by the anchor, as
+ * `steadyLayout`'s clamp is.
  */
 function frameWithin(full: SteadyLayout, size: Size): SteadyLayout {
+  // Growing down, the room is only what the full window got: on the top row the
+  // menu bar allows 12 points, and a taller window would just reach further down.
+  const room = full.growUp ? FLAME_HEADROOM_GROWING_UP : Math.min(full.anchor.y, FLAME_HEADROOM);
   const width = Math.min(size.width, full.size.width);
-  const height = Math.min(size.height, full.size.height);
+  const height = Math.min(size.height + room, full.size.height);
   const placed = dragLayout(full, { width, height });
   const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
   const x = clamp(placed.origin.x, full.origin.x, full.origin.x + full.size.width - width);
-  const y = clamp(placed.origin.y, full.origin.y, full.origin.y + full.size.height - height);
+  const top = full.growUp ? placed.origin.y : placed.origin.y - room;
+  const y = clamp(top, full.origin.y, full.origin.y + full.size.height - height);
   return {
     ...placed,
     origin: { x, y },
