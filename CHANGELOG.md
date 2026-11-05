@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.261] - 2026-11-05
+
+### Fixed
+
+- **release:** notarize with an App Store Connect API key, and make the 401 verdict say which cause it is (#942) (66854766)
+
 ## [0.8.260] - 2026-11-05
 
 ### Fixed
@@ -1779,7 +1785,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.260...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.261...HEAD
+[0.8.261]: https://github.com/lacymorrow/juno/compare/cua-v0.8.260...v0.8.261
 [0.8.260]: https://github.com/lacymorrow/juno/compare/cua-v0.8.259...v0.8.260
 [0.8.259]: https://github.com/lacymorrow/juno/compare/cua-v0.8.258...v0.8.259
 [0.8.257]: https://github.com/lacymorrow/juno/compare/cua-v0.8.256...v0.8.257
