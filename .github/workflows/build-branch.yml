@@ -65,6 +65,17 @@ jobs:
 
       # Same throwaway-keychain import as demo-build.yml, minus the notary
       # profile.
+      #
+      # This job deliberately has NO `environment:` (LAC-7145). The notarization
+      # credentials are scoped to the `release` environment, which allows `main`
+      # only; this workflow is dispatched on feature branches by
+      # scripts/juno-build.sh, which is the documented way to run Juno from a
+      # branch, and a branch-restricted environment would refuse the job before
+      # its first step. So the three secrets below stay repo-scoped as the
+      # lesser risk: a Developer ID certificate with no notarization credential
+      # cannot produce a build that opens on someone else's Mac (Gatekeeper
+      # judges the notarized artifact), and a leaked certificate is revocable.
+      # Do not add notary secrets (APPLE_ID, APPLE_PASSWORD, APPLE_API_*) here.
       - name: Import the signing certificate
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
