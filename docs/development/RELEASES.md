@@ -27,8 +27,19 @@ downloads the signed `.app`, replaces `/Applications/Juno.app` (old copy goes
 to the Trash) and opens it. `--no-install` just downloads. A commit already
 built is downloaded again instead of rebuilt.
 
-**Pushing a `v*` tag by hand** (for example `bun run release minor` from a
-checkout) still builds a full release directly, skipping the prerelease step.
+**Pushing a `v*` tag by hand no longer builds.** Since LAC-7145 the signing
+and notarization credentials live in a `release` GitHub Environment whose
+deployment branch policy allows `main` and nothing else, so a build on a tag
+ref is refused before its first step. The gate fails such a push with the
+command to use instead:
+
+```bash
+gh workflow run release-tauri.yml --ref main -f tag=v0.9.0 -f prerelease=false
+```
+
+That is the same build on an allowed ref. `bun run release` (shipx) is
+unaffected: it writes a `release:` commit, which the gate already skips in
+favour of `release-every-merge.yml`'s dispatch on main.
 
 **Latest is pinned to the highest version.** Builds finish out of order, and
 GitHub marks whichever full release was created last as Latest. After a full

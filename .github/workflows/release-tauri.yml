@@ -10,8 +10,12 @@ on:
   # invisible to the app's prerelease channel: the "Publish the canary feed"
   # step below copies every build's manifest to a fixed `canary` tag, and an
   # install with "Get prereleases" on reads that instead. See
-  # src-tauri/src/updater.rs. A tag pushed by hand has no inputs, so it builds
-  # a full release as before.
+  # src-tauri/src/updater.rs.
+  #
+  # A tag pushed at a non-`release:` commit used to build a full release here.
+  # It no longer does: build-tauri runs in the main-only `release` environment,
+  # so a tag ref cannot reach the signing secrets, and the gate below fails
+  # such a push with the dispatch command to use instead (LAC-7145).
   workflow_dispatch:
     inputs:
       prerelease:
@@ -43,7 +47,8 @@ jobs:
   # release-every-merge's dispatch. The tag-triggered half is the dangerous
   # one, because it carries no inputs: `prerelease` would default to false and
   # publish straight to the stable channel, which is the audience that did not
-  # sign up to find the bugs.
+  # sign up to find the bugs. That is why the `release:` marker below skips it,
+  # and since LAC-7145 any other tag push fails there rather than building.
   #
   # Resolved over the API rather than read from `github.event.head_commit`,
   # which GitHub documents only as "object or null" and does not promise for
@@ -81,10 +86,30 @@ jobs:
             release:*)
               echo "::notice title=Skipped::$tag points at shipx's own version bump; release-every-merge.yml dispatches this build with prerelease=true."
               echo "build=false" >> "$GITHUB_OUTPUT" ;;
-            # A tag pushed by hand still builds a full release, as documented
-            # on the trigger above.
+            # A tag pushed at any other commit used to build a full release
+            # here, and historically every minor and major version shipped
+            # that way (15 such builds, the last v0.8.41 on 2026-10-01). It can
+            # no longer do so: build-tauri runs in the `release` environment,
+            # whose deployment branch policy allows `main` and nothing else, so
+            # a tag ref is refused before its first step (LAC-7145). `v*` is
+            # deliberately not in that policy, because there is no tag ruleset
+            # on this repo: anyone who can push could point a v* tag at any
+            # tree, and allowing tag refs would hand the signing secrets to
+            # exactly the person the environment exists to stop.
+            #
+            # The capability is not lost, it moved one door over. A dispatch on
+            # main takes the tag to build as an input, which is the same build
+            # on an allowed ref:
+            #   gh workflow run release-tauri.yml --ref main -f tag=<tag>
+            # Naming `prerelease` explicitly there also removes the no-inputs
+            # hazard described above the gate.
+            #
+            # Failing here rather than skipping quietly is deliberate: someone
+            # who hand-pushes a release tag wants a release, and a green run
+            # that published nothing is the worse answer.
             *)
-              echo "build=true" >> "$GITHUB_OUTPUT" ;;
+              echo "::error title=Hand-pushed tags no longer build::$tag was pushed by hand. build-tauri runs in the main-only 'release' environment, so a tag ref cannot reach the signing secrets. Build it on main instead: gh workflow run release-tauri.yml --ref main -f tag=$tag -f prerelease=false"
+              exit 1 ;;
           esac
 
   build-tauri:

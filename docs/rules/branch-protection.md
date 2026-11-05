@@ -151,8 +151,11 @@ half would carry no inputs, so `prerelease` would default to false and publish
 straight to the stable channel.
 
 `release-tauri.yml` therefore opens with a `gate` job that skips a tag pointing
-at shipx's own `release:` commit. A tag pushed by hand still builds a full
-release. The gate resolves the commit message over the API rather than reading
+at shipx's own `release:` commit. A tag pushed at any other commit used to
+build a full release; since LAC-7145 it fails there instead, because
+build-tauri runs in a `release` environment restricted to `main` and so cannot
+reach the signing secrets from a tag ref.
+The gate resolves the commit message over the API rather than reading
 `github.event.head_commit`, which GitHub documents only as "object or null" and
 does not promise for tag pushes.
 
