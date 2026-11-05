@@ -30,8 +30,8 @@ built is downloaded again instead of rebuilt.
 **Pushing a `v*` tag by hand no longer builds.** Since LAC-7145 the signing
 and notarization credentials live in a `release` GitHub Environment whose
 deployment branch policy allows `main` and nothing else, so a build on a tag
-ref is refused before its first step. The gate fails such a push with the
-command to use instead:
+ref is refused before its first step. The gate fails such a push rather than
+building it. To build a tag shipx already cut, dispatch it on main:
 
 ```bash
 gh workflow run release-tauri.yml --ref main -f tag=v0.9.0 -f prerelease=false
