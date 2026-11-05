@@ -17,6 +17,9 @@ pub mod window_labels {
     /// The smoke around the bar the first time it appears. Built for the
     /// occasion by `intro.rs`, not declared in tauri.conf.json.
     pub const INTRO: &str = "intro";
+    /// The card that sits beside System Settings and points at the row Juno
+    /// needs switched on. See `permission_coach.rs`.
+    pub const PERMISSION_COACH: &str = "permission-coach";
 }
 
 /// Agent session identity colors (LAC-1432 / LAC-2830 spec section 2).

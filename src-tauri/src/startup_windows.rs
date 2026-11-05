@@ -29,12 +29,16 @@ use crate::constants::ui::window_labels;
 
 /// Built after the bar is up, in this order: the chat window first, because
 /// it is the one the bar opens.
-pub const DEFERRED: [&str; 5] = [
+pub const DEFERRED: [&str; 6] = [
     window_labels::MAIN,
     window_labels::FLOATING_PANEL,
     crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL,
     window_labels::SNAP_WELLS_OVERLAY,
     "listening-overlay",
+    // Built ahead of time so the card is on screen the moment it is needed
+    // rather than after a webview boot. `permission_coach` builds it itself if
+    // a permission is asked for before this list gets that far.
+    window_labels::PERMISSION_COACH,
 ];
 
 /// Build the deferred windows by now even if the bar never came up.
