@@ -94,6 +94,7 @@ const VERB_IN_INPUT_TOOLS: &[&str] = &[
     "computer",
     "str_replace_based_edit_tool",
     "browser_interact",
+    "browser_call_page_tool",
 ];
 
 /// Tools that are the `computer` tool under another schema: each call maps
@@ -231,6 +232,7 @@ pub const DELIBERATELY_UNGATED_TOOLS: &[&str] = &[
     "read_file",
     "browser_extract_content",
     "browser_get_current_url",
+    "browser_list_page_tools",
     "browser_screenshot",
     "safari_extract_dom",
     "safari_get_url",
@@ -382,6 +384,12 @@ pub fn classify_risk(tool_name: &str, tool_input: &Value) -> RiskLevel {
             Some("type") | Some("select") => classify_form_fill_risk(tool_input),
             _ => RiskLevel::Low,
         },
+
+        // A WebMCP tool the page published. The page, not Juno, decides what it
+        // does, so the risk comes from what the page flagged on the last
+        // listing (`webmcp::classify_call`): consequential is High, read-only
+        // is Low, anything unflagged or unlisted is Medium.
+        "browser_call_page_tool" => crate::agent::tools::webmcp::classify_call(tool_input),
 
         // Agent self-scheduling — creates a persistent automation that
         // re-executes unattended with full tool access after this session
@@ -1425,6 +1433,11 @@ mod tests {
             (
                 "browser_interact",
                 json!({"action": "type", "value": "hunter2", "field": "password"}),
+            ),
+            // An unlisted page tool is never Low: the page decides what it does.
+            (
+                "browser_call_page_tool",
+                json!({"name": "never_listed_tool"}),
             ),
         ];
 
