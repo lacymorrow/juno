@@ -15,9 +15,10 @@ on:
   # A tag pushed at a non-`release:` commit used to build a full release here.
   # It no longer does: build-tauri runs in the main-only `release` environment,
   # so a tag ref cannot reach the signing secrets, and the gate below fails
-  # such a push with the dispatch command to use instead (LAC-7145). That
-  # dispatch is not a loophole: the gate validates its `tag` input against main
-  # and hands build-tauri a resolved SHA (LAC-7166).
+  # such a push rather than building it (LAC-7145). Dispatching the same tag is
+  # not a way around that and not a loophole: the gate validates its `tag`
+  # input against main and only ever builds a commit main already carries, at a
+  # `release:` bump, resolved to a SHA (LAC-7166).
   workflow_dispatch:
     inputs:
       prerelease:
@@ -187,18 +188,29 @@ jobs:
             # tree, and allowing tag refs would hand the signing secrets to
             # exactly the person the environment exists to stop.
             #
-            # The capability is not lost, it moved one door over. A dispatch on
-            # main takes the tag to build as an input, which is the same build
-            # on an allowed ref:
+            # Do not send the person here to a dispatch. A dispatch on main
+            # does take the tag to build as an input:
             #   gh workflow run release-tauri.yml --ref main -f tag=<tag>
-            # Naming `prerelease` explicitly there also removes the no-inputs
-            # hazard described above the gate.
+            # but check 4 above requires that tag to sit on a `release:` commit,
+            # and this branch is reached ONLY when it does not -- a `release:`
+            # tag matches the arm above and is skipped in favour of
+            # release-every-merge.yml's own dispatch. So for the tag as
+            # pushed, that command is guaranteed to fail "Not a release commit"
+            # (and often "Not reachable from main" first). That dispatch
+            # is the re-run path for a tag shipx already cut, not a way to build
+            # this one.
+            #
+            # The path for this tree is to get it onto main and cut a version:
+            # `bun run release` (shipx) writes the `release:` commit and tag,
+            # and release-every-merge.yml dispatches the build with
+            # prerelease=true, which is also how `prerelease` stops defaulting
+            # to the stable channel as described above the gate.
             #
             # Failing here rather than skipping quietly is deliberate: someone
             # who hand-pushes a release tag wants a release, and a green run
             # that published nothing is the worse answer.
             *)
-              echo "::error title=Hand-pushed tags no longer build::$tag was pushed by hand. build-tauri runs in the main-only 'release' environment, so a tag ref cannot reach the signing secrets. Build it on main instead: gh workflow run release-tauri.yml --ref main -f tag=$tag -f prerelease=false"
+              echo "::error title=Hand-pushed tags no longer build::$tag was pushed by hand at a commit that is not a 'release:' version bump, so nothing will build it. Get this tree onto main and cut a version with 'bun run release'; release-every-merge.yml then dispatches the build. Dispatching this tag yourself will not work either: build-tauri runs in the main-only 'release' environment so a tag ref cannot reach the signing secrets, and the gate only builds a tag main already carries at a 'release:' commit. See docs/development/RELEASES.md."
               exit 1 ;;
           esac
 
