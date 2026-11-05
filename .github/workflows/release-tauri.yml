@@ -196,9 +196,9 @@ jobs:
             # tag matches the arm above and is skipped in favour of
             # release-every-merge.yml's own dispatch. So for the tag as
             # pushed, that command is guaranteed to fail "Not a release commit"
-            # (and often "Not reachable from main" first). That dispatch
-            # is the re-run path for a tag shipx already cut, not a way to build
-            # this one.
+            # (and often "Not reachable from main" first). That dispatch is the
+            # re-run path for a tag shipx already cut, not a way to build this
+            # one.
             #
             # The path for this tree is to get it onto main and cut a version:
             # `bun run release` (shipx) writes the `release:` commit and tag,
