@@ -21,7 +21,11 @@
 #   TAURI_SIGNING_PRIVATE_KEY           key content or path; honoured as-is when set
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  key password; if unset, tauri prompts on a TTY
 #   APPLE_SIGNING_IDENTITY              Developer ID identity; auto-detected when unset
-#   JUNO_NOTARY_PROFILE                 notarytool keychain profile (default: juno)
+#   JUNO_NOTARY_PROFILE                 notarytool keychain profile (default: juno).
+#                                       Back it with an App Store Connect API
+#                                       key, not an app-specific password; see
+#                                       the refusal banner for the exact
+#                                       store-credentials call and why.
 #   JUNO_SKIP_NOTARIZE=1                sign, but skip notarizing and stapling
 #   JUNO_UNSIGNED_BUILD=1               no updater artifacts, no Apple signing, no
 #                                       notarization; local testing only
@@ -546,7 +550,21 @@ else
            "un-notarized build is still refused once it has been downloaded: macOS" \
            "says \"Apple could not verify this app is free of malware.\"" \
            "" \
-           "Create the profile once (it is stored in the keychain, not in the repo):" \
+           "Create the profile once (it is stored in the keychain, not in the repo)." \
+           "Back it with an App Store Connect API key, not an app-specific" \
+           "password: the key is signed into a JWT locally, while a password" \
+           "profile authenticates through notary/v2/asp, which answers 401 when" \
+           "it is unreachable and cost seven releases in LAC-6331/LAC-6333." \
+           "" \
+           "  xcrun notarytool store-credentials ${notary_profile} \\" \
+           "    --key ~/.appstoreconnect/private_keys/AuthKey_<KeyID>.p8 \\" \
+           "    --key-id <KeyID> --issuer <issuer-uuid>" \
+           "" \
+           "Keys come from App Store Connect: Users and Access -> Integrations" \
+           "-> App Store Connect API. Developer role is enough to notarize." \
+           "The issuer UUID is shown above the keys table." \
+           "" \
+           "The password form still works and is still a supported fallback:" \
            "  xcrun notarytool store-credentials ${notary_profile} \\" \
            "    --apple-id <your-apple-id> --team-id <TEAMID> \\" \
            "    --password <app-specific-password>" \
