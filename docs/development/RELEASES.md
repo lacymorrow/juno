@@ -27,15 +27,20 @@ downloads the signed `.app`, replaces `/Applications/Juno.app` (old copy goes
 to the Trash) and opens it. `--no-install` just downloads. A commit already
 built is downloaded again instead of rebuilt.
 
-**Pushing a `v*` tag by hand no longer builds.** Since LAC-7145 the signing
-and notarization credentials live in a `release` GitHub Environment whose
-deployment branch policy allows `main` and nothing else, so a build on a tag
-ref is refused before its first step. The gate fails such a push rather than
-building it. To build a tag shipx already cut, dispatch it on main:
+**Pushing a `v*` tag by hand no longer builds.** Since LAC-7145 `build-tauri`
+runs in a `release` GitHub Environment whose deployment branch policy allows
+`main` and nothing else, so a build on a tag ref is refused before its first
+step. The gate fails such a push rather than building it. To build a tag shipx
+already cut, dispatch it on main:
 
 ```bash
 gh workflow run release-tauri.yml --ref main -f tag=v0.9.0 -f prerelease=false
 ```
+
+Note that only the *ref restriction* is live. Moving the credentials themselves
+into that environment is still outstanding and needs Lacy; see
+[Which of them belong in the `release` environment](#which-of-them-belong-in-the-release-environment)
+and LAC-7194.
 
 **That works only for a tag main already carries, at a `release:` commit.** The
 `release` environment restricts the ref the build *runs* on, not the ref it
@@ -178,10 +183,22 @@ held there cannot be read by a workflow on any other branch; a repo-scoped
 secret on a public repo can be read by anyone who can push a workflow file.
 
 Move these seven into **Settings → Environments → release → Environment
-secrets**, then delete the repository-scoped copy. Moving a value needs the
-plaintext, so it is Lacy's to do; nothing breaks in the meantime, because a job
-naming an environment still resolves a repo-scoped secret (measured, run
-42114623977).
+secrets**, then **delete the repository-scoped copy** — step two is the one that
+closes anything. Moving a value needs the plaintext, so it is Lacy's to do;
+nothing breaks in the meantime, because a job naming an environment still
+resolves a repo-scoped secret (measured, run 42114623977).
+
+That last property is also why the first attempt at this was inert with no
+failing check anywhere (LAC-7194): the environment was attached and documented
+as done, none of the seven actually moved, the only value that did move was
+`APPLE_TEAM_ID` which was meant to stay, and every build kept resolving the rest
+from repo scope exactly as before. The exposure itself is not new -- these have
+been repo-scoped since September -- but believing it closed is.
+`.github/workflows/secret-scope-guard.yml` is the executable form of this
+table — it runs a job that names no environment, so a secret it can still read
+is a secret that is still repo-scoped, and it fails when reality stops matching
+what is declared here. After moving a secret, move its name from `PENDING` to
+`ENV_ONLY` in that file; the guard reddens until you do.
 
 | Secret | Why it moves |
 |--------|--------------|

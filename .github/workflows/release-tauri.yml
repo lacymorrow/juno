@@ -222,14 +222,34 @@ jobs:
     # and the validation below would be silently skipped. Fail closed.
     if: needs.gate.outputs.build == 'true' && needs.gate.outputs.sha != ''
     runs-on: macos-latest
-    # The updater signing key (TAURI_SIGNING_PRIVATE_KEY,
-    # TAURI_SIGNING_PRIVATE_KEY_PASSWORD) and Apple's notarization credentials
-    # (APPLE_ID, APPLE_PASSWORD, APPLE_API_ISSUER, APPLE_API_KEY,
-    # APPLE_API_KEY_P8_B64) live in the `release` GitHub Environment, whose
-    # deployment branch policy allows `main` and nothing else. A workflow pushed
-    # to any other branch that names this environment is refused before its
-    # first step runs, so push access to the repo is no longer enough to read
-    # them (LAC-7145).
+    # This job runs in the `release` GitHub Environment, whose deployment
+    # branch policy allows `main` and nothing else. A workflow pushed to any
+    # other branch that names this environment is refused before its first step
+    # runs (LAC-7145). That half is real and load-bearing today: it is why a
+    # hand-pushed `v*` tag can no longer build at all, and why the gate above
+    # redirects such a tag to a dispatch on main.
+    #
+    # The OTHER half of LAC-7145 -- moving the credentials themselves out of
+    # repository scope -- has NOT happened. This comment asserted it had from
+    # the moment #947 merged, which is the part worth noticing: the claim was
+    # never true, and nothing in CI could have said so. Measured 2026-11-05,
+    # ~40 minutes after that merge: the `release` environment holds exactly one
+    # secret, APPLE_TEAM_ID (the one value this comment says stays behind),
+    # while the updater
+    # signing key (TAURI_SIGNING_PRIVATE_KEY,
+    # TAURI_SIGNING_PRIVATE_KEY_PASSWORD), APPLE_ID and APPLE_PASSWORD are all
+    # still repository-scoped and readable by any workflow on any branch. An
+    # Environment ADDS a resolution scope, it does not SUBTRACT the repository
+    # one, so this job resolves all of them from repo scope, the build behaves
+    # identically, and nothing fails or warns. Do NOT read the `environment:`
+    # line below as meaning these secrets are scoped: push access to this repo
+    # is still enough to read the signing key.
+    #
+    # Finishing it needs a human, because secret values are write-only and no
+    # API can copy one between scopes: LAC-7194 tracks the migration, and
+    # .github/workflows/secret-scope-guard.yml asserts the actual scope of
+    # every release credential on every push to main, so neither this comment
+    # nor the next migration can go quietly inert again.
     #
     # The signing key is the one that matters most, and it is read only here
     # (the two Build steps below). The app's updater verifies the minisign
@@ -248,7 +268,10 @@ jobs:
     # APPLE_TEAM_ID and the signing certificate itself stay repo-scoped. The
     # team ID is not a secret (it is embedded in the public signing identity
     # string), and build-branch.yml needs the certificate on arbitrary branches;
-    # see the note there for why that is the lesser risk.
+    # see the note there for why that is the lesser risk. The duplicate
+    # APPLE_TEAM_ID added to the `release` environment on 2026-11-05 is
+    # redundant rather than wrong -- the environment copy simply wins here --
+    # and the scope guard ignores it for that reason.
     environment: release
 
     steps:
