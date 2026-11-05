@@ -37,9 +37,20 @@ command to use instead:
 gh workflow run release-tauri.yml --ref main -f tag=v0.9.0 -f prerelease=false
 ```
 
-That is the same build on an allowed ref. `bun run release` (shipx) is
-unaffected: it writes a `release:` commit, which the gate already skips in
-favour of `release-every-merge.yml`'s dispatch on main.
+**That works only for a tag main already carries, at a `release:` commit.** The
+`release` environment restricts the ref the build *runs* on, not the ref it
+*checks out*, so `-f tag=` would otherwise have been a way to build any tree at
+all from an allowed ref. The gate therefore validates the input before anything
+is signed: it must be a real tag, pointing at a commit main already contains
+(`identical` or `behind` in `compare/main...<tag>`), whose message starts with
+`release:`. It is then resolved to a SHA once and the build checks out that SHA,
+so re-pointing the tag afterwards changes nothing. Anything else fails the gate
+by name (LAC-7166).
+
+In practice that means you dispatch a tag shipx already cut. To release a tree
+that has no such tag, merge it to main and let `release-every-merge.yml` cut
+one; `bun run release` (shipx) is unaffected either way, because it writes a
+`release:` commit that the gate skips in favour of that dispatch.
 
 **Latest is pinned to the highest version.** Builds finish out of order, and
 GitHub marks whichever full release was created last as Latest. After a full
@@ -156,6 +167,45 @@ is to ask for one by name.
 | `HOMEBREW_TAP_TOKEN` | Push to lacymorrow/homebrew-tap from CI | GitHub PAT with `repo` scope |
 | `GITHUB_TOKEN` | Create releases | Automatic |
 | `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | Code sign and notarize the release build | See [Code signing and notarization](#code-signing-and-notarization-apple) |
+
+### Which of them belong in the `release` environment
+
+This repo is public and every fleet agent pushes with admin-level credentials,
+and **admins bypass rulesets**. There is no admin bypass for an environment's
+deployment branch policy, which is why the `release` environment (deployment
+branches: `main` only) is the instrument here rather than another rule. A secret
+held there cannot be read by a workflow on any other branch; a repo-scoped
+secret on a public repo can be read by anyone who can push a workflow file.
+
+Move these seven into **Settings → Environments → release → Environment
+secrets**, then delete the repository-scoped copy. Moving a value needs the
+plaintext, so it is Lacy's to do; nothing breaks in the meantime, because a job
+naming an environment still resolves a repo-scoped secret (measured, run
+42114623977).
+
+| Secret | Why it moves |
+|--------|--------------|
+| `TAURI_SIGNING_PRIVATE_KEY` | **The updater trust root.** The app verifies only the minisign `pubkey` in `tauri.conf.json`, so this key alone can hand every install a malicious update. Read only by `release-tauri.yml`. |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Decrypts the above. |
+| `APPLE_ID`, `APPLE_PASSWORD` | Notarization. Read only by `release-tauri.yml` and `demo-build.yml`, both main-only. |
+| `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_P8_B64` | Notarization (App Store Connect key). **Do not exist yet** — create them directly in the environment, never at repo scope. |
+
+Staying at repo scope, deliberately:
+
+- `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` —
+  `build-branch.yml` imports the certificate on arbitrary branches and `exit 1`s
+  without it, so scoping these would take "run Juno from a branch" with them. A
+  leaked certificate with no notarization credential cannot produce a build that
+  opens on a stranger's Mac, and it is revocable.
+- `APPLE_TEAM_ID` — not a secret. It is embedded in the public signing identity
+  string.
+- `GITHUB_TOKEN` — minted per run, already scoped.
+
+Not yet assessed, same class, tracked separately: `RELEASE_SSH_KEY` (the deploy
+key that bypasses the `main` ruleset, read by `release-every-merge.yml`),
+`HOMEBREW_TAP_TOKEN` (`release-cua.yml`), `NPM_TOKEN`
+(`release-every-merge.yml`). Each is read by a workflow with no `environment:`
+key today, so moving them means scoping those jobs too.
 
 ## Local prerequisites
 
