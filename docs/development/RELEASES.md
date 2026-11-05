@@ -164,7 +164,9 @@ is to ask for one by name.
 |--------|---------|--------|
 | `TAURI_SIGNING_PRIVATE_KEY` | Sign updater artifacts in CI | `cat ~/.tauri/juno.key` |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Decrypt the private key | What you typed when generating the key |
-| `HOMEBREW_TAP_TOKEN` | Push to lacymorrow/homebrew-tap from CI | GitHub PAT with `repo` scope |
+| `HOMEBREW_TAP_TOKEN` | Push to lacymorrow/homebrew-tap from CI | GitHub PAT with `repo` scope. Stays repo-scoped, see below |
+| `RELEASE_SSH_KEY` | Deploy key that pushes the release commit past the main ruleset | `scripts/apply-branch-protection.sh`. Move to `release` env |
+| `NPM_TOKEN` | Publish juno-cua | npm automation token. Move to `release` env |
 | `GITHUB_TOKEN` | Create releases | Automatic |
 | `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | Code sign and notarize the release build | See [Code signing and notarization](#code-signing-and-notarization-apple) |
 
@@ -177,7 +179,7 @@ branches: `main` only) is the instrument here rather than another rule. A secret
 held there cannot be read by a workflow on any other branch; a repo-scoped
 secret on a public repo can be read by anyone who can push a workflow file.
 
-Move these seven into **Settings → Environments → release → Environment
+Move these nine into **Settings → Environments → release → Environment
 secrets**, then delete the repository-scoped copy. Moving a value needs the
 plaintext, so it is Lacy's to do; nothing breaks in the meantime, because a job
 naming an environment still resolves a repo-scoped secret (measured, run
@@ -188,6 +190,8 @@ naming an environment still resolves a repo-scoped secret (measured, run
 | `TAURI_SIGNING_PRIVATE_KEY` | **The updater trust root.** The app verifies only the minisign `pubkey` in `tauri.conf.json`, so this key alone can hand every install a malicious update. Read only by `release-tauri.yml`. |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Decrypts the above. |
 | `APPLE_ID`, `APPLE_PASSWORD` | Notarization. Read only by `release-tauri.yml` and `demo-build.yml`, both main-only. |
+| `RELEASE_SSH_KEY` | **A direct write to `main`.** The deploy key provisioned to bypass the `main` ruleset (see `docs/rules/branch-protection.md`). Read only by the `release` job of `release-every-merge.yml`, which now declares `environment: release` (LAC-7170). |
+| `NPM_TOKEN` | Publishes `juno-cua`. Same job, same reason. |
 | `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_P8_B64` | Notarization (App Store Connect key). **Do not exist yet** — create them directly in the environment, never at repo scope. |
 
 Staying at repo scope, deliberately:
@@ -201,11 +205,17 @@ Staying at repo scope, deliberately:
   string.
 - `GITHUB_TOKEN` — minted per run, already scoped.
 
-Not yet assessed, same class, tracked separately: `RELEASE_SSH_KEY` (the deploy
-key that bypasses the `main` ruleset, read by `release-every-merge.yml`),
-`HOMEBREW_TAP_TOKEN` (`release-cua.yml`), `NPM_TOKEN`
-(`release-every-merge.yml`). Each is read by a workflow with no `environment:`
-key today, so moving them means scoping those jobs too.
+- `HOMEBREW_TAP_TOKEN` — `release-cua.yml` runs on `cua-v*` tag pushes, and the
+  environment's policy allows `main` only. A `cua-v*` tag policy would protect
+  nothing: there is no tag ruleset, so anyone with push access can point such a
+  tag at any tree. It is a single-repo PAT for `homebrew-tap`, so the blast
+  radius is one formula. Moving it needs the CLI release dispatched from `main`
+  first, as `release-tauri.yml` is (LAC-7170).
+
+**Never add required reviewers to `release`.** `release-every-merge.yml`'s
+release job runs on every merge, so a reviewer rule would hold every merge
+behind a manual approval. Checked 2026-11-05: the environment's only protection
+rule is the branch policy.
 
 ## Local prerequisites
 
