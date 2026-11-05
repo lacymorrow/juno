@@ -1,0 +1,375 @@
+﻿{
+    "windows":  {
+                    "edge":  "196900",
+                    "vscode":  "131990",
+                    "wpf":  "132026",
+                    "cdp_page":  "count 0",
+                    "vscode_checkbox_found":  true
+                },
+    "summary":  [
+                    {
+                        "case":  "edge_msaa",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  0,
+                        "took_foreground":  0,
+                        "cursor_moved":  0,
+                        "methods":  [
+                                        "not found"
+                                    ]
+                    },
+                    {
+                        "case":  "vscode_msaa",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  0,
+                        "cursor_moved":  0,
+                        "methods":  [
+                                        "MSAA accDoDefaultAction"
+                                    ]
+                    }
+                ],
+    "trials":  [
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "edge_msaa",
+                       "valid":  true,
+                       "method":  "not found",
+                       "worked":  false,
+                       "effect":  [
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge",
+                                      "count 0 and 1 more page - Profile 1 - Microsoft​ Edge"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "On",
+                                      "Off"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "vscode_msaa",
+                       "valid":  true,
+                       "method":  "MSAA accDoDefaultAction",
+                       "worked":  true,
+                       "effect":  [
+                                      "Off",
+                                      "On"
+                                  ],
+                       "cursor_unchanged":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   }
+               ]
+}
