@@ -27,9 +27,19 @@ name: Demo build
 #   APPLE_CERTIFICATE            base64 of the Developer ID Application .p12
 #   APPLE_CERTIFICATE_PASSWORD   password for the .p12
 #   APPLE_SIGNING_IDENTITY       e.g. "Developer ID Application: Name (TEAMID)"
+#   APPLE_TEAM_ID                10-character team ID
+# and ONE notarization credential set, preferring the first:
+#   APPLE_API_ISSUER             App Store Connect issuer UUID
+#   APPLE_API_KEY                the 10-character Key ID
+#   APPLE_API_KEY_P8_B64         base64 of the AuthKey_<KeyID>.p8 itself
+# or the legacy pair:
 #   APPLE_ID                     Apple ID email for notarization
 #   APPLE_PASSWORD               app-specific password for that Apple ID
-#   APPLE_TEAM_ID                10-character team ID
+#
+# Same reasoning as release-tauri.yml: a password-backed notary profile
+# authenticates through appstoreconnect.apple.com/notary/v2/asp, which answers
+# 401 for a runner that cannot reach it and is indistinguishable in the log
+# from a bad secret. An API-key profile signs a JWT locally (LAC-6333).
 #
 # Unlike release-tauri.yml, this workflow does NOT go through tauri-action.
 # The demo build runs scripts/tauri-build.sh directly (bun run tauri:build
@@ -110,9 +120,39 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8_B64: ${{ secrets.APPLE_API_KEY_P8_B64 }}
         run: |
           set -euo pipefail
-          for var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+
+          # All three API-key secrets or none, so a partial set can never fall
+          # back to the password silently. Mirrors release-tauri.yml.
+          api_present=0
+          for var in APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8_B64; do
+            if [ -n "${!var:-}" ]; then
+              api_present=$((api_present + 1))
+            fi
+          done
+          if [ "$api_present" = 3 ]; then
+            notary_mode=api_key
+            required="APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_TEAM_ID"
+          elif [ "$api_present" = 0 ]; then
+            notary_mode=password
+            required="APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID"
+          else
+            missing=""
+            for var in APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8_B64; do
+              if [ -z "${!var:-}" ]; then
+                missing="$missing $var"
+              fi
+            done
+            echo "App Store Connect API key notarization is half-configured; missing secret(s):$missing" >&2
+            echo "Set all three, or none of them." >&2
+            exit 1
+          fi
+
+          for var in $required; do
             if [ -z "${!var:-}" ]; then
               echo "missing required secret: $var" >&2
               exit 1
@@ -142,14 +182,45 @@ jobs:
           rm -f "$cert_path"
 
           # notarytool reads this profile from the keychain when the build
-          # notarizes. Stored into the same keychain, non-interactively.
-          xcrun notarytool store-credentials juno \
-            --apple-id "$APPLE_ID" \
-            --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_PASSWORD" \
-            --keychain "$keychain"
+          # notarizes. Stored into the same keychain, non-interactively. The
+          # credential baked in here is what decides whether notarization goes
+          # through notary/v2/asp or a locally signed JWT.
+          if [ "$notary_mode" = api_key ]; then
+            key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+            ( umask 077; : > "$key_path" )
+            # openssl rather than `base64 --decode`: the long option is not in
+            # every macOS runner image's base64, and -A accepts the single line
+            # a GitHub secret stores.
+            if ! printf '%s' "$APPLE_API_KEY_P8_B64" | tr -d '\r\n ' | openssl base64 -d -A > "$key_path"; then
+              echo "APPLE_API_KEY_P8_B64 could not be base64-decoded." >&2
+              exit 1
+            fi
+            # The real guard: openssl base64 -d is lenient and exits 0 on
+            # garbage. Also catches storing the key's path, not its contents.
+            if ! grep -q 'BEGIN PRIVATE KEY' "$key_path"; then
+              echo "APPLE_API_KEY_P8_B64 did not decode to a PKCS#8 private key. It must be the base64 of the AuthKey_<KeyID>.p8 file's CONTENTS, not its path." >&2
+              exit 1
+            fi
+            # The key is removed whether or not store-credentials succeeds:
+            # under `set -e` a bare rm after the call would be skipped on
+            # failure, leaving private key material on the runner.
+            store_rc=0
+            xcrun notarytool store-credentials juno \
+              --key "$key_path" \
+              --key-id "$APPLE_API_KEY" \
+              --issuer "$APPLE_API_ISSUER" \
+              --keychain "$keychain" || store_rc=$?
+            rm -f "$key_path"
+            [ "$store_rc" -eq 0 ] || exit "$store_rc"
+          else
+            xcrun notarytool store-credentials juno \
+              --apple-id "$APPLE_ID" \
+              --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_PASSWORD" \
+              --keychain "$keychain"
+          fi
 
-          echo "Imported signing identity and stored notary profile 'juno'."
+          echo "Imported signing identity and stored notary profile 'juno' (${notary_mode})."
 
       # The build wrapper reads JUNO_DEMO_ANTHROPIC_KEY and JUNO_DEMO_COHORT,
       # signs with APPLE_SIGNING_IDENTITY, and notarizes + staples through the
