@@ -86,8 +86,30 @@ export function canSend({ draft, images, working }: { draft: string; images: num
 /** The tallest the shape gets. Taller answers scroll inside it. */
 export const SHAPE_MAX_HEIGHT = 400;
 
-/** Room beyond the composer for the skill suggestions. */
-export const SUGGESTION_ROOM = 200;
+/** One row of the skill suggestions, the list's own padding, and its gap from the shape. */
+export const SUGGESTION_ROW_H = 29;
+export const SUGGESTION_LIST_PAD = 20;
+export const SUGGESTION_GAP = 8;
+
+/**
+ * Suggestion rows the window keeps room for. This model stays free of the
+ * autocomplete hook (every test that mocks the hook would otherwise have to
+ * know about window geometry), so a test pins this against the list's own cap,
+ * `MAX_SUGGESTIONS`.
+ */
+export const SUGGESTION_ROWS = 6;
+
+/**
+ * Room beyond the composer for the skill suggestions: a full list, exactly.
+ *
+ * Derived, not a round number. It was 200 against a list that needs 202, so
+ * the tallest face with a full list overflowed its window by 2px and was
+ * quietly clipped. That became load-bearing when the Island started drawing
+ * nothing rather than drawing clipped (LAC-4832), where 2px of overflow would
+ * have hidden the whole island. Keep it derived and they cannot drift.
+ */
+export const SUGGESTION_ROOM =
+  SUGGESTION_GAP + SUGGESTION_ROWS * SUGGESTION_ROW_H + SUGGESTION_LIST_PAD;
 
 // === THE ROSTER ===
 
@@ -160,6 +182,104 @@ export function islandMaxFor(monitor: MonitorRect): Size {
 }
 
 /**
+ * Controls the hover capsule can carry: Talk, Open chat, and the wake phrase
+ * when one is set. The resting window is sized for all three, so showing them
+ * is a CSS morph and never a window change.
+ */
+export const HOVER_BUTTONS_MAX = 3;
+
+/**
+ * The compose face as a small bar: one line, narrow. Listening, working, an
+ * error, a reply being spoken: none of these needs a 360px box, only the words
+ * that say what is happening and the controls. Lacy, 2026-10-15.
+ */
+export const COMPACT_COMPOSE_WIDTH = 248;
+
+/**
+ * Why the Island's window follows what it draws, when the steady frame says a
+ * window is not resized per state (`docs/plans/appearance-steady-frame.md`).
+ * macOS lists a window by its frame, not by what it draws, and `islandMaxFor`
+ * is most of the display (83% of a 1440 x 900). An invisible, click-through
+ * Juno rectangle that size sits over every app behind it, and a screen-share
+ * picker (which hit-tests the window list rather than routing mouse events)
+ * offers Juno instead of the app underneath (LAC-4832). `sharingType = .none`
+ * does not help: the window stays in both `CGWindowList` and
+ * `SCShareableContent`. The frame itself is the only lever, so in every state
+ * the window is only as big as that state needs.
+ *
+ * A few sizes rather than one per shape, because each change is a hidden swap
+ * (`useIslandFrame`): the small window holds a whole spoken turn up to the
+ * answer, and a card holds the composer and a short answer.
+ */
+
+/** Past the shadow room, on the side the island grows: a tooltip and its gap. */
+const TOOLTIP_ROOM_Y = 16;
+/** The height of the smaller card window: the tallest composer, and a short answer. */
+const CARD_HEIGHT = 160;
+
+/**
+ * The activity flame rises up to 53 points above the shape (measured frame by
+ * frame in the preview, faintest smoke included; the bright part stops at 43).
+ * The shadow room gives it 24, and a window edge there cuts it in a hard line in
+ * mid-air. So the window keeps this much more above the shape, on every well.
+ * On the top row the menu bar stops the window first, 36 points above the shape,
+ * and the tips pass behind the menu bar like any other window's content.
+ */
+export const FLAME_HEADROOM = 32;
+/** Growing up, the tooltip room is already above the shape and counts toward it. */
+export const FLAME_HEADROOM_GROWING_UP = FLAME_HEADROOM - TOOLTIP_ROOM_Y;
+
+/** The window around a shape: its shadow, a tooltip, and the roster's room on both sides. */
+function frameAround(shape: Size, agents: number): Size {
+  // The bubble sits on whichever side the well leaves free, so the window
+  // keeps its room on both: a drop into a well that docks the other way must
+  // not need the window resized again.
+  const roster = rosterShown(agents) ? 2 * (ROSTER_GAP + rosterWidthFor(agents)) : 0;
+  return {
+    width: shape.width + roster + 2 * SHADOW_PAD,
+    height: shape.height + 2 * SHADOW_PAD + TOOLTIP_ROOM_Y,
+  };
+}
+
+/** What the small window holds: the capsule, its hover controls, the mini voice capsule, the small bar. */
+const SMALL_BOUNDS: Size = {
+  width: Math.max(hoverShapeFor(HOVER_BUTTONS_MAX).width, COMPACT_COMPOSE_WIDTH),
+  height: Math.max(HOVER_SHAPE.height, composerHeightFor(COMPOSER_LINE_PX)),
+};
+
+/** The small window, where the island spends nearly all of its time. */
+export function islandRestFrame(agents: number): Size {
+  return frameAround(SMALL_BOUNDS, agents);
+}
+
+export interface FrameInput {
+  face: Face;
+  /** The shape as drawn (`shapeFor`). */
+  shape: Size;
+  /** The small bar (`composeIsCompact`) or the mini voice capsule is showing. */
+  small: boolean;
+  agents: number;
+  /** The skill suggestions are open under the shape. */
+  suggestions: boolean;
+}
+
+/** The window this moment needs, and no more. */
+export function islandFrameFor({ face, shape, small, agents, suggestions }: FrameInput): Size {
+  const extra = suggestions ? SUGGESTION_ROOM : 0;
+  if (face === "idle" || small) {
+    const fits = shape.width <= SMALL_BOUNDS.width && shape.height <= SMALL_BOUNDS.height;
+    if (fits && !extra) return islandRestFrame(agents);
+    return frameAround(
+      { width: Math.max(SMALL_BOUNDS.width, shape.width), height: Math.max(SMALL_BOUNDS.height, shape.height) + extra },
+      agents,
+    );
+  }
+  if (face === "chat") return frameAround({ width: shape.width, height: shape.height + extra }, agents);
+  const height = shape.height > CARD_HEIGHT ? SHAPE_MAX_HEIGHT : CARD_HEIGHT;
+  return frameAround({ width: ISLAND_WIDTH, height: height + extra }, agents);
+}
+
+/**
  * The chat face inside a placed window, read back from the window's size
  * and capped to the room its well leaves to grow into
  * (the inverse of `islandMaxFor`), so every placement path (launch, drop,
@@ -188,6 +308,7 @@ export const ISLAND_STEADY_SPEC: SteadySpec = {
   rest: { width: IDLE_SHAPE.width + 2 * SHADOW_PAD, height: IDLE_SHAPE.height + 2 * SHADOW_PAD },
   max: islandMaxFor({ position: { x: 0, y: 0 }, size: { width: 1440, height: 900 } }),
   maxFor: islandMaxFor,
+  headroom: FLAME_HEADROOM,
   stage: {
     width: ISLAND_WIDTH + 2 * SHADOW_PAD,
     height: COMPOSER_LINE_PX + 2 * COMPOSER_PAD_Y + 2 * SHADOW_PAD,
@@ -310,13 +431,6 @@ export function faceFor({
   if (isRestingState(state)) return composerActive ? "compose" : "idle";
   return "compose";
 }
-
-/**
- * The compose face as a small bar: one line, narrow. Listening, working, an
- * error, a reply being spoken: none of these needs a 360px box, only the words
- * that say what is happening and the controls. Lacy, 2026-10-15.
- */
-export const COMPACT_COMPOSE_WIDTH = 248;
 
 export interface CompactInput {
   face: Face;

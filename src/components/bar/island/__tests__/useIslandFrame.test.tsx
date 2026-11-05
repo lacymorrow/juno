@@ -1,0 +1,314 @@
+import { useLayoutEffect, type ReactElement } from "react";
+import { act, render, type RenderResult } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { COMMANDS } from "@/lib/constants.generated";
+import type { Rect } from "@/lib/steadyFrame";
+
+/**
+ * The Island's window is most of the display (`islandMaxFor`: the chat face
+ * plus its room). Everything outside the drawn shape is transparent, and the
+ * only thing that stops that transparent acreage swallowing every click on
+ * the desktop is the hit regions this hook reports. So these tests are about
+ * one question: does Rust always learn what is drawn?
+ */
+
+const { invoke, monitors, windowPos } = vi.hoisted(() => ({
+  invoke: vi.fn((..._args: unknown[]): Promise<unknown> => Promise.resolve(null)),
+  monitors: { list: [] as unknown[], throws: false },
+  windowPos: { x: 0, y: 0 },
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invoke(...args) }));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async () => () => {}),
+  emit: vi.fn(async () => {}),
+}));
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    label: "floating-bar",
+    outerPosition: async () => ({ x: windowPos.x, y: windowPos.y }),
+    outerSize: async () => ({ width: 200, height: 100 }),
+    scaleFactor: async () => 1,
+    setPosition: vi.fn(async () => {}),
+    setSize: vi.fn(async () => {}),
+  }),
+  availableMonitors: async () => {
+    if (monitors.throws) throw new Error("no window server");
+    return monitors.list;
+  },
+}));
+
+import { useIslandFrame } from "../useIslandFrame";
+import {
+  FLAME_HEADROOM,
+  FLAME_HEADROOM_GROWING_UP,
+  IDLE_SHAPE,
+  ISLAND_WIDTH,
+  SHADOW_PAD,
+  islandFrameFor,
+  islandMaxFor,
+  islandRestFrame,
+} from "../islandModel";
+import { MENU_BAR_GAP } from "@/lib/snapWells";
+import { resetSteady, steadySwapsSettled, type Size } from "@/lib/steadyFrame";
+import { resetBarSnapState } from "@/hooks/useBarSnapWells";
+
+/** The capsule as IslandBar reports it at rest: the shape, plus its shadow room. */
+const IDLE_BLOCK = {
+  width: IDLE_SHAPE.width + 2 * SHADOW_PAD,
+  height: IDLE_SHAPE.height + 2 * SHADOW_PAD,
+};
+
+/** IslandBar reports from a layout effect, before the frame is painted. */
+/** The full window the hook last handed the page. */
+const seen: { full: { width: number; height: number } | null } = { full: null };
+
+function Harness({ hit, rest = islandRestFrame(0), settled = true }: { hit: Rect; rest?: Size; settled?: boolean }) {
+  const frame = useIslandFrame();
+  const { report } = frame;
+  useLayoutEffect(() => {
+    report(IDLE_BLOCK, hit, rest, settled);
+  }, [report, hit, rest, settled]);
+  useLayoutEffect(() => {
+    seen.full = frame.full.size;
+  });
+  return null;
+}
+
+/** Every `set_bar_hit_regions` call, in order. */
+const regionCalls = () =>
+  invoke.mock.calls
+    .filter((c) => c[0] === COMMANDS.BAR_SET_BAR_HIT_REGIONS)
+    .map((c) => (c[1] as { regions: Rect[] | null }).regions);
+
+/** Every frame put on the window, in order. */
+const frameCalls = () =>
+  invoke.mock.calls
+    .filter((c) => c[0] === COMMANDS.BAR_SET_BAR_FRAME)
+    .map((c) => c[1] as { x: number; y: number; width: number; height: number });
+
+const A_MONITOR = {
+  position: { x: 0, y: 0 },
+  size: { width: 1440, height: 900 },
+  scaleFactor: 1,
+};
+
+beforeEach(() => {
+  invoke.mockClear();
+  resetSteady();
+  resetBarSnapState();
+  monitors.list = [A_MONITOR];
+  monitors.throws = false;
+  windowPos.x = 0;
+  windowPos.y = 0;
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("useIslandFrame reports what the island draws", () => {
+  const capsule: Rect = { x: 100, y: 24, width: IDLE_SHAPE.width, height: IDLE_SHAPE.height };
+
+  it("tells Rust the drawn shape once the window is placed", async () => {
+    await act(async () => {
+      render(<Harness hit={capsule} />);
+    });
+    expect(regionCalls().at(-1)).toEqual([capsule]);
+  });
+
+  it("still reports when placement fails, so the window is not left swallowing clicks", async () => {
+    // No displays answer: `availableMonitors` is empty, which is the launch
+    // path's early return. The window is still on screen at its full size.
+    monitors.list = [];
+    await act(async () => {
+      render(<Harness hit={capsule} />);
+    });
+    expect(regionCalls().at(-1)).toEqual([capsule]);
+  });
+
+  it("still reports when the window server throws during placement", async () => {
+    monitors.throws = true;
+    await act(async () => {
+      render(<Harness hit={capsule} />);
+    });
+    expect(regionCalls().at(-1)).toEqual([capsule]);
+  });
+});
+
+/**
+ * LAC-4832. Rust routes mouse events away from the transparent part of the
+ * window, but macOS still lists the window at its full frame, so a
+ * display-sized Island is a display-sized rectangle to a screen-share picker
+ * and no app behind it can be picked. The window must therefore be the capsule
+ * while the capsule is all that is drawn.
+ */
+describe("useIslandFrame keeps the window to what the moment needs", () => {
+  const capsule: Rect = { x: 100, y: 24, width: IDLE_SHAPE.width, height: IDLE_SHAPE.height };
+  const rest = islandRestFrame(0);
+  const full = islandMaxFor(A_MONITOR);
+  const card = islandFrameFor({
+    face: "compose",
+    shape: { width: ISLAND_WIDTH, height: 36 },
+    small: false,
+    agents: 0,
+    suggestions: false,
+  });
+
+  it("places the resting frame at launch, never the display-sized one", async () => {
+    await act(async () => {
+      render(<Harness hit={capsule} rest={rest} />);
+    });
+    const placed = frameCalls();
+    expect(placed.length).toBeGreaterThan(0);
+    // Not one frame on the way to resting may be the full window: a blink
+    // would be cosmetic, but a display-sized frame on screen is the bug.
+    for (const f of placed) {
+      expect(f.width).toBe(rest.width);
+      expect(f.height).toBe(rest.height + MENU_BAR_GAP);
+    }
+  });
+
+  it("is a small fraction of the display it rests on", async () => {
+    await act(async () => {
+      render(<Harness hit={capsule} rest={rest} />);
+    });
+    const f = frameCalls().at(-1);
+    expect(f).toBeDefined();
+    const share = ((f?.width ?? 0) * (f?.height ?? 0)) / (A_MONITOR.size.width * A_MONITOR.size.height);
+    expect(share).toBeLessThan(0.03);
+    // And the regression it guards: the window it would otherwise have been.
+    const was = (full.width * full.height) / (A_MONITOR.size.width * A_MONITOR.size.height);
+    expect(was).toBeGreaterThan(0.5);
+  });
+
+  it("stays inside the full window's frame, so the capsule keeps its place", async () => {
+    await act(async () => {
+      render(<Harness hit={capsule} rest={rest} />);
+    });
+    const f = frameCalls().at(-1);
+    expect(f).toBeDefined();
+    // Top centre of a 1440 x 900 display: the resting window sits at the top
+    // of the full window's rect and centred on the same column.
+    expect((f?.x ?? 0) + (f?.width ?? 0) / 2).toBeCloseTo(A_MONITOR.size.width / 2, 0);
+    expect(f?.y).toBeGreaterThanOrEqual(0);
+    expect((f?.y ?? 0) + (f?.height ?? 0)).toBeLessThanOrEqual(A_MONITOR.size.height);
+  });
+
+  /** Re-report, then let the hidden two-frame swap finish. */
+  const settle = async (view: RenderResult, node: ReactElement) => {
+    await act(async () => {
+      view.rerender(node);
+    });
+    await act(async () => {
+      await steadySwapsSettled("floating-bar");
+    });
+  };
+
+  describe("the flame's room above the shape", () => {
+    const flameRoom = async (saved: { x: number; y: number } | null, monitor: unknown = A_MONITOR) => {
+      monitors.list = [monitor];
+      invoke.mockImplementation((command: unknown) =>
+        Promise.resolve(command === COMMANDS.BAR_GET_BAR_POSITION ? saved : null),
+      );
+      await act(async () => {
+        render(<Harness hit={capsule} rest={rest} />);
+      });
+      invoke.mockImplementation(() => Promise.resolve(null));
+      const f = frameCalls().at(-1);
+      const well = invoke.mock.calls.filter((c) => c[0] === COMMANDS.BAR_SET_BAR_POSITION).at(-1)?.[1] as {
+        x: number;
+        y: number;
+      };
+      return { f: f as NonNullable<typeof f>, well };
+    };
+
+    it("reaches the menu bar on the top row and no lower than it has to", async () => {
+      const { f, well } = await flameRoom(null);
+      expect(f.y).toBe(24);
+      expect(well.y - f.y).toBe(MENU_BAR_GAP);
+      expect(f.height).toBe(rest.height + MENU_BAR_GAP);
+    });
+
+    it("follows the display's real menu bar under a notch", async () => {
+      const notched = {
+        position: { x: 0, y: 0 },
+        size: { width: 1512, height: 982 },
+        scaleFactor: 1,
+        workArea: { position: { x: 0, y: 38 }, size: { width: 1512, height: 944 } },
+      };
+      const { f, well } = await flameRoom(null, notched);
+      expect(f.y).toBe(38);
+      expect(well.y - f.y).toBe(MENU_BAR_GAP);
+    });
+
+    it("gets all of it on a well that grows down, away from the menu bar", async () => {
+      // A display 2000 points tall has a stop a quarter of the way down, the one such well.
+      const tall = { position: { x: 0, y: 0 }, size: { width: 1200, height: 2000 }, scaleFactor: 1 };
+      const { f, well } = await flameRoom({ x: 16, y: 500 }, tall);
+      expect(well.y).toBeGreaterThan(300);
+      expect(well.y - f.y).toBe(FLAME_HEADROOM);
+      expect(f.height).toBe(rest.height + FLAME_HEADROOM);
+    });
+
+    it("grows the window upward on a well that grows up, leaving the shape where it was", async () => {
+      const { f, well } = await flameRoom({ x: 700, y: 880 });
+      expect(f.height).toBe(rest.height + FLAME_HEADROOM_GROWING_UP);
+      expect(f.y + f.height).toBe(well.y + IDLE_BLOCK.height);
+    });
+  });
+
+  it("grows for a face that needs it and shrinks back after, never to the display-sized window", async () => {
+    const view = await act(async () => render(<Harness hit={capsule} rest={rest} />));
+    expect(frameCalls().at(-1)?.width).toBe(rest.width);
+
+    await settle(view, <Harness hit={capsule} rest={card} />);
+    expect(frameCalls().at(-1)).toMatchObject({ width: card.width, height: card.height + MENU_BAR_GAP });
+
+    await settle(view, <Harness hit={capsule} rest={rest} />);
+    expect(frameCalls().at(-1)).toMatchObject({ width: rest.width, height: rest.height + MENU_BAR_GAP });
+
+    // The bug: at no point in that turn was the big window on screen.
+    for (const f of frameCalls()) expect(f.width).toBeLessThan(full.width);
+  });
+
+  it("grows at once, but shrinks only after the shape has", async () => {
+    const view = await act(async () => render(<Harness hit={capsule} rest={rest} />));
+    // Growing does not wait: the shape is about to need the room.
+    await settle(view, <Harness hit={capsule} rest={card} settled={false} />);
+    expect(frameCalls().at(-1)?.width).toBe(card.width);
+
+    // Shrinking waits: the window's edge would cut a shape still on its way down.
+    await settle(view, <Harness hit={capsule} rest={rest} settled={false} />);
+    expect(frameCalls().at(-1)?.width).toBe(card.width);
+
+    await settle(view, <Harness hit={capsule} rest={rest} settled />);
+    expect(frameCalls().at(-1)?.width).toBe(rest.width);
+  });
+
+  it("reversing before a swap lands does not take a small window for the full one", async () => {
+    const view = await act(async () => render(<Harness hit={capsule} rest={rest} />));
+    await act(async () => {
+      view.rerender(<Harness hit={capsule} rest={card} />);
+    });
+    await act(async () => {
+      view.rerender(<Harness hit={capsule} rest={rest} />);
+    });
+    await act(async () => {
+      await steadySwapsSettled("floating-bar");
+    });
+    expect(frameCalls().at(-1)?.width).toBe(rest.width);
+    // The chat face is sized from this, so it must still be the largest window.
+    expect(seen.full).toMatchObject({ width: full.width, height: full.height });
+    await settle(view, <Harness hit={capsule} rest={card} />);
+    expect(frameCalls().at(-1)?.width).toBe(card.width);
+  });
+
+  it("keeps reporting hit regions across a frame change", async () => {
+    const view = await act(async () => render(<Harness hit={capsule} rest={rest} />));
+    await settle(view, <Harness hit={capsule} rest={card} />);
+    // Whatever the frame, Rust still knows what is drawn: the transparent
+    // acreage of the grown window must not start swallowing clicks.
+    expect(regionCalls().at(-1)).toEqual([capsule]);
+  });
+});

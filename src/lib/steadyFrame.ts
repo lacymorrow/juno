@@ -33,7 +33,7 @@
  * Everything is in global desktop points, as in `snapWells.ts`.
  */
 
-import { screenInsets, type MonitorRect, type Well, type WellSlot } from "./snapWells";
+import { menuBarDepth, screenInsets, type MonitorRect, type Well, type WellSlot } from "./snapWells";
 import { dockAnchorX, dockGrowsUp, type WindowAnchorX } from "./barDock";
 
 /** A size in logical pixels. */
@@ -73,6 +73,12 @@ export interface SteadySpec {
    * the display's edges (`src/lib/notchWells.ts`).
    */
   wells?: "grid" | "notch";
+  /**
+   * Room to keep in the window above the resting footprint, where a look draws
+   * something past its own padding (the Island's flame). The footprint stays on
+   * its well; the window's top moves up, as far as the menu bar allows.
+   */
+  headroom?: number;
 }
 
 /** Where a look's window sits for one well, and where its content goes inside it. */
@@ -134,12 +140,17 @@ export function steadyLayout(
   // otherwise be uneven: a centre column then sits on a whole pixel, and so
   // does every edge that grows symmetrically around it.
   const max = spec.maxFor ? spec.maxFor(monitor) : spec.max;
+  // Only a block that grows down has its window's top edge right at the well.
+  // The menu bar stops the window, not the wells' gap under it.
+  const menuBarLine = monitor.position.y + menuBarDepth(monitor);
+  const headroom =
+    spec.headroom && !centerY && !growUp ? Math.max(0, Math.min(spec.headroom, well.y - menuBarLine)) : 0;
   const W = max.width + ((max.width - rw) % 2);
   const H = max.height + (centerY ? (max.height - rh) % 2 : 0);
 
   // Ideal offset of the resting footprint inside the window.
   const idealX = anchorX === "start" ? 0 : anchorX === "end" ? W - rw : Math.floor((W - rw) / 2);
-  const idealY = centerY ? Math.floor((H - rh) / 2) : growUp ? H - rh : 0;
+  const idealY = centerY ? Math.floor((H - rh) / 2) : growUp ? H - rh : headroom;
 
   // The window's ideal top-left, then clamped inside the inset area: the
   // display's real work area, so the top edge sits under this display's own
@@ -149,7 +160,7 @@ export function steadyLayout(
     spec.wells === "notch" ? { top: 0, right: 0, bottom: 0, left: 0 } : screenInsets(monitor, insets);
   const minX = monitor.position.x + inset.left;
   const maxX = monitor.position.x + monitor.size.width - inset.right - W;
-  const minY = monitor.position.y + inset.top;
+  const minY = headroom > 0 ? Math.min(monitor.position.y + inset.top, well.y - headroom) : monitor.position.y + inset.top;
   const maxY = monitor.position.y + monitor.size.height - inset.bottom - H;
   const clamp = (v: number, lo: number, hi: number) => (hi < lo ? lo : Math.min(hi, Math.max(lo, v)));
 
