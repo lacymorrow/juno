@@ -29,6 +29,14 @@ pub struct ScreenshotResult {
 
 /// Get cursor position in standard (API) coordinates for inclusion in screenshot results.
 /// Returns a human-readable string like "Cursor at (523, 341)." or None if unavailable.
+#[cfg(target_os = "windows")]
+fn get_cursor_position_text() -> Option<String> {
+    let (x, y) = computer_use_ai_sdk::platforms::windows::window_list::cursor_point()?;
+    let (std_x, std_y) =
+        coordinates::transform_screen_to_standard_coordinates(f64::from(x), f64::from(y));
+    Some(format!("Cursor at ({}, {}).", std_x as i32, std_y as i32))
+}
+
 #[cfg(target_os = "macos")]
 fn get_cursor_position_text() -> Option<String> {
     use core_graphics::event::CGEvent;
@@ -43,14 +51,19 @@ fn get_cursor_position_text() -> Option<String> {
     Some(format!("Cursor at ({}, {}).", std_x as i32, std_y as i32))
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub(crate) async fn capture_screenshot_command(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ScreenshotResult, String> {
     use base64::Engine;
+    #[cfg(target_os = "macos")]
     use computer_use_ai_sdk::platforms::macos::utils::{
+        capture_display_screenshot_buffer, capture_screenshot_buffer,
+    };
+    #[cfg(target_os = "windows")]
+    use computer_use_ai_sdk::platforms::windows::capture::{
         capture_display_screenshot_buffer, capture_screenshot_buffer,
     };
     use image::DynamicImage;
@@ -250,6 +263,20 @@ pub(crate) async fn capture_screenshot_command(
     }
 }
 
+/// The display the cursor is on, the same answer the macOS version gives.
+#[cfg(target_os = "windows")]
+fn get_display_dimensions() -> Result<(u32, u32, f64, f64, u32), String> {
+    let display = computer_use_ai_sdk::platforms::windows::window_list::current_display()
+        .ok_or_else(|| "Windows reports no display".to_string())?;
+    Ok((
+        display.width,
+        display.height,
+        f64::from(display.x),
+        f64::from(display.y),
+        display.id,
+    ))
+}
+
 /// Get display dimensions using macOS Core Graphics
 /// NEW: Now detects cursor position and returns info for the display containing the cursor
 #[cfg(target_os = "macos")]
@@ -320,10 +347,11 @@ fn get_display_dimensions() -> Result<(u32, u32, f64, f64, u32), String> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 #[tauri::command]
 pub(crate) async fn capture_screenshot_command(
     _app: DummyAppHandle,
+    _state: State<'_, AppState>,
 ) -> Result<ScreenshotResult, String> {
     // Use alias
     Err("Screenshot capture is only supported on macOS currently.".to_string())

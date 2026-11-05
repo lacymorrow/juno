@@ -282,6 +282,7 @@ mod tests {
         assert!(result.is_err(), "absolute escape must be refused");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_symlink_out_of_an_allowed_root_is_refused() {
         let inside = temp_root();
@@ -305,6 +306,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_symlinked_directory_out_of_an_allowed_root_cannot_be_listed_or_written_through() {
         let inside = temp_root();

@@ -1,0 +1,83 @@
+name: Windows app
+
+# Builds the Windows installer (LAC-6321, step 1 of docs/plans/windows.md).
+# Unsigned and without updater artifacts: this is a QA build for a Win11 VM,
+# not a release. It is outside the required checks until it is stable.
+on:
+  workflow_dispatch:
+  push:
+    branches: [LAC-6321-windows-app, LAC-6321-windows-computer-use]
+
+concurrency:
+  group: windows-app-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Windows x64 installer (NSIS)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      # The repo pins its toolchain in rust-toolchain.toml; read the pin so the
+      # Windows build uses the same compiler as the Mac ones.
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          [ -n "$channel" ] || { echo "no channel in rust-toolchain.toml" >&2; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust (pinned toolchain)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Cargo workspace root is the repo root, so the build lands in ./target.
+          workspaces: ". -> target"
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      # No updater artifacts: they need the minisign key, and nothing reads a
+      # Windows update feed yet.
+      - name: Build the installer
+        run: bunx tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: juno-windows-x64-setup
+          path: target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
+      # A panic at launch compiles fine. The upload comes first so a failed
+      # launch still leaves the installer to look at.
+      - name: Install and launch it
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList '/S' -Wait
+          $env:RUST_BACKTRACE = '1'
+          $p = Start-Process "$env:LOCALAPPDATA\Juno\juno.exe" -PassThru -RedirectStandardError juno-err.txt -RedirectStandardOutput juno-out.txt
+          Start-Sleep 30
+          if ($p.HasExited) {
+            Get-Content juno-err.txt -Tail 40
+            throw "Juno exited with code $($p.ExitCode) within 30 seconds of launch"
+          }
+          Stop-Process -Id $p.Id -Force
+          Write-Output "Juno stayed up for 30 seconds"

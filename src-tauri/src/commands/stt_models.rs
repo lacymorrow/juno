@@ -534,7 +534,9 @@ fn parakeet_id_for_dir(dir: &str) -> Option<&'static str> {
 
 /// Absolute path of a Whisper model if it is on disk (bundled or downloaded).
 fn whisper_path_on_disk(app: &AppHandle, def: &ModelDef) -> Option<PathBuf> {
-    if def.bundled {
+    // The bundled model ships on macOS only (tauri.windows.conf.json leaves it
+    // out while voice is off there), so elsewhere there is nothing to look up.
+    if def.bundled && cfg!(target_os = "macos") {
         let resolved = resolve_model_path(app, &format!("models/{}", def.filename));
         let path = PathBuf::from(resolved);
         if path.is_file() {
@@ -704,12 +706,15 @@ pub async fn stt_models_status(app: &AppHandle) -> Result<SttModelsStatus, Strin
     // large-v3-turbo on Intel, which the offer UI already renders.
     let recommended_on_disk =
         find_def(recommended_id(&arch)).is_some_and(|d| is_downloaded(app, d));
-    let offer_recommended = should_offer_recommended(
-        &arch,
-        settings.parakeet_download_declined,
-        &settings.stt_provider,
-        recommended_on_disk,
-    );
+    // Voice is macOS-only until the Windows voice step (docs/plans/windows.md,
+    // step 3), so nothing is offered for download anywhere else.
+    let offer_recommended = cfg!(target_os = "macos")
+        && should_offer_recommended(
+            &arch,
+            settings.parakeet_download_declined,
+            &settings.stt_provider,
+            recommended_on_disk,
+        );
 
     let quality_notice = run_quality_clock(app, &arch, &active_id, &settings).await;
 

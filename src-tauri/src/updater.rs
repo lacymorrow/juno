@@ -479,6 +479,12 @@ async fn run_check(app: &AppHandle, channel: UpdateChannel) -> Result<(), String
 /// than capturing them, so changing either in Settings takes effect at the
 /// next check instead of the next launch.
 pub fn spawn_schedule(app: AppHandle) {
+    // No Windows release is published yet, so the feeds have no
+    // windows-x86_64 entry and every check would only warn. Said once.
+    if cfg!(target_os = "windows") {
+        info!("[Updater] no Windows releases are published yet; scheduled checks are off");
+        return;
+    }
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(FIRST_CHECK_DELAY).await;
         loop {

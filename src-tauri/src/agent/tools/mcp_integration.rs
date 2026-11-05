@@ -302,7 +302,17 @@ impl MCPServerConnection {
         let program = crate::user_env::resolve_command(&self.config.command, &user_path)
             .map(|p| p.into_os_string())
             .unwrap_or_else(|| self.config.command.clone().into());
+        // On Windows an npx/uvx `.cmd` shim is started through what it runs,
+        // so stopping the server stops it rather than an orphaned cmd.exe,
+        // and no console window opens for it.
+        #[cfg(windows)]
+        let mut command = crate::user_env::windows_command(&program);
+        #[cfg(not(windows))]
         let mut command = Command::new(program);
+        {
+            use crate::platform::console_window::HideConsoleWindow;
+            command.hide_console_window();
+        }
         command.env("PATH", &user_path);
         command.args(&self.config.args);
         command.stdin(Stdio::piped());

@@ -41,6 +41,7 @@ pub mod mac_apps; // Reminders, Calendar and Contacts through EventKit and Conta
 pub mod mcp_integration;
 pub mod path_security; // Shared canonicalization + workspace-boundary enforcement for file tools
 pub mod permission_policy; // The one decision: does this action need asking, and what do we call it
+pub mod powershell; // The Windows shell tool and how its commands are read
 pub mod safari_tools; // Native Safari DOM automation with AppleScript injection
 pub mod self_awareness_tools; // Self-building and introspection capabilities
 pub mod settings_tool; // The agent drives its own Settings window (list, get, set, open, highlight)

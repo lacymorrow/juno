@@ -17,11 +17,13 @@ use serde::Serialize;
 /// Hard ceilings on one walk, so a huge tree (a long web page, a table with
 /// thousands of rows) costs a bounded amount of time and tokens.
 pub const MAX_NODES_VISITED: usize = 5_000;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const MAX_DEPTH: usize = 50;
 /// Longest value reported for an element, in characters.
 const MAX_VALUE_CHARS: usize = 200;
 /// Nodes read for one window fingerprint. Smaller than a full listing: it runs
 /// twice around every background click.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const FINGERPRINT_MAX_NODES: usize = 1_500;
 
 /// Roles whose value changes by itself (a playback position, a progress bar),
@@ -132,11 +134,17 @@ pub use macos_impl::{
     ElementRef,
 };
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+pub use crate::platforms::windows::ax::{
+    focus, live_frame, press, press_nearest, show_menu, window_elements, window_fingerprint,
+    ElementRef,
+};
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 #[derive(Clone, Debug)]
 pub struct ElementRef;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn window_elements(
     _pid: i32,
     _window_id: u32,
@@ -145,27 +153,27 @@ pub fn window_elements(
     Err("Reading a window's elements is only available on macOS".to_string())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn press(_element: &ElementRef) -> Result<(), String> {
     Err("Pressing an element is only available on macOS".to_string())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn show_menu(_element: &ElementRef) -> Result<(), String> {
     Err("Opening an element's menu is only available on macOS".to_string())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn focus(_element: &ElementRef) -> Result<(), String> {
     Err("Focusing an element is only available on macOS".to_string())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn live_frame(_element: &ElementRef) -> Option<(f64, f64, f64, f64)> {
     None
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn press_nearest(
     _element: &ElementRef,
     _kind: crate::click_verify::ClickKind,
@@ -173,7 +181,7 @@ pub fn press_nearest(
     Err("Pressing an element is only available on macOS".to_string())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn window_fingerprint(_pid: i32, _window_id: u32) -> Option<u64> {
     None
 }

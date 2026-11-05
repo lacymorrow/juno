@@ -223,9 +223,15 @@ fn capture_display_native(display_id: u32) -> Result<image::RgbaImage, String> {
         .map_err(|e| format!("Zoom capture failed: {}", e))
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn capture_display_native(display_id: u32) -> Result<image::RgbaImage, String> {
+    computer_use_ai_sdk::platforms::windows::capture::capture_display_screenshot_buffer(display_id)
+        .map_err(|e| format!("Zoom capture failed: {}", e))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn capture_display_native(_display_id: u32) -> Result<image::RgbaImage, String> {
-    Err("Zoom is only available on macOS".to_string())
+    Err("Zoom is not available on this platform".to_string())
 }
 
 /// Extract [x, y] from a computer tool input's "coordinate" field.
@@ -712,7 +718,7 @@ fn get_frontmost_app_name() -> Option<String> {
 
 #[cfg(not(target_os = "macos"))]
 fn get_frontmost_app_name() -> Option<String> {
-    None
+    computer_use_ai_sdk::window_target::native::frontmost().map(|window| window.owner)
 }
 
 /// Localized name of a running application, by pid.
@@ -749,8 +755,8 @@ fn app_name_for_pid(pid: i32) -> Option<String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn app_name_for_pid(_pid: i32) -> Option<String> {
-    None
+fn app_name_for_pid(pid: i32) -> Option<String> {
+    computer_use_ai_sdk::window_target::native::process_name(pid)
 }
 
 /// The app a consent prompt should name: the one the agent has been acting on,
@@ -902,8 +908,10 @@ fn click_target(x: f64, y: f64, window_pin: Option<PinnedWindow>) -> Option<(i32
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (x, y);
-        None
+        use computer_use_ai_sdk::window_target::{native, window_at_point};
+        let records = native::window_records();
+        window_at_point(&records, x, y, std::process::id() as i32)
+            .map(|window| (window.pid, Some(window.id)))
     }
 }
 
@@ -1242,7 +1250,9 @@ fn activate_app(pid: i32) {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn activate_app(_pid: i32) {}
+fn activate_app(pid: i32) {
+    computer_use_ai_sdk::window_target::native::activate(pid);
+}
 
 /// Run one click and check the app reacted.
 ///
@@ -1400,8 +1410,14 @@ fn resolve_named_window(input: &Value) -> Result<Option<NamedWindow>, String> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = selector;
-        Err("Window targeting is only available on macOS".to_string())
+        let records = computer_use_ai_sdk::window_target::native::window_records();
+        let own_pid = std::process::id() as i32;
+        let window =
+            computer_use_ai_sdk::window_target::select_window(&records, &selector, own_pid)?;
+        Ok(Some(NamedWindow {
+            pid: window.pid,
+            id: window.id,
+        }))
     }
 }
 
@@ -1418,6 +1434,25 @@ fn element_param(input: &Value) -> Option<String> {
         Value::Number(n) => Some(n.to_string()),
         _ => None,
     }
+}
+
+/// Controls that can't hold text. Posted characters aimed at one go nowhere and
+/// would still report success. A document stays out of this list: VS Code's
+/// editor is one, it has no value to write, and posted characters do reach it.
+fn never_takes_typing(role: &str) -> bool {
+    matches!(
+        role,
+        "statictext"
+            | "button"
+            | "menubutton"
+            | "menuitem"
+            | "row"
+            | "tab"
+            | "link"
+            | "image"
+            | "checkbox"
+            | "radiobutton"
+    )
 }
 
 /// Act on a control from the latest `elements` listing: press it or open its
@@ -1442,6 +1477,13 @@ async fn run_element_action(
         Ok(resolved) => resolved,
         Err(message) => return Ok(create_anthropic_error_response(message)),
     };
+    // MSAA's default action reports success on a disabled control and does
+    // nothing, so this is said before anything is pressed.
+    if cfg!(windows) && !resolved.info.enabled {
+        return Ok(create_anthropic_error_response(
+            "That control was disabled in your last listing, so nothing was pressed. List again if it may have changed.".to_string(),
+        ));
+    }
     let pin = resolved.pin;
     let (mut center_x, mut center_y) = resolved.screen_center();
     ax_targeting::set_working_window(pin);
@@ -1635,7 +1677,7 @@ fn frontmost_app_pid() -> Option<i32> {
 
 #[cfg(not(target_os = "macos"))]
 fn frontmost_app_pid() -> Option<i32> {
-    None
+    computer_use_ai_sdk::window_target::native::frontmost().map(|window| window.pid)
 }
 
 /// Why keyboard input must not be sent, if it must not.
@@ -2480,6 +2522,22 @@ pub async fn execute_computer_tool(
             }
         }
     }
+    // Windows drops input to an administrator window with no error at all, so
+    // the agent is told here and says so, rather than reporting a success that
+    // never happened.
+    #[cfg(not(target_os = "macos"))]
+    if is_ui_modifying_action(action) {
+        let aimed_at = window_pin.map(|pin| pin.pid).or_else(|| {
+            let (x, y) = extract_coordinate(&input)?;
+            let (screen_x, screen_y) = coordinates::transform_to_screen_coordinates(x, y);
+            click_target(screen_x, screen_y, None).map(|(pid, _)| pid)
+        });
+        if aimed_at.is_some_and(computer_use_ai_sdk::window_target::native::runs_elevated) {
+            return Ok(create_anthropic_error_response(
+                computer_use_ai_sdk::AutomationError::ElevatedWindow.to_string(),
+            ));
+        }
+    }
     // An `element` from the latest listing: act on the control itself. Typing
     // focuses the field inside its app (no raise), then goes through the
     // normal verified typing path, pinned to the field's window.
@@ -2491,6 +2549,12 @@ pub async fn execute_computer_tool(
             Ok(resolved) => resolved,
             Err(message) => return Ok(create_anthropic_error_response(message)),
         };
+        if cfg!(windows) && never_takes_typing(&resolved.info.role) {
+            return Ok(create_anthropic_error_response(format!(
+                "That control is a {}, so nothing was typed. Choose a textfield or textarea from a fresh elements listing.",
+                resolved.info.role
+            )));
+        }
         if let Err(reason) = computer_use_ai_sdk::ax_elements::focus(&resolved.element) {
             tracing::info!(
                 "[AX] Focus before typing failed ({}); typing into the window",
@@ -4231,10 +4295,35 @@ Always name the window (its title, its app's name, or its id). It becomes your w
     // Apply versioning to all tools
     tools.push(manager.apply_versioning(computer_tool));
     tools.push(app_controls_tool);
-    tools.push(manager.apply_versioning(bash_tool));
+    // Windows has no bash, and a tool that only fails is worse than none. Its
+    // shell is PowerShell, which Anthropic has no versioned type for.
+    if cfg!(target_os = "windows") {
+        tools.push(crate::agent::tools::powershell::tool_definition());
+    } else {
+        tools.push(manager.apply_versioning(bash_tool));
+    }
     tools.push(manager.apply_versioning(str_replace_tool));
 
+    #[cfg(target_os = "windows")]
+    for tool in &mut tools {
+        describe_for_windows(tool);
+    }
+
     tools
+}
+
+/// What the tool descriptions say that isn't so on Windows: `cmd` there is the
+/// Windows key, and the model reaches for whatever key the description names.
+#[cfg(target_os = "windows")]
+fn describe_for_windows(tool: &mut ToolDefinition) {
+    let windows = |text: &str| {
+        text.replace("'cmd+c'", "'ctrl+c'")
+            .replace("through macOS accessibility", "through UI Automation")
+    };
+    tool.description = windows(&tool.description);
+    if let Ok(schema) = serde_json::from_str(&windows(&tool.input_schema.to_string())) {
+        tool.input_schema = schema;
+    }
 }
 
 pub async fn register_anthropic_computer_use_tools(
@@ -4380,6 +4469,20 @@ pub async fn register_anthropic_computer_use_tools_with_version(
                     })
                     .await;
             }
+            #[cfg(target_os = "windows")]
+            crate::agent::tools::powershell::TOOL_NAME => {
+                provider
+                    .register_async_tool(tool, {
+                        let handle = app_handle.clone();
+                        move |input: Value| {
+                            let handle = handle.clone();
+                            async move {
+                                crate::agent::tools::powershell::execute(&handle, input).await
+                            }
+                        }
+                    })
+                    .await;
+            }
             "str_replace_based_edit_tool" => {
                 provider
                     .register_async_tool(tool, {
@@ -4406,6 +4509,16 @@ pub async fn register_anthropic_computer_use_tools_with_version(
 
 #[cfg(test)]
 mod hold_key_duration_tests {
+    #[test]
+    fn a_document_can_be_typed_into_and_a_label_cannot() {
+        use super::never_takes_typing;
+        assert!(!never_takes_typing("textarea"));
+        assert!(!never_takes_typing("textfield"));
+        assert!(!never_takes_typing("combobox"));
+        assert!(never_takes_typing("statictext"));
+        assert!(never_takes_typing("button"));
+    }
+
     use super::*;
 
     #[test]

@@ -9,6 +9,7 @@ import {
   ConfirmationRequest,
 } from "@/components/ai-elements/confirmation";
 import { useEventListener } from "@/hooks/useEventListener";
+import { IS_WINDOWS } from "@/lib/platform";
 import { COMMANDS, EVENTS } from "@/lib/constants.generated";
 import {
   describeRequest,
@@ -192,9 +193,8 @@ export function InputControlNotices({ className }: { className?: string }) {
             <div className={BODY}>
               <p className={TITLE}>Juno needs your mouse</p>
               <p className={DETAIL}>
-                Juno wants to {describeRequest(request)}. It cannot do this one in
-                the background, so it has to move your pointer for a moment. Your
-                cursor gets bigger while it works.
+                {describeRequest(request)} Juno has to move your pointer for a
+                moment.{IS_WINDOWS ? "" : " Your cursor gets bigger while it works."}
               </p>
               <ConfirmationActions className="flex-wrap">
                 <ConfirmationAction

@@ -265,7 +265,14 @@ fn place_overlay(app: &AppHandle, x: f64, y: f64) -> DisplayRect {
 }
 
 /// Bring up the click-through overlay. Cheap when it is already up.
+///
+/// Not on Windows yet: nothing there makes the window click-through or maps its
+/// frame to physical pixels, so it would sit over the person's whole screen and
+/// swallow their clicks. The agent's work doesn't depend on it.
 fn show_overlay(app: &AppHandle) {
+    if cfg!(target_os = "windows") {
+        return;
+    }
     if let Some(window) =
         app.get_webview_window(crate::window_management::DESKTOP_CURSOR_OVERLAY_LABEL)
     {
