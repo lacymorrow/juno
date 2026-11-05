@@ -849,6 +849,9 @@ jobs:
       issues: write
       # To name the step that actually failed, below, instead of guessing.
       actions: read
+      # To read the last published release, so the body can say how long the
+      # app has actually been unshippable rather than only naming this run.
+      contents: read
     steps:
       - name: Open, update or close the release-failure issue
         env:
@@ -876,6 +879,76 @@ jobs:
             --jq '.jobs[] | select(.conclusion == "failure") | .steps[] | select(.conclusion == "failure") | .name' \
             2>/dev/null | head -5 | paste -sd '; ' - || true)
 
+          # How many times has this already been reported, and how long has the
+          # app been unshippable? Both numbers were computable right here and
+          # neither was in the body, so every comment on the tracking issue read
+          # as if it were the first one. #926 collected 13 of them over six days
+          # while the advice below stayed frozen at the advice for a FIRST
+          # failure: twelve consecutive reds in, it was still saying "re-dispatch
+          # the tag first" and "replace APPLE_PASSWORD only when red on two runs
+          # in a row", a condition met on day one. A reader who followed it
+          # burned a macOS runner to re-learn the same 401 (LAC-7193).
+          #
+          # Every query below is best-effort. This step runs only when the
+          # release is already broken, so failing to COUNT the breakage must
+          # never also cost the report: hence the "|| true" and the ${x:-}
+          # fallbacks, which degrade to the first-failure wording.
+          #
+          # The workflow file name comes from the run rather than a literal, so
+          # renaming this file cannot silently pin the streak at 1 - a wrong
+          # number that looks right is the bug being fixed here.
+          wf=${GITHUB_WORKFLOW_REF:-}
+          wf=${wf%%@*}
+          wf=${wf##*/}
+          # This run is excluded by id rather than by status. It is normally
+          # still in_progress while its own report job runs, so a status filter
+          # appears to exclude it too - but only by luck, and a re-run or a
+          # timing change would then double-count it. Excluding the id is true
+          # either way. Verified by rendering this body against a completed run
+          # (LAC-7193): the status filter alone reported 13 for a streak of 12.
+          # The run id is read with jq's env.*, not --arg: "gh api --jq" takes a
+          # single expression string and silently treated a "--arg" after it as
+          # the expression, which collapsed the count to 1 (same run, LAC-7193).
+          prior=$(gh api "repos/$REPO/actions/workflows/${wf:-release-tauri.yml}/runs?event=workflow_dispatch&per_page=40" \
+            --jq '[.workflow_runs[] | select((.id | tostring) != env.GITHUB_RUN_ID) | select(.status == "completed") | .conclusion] | index("success") // length' \
+            2>/dev/null || true)
+          # "gh api" prints its error body on STDOUT, so 2>/dev/null does not
+          # keep a 404 out of $prior, and feeding that JSON to $(( )) aborted
+          # the whole step - which would have silenced the only alarm this job
+          # exists to raise. Caught by running this script against a renamed
+          # workflow (LAC-7193). Anything that is not a plain integer is 0.
+          case "${prior:-}" in
+            ''|*[!0-9]*) prior=0 ;;
+          esac
+          streak=$(( prior + 1 ))
+
+          # Prereleases included on purpose: `prerelease` is the default update
+          # channel, so a prerelease IS a shipped release to every install.
+          # cua-v* tags are a different product and would mask the outage.
+          last=$(gh api "repos/$REPO/releases?per_page=60" \
+            --jq 'map(select(.tag_name | startswith("v"))) | .[0] | "\(.tag_name) \(.published_at)"' \
+            2>/dev/null || true)
+          # Same hazard as $prior above: an error body would otherwise be
+          # reported as the last published release. Require "v<tag> <stamp>".
+          case "${last:-}" in
+            v*' '*) ;;
+            *) last='' ;;
+          esac
+          last_tag=${last%% *}
+          last_at=${last#* }
+          # No "|| echo $now" fallback here. That printed "0d 0h ago" on a
+          # date it could not parse, which reads as a freshly published release
+          # and would have hidden exactly the outage this is meant to surface.
+          # An unparsed date must degrade to saying so (LAC-7193).
+          stale="an unknown time"
+          if [ -n "${last_at:-}" ] && [ "$last_at" != "${last:-}" ]; then
+            was=$(date -u -d "$last_at" +%s 2>/dev/null || true)
+            if [ -n "$was" ]; then
+              now=$(date -u +%s)
+              stale="$(( (now - was) / 86400 ))d $(( ((now - was) % 86400) / 3600 ))h"
+            fi
+          fi
+
           # The paragraph below used to read "Notarization failures (HTTP 401)
           # mean the APPLE_PASSWORD app-specific password needs replacing". It
           # asserted a cause this job cannot observe, and it was wrong: that
@@ -886,27 +959,49 @@ jobs:
           # A heredoc, not a quoted string: this runs only when the release is
           # already broken, which is the worst possible moment to find an
           # escaping bug, so the text carries no shell metacharacters.
-          body=$(cat <<EOF
+          head=$(cat <<EOF
           The release build for $TAG failed, so nothing was published and nobody gets this version.
+
+          Consecutive failed release dispatches: $streak
+          Last published release: ${last_tag:-unknown}, $stale ago
 
           Run: $RUN_URL
           Failed step: ${failed:-unknown, see the run}
 
           Read that step's log before changing anything. On a notarization failure also read the "Configure Apple code signing" step, which PASSES and is therefore invisible to "gh run view --log-failed" - its warning lines are where a malformed credential gets named, and four runs in a row were misdiagnosed because nobody looked there (LAC-6333).
+          EOF
+          )
 
+          # The advice depends on the streak, because the right first move and
+          # the right twelfth move are opposites. Re-dispatching is correct once
+          # (a 401 really can be reachability) and wrong every time after.
+          if [ "$streak" -le 1 ]; then
+            advice=$(cat <<EOF
           A notarization "HTTP status code: 401" does not on its own mean APPLE_PASSWORD is wrong. The endpoint behind it, notary/v2/asp, IS the app-specific-password token exchange, so a runner that cannot reach Apple gets a 401 rather than a network error, and the same unchanged credential has succeeded within hours of a 401.
 
           But if the signing step warned that APPLE_PASSWORD does not match the app-specific-password shape, the 401 is already explained and re-dispatching will not clear it. Replace the secret.
 
-          Otherwise re-dispatch the tag first:
+          Otherwise re-dispatch the tag once:
 
               gh workflow run release-tauri.yml --ref main -f tag=$TAG -f prerelease=true
 
-          and replace APPLE_PASSWORD only when "Check the notary service" is red on two runs in a row.
-
-          The durable fix is the App Store Connect API key path (APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_P8_B64): it signs a JWT on the runner and never calls notary/v2/asp at all.
+          If that is also red, stop re-dispatching: this comment will say so, and name the credential to change instead.
           EOF
           )
+          else
+            advice=$(cat <<EOF
+          This is failure $streak in a row, so a transient fault is ruled out and re-dispatching has already been tried $streak times. Do not dispatch this tag again expecting a different result. Change a credential or the code first.
+
+          On a 401 from "Check the notary service", read APPLE_PASSWORD_SHAPE in the "Configure Apple code signing" log. "bad" means the stored value is not an app-specific password - those are always exactly 19 characters, xxxx-xxxx-xxxx-xxxx - and nothing but replacing it will clear this.
+
+          The durable fix is the App Store Connect API key path (APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_P8_B64): it signs a JWT on the runner and never calls notary/v2/asp at all. Those three are read from the \`release\` environment, so set them there, not at repo scope.
+          EOF
+          )
+          fi
+
+          body="$head
+
+          $advice"
           if [ -n "$open" ]; then
             gh issue comment "$open" --repo "$REPO" --body "$body"
           else
