@@ -91,6 +91,23 @@ jobs:
     needs: gate
     if: needs.gate.outputs.build == 'true'
     runs-on: macos-latest
+    # Apple's notarization credentials (APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID,
+    # APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_P8_B64) live in the
+    # `release` GitHub Environment, whose deployment branch policy allows `main`
+    # and nothing else. A workflow pushed to any other branch that names this
+    # environment is refused before its first step runs, so push access to the
+    # repo is no longer enough to read them (LAC-7145).
+    #
+    # `main` is the whole build path: release-every-merge.yml dispatches this
+    # workflow with --ref main, and the `v*` tag push hits the "already
+    # dispatched" gate above and skips. `v*` is deliberately NOT in the policy:
+    # there is no tag ruleset on this repo, so anyone with push access can point
+    # a v* tag at any tree, which would hand the environment straight back.
+    #
+    # The signing certificate itself stays repo-scoped. build-branch.yml needs
+    # it on arbitrary branches; see the note there for why that is the lesser
+    # risk.
+    environment: release
 
     steps:
       - uses: actions/checkout@v6
