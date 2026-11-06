@@ -523,7 +523,11 @@ pub fn standing_ask() -> Option<PermissionAsk> {
     let granted = Capability::from_key(&ask.permission)
         .is_some_and(|capability| process_answer(capability) == ProcessAnswer::Granted);
     if granted {
-        forget_standing_ask();
+        // Only this ask. The lock was released for the check above, so a newer
+        // need may have landed in that window, and clearing the slot wholesale
+        // would drop a question nobody has answered while `may_ask` stays
+        // quiet for five minutes: juno#946 again, in a narrower window.
+        forget_standing_ask_if(&ask);
         return None;
     }
     Some(ask)
@@ -534,6 +538,28 @@ pub fn standing_ask() -> Option<PermissionAsk> {
 pub fn forget_standing_ask() {
     if let Ok(mut slot) = STANDING.lock() {
         *slot = None;
+    }
+}
+
+/// Drop `ask` from a given slot, leaving a different one alone.
+///
+/// Split from the static for the same reason as [`may_ask_in`] and
+/// [`standing_ask_in`]: every test thread shares the slot, so the rule is
+/// tested over a slot of its own.
+fn forget_ask_in(slot: &mut Option<StandingAsk>, ask: &PermissionAsk) {
+    if slot.as_ref().is_some_and(|standing| &standing.ask == ask) {
+        *slot = None;
+    }
+}
+
+/// Take the standing ask away only if it is still the ask `ask` names.
+///
+/// What a grant uses, rather than [`forget_standing_ask`]: a grant answers one
+/// question, and the newest need is not it.
+fn forget_standing_ask_if(ask: &PermissionAsk) {
+    match STANDING.lock() {
+        Ok(mut slot) => forget_ask_in(&mut slot, ask),
+        Err(e) => tracing::error!("Could not drop the answered permission ask: {}", e),
     }
 }
 
@@ -901,6 +927,28 @@ mod tests {
         forget_standing_ask();
         let still_there = STANDING.lock().map(|slot| slot.is_some()).unwrap_or(false);
         assert!(!still_there, "Not now has to take the ask away for good");
+    }
+
+    #[test]
+    fn a_grant_drops_only_the_ask_it_answers() {
+        // `standing_ask` releases the lock before reaching macOS, so a newer
+        // need can land while the grant check runs. Clearing the slot wholesale
+        // there would lose a question nobody has answered, with `may_ask`
+        // already quiet about it: the reported bug, in a narrower window.
+        let now = Instant::now();
+        let answered = PermissionAsk::new(Capability::Microphone, "left_click");
+        let mut slot = standing(Capability::Accessibility, now);
+        forget_ask_in(&mut slot, &answered);
+        assert!(
+            slot.is_some(),
+            "a newer ask must survive an older one being granted"
+        );
+        let newer = slot
+            .as_ref()
+            .map(|standing| standing.ask.clone())
+            .expect("the newer ask is there");
+        forget_ask_in(&mut slot, &newer);
+        assert!(slot.is_none(), "the ask that was answered does go");
     }
 
     #[test]
