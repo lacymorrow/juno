@@ -222,3 +222,39 @@ jobs:
 
       - name: Check the voice plugin (x86_64)
         run: cargo check --manifest-path tauri-plugin-voice-transcription/Cargo.toml --all-targets --target x86_64-apple-darwin
+
+  # The release-failure report. It is the only thing that speaks when a release
+  # build dies, it is pure text generation from three API reads, and every bug
+  # it has had was a number that was wrong but looked right: a streak of 13
+  # reported as 1, then 13 reported for a streak of 12, then a floor printed as
+  # an exact total. That class is invisible to a reader and one render away from
+  # being caught, so it is rendered here.
+  #
+  # Cheap on purpose: bash and jq, both already on the runner, no network, about
+  # a second. It is a separate job rather than a step on `frontend` so that a
+  # red check names what actually broke.
+  release-report:
+    name: Release failure report (render)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      # The `workflows` job above lints every `run:` block's shell through
+      # actionlint, on the shellcheck preinstalled on ubuntu-latest, and says
+      # so in as many words. This script used to BE such a block, so
+      # extracting it to a file moved it out of that job's reach: actionlint
+      # lints workflow files, not scripts. Running the same preinstalled
+      # shellcheck here holds the script to exactly the standard it was held
+      # to inline - no more, so this does not become a stricter gate by
+      # accident, and no less, so the extraction is not a quiet loss of
+      # coverage.
+      #
+      # Not decoration. The "no jq $-variables" constraint the streak query is
+      # written around is an SC2016 finding, and a comment explaining a rule
+      # outlives the rule if nothing still enforces it (LAC-7209).
+      - name: Shellcheck
+        run: shellcheck scripts/release-failure-report.sh scripts/__tests__/release-failure-report.test.sh
+
+      - name: Render the report against stubbed gh
+        run: scripts/__tests__/release-failure-report.test.sh
