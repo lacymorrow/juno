@@ -251,7 +251,6 @@ jobs:
         id: locate
         run: |
           set -euo pipefail
-          # scratch: literal delimiter ${{ in a comment
           dmg="$(find "$GITHUB_WORKSPACE" -path '*/bundle/dmg/Juno-Demo-*.dmg' -type f | head -1)"
           [ -n "$dmg" ] || { echo "no demo DMG found" >&2; exit 1; }
           {
