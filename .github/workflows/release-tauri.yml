@@ -909,18 +909,51 @@ jobs:
           # The run id is read with jq's env.*, not --arg: "gh api --jq" takes a
           # single expression string and silently treated a "--arg" after it as
           # the expression, which collapsed the count to 1 (same run, LAC-7193).
+          #
+          # Cancelled runs are dropped rather than counted as failures. This
+          # job's own "if" refuses to report a cancelled build, so counting one
+          # as a failed dispatch would put a number in the body for a run that
+          # never got a body of its own. Dropping it also means a cancellation
+          # between two real failures neither breaks the streak nor pads it.
+          #
+          # The window is 40 runs, so a streak that fills it has no success to
+          # index against and "length" is then a FLOOR, not a total. jq marks
+          # that case with a trailing "+" and the body prints it: "40" where the
+          # truth is "40 or more" is the same class of wrong-number-that-looks-
+          # right as the two bugs above (LAC-7199).
+          #
+          # "index" is called twice rather than bound to a jq $-variable: a jq
+          # variable is indistinguishable from an unexpanded shell one inside
+          # the single-quoted expression, so actionlint reports SC2016 on it.
+          # main is actionlint-clean, and a first red check is only worth
+          # anything while it stays that way. Note also that a comment whose
+          # first word is the linter's own name is read as a directive, not as
+          # prose: that is SC1072, and it is an error, not an info.
           prior=$(gh api "repos/$REPO/actions/workflows/${wf:-release-tauri.yml}/runs?event=workflow_dispatch&per_page=40" \
-            --jq '[.workflow_runs[] | select((.id | tostring) != env.GITHUB_RUN_ID) | select(.status == "completed") | .conclusion] | index("success") // length' \
+            --jq '[.workflow_runs[] | select((.id | tostring) != env.GITHUB_RUN_ID) | select(.status == "completed") | select(.conclusion != "cancelled") | .conclusion] | if index("success") == null then "\(length)+" else "\(index("success"))" end' \
             2>/dev/null || true)
           # "gh api" prints its error body on STDOUT, so 2>/dev/null does not
           # keep a 404 out of $prior, and feeding that JSON to $(( )) aborted
           # the whole step - which would have silenced the only alarm this job
           # exists to raise. Caught by running this script against a renamed
-          # workflow (LAC-7193). Anything that is not a plain integer is 0.
+          # workflow (LAC-7193). Anything that is not a plain integer is 0, and
+          # such a value also loses its "+", so it cannot claim a floor it never
+          # measured. A floor of 0 loses it too: an empty window is not a streak
+          # that overflowed the window, it is no prior dispatch at all.
+          atleast=''
           case "${prior:-}" in
-            ''|*[!0-9]*) prior=0 ;;
+            *+) atleast='+'; prior=${prior%+} ;;
           esac
+          case "${prior:-}" in
+            ''|*[!0-9]*) prior=0; atleast='' ;;
+          esac
+          if [ "$prior" -eq 0 ]; then
+            atleast=''
+          fi
           streak=$(( prior + 1 ))
+          # What the body prints. $streak stays numeric so the comparison that
+          # picks the advice below still works.
+          streak_text="$streak$atleast"
 
           # Prereleases included on purpose: `prerelease` is the default update
           # channel, so a prerelease IS a shipped release to every install.
@@ -940,12 +973,15 @@ jobs:
           # date it could not parse, which reads as a freshly published release
           # and would have hidden exactly the outage this is meant to surface.
           # An unparsed date must degrade to saying so (LAC-7193).
-          stale="an unknown time"
+          # $stale carries its own tail, "ago" included, because the unparsed
+          # case must not take one: "an unknown time ago" reads as a measured
+          # interval rather than a missing measurement (LAC-7199).
+          stale="at an unknown time"
           if [ -n "${last_at:-}" ] && [ "$last_at" != "${last:-}" ]; then
             was=$(date -u -d "$last_at" +%s 2>/dev/null || true)
             if [ -n "$was" ]; then
               now=$(date -u +%s)
-              stale="$(( (now - was) / 86400 ))d $(( ((now - was) % 86400) / 3600 ))h"
+              stale="$(( (now - was) / 86400 ))d $(( ((now - was) % 86400) / 3600 ))h ago"
             fi
           fi
 
@@ -962,8 +998,8 @@ jobs:
           head=$(cat <<EOF
           The release build for $TAG failed, so nothing was published and nobody gets this version.
 
-          Consecutive failed release dispatches: $streak
-          Last published release: ${last_tag:-unknown}, $stale ago
+          Consecutive failed release dispatches: $streak_text
+          Last published release: ${last_tag:-unknown}, $stale
 
           Run: $RUN_URL
           Failed step: ${failed:-unknown, see the run}
@@ -990,7 +1026,7 @@ jobs:
           )
           else
             advice=$(cat <<EOF
-          This is failure $streak in a row, so a transient fault is ruled out and re-dispatching has already been tried $streak times. Do not dispatch this tag again expecting a different result. Change a credential or the code first.
+          This is failure $streak_text in a row, so re-dispatching is no longer a reasonable first move. Do not dispatch this tag again expecting a different result. Change a credential or the code first. Those dispatches may have carried different tags and failed for different reasons, so read the earlier comments here before settling on one cause.
 
           On a 401 from "Check the notary service", read APPLE_PASSWORD_SHAPE in the "Configure Apple code signing" log. "bad" means the stored value is not an app-specific password - those are always exactly 19 characters, xxxx-xxxx-xxxx-xxxx - and nothing but replacing it will clear this.
 
