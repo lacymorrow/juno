@@ -114,6 +114,14 @@ jobs:
           # so a CLI release must never become Latest.
           make_latest: false
 
+      # HOMEBREW_TAP_TOKEN stays repo-scoped on purpose (LAC-7170). This
+      # workflow runs on a `cua-v*` tag push, and the `release` environment's
+      # policy allows `main` only. Adding a `cua-v*` tag policy would not help:
+      # there is no tag ruleset, so anyone with push access can point such a
+      # tag at any tree, which hands the token straight back. Moving it needs
+      # this release dispatched from main (or a tag ruleset) first; the token
+      # is a single-repo PAT for homebrew-tap, so the blast radius is that
+      # formula.
       - name: Update Homebrew formula
         if: github.event_name == 'push'
         env:
