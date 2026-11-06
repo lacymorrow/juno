@@ -77,9 +77,11 @@ jobs:
       - name: Compute SHA256
         id: sha
         run: |
-          echo "arm64=$(shasum -a 256 juno-cua-darwin-arm64.tar.gz | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-          echo "x64=$(shasum -a 256 juno-cua-darwin-x64.tar.gz | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-          echo "universal=$(shasum -a 256 juno-cua-darwin-universal.tar.gz | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          {
+            echo "arm64=$(shasum -a 256 juno-cua-darwin-arm64.tar.gz | cut -d ' ' -f 1)"
+            echo "x64=$(shasum -a 256 juno-cua-darwin-x64.tar.gz | cut -d ' ' -f 1)"
+            echo "universal=$(shasum -a 256 juno-cua-darwin-universal.tar.gz | cut -d ' ' -f 1)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -130,7 +132,7 @@ jobs:
           X64_SHA="${{ steps.sha.outputs.x64 }}"
 
           # Clone the tap repo and update formula
-          git clone https://x-access-token:${GH_TOKEN}@github.com/lacymorrow/homebrew-tap.git /tmp/tap
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/lacymorrow/homebrew-tap.git" /tmp/tap
           cd /tmp/tap
 
           sed -i '' "s/version \".*\"/version \"${VERSION}\"/" Formula/juno-cua.rb

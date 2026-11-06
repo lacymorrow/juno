@@ -32,6 +32,14 @@ import { cn } from "@/lib/utils";
  *
  * Every one of those decisions is made in Rust. This file renders them.
  *
+ * Two ways in, because one was never enough. The `permission-needed` event is
+ * the nudge, and it only reaches a surface that is already mounted. Every
+ * surface that draws this card mounts later than that: the Pill opens its pane
+ * *on* the event, and the Island mounts the conversation only on its chat
+ * face. So on mount the card also asks Rust for the ask already standing
+ * (`standing_permission_ask`), which is what makes a late surface ask the
+ * question at all rather than showing an empty pane (juno#946).
+ *
  * It never takes focus and renders nothing when there is nothing to ask.
  */
 
@@ -96,8 +104,17 @@ export function PermissionNotice({ className }: { className?: string }) {
   // Polling only runs while a card is up and only for a bounded stretch.
   const pollStartedAt = useRef<number>(0);
 
+  /**
+   * True once the event has been heard here. The mount read below resolves a
+   * tick later, and the ask in front of the person wins over the one Rust is
+   * holding (they are the same ask in every case but a second need arriving in
+   * that tick).
+   */
+  const heardEventRef = useRef(false);
+
   useEventListener<PermissionNeeded>(EVENTS.PERMISSIONS_NEEDED, (payload) => {
     if (!payload?.permission) return;
+    heardEventRef.current = true;
     setNeeded((current) => {
       // A second ask for the same thing should not restart the card underneath
       // someone who is reading it.
@@ -110,6 +127,27 @@ export function PermissionNotice({ className }: { className?: string }) {
     setAnswered(false);
     pollStartedAt.current = Date.now();
   });
+
+  // The ask Juno made before this surface existed. Rust drops one that has
+  // gone stale or has since been granted, so anything that comes back here is
+  // a question still worth asking.
+  useEffect(() => {
+    let mounted = true;
+    void (async () => {
+      try {
+        const standing = await invoke<PermissionNeeded | null>(COMMANDS.PERMISSIONS_STANDING_ASK);
+        if (!mounted || heardEventRef.current || !standing?.permission) return;
+        pollStartedAt.current = Date.now();
+        setNeeded(standing);
+      } catch {
+        // Nothing standing is the ordinary answer, and a failed read says the
+        // same thing: say nothing.
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Watch for the switch being flipped in System Settings. The card turns into
   // a confirmation rather than vanishing, so the person sees it worked.
@@ -198,6 +236,9 @@ export function PermissionNotice({ className }: { className?: string }) {
     setNeeded(null);
     setError(null);
     setRestart(null);
+    // Not now is a real answer, so Rust forgets the ask. Without this the next
+    // surface to open would read it back and ask again.
+    void invoke(COMMANDS.PERMISSIONS_DISMISS_ASK).catch(() => {});
   }, []);
 
   if (!needed) return null;
