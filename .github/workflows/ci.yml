@@ -57,6 +57,42 @@ jobs:
       - name: Build frontend
         run: bun run build
 
+  # actionlint over every workflow file. A workflow GitHub cannot parse does not
+  # fail as a lint error: it fails with zero jobs, no log, and an `on:` that
+  # matches everything, so a `branches: [main]` filter silently stops applying
+  # and no check appears on the PR (LAC-7194 / PR #951: a literal expression
+  # delimiter inside a `run:` comment). YAML parsing and running the extracted
+  # script in bash both pass that file; only actionlint lexes the expressions.
+  #
+  # The binary is pinned and checked against the SHA256 published with the
+  # release, not pulled through a floating action or `:latest` image: this job
+  # runs on every PR in a public repo that holds the updater signing key.
+  # Bumping it means changing both lines below. shellcheck (preinstalled on
+  # ubuntu-latest) stays on so `run:` scripts are linted too.
+  workflows:
+    name: Workflows (actionlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ACTIONLINT_VERSION: "1.7.12"
+      ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install actionlint (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          dir="$(mktemp -d)"
+          curl -fsSL --retry 3 -o "$dir/$tarball" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${tarball}"
+          echo "${ACTIONLINT_SHA256}  $dir/$tarball" | sha256sum -c -
+          tar -xzf "$dir/$tarball" -C "$dir" actionlint
+          install -m 0755 "$dir/actionlint" /usr/local/bin/actionlint
+
+      - name: Lint workflows
+        run: actionlint -color
+
   # Rust backend: formatting, lints, and the hermetic test suite.
   #
   # This must run on macOS. src-tauri links Apple frameworks through
