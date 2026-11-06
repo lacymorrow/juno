@@ -253,9 +253,11 @@ jobs:
           set -euo pipefail
           dmg="$(find "$GITHUB_WORKSPACE" -path '*/bundle/dmg/Juno-Demo-*.dmg' -type f | head -1)"
           [ -n "$dmg" ] || { echo "no demo DMG found" >&2; exit 1; }
-          echo "dmg=$dmg" >> "$GITHUB_OUTPUT"
-          echo "name=$(basename "$dmg")" >> "$GITHUB_OUTPUT"
-          echo "manifest=${dmg%.dmg}.json" >> "$GITHUB_OUTPUT"
+          {
+            echo "dmg=$dmg"
+            echo "name=$(basename "$dmg")"
+            echo "manifest=${dmg%.dmg}.json"
+          } >> "$GITHUB_OUTPUT"
           echo "Found $dmg"
 
       # Always attach the DMG (and its manifest) to the run, so it is
