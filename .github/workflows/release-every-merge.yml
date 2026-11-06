@@ -237,6 +237,22 @@ jobs:
             -f prerelease=true
           echo "Requested a signed prerelease build of $TAG."
 
+      # The CLI release is dispatched from main too, not started by shipx's
+      # `cua-v*` tag push (LAC-7267): a job on a tag ref cannot name the
+      # main-only `release` environment, which is what HOMEBREW_TAP_TOKEN needs.
+      # release-cua.yml no longer has a push trigger, so this is the only start.
+      - name: Start the CLI release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          gh workflow run release-cua.yml \
+            --repo "$REPO" \
+            --ref main \
+            -f tag="cua-$TAG"
+          echo "Requested the juno-cua release for cua-$TAG."
+
       # There is deliberately no "confirm juno-cua reached the registry" step.
       #
       # #602 added one, and it was the only thing that ever failed this
