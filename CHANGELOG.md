@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.266] - 2026-11-06
+
+### Fixed
+
+- **permissions:** keep the ask, so a surface that opens later asks it (LAC-7015) (#954) (1387f1d1)
+- **ci:** close three silent-pass holes in the secret scope guard (LAC-7210) (#955) (adbdcb77)
+
 ## [0.8.261] - 2026-11-05
 
 ### Fixed
@@ -1785,7 +1792,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.261...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.266...HEAD
+[0.8.266]: https://github.com/lacymorrow/juno/compare/cua-v0.8.265...v0.8.266
 [0.8.261]: https://github.com/lacymorrow/juno/compare/cua-v0.8.260...v0.8.261
 [0.8.260]: https://github.com/lacymorrow/juno/compare/cua-v0.8.259...v0.8.260
 [0.8.259]: https://github.com/lacymorrow/juno/compare/cua-v0.8.258...v0.8.259
