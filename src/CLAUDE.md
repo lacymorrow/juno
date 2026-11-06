@@ -313,6 +313,47 @@ vi.mock('tauri-plugin-voice-transcription-api', () => ({
 }));
 ```
 
+### `findBy*` is not evidence that an effect has run
+
+A `findBy*` resolves off a MutationObserver callback, so it fires as soon as the
+node is in the DOM. React applies DOM mutations in the commit's mutation phase
+but queues `useEffect` callbacks on the Scheduler as a **separate task**, so
+"the node exists" and "the effect has run" are two different moments. Anything a
+passive effect writes, a captured `listen` handler or a mount counter, can still
+be unset when the `findBy*` resolves. It is rare enough to pass locally and
+common enough on a loaded CI runner to redden a PR that cannot have caused it:
+LAC-4629 did that to #828 (a Rust-only change) and #942 (two workflow files).
+
+```typescript
+// WRONG: reads a mount counter / handler map in the gap
+await screen.findByTestId("section-voice");
+expect(voiceMounts).toHaveBeenCalledTimes(1);
+const handler = handlers.get("some-event");   // sometimes undefined
+
+// CORRECT: wait for the side effect itself, not for the DOM
+await waitFor(() => expect(voiceMounts).toHaveBeenCalledTimes(1));
+await waitFor(() => expect(handlers.has("some-event")).toBe(true));
+const handler = handlers.get("some-event");
+```
+
+Never fire a captured handler through `?.()`. If it is not registered yet the
+call silently no-ops and the failure surfaces as an unrelated assertion several
+lines later, pointing nowhere near the cause. Wait for it, then call it
+unconditionally and throw if it is missing.
+
+A test that mocks `@/hooks/useEventListener` itself (rather than `listen`)
+registers during *render*, which `render`/`renderHook` wrap in `act`, so it has
+no such gap and needs no wait.
+
+**When the awaited node is on the first commit, mock `listen` so it resolves on
+a later task**, as `bar/__tests__/debugWindowOutline.test.tsx` does. A mock that
+registers synchronously lets an assertion with no wait pass locally and still
+fail under load, so the wait does not guard its own absence. This only bites
+first-commit nodes: where the awaited node arrives after an awaited `invoke`
+(`settings/__tests__/agent-navigation.test.tsx`), RTL's polling has already
+drained the timer queue, so a deferred mock changes nothing and is not worth
+the churn.
+
 ## UI/UX Patterns
 
 ### Design System

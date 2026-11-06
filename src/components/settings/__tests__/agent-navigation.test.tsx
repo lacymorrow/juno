@@ -229,10 +229,18 @@ describe("the agent points the Settings window", () => {
     backend({ pane: "voice", row: null, reload: false });
     render(<ModularSettingsWindow />);
     expect(await screen.findByTestId("section-voice")).toBeTruthy();
-    expect(voiceMounts).toHaveBeenCalledTimes(1);
+    // `findBy*` resolves on the DOM node, and React commits the node a task
+    // before it flushes the passive effect that counts the mount, so the count
+    // is waited for rather than read (LAC-4629).
+    await waitFor(() => expect(voiceMounts).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(handlers().has(SETTINGS.EVENTS_SETTINGS_NAVIGATE)).toBe(true),
+    );
 
+    const navigate = handlers().get(SETTINGS.EVENTS_SETTINGS_NAVIGATE);
+    if (!navigate) throw new Error("the window registered no navigate listener");
     act(() => {
-      handlers().get(SETTINGS.EVENTS_SETTINGS_NAVIGATE)?.({
+      navigate({
         payload: { pane: "voice", row: "juno-voice", reload: true },
       });
     });
