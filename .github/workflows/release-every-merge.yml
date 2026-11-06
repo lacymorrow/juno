@@ -119,6 +119,22 @@ jobs:
     needs: gate
     if: needs.gate.outputs.release == 'true'
     runs-on: ubuntu-latest
+    # RELEASE_SSH_KEY (the deploy key that bypasses the main ruleset) and
+    # NPM_TOKEN are read below. This job only ever runs on main: `workflow_run`
+    # jobs get the default branch as their ref, and the trigger filters to
+    # `branches: [main]`. The `release` environment's deployment branch policy
+    # allows `main` alone, so a workflow pushed to any other branch that names
+    # these secrets is refused before its first step (LAC-7170, same
+    # instrument as release-tauri.yml / LAC-7145).
+    #
+    # The `release` environment must NEVER carry required reviewers: this job
+    # runs on every merge, so a reviewer rule would hold every release behind a
+    # manual approval. Checked 2026-11-05: its only protection rule is the
+    # branch policy.
+    #
+    # Safe to land before the values move: a job naming an environment still
+    # resolves a repo-scoped secret of the same name.
+    environment: release
     steps:
       - uses: actions/checkout@v6
         with:
