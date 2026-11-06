@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import {
   AlertCircle,
-  Command,
+  ChevronDown,
   Globe,
   Keyboard,
   Mic,
@@ -22,7 +22,8 @@ import { Switch } from "@/components/ui/switch";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -107,10 +108,36 @@ const GESTURE_ENDING: Record<Gesture, string> = {
 };
 
 const ALL_GESTURES: Gesture[] = ["hold", "tap", "say"];
+
+/**
+ * The gestures a key or mouse row can have. A wake phrase is left out on
+ * purpose: it is a different kind of row, with a phrase where the key goes,
+ * so offering it as another gesture would quietly throw a recorded key away.
+ */
+const KEY_GESTURES: Gesture[] = ALL_GESTURES.filter((g) => g !== "say");
 const ALL_TARGETS: TriggerTarget[] = ["agent", "dictation"];
 
 const comboLabel = (gesture: Gesture, target: TriggerTarget) =>
   `${GESTURE_LABEL[gesture]} ${TARGET_LABEL[target]}`;
+
+/**
+ * The target as the bare thing it does. The sentence on screen supplies the
+ * "to" itself, so the word somebody picks from a menu is "dictate", not "to
+ * dictate". Derived from the Rust mirror rather than written out again, so the
+ * two cannot drift apart.
+ */
+const targetWord = (target: TriggerTarget) =>
+  TARGET_LABEL[target].replace(/^to /, "");
+
+/**
+ * The whole row read aloud, key included: "Hold Fn (globe) to talk to Juno".
+ * It is the row's accessible name, so a screen reader hears the sentence
+ * somebody with eyes reads rather than a pile of unlabelled controls.
+ */
+const sentenceLabel = (trigger: Trigger) =>
+  trigger.gesture === "say"
+    ? `Say "${trigger.require_hey_prefix ? "hey " : ""}${trigger.phrase || "…"}" ${TARGET_LABEL[trigger.target]}`
+    : `${GESTURE_LABEL[trigger.gesture]} ${bindingLabel(trigger.binding)} ${TARGET_LABEL[trigger.target]}`;
 
 const errStr = (e: unknown) =>
   typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
@@ -216,6 +243,34 @@ function bindingLabel(binding: Binding | null): string {
     return binding.shortcut || "Set binding";
   }
   return mouseLabel(binding.button);
+}
+
+/**
+ * The keys that can only ever be held, never tapped. Mirrors
+ * `ModifierKey::hold_only` in Rust: Control and the right-hand Option key are
+ * ordinary shortcut ingredients, so counting a tap on one would fire Juno on
+ * every Control-click. A chord may be tapped, because the monitor only counts
+ * a tap whose keys came up with nothing else pressed in between.
+ *
+ * `triggers_hold_only_matches_rust.test.ts` reads the Rust source and fails if
+ * these two lists stop agreeing.
+ */
+const HOLD_ONLY_MODIFIERS = ["Control", "Right Option"];
+
+/**
+ * Why this binding cannot be tapped, or null when it can be.
+ *
+ * The sentence is the one `triggers::issues` refuses the save with, so the
+ * greyed-out gesture and the refusal it is preventing read identically. Nobody
+ * should be able to pick Tap and then be told no: the menu says no first.
+ */
+function holdOnlyReason(binding: Binding | null): string | null {
+  if (binding?.kind !== "keyboard") return null;
+  const set = modifierSet(binding.shortcut);
+  if (!set || set.length !== 1 || !HOLD_ONLY_MODIFIERS.includes(set[0])) {
+    return null;
+  }
+  return `"${bindingLabel(binding)}" can only be held, not tapped.`;
 }
 
 /**
@@ -494,14 +549,27 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
     [triggers, editingKey, applyTriggers],
   );
 
-  // Every gesture, for every target. Nothing is filtered out: a row is its own
-  // identity now, so two Hold rows on two different keys are an ordinary pair
-  // rather than a duplicate. Which gestures may share one *key* is the
-  // backend's table, and a refusal names the row that already has it.
-  const addable: Array<{ gesture: Gesture; target: TriggerTarget }> = [];
-  for (const gesture of ALL_GESTURES)
-    if (advanced || gesture !== "say")
-      for (const target of ALL_TARGETS) addable.push({ gesture, target });
+  // Adding is one press, not a choice between six. This used to be a menu of
+  // every gesture crossed with every target, because a row's words could not
+  // be changed once it existed: picking the wrong one meant deleting the row
+  // and starting again, so the menu had to be right first time. Now every word
+  // in a sentence is editable where it is read, so the button adds the next
+  // sentence nobody has yet and opens the recorder on it, and anything about
+  // it that is wrong is a word away from being right.
+  const taken = new Set(triggers.map((t) => `${t.gesture}:${t.target}`));
+  const nextSentence = (() => {
+    for (const gesture of KEY_GESTURES)
+      for (const target of ALL_TARGETS)
+        if (!taken.has(`${gesture}:${target}`)) return { gesture, target };
+    return { gesture: "hold" as Gesture, target: "agent" as TriggerTarget };
+  })();
+
+  // A wake phrase is a different kind of row, not another gesture, so it is
+  // added separately and only where it is offered at all. One per target,
+  // because two rows cannot hold the same phrase and a blank one cannot save.
+  const nextSayTarget = advanced
+    ? (ALL_TARGETS.find((target) => !taken.has(`say:${target}`)) ?? null)
+    : null;
 
   const visibleTriggers = advanced
     ? triggers
@@ -540,30 +608,28 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
     );
   }
 
-  const addMenu = (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button size="sm">
-          <Plus className="size-3.5" />
-          Add shortcut
+  const addButtons = (
+    <>
+      {nextSayTarget && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void addTrigger("say", nextSayTarget)}
+        >
+          <Mic className="size-3.5" />
+          Add wake phrase
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64">
-        {addable.map(({ gesture, target }) => (
-          <DropdownMenuItem
-            key={`${gesture}:${target}`}
-            onSelect={() => void addTrigger(gesture, target)}
-          >
-            {gesture === "say" ? (
-              <Mic className="size-3.5 text-muted-foreground" />
-            ) : (
-              <Keyboard className="size-3.5 text-muted-foreground" />
-            )}
-            {comboLabel(gesture, target)}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      )}
+      <Button
+        size="sm"
+        onClick={() =>
+          void addTrigger(nextSentence.gesture, nextSentence.target)
+        }
+      >
+        <Plus className="size-3.5" />
+        Add shortcut
+      </Button>
+    </>
   );
 
   /* ------------------------------ empty state ---------------------------- */
@@ -584,7 +650,9 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
                   : "A shortcut is how you summon Juno: a key or a mouse button."}
               </p>
             </div>
-            {addMenu}
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {addButtons}
+            </div>
           </div>
         </SettingsGroup>
       </div>
@@ -610,7 +678,7 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
         }
       >
         {visibleTriggers.map((trigger) => (
-          <TriggerRow
+          <TriggerSentence
             key={trigger.id}
             anchor={anchors.get(trigger.id)}
             trigger={trigger}
@@ -655,18 +723,107 @@ export default function TriggersSettings({ settings }: SettingsSectionProps) {
           otherwise, and a key that already does nothing needs no advice. */}
       {usesFn && globeNeedsSetup && <GlobeKeyNote />}
 
-      <div className="flex items-center justify-end gap-3 px-1">
-        {addMenu}
+      <div className="flex items-center justify-end gap-2 px-1">
+        {addButtons}
       </div>
     </div>
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/* Row                                                                        */
+/* One editable word                                                          */
 /* -------------------------------------------------------------------------- */
 
-interface TriggerRowProps {
+interface WordOption<T extends string> {
+  value: T;
+  label: string;
+  /**
+   * Why this word cannot be chosen, from the same rule the save refuses on,
+   * or null when it can be. Shown under the greyed word, where the choice is.
+   */
+  blocked?: string | null;
+}
+
+/**
+ * One word in a sentence that can be swapped for another.
+ *
+ * It reads as the word it stands for, not as a form control: no border, no
+ * background until the pointer is on it. The chevron is the whole affordance,
+ * because the sentence is the thing being read and a row of outlined selects
+ * would stop it being a sentence.
+ *
+ * A blocked word stays focusable (`aria-disabled` rather than `disabled`,
+ * which Radix skips over) so somebody arrowing through the menu hears why it
+ * cannot be picked instead of finding the option missing.
+ */
+function SentenceWord<T extends string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+}: {
+  value: T;
+  options: Array<WordOption<T>>;
+  onChange: (next: T) => void;
+  ariaLabel: string;
+}) {
+  const current = options.find((o) => o.value === value);
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={`${ariaLabel} (currently ${current?.label ?? value})`}
+          className={cn(
+            // Never shrinks: these are three or four known words, so the
+            // sentence wraps to the next line rather than eating one of them.
+            "-mx-0.5 inline-flex shrink-0 items-center gap-0.5 rounded-[5px] px-1 py-px",
+            "hover:bg-accent focus-visible:outline-none focus-visible:ring-[1.5px] focus-visible:ring-ring",
+            "data-[state=open]:bg-accent",
+          )}
+        >
+          <span className="whitespace-nowrap">{current?.label ?? value}</span>
+          <ChevronDown className="size-3 shrink-0 text-muted-foreground/70" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-60">
+        <DropdownMenuRadioGroup value={value}>
+          {options.map((option) => (
+            <DropdownMenuRadioItem
+              key={option.value}
+              value={option.value}
+              aria-disabled={option.blocked ? true : undefined}
+              onSelect={(e) => {
+                if (option.blocked) {
+                  e.preventDefault();
+                  return;
+                }
+                onChange(option.value);
+              }}
+              className={cn("items-start", option.blocked && "opacity-55")}
+            >
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span>{option.label}</span>
+                {option.blocked && (
+                  <span className="text-[11px] leading-snug text-muted-foreground">
+                    {option.blocked}
+                  </span>
+                )}
+              </span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* One sentence                                                              */
+/* -------------------------------------------------------------------------- */
+
+interface TriggerSentenceProps {
   trigger: Trigger;
   editing: boolean;
   bindingTab: BindingTab;
@@ -711,7 +868,7 @@ function triggerAnchors(triggers: Trigger[]): Map<string, string> {
   return anchors;
 }
 
-function TriggerRow({
+function TriggerSentence({
   anchor,
   trigger,
   editing,
@@ -724,19 +881,27 @@ function TriggerRow({
   onPatch,
   onSetBinding,
   onRemove,
-}: TriggerRowProps) {
+}: TriggerSentenceProps) {
   const key = trigger.id;
   const isVoice = trigger.gesture === "say";
 
-  const GestureIcon = isVoice
-    ? Mic
-    : trigger.binding?.kind === "mouse"
-      ? MousePointer2
-      : trigger.gesture === "tap"
-        ? Command
-        : Keyboard;
-
   const setBindingNow = (binding: Binding | null) => onSetBinding(key, binding);
+
+  // The gestures this row could have, and why it cannot have one. Tap is the
+  // only gesture a key can refuse, and `holdOnlyReason` is the sentence the
+  // save would refuse with, so the menu says no before anything is saved.
+  const gestureOptions: Array<WordOption<Gesture>> = KEY_GESTURES.map(
+    (gesture) => ({
+      value: gesture,
+      label: GESTURE_LABEL[gesture],
+      blocked: gesture === "tap" ? holdOnlyReason(trigger.binding) : null,
+    }),
+  );
+
+  // Nothing can forbid a target: no rule in `triggers::issues` reads one.
+  const targetOptions: Array<WordOption<TriggerTarget>> = ALL_TARGETS.map(
+    (target) => ({ value: target, label: targetWord(target) }),
+  );
 
   return (
     <div
@@ -747,59 +912,109 @@ function TriggerRow({
           "scroll-mt-16 transition-colors duration-300 motion-reduce:transition-none",
       )}
     >
+      {/* No icon column. Every key row carried the same keyboard glyph in a
+          teal tile, which said nothing the sentence does not say better and
+          repeated the on/off the switch already shows. The sentence starts
+          the row. */}
       <div className="flex items-center gap-3">
-        <span
+        {/* One sentence, with every word in it that can change editable where
+            it is read: "Hold [Fn (globe)] to [talk to Juno]". The row carries
+            the whole sentence as its accessible name, so the controls inside
+            it are heard in the order they are read. */}
+        <div
+          role="group"
+          aria-label={sentenceLabel(trigger)}
           className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px]",
-            trigger.enabled
-              ? "bg-[#00C7BE]/15 text-[#00C7BE]"
-              : "bg-muted text-muted-foreground",
+            "flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px]",
+            !trigger.enabled && "opacity-55",
           )}
         >
-          <GestureIcon className="h-3.5 w-3.5" />
-        </span>
+          {/* Say is the only gesture a voice row can have, so it is a word
+              rather than a menu of one. */}
+          {isVoice ? (
+            <span className="font-medium">{GESTURE_LABEL.say}</span>
+          ) : (
+            <span className="font-medium">
+              <SentenceWord
+                value={trigger.gesture}
+                options={gestureOptions}
+                onChange={(gesture) =>
+                  onPatch(key, { gesture }, { immediate: true })
+                }
+                ariaLabel="Gesture"
+              />
+            </span>
+          )}
 
-        <div className={cn("min-w-0 flex-1", !trigger.enabled && "opacity-55")}>
-          {/* One sentence: the gesture, then what it does. */}
-          <div className="flex items-baseline gap-1 text-[13px]">
-            <span className="font-medium">{GESTURE_LABEL[trigger.gesture]}</span>
-            <span className="text-muted-foreground">{TARGET_LABEL[trigger.target]}</span>
-          </div>
-          <p className="text-[12px] leading-snug text-muted-foreground">
+          {isVoice ? (
+            <>
+              <Toggle
+                variant="outline"
+                size="sm"
+                pressed={trigger.require_hey_prefix}
+                onPressedChange={(pressed) =>
+                  onPatch(key, { require_hey_prefix: pressed }, { immediate: true })
+                }
+                aria-label="Require the “hey” prefix"
+                className="h-6 min-w-0 rounded-md px-2 font-mono text-[13px] data-[state=off]:text-muted-foreground/60"
+              >
+                hey
+              </Toggle>
+              <Input
+                value={trigger.phrase ?? ""}
+                onChange={(e) => onPatch(key, { phrase: e.target.value })}
+                placeholder={trigger.target === "agent" ? "juno" : "transcribe"}
+                aria-label="Wake phrase"
+                className="h-6 w-28 px-2 font-mono text-[13px]"
+              />
+            </>
+          ) : (
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={() => (editing ? onCloseEditor() : onOpenEditor())}
+              aria-label={`Edit binding for ${comboLabel(
+                trigger.gesture,
+                trigger.target,
+              )}`}
+              className={cn(
+                "font-mono",
+                !trigger.binding && "text-muted-foreground",
+              )}
+            >
+              {trigger.binding?.kind === "mouse" ? (
+                <>
+                  <MousePointer2 className="size-3" />
+                  {bindingLabel(trigger.binding)}
+                </>
+              ) : trigger.binding?.kind === "keyboard" &&
+                trigger.binding.shortcut ? (
+                <KeyCaps shortcut={trigger.binding.shortcut} />
+              ) : (
+                <>
+                  <Keyboard className="size-3" />
+                  {bindingLabel(trigger.binding)}
+                </>
+              )}
+            </Button>
+          )}
+
+          {/* The preposition belongs to the sentence, not to the choice, so
+              the menu offers "dictate" rather than "to dictate". */}
+          <span className="text-muted-foreground">to</span>
+          <SentenceWord
+            value={trigger.target}
+            options={targetOptions}
+            onChange={(target) => onPatch(key, { target }, { immediate: true })}
+            ariaLabel="What it does"
+          />
+
+          {/* How it ends, generated from the gesture, so this line can only
+              ever describe the row it sits in. */}
+          <span className="text-[12px] text-muted-foreground">
             {GESTURE_ENDING[trigger.gesture]}
-          </p>
+          </span>
         </div>
-
-        {/* Binding chip (key methods only) */}
-        {!isVoice && (
-          <Button
-            variant="outline"
-            size="xs"
-            onClick={() => (editing ? onCloseEditor() : onOpenEditor())}
-            aria-label={`Edit binding for ${comboLabel(
-              trigger.gesture,
-              trigger.target,
-            )}`}
-            className={cn(
-              "font-mono",
-              !trigger.binding && "text-muted-foreground",
-            )}
-          >
-            {trigger.binding?.kind === "mouse" ? (
-              <>
-                <MousePointer2 className="size-3" />
-                {bindingLabel(trigger.binding)}
-              </>
-            ) : trigger.binding?.kind === "keyboard" && trigger.binding.shortcut ? (
-              <KeyCaps shortcut={trigger.binding.shortcut} />
-            ) : (
-              <>
-                <Keyboard className="size-3" />
-                {bindingLabel(trigger.binding)}
-              </>
-            )}
-          </Button>
-        )}
 
         <Switch
           checked={trigger.enabled}
@@ -820,50 +1035,31 @@ function TriggerRow({
         </Button>
       </div>
 
-      {/* Voice controls (always shown for voice rows) */}
+      {/* What a voice row cannot say inside its sentence: whether a
+          microphone is actually open, and that none of this is reliable yet.
+          The phrase and the prefix are edited in the sentence above, so they
+          are not repeated here. */}
       {isVoice && (
-        <div className={cn("mt-3 space-y-2", !trigger.enabled && "opacity-55")}>
+        <div
+          className={cn(
+            "mt-2 space-y-1",
+            !trigger.enabled && "opacity-55",
+          )}
+        >
           <div className="flex items-center gap-2">
-            <Toggle
-              variant="outline"
-              size="sm"
-              pressed={trigger.require_hey_prefix}
-              onPressedChange={(pressed) =>
-                onPatch(key, { require_hey_prefix: pressed }, { immediate: true })
-              }
-              aria-label="Require the “hey” prefix"
-              className="font-mono text-[13px] data-[state=off]:text-muted-foreground/60"
-            >
-              hey
-            </Toggle>
-            <Input
-              value={trigger.phrase ?? ""}
-              onChange={(e) => onPatch(key, { phrase: e.target.value })}
-              placeholder={trigger.target === "agent" ? "juno" : "transcribe"}
-              aria-label="Wake phrase"
-              className="h-8 flex-1 font-mono text-[13px]"
-            />
-            <Switch
-              checked={trigger.require_hey_prefix}
-              onCheckedChange={(checked) =>
-                onPatch(key, { require_hey_prefix: checked }, { immediate: true })
-              }
-              aria-label="Require the hey prefix"
-            />
-          </div>
-
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[12px] text-muted-foreground">
-              Say{" "}
-              <span className="font-medium text-foreground">
-                {trigger.require_hey_prefix
-                  ? `“hey ${trigger.phrase || "…"}”`
-                  : `“${trigger.phrase || "…"}” or “hey ${trigger.phrase || "…"}”`}
-              </span>
-            </p>
+            {/* Only said when the sentence does not already show it: with the
+                prefix off, Juno answers to the phrase either way. */}
+            {!trigger.require_hey_prefix && (
+              <p className="min-w-0 text-[12px] text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {`\u201chey ${trigger.phrase || "\u2026"}\u201d`}
+                </span>{" "}
+                works too.
+              </p>
+            )}
             <span
               className={cn(
-                "flex shrink-0 items-center gap-1.5 text-[11px]",
+                "ml-auto flex shrink-0 items-center gap-1.5 text-[11px]",
                 alwaysListening ? "text-[#34C759]" : "text-muted-foreground",
               )}
             >
