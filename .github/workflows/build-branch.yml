@@ -67,8 +67,10 @@ jobs:
       # profile.
       #
       # This job deliberately has NO `environment:` (LAC-7145). The notarization
-      # credentials are scoped to the `release` environment, which allows `main`
-      # only; this workflow is dispatched on feature branches by
+      # credentials belong to the `release` environment, which allows `main`
+      # only (they are still repo-scoped in practice until LAC-7194's migration
+      # happens, but this job must not depend on that); it is dispatched on
+      # feature branches by
       # scripts/juno-build.sh, which is the documented way to run Juno from a
       # branch, and a branch-restricted environment would refuse the job before
       # its first step. So the three secrets below stay repo-scoped as the
