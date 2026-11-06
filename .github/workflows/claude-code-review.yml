@@ -10,18 +10,36 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      issues: read
       id-token: write
+    # The token lives ONLY in this Environment, never at repository scope
+    # (LAC-5821). An Environment adds a resolution scope, it does not subtract
+    # the repository one, so secret-scope-guard.yml asserts that no repo-scoped
+    # copy of CLAUDE_CODE_OAUTH_TOKEN exists. Keep this Environment free of a
+    # deployment branch policy (a pull_request job runs on refs/pull/N/merge and
+    # would be refused) and of required reviewers (they would stall every PR).
+    environment: ai-review
     # The secrets context is not allowed in `if:` expressions (workflow parse
     # error), so evaluate the presence check once here (LAC-3035).
     env:
       HAS_CLAUDE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+      # Fork and Dependabot PRs get no secrets by design, so a missing token
+      # there is not a fault anyone can fix.
+      NO_SECRETS_BY_DESIGN: ${{ github.event.pull_request.head.repo.fork || github.actor == 'dependabot[bot]' }}
     steps:
-      # The action fails env validation when CLAUDE_CODE_OAUTH_TOKEN is unset,
-      # turning every PR check red. Skip cleanly until the secret exists (LAC-3035).
-      - name: Notice when CLAUDE_CODE_OAUTH_TOKEN is missing
-        if: env.HAS_CLAUDE_OAUTH_TOKEN != 'true'
-        run: echo "::notice::Skipping Claude review — CLAUDE_CODE_OAUTH_TOKEN repo secret is not set. Run 'claude setup-token' and 'gh secret set CLAUDE_CODE_OAUTH_TOKEN' to enable AI review (LAC-3035)."
+      # A green check must mean a review happened. With the token absent on a
+      # same-repo PR this step fails the job, so the check is honest when the
+      # token is never set or when a `claude setup-token` token expires. The
+      # check is not required by the branch ruleset, so red blocks no merge
+      # (LAC-5821, LAC-7216).
+      - name: Fail when CLAUDE_CODE_OAUTH_TOKEN is missing on a same-repo PR
+        if: env.HAS_CLAUDE_OAUTH_TOKEN != 'true' && env.NO_SECRETS_BY_DESIGN != 'true'
+        run: |
+          echo "::error title=No review ran::CLAUDE_CODE_OAUTH_TOKEN is not set (or is empty) in the ai-review Environment, so no Claude review ran. Run 'claude setup-token', then add it under Settings > Environments > ai-review. Never as a repository secret."
+          exit 1
+
+      - name: Notice when secrets are withheld by design
+        if: env.HAS_CLAUDE_OAUTH_TOKEN != 'true' && env.NO_SECRETS_BY_DESIGN == 'true'
+        run: echo "::notice::Skipping Claude review. Fork and Dependabot pull requests receive no secrets."
 
       - name: Checkout repository
         if: env.HAS_CLAUDE_OAUTH_TOKEN == 'true'
