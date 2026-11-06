@@ -200,6 +200,12 @@ pub mod permissions {
     pub const PERMISSION_MOMENT: &str = "permission_moment";
     /// Lets macOS raise its Automation dialog, after Juno has explained it
     pub const ALLOW_AUTOMATION: &str = "allow_automation_permission";
+    /// The ask Juno has already made and nobody has answered yet, so a surface
+    /// that was not on screen when it was made can still show the question
+    pub const STANDING_ASK: &str = "standing_permission_ask";
+    /// Not now: forget the standing ask, so opening another surface does not
+    /// put the same question back
+    pub const DISMISS_ASK: &str = "dismiss_permission_ask";
     pub const GET_PERMISSION_DIAGNOSTICS: &str = "get_permission_diagnostics";
     pub const RESET_PERMISSION_GRANT: &str = "reset_permission_grant";
     pub const OPEN_SYSTEM_PREFERENCES: &str = "open_system_preferences";

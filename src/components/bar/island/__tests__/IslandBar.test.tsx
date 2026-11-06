@@ -1142,6 +1142,43 @@ async function escape(route: "dom" | "monitor" = "dom", { stops = false } = {}) 
   await rustAnswers();
 }
 
+describe("IslandBar: a permission Juno needs", () => {
+  // The card that asks (`PermissionNotice`) lives inside the conversation,
+  // which the Island mounts on its chat face and nowhere else. Off that face
+  // the `permission-needed` event had no listener at all, so nothing appeared
+  // and `may_ask` sat on the capability for five minutes (juno#946).
+
+  it("opens the conversation from the capsule, where the card can render", async () => {
+    render(<IslandBar />);
+    expect(face()).toBe("idle");
+    await act(async () => {
+      eventHandlers.get(EVENTS.PERMISSIONS_NEEDED)?.({ permission: "microphone" });
+    });
+    expect(face()).toBe("chat");
+  });
+
+  it("opens it from the composer too, mid-draft, without losing the draft", async () => {
+    render(<IslandBar />);
+    fireEvent.change(composer(), { target: { value: "half a thought" } });
+    expect(face()).toBe("compose");
+    await act(async () => {
+      eventHandlers.get(EVENTS.PERMISSIONS_NEEDED)?.({ permission: "accessibility" });
+    });
+    expect(face()).toBe("chat");
+    expect(composer().value).toBe("half a thought");
+  });
+
+  it("does not take the caret: Juno asked, the person did not press anything", async () => {
+    render(<IslandBar />);
+    setFocus.mockClear();
+    await act(async () => {
+      eventHandlers.get(EVENTS.PERMISSIONS_NEEDED)?.({ permission: "screen_recording" });
+    });
+    expect(face()).toBe("chat");
+    expect(setFocus).not.toHaveBeenCalled();
+  });
+});
+
 describe("IslandBar: Escape walks all the way down to the capsule", () => {
   it.each(["dom", "monitor"] as const)(
     "chat, then the answer, then the capsule, one rung a press (%s)",

@@ -25,6 +25,20 @@
 //! same way as the rest: Juno finds out that macOS would ask, says why in its
 //! own words, and lets the system ask once on a button the person pressed.
 //!
+//! ## The ask outlives the event that announced it
+//!
+//! `permission-needed` is one Tauri event, delivered to whatever happens to be
+//! mounted when it fires. Every surface that can draw the card mounts late:
+//! the Pill opens its pane *on* the event, and the Island mounts the
+//! conversation only on its chat face. So the event alone asked nobody, and
+//! [`may_ask`] then sat on the capability for five minutes (juno#946).
+//!
+//! The fix is that the ask is a piece of state, not only a notification.
+//! [`ask_inner`] records it; [`standing_ask`] hands it to any surface that
+//! appears afterwards; "Not now" ([`forget_standing_ask`]) is what takes it
+//! away. A grant takes it away too, so a card is never shown for a switch that
+//! is already on.
+//!
 //! ## What a restart is for, and what it is not
 //!
 //! Some grants cannot reach a running process. That is macOS, not Juno, and no
@@ -366,6 +380,54 @@ pub fn moment_for(key: &str) -> Result<PermissionMoment, String> {
     })
 }
 
+/// Everything the card needs to draw one ask.
+///
+/// The event payload and [`standing_ask`]'s answer are the same type on
+/// purpose: a surface that reads the ask late must get exactly what a surface
+/// listening at the time would have been handed. Two shapes here is two ways
+/// for the card to be wrong on one of the paths.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PermissionAsk {
+    /// The capability key, which is what the card hands back when it asks
+    /// where the person now stands.
+    pub permission: String,
+    /// What Juno was trying to do. The reason, in the agent's words.
+    pub action: String,
+    pub title: String,
+    pub detail: String,
+    /// What the one button does. Decided here, never inferred in the page.
+    pub primary_action: String,
+    /// The words on that button.
+    pub primary_label: String,
+}
+
+impl PermissionAsk {
+    fn new(capability: Capability, action: &str) -> Self {
+        let primary = capability.primary_action();
+        Self {
+            permission: capability.key().to_string(),
+            action: action.to_string(),
+            title: capability.title(),
+            detail: capability.detail(),
+            primary_action: primary.key().to_string(),
+            primary_label: primary.label().to_string(),
+        }
+    }
+}
+
+/// The ask Juno has made and nobody has answered yet.
+///
+/// One slot, not a queue: a person owes an answer to the question in front of
+/// them, and stacking four cards behind it is the nagging this module exists
+/// to avoid. The newest need is the one worth asking about.
+static STANDING: LazyLock<Mutex<Option<StandingAsk>>> = LazyLock::new(|| Mutex::new(None));
+
+#[derive(Debug, Clone)]
+struct StandingAsk {
+    ask: PermissionAsk,
+    made_at: Instant,
+}
+
 /// When each capability was last asked about, so a tool loop cannot nag.
 static LAST_ASKED: LazyLock<Mutex<HashMap<Capability, Instant>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -400,9 +462,104 @@ fn may_ask_in(
 
 /// Forget what has been asked. Called when the person answers a prompt, so the
 /// next genuine need asks again rather than sitting silent for five minutes.
+///
+/// The ask they just answered goes with it: leaving it standing would put the
+/// same question back on the next surface to open.
 pub fn clear_ask_history() {
     if let Ok(mut asked) = LAST_ASKED.lock() {
         asked.clear();
+    }
+    forget_standing_ask();
+}
+
+/// Whether an ask made at `made_at` is still the ask Juno would make now.
+///
+/// The window is [`ASK_AGAIN_AFTER`], the rate limit itself, and it is the same
+/// constant rather than a second one beside it. While Juno would not ask again,
+/// the ask it already made still stands; the moment Juno would ask afresh, the
+/// old one is stale. Two durations here could drift into a stretch where Juno
+/// neither re-asks nor shows what it asked, which is the silence this whole
+/// path exists to remove.
+fn ask_still_stands(made_at: Instant, now: Instant) -> bool {
+    now.duration_since(made_at) < ASK_AGAIN_AFTER
+}
+
+/// Read the standing ask out of a given slot, dropping it if it has gone stale.
+///
+/// The rule lives here, away from the process-wide slot, so tests can hold
+/// their own: the static is shared by every test thread, and that is what made
+/// the rate-limit tests flaky before `may_ask_in` was split out the same way.
+fn standing_ask_in(slot: &mut Option<StandingAsk>, now: Instant) -> Option<PermissionAsk> {
+    let standing = slot.as_ref()?;
+    if !ask_still_stands(standing.made_at, now) {
+        *slot = None;
+        return None;
+    }
+    Some(standing.ask.clone())
+}
+
+/// The ask Juno has already made and nobody has answered yet, if there is one.
+///
+/// This is how a surface that mounts after the event still asks the question.
+/// An ask whose permission has since been granted is dropped rather than
+/// returned: the card would only turn into its own receipt for a switch the
+/// person never touched here.
+pub fn standing_ask() -> Option<PermissionAsk> {
+    let ask = {
+        let mut slot = match STANDING.lock() {
+            Ok(slot) => slot,
+            Err(e) => {
+                // Say so rather than reading as "nothing was asked": the
+                // person would be left with the same silence as before.
+                tracing::error!("Could not read the standing permission ask: {}", e);
+                return None;
+            }
+        };
+        standing_ask_in(&mut slot, Instant::now())?
+    };
+    // The lock is released before the native check: `process_answer` reaches
+    // macOS, and holding a std mutex across that would stall every other
+    // caller of this module for the length of a tccd round trip.
+    let granted = Capability::from_key(&ask.permission)
+        .is_some_and(|capability| process_answer(capability) == ProcessAnswer::Granted);
+    if granted {
+        // Only this ask. The lock was released for the check above, so a newer
+        // need may have landed in that window, and clearing the slot wholesale
+        // would drop a question nobody has answered while `may_ask` stays
+        // quiet for five minutes: juno#946 again, in a narrower window.
+        forget_standing_ask_if(&ask);
+        return None;
+    }
+    Some(ask)
+}
+
+/// Take the standing ask away. "Not now" is a real answer, and an answer that
+/// reappears on the next surface is not one.
+pub fn forget_standing_ask() {
+    if let Ok(mut slot) = STANDING.lock() {
+        *slot = None;
+    }
+}
+
+/// Drop `ask` from a given slot, leaving a different one alone.
+///
+/// Split from the static for the same reason as [`may_ask_in`] and
+/// [`standing_ask_in`]: every test thread shares the slot, so the rule is
+/// tested over a slot of its own.
+fn forget_ask_in(slot: &mut Option<StandingAsk>, ask: &PermissionAsk) {
+    if slot.as_ref().is_some_and(|standing| &standing.ask == ask) {
+        *slot = None;
+    }
+}
+
+/// Take the standing ask away only if it is still the ask `ask` names.
+///
+/// What a grant uses, rather than [`forget_standing_ask`]: a grant answers one
+/// question, and the newest need is not it.
+fn forget_standing_ask_if(ask: &PermissionAsk) {
+    match STANDING.lock() {
+        Ok(mut slot) => forget_ask_in(&mut slot, ask),
+        Err(e) => tracing::error!("Could not drop the answered permission ask: {}", e),
     }
 }
 
@@ -435,17 +592,24 @@ fn ask_inner(app_handle: &AppHandle, capability: Capability, action: &str, user_
         return;
     }
 
-    let primary = capability.primary_action();
-    let payload = serde_json::json!({
-        "permission": capability.key(),
-        "action": action,
-        "title": capability.title(),
-        "detail": capability.detail(),
-        "primary_action": primary.key(),
-        "primary_label": primary.label(),
-    });
+    let ask = PermissionAsk::new(capability, action);
 
-    if let Err(e) = app_handle.emit(events::permissions::NEEDED, payload) {
+    // Recorded before it is announced, so a surface the event opens (the
+    // Pill's pane, the Island's chat face) finds the ask waiting for it. The
+    // event is the nudge; this is the question.
+    match STANDING.lock() {
+        Ok(mut slot) => {
+            *slot = Some(StandingAsk {
+                ask: ask.clone(),
+                made_at: Instant::now(),
+            });
+        }
+        // Nothing to gain by refusing to ask: the event still reaches a
+        // surface that is already up.
+        Err(e) => tracing::error!("Could not record the permission ask: {}", e),
+    }
+
+    if let Err(e) = app_handle.emit(events::permissions::NEEDED, ask) {
         tracing::error!("Failed to emit permission request: {}", e);
     }
 }
@@ -688,6 +852,109 @@ mod tests {
         assert!(may_ask_in(&mut asked, Capability::Accessibility, now));
         let later = now + ASK_AGAIN_AFTER + Duration::from_secs(1);
         assert!(may_ask_in(&mut asked, Capability::Accessibility, later));
+    }
+
+    // ── The ask outlives the event that announced it (juno#946) ────────────
+
+    fn standing(capability: Capability, made_at: Instant) -> Option<StandingAsk> {
+        Some(StandingAsk {
+            ask: PermissionAsk::new(capability, "left_click"),
+            made_at,
+        })
+    }
+
+    #[test]
+    fn an_ask_is_there_for_a_surface_that_was_not_on_screen_for_it() {
+        // The whole bug: the Island mounts the card only on its chat face, so
+        // the event reached nobody. The ask has to be readable afterwards.
+        let now = Instant::now();
+        let mut slot = standing(Capability::Microphone, now);
+        let read = standing_ask_in(&mut slot, now).expect("the ask should still be there");
+        assert_eq!(read.permission, "microphone");
+        assert_eq!(read.primary_label, "Open Settings");
+        // Reading it does not consume it: two surfaces can open in turn.
+        assert!(standing_ask_in(&mut slot, now).is_some());
+    }
+
+    #[test]
+    fn the_event_payload_and_the_standing_ask_are_one_shape() {
+        // A surface reading the ask late must get what a listening surface was
+        // handed. The type is the guarantee; this pins the field names, which
+        // the card reads by name.
+        let ask = PermissionAsk::new(
+            Capability::Automation(AutomationTarget::Safari),
+            "read the page",
+        );
+        let json = serde_json::to_value(&ask).expect("the ask serializes");
+        for field in [
+            "permission",
+            "action",
+            "title",
+            "detail",
+            "primary_action",
+            "primary_label",
+        ] {
+            assert!(
+                json.get(field).is_some(),
+                "the card reads {} by name",
+                field
+            );
+        }
+        assert_eq!(json["permission"], "automation_safari");
+        assert_eq!(json["primary_action"], "allow_automation");
+    }
+
+    #[test]
+    fn an_ask_goes_stale_exactly_when_juno_would_ask_again() {
+        let now = Instant::now();
+        let mut slot = standing(Capability::Accessibility, now);
+        let just_inside = now + ASK_AGAIN_AFTER - Duration::from_secs(1);
+        assert!(standing_ask_in(&mut slot, just_inside).is_some());
+        let past_it = now + ASK_AGAIN_AFTER + Duration::from_secs(1);
+        assert!(standing_ask_in(&mut slot, past_it).is_none());
+        // Dropped, not merely hidden: nothing re-reads a stale ask later.
+        assert!(slot.is_none());
+    }
+
+    #[test]
+    fn not_now_is_an_answer_that_does_not_come_back() {
+        // Against the real slot, because that is what the dismiss command
+        // touches. Nothing else in these tests writes it: `ask_inner` needs an
+        // AppHandle, so this is the only writer and it cannot race another.
+        if let Ok(mut slot) = STANDING.lock() {
+            *slot = standing(Capability::ScreenRecording, Instant::now());
+        }
+        forget_standing_ask();
+        let still_there = STANDING.lock().map(|slot| slot.is_some()).unwrap_or(false);
+        assert!(!still_there, "Not now has to take the ask away for good");
+    }
+
+    #[test]
+    fn a_grant_drops_only_the_ask_it_answers() {
+        // `standing_ask` releases the lock before reaching macOS, so a newer
+        // need can land while the grant check runs. Clearing the slot wholesale
+        // there would lose a question nobody has answered, with `may_ask`
+        // already quiet about it: the reported bug, in a narrower window.
+        let now = Instant::now();
+        let answered = PermissionAsk::new(Capability::Microphone, "left_click");
+        let mut slot = standing(Capability::Accessibility, now);
+        forget_ask_in(&mut slot, &answered);
+        assert!(
+            slot.is_some(),
+            "a newer ask must survive an older one being granted"
+        );
+        let newer = slot
+            .as_ref()
+            .map(|standing| standing.ask.clone())
+            .expect("the newer ask is there");
+        forget_ask_in(&mut slot, &newer);
+        assert!(slot.is_none(), "the ask that was answered does go");
+    }
+
+    #[test]
+    fn nothing_was_asked_is_an_ordinary_answer() {
+        let mut slot: Option<StandingAsk> = None;
+        assert!(standing_ask_in(&mut slot, Instant::now()).is_none());
     }
 
     #[test]

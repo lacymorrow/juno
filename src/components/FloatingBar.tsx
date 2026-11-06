@@ -976,6 +976,12 @@ export function FloatingBar(_props: { barAppearance?: BarAppearance }) {
   // the mic from the idle pill left that card with nowhere to render, so the
   // button did nothing visible at all. Open the pane so the question is where
   // the person is already looking.
+  //
+  // Opening the pane is half of it. The pane is lazy and conditional, so the
+  // card mounts a tick after this event was delivered and never heard it: for
+  // a while this showed an empty pane, which is the same bug wearing a pane
+  // (juno#946). The card now reads the standing ask from Rust on mount, so
+  // this listener only has to put a surface on screen.
   useEventListener(EVENTS.PERMISSIONS_NEEDED, () => setPaneShown(true));
 
   const dismissPane = useCallback(() => setPaneShown(false), []);

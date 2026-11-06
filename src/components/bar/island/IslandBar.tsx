@@ -646,6 +646,19 @@ export function IslandBar() {
     else openFullChat();
   });
 
+  // A permission Juno needs is asked for on a card inside the conversation
+  // (`PermissionNotice`, in `ChatContainerV2`), which the Island mounts on the
+  // chat face and nowhere else. Off that face the ask had nowhere to render at
+  // all, and Rust's rate limit then sat on the capability for five minutes, so
+  // pressing the mic without Microphone granted did nothing visible and went
+  // on doing nothing (juno#946). Open the conversation, the way the Pill opens
+  // its pane. The card itself reads the ask from Rust on mount, so it does not
+  // matter that this face appears after the event.
+  //
+  // Not `openFullChat`: this is Juno asking, not something the person pressed,
+  // so the window is never activated and the caret stays where it is.
+  useEventListener(EVENTS.PERMISSIONS_NEEDED, () => openChat());
+
   // ── New chat: the tray, the right-click menu, Cmd+N, the + in a header ──
   //
   // The Pill's rule: stop an answer still arriving (rotating under a live

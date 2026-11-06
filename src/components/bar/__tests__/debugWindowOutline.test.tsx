@@ -1,5 +1,7 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { EVENTS } from "@/lib/constants.generated";
 
 /**
  * Debug mode outlines the bar window, so a native resize or a transition that
@@ -13,11 +15,19 @@ const { invoke, handlers } = vi.hoisted(() => ({
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invoke(...args) }));
+// listen() resolves on a later task, as the real one does. Registering
+// synchronously would let an assertion that never waits for it pass here and
+// still fail on a loaded runner, which is how this file flaked (LAC-7015).
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn(async (name: string, fn: (event: { payload: unknown }) => void) => {
-    handlers.set(name, fn);
-    return () => handlers.delete(name);
-  }),
+  listen: vi.fn(
+    (name: string, fn: (event: { payload: unknown }) => void) =>
+      new Promise<() => void>((resolve) =>
+        setTimeout(() => {
+          handlers.set(name, fn);
+          resolve(() => handlers.delete(name));
+        }, 0),
+      ),
+  ),
   emit: vi.fn(async () => {}),
 }));
 vi.mock("@/components/FloatingBar", () => ({ FloatingBar: () => <div data-testid="look" /> }));
@@ -60,7 +70,12 @@ describe("debug window outline", () => {
   it("follows the settings toggle without a relaunch", async () => {
     mount(false);
     await screen.findByTestId("look");
-    const changed = handlers.get("bar-debug-mode-changed");
+    // The look on screen says nothing about this listener. It attaches through
+    // useEventListener, whose listen() is a promise, and the outline is a
+    // different component from the look: waiting on the look rather than on the
+    // registration is what made this flake under CI load (LAC-7015).
+    await waitFor(() => expect(handlers.has(EVENTS.BAR_DEBUG_MODE_CHANGED)).toBe(true));
+    const changed = handlers.get(EVENTS.BAR_DEBUG_MODE_CHANGED);
     expect(changed).toBeDefined();
     await act(async () => changed?.({ payload: true }));
     expect(screen.getByTestId("debug-window-outline")).toBeTruthy();

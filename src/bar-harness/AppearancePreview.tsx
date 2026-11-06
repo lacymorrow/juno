@@ -36,6 +36,11 @@
  * `dock=corner` (bottom-right) or `dock=top-left` to show its page curl, and
  * `dock=bottom`, `dock=left` or `dock=right` for a notch on that edge.
  *
+ * `permission=microphone|accessibility` stages Juno reaching for a permission
+ * it does not have: the ask is recorded and then announced, as
+ * `permission_gate::ask_inner` does both. Any look that can draw the card
+ * should end up showing it; the ones that cannot are LAC-7208.
+ *
  * The Island also takes `demo=hover` (the pointer over the capsule; with
  * `tip=<control>` the native forwarded hover rests on that control, e.g.
  * `tip=dot` or `tip=listen`, so its tooltip opens), `demo=paste` (a picture
@@ -72,6 +77,7 @@ import {
   installBarHarnessTauri,
   setPreviewAppearance,
   setPreviewTheme,
+  setStandingPermissionAsk,
 } from "./barHarnessTauri";
 
 // The sentence the preview "dictates". Short enough to fit every look, long
@@ -170,6 +176,8 @@ function readQuery(): {
   /** Where the Notch was left, as fractions of the display, or null for the notch itself. */
   dockCorner: { x: number; y: number } | null;
   ask: AskScript | null;
+  /** `permission=<capability key>`: Juno reaching for one it does not have. */
+  permission: string | null;
 } {
   const params = new URLSearchParams(window.location.search);
   const appearance = appearanceEntry(params.get("appearance")).value;
@@ -188,8 +196,38 @@ function readQuery(): {
     dockLow: params.get("dock") === "low",
     dockCorner: NOTCH_DOCKS[params.get("dock") ?? ""] ?? null,
     ask: params.get("demo") === "ask" ? readAsk(params) : null,
+    permission: params.get("permission"),
   };
 }
+
+/**
+ * The permission asks the preview can stage, as `permission_gate` writes them.
+ *
+ * Copy lives in Rust (`Capability::title` / `detail`), so this is a transcript
+ * of it rather than a second source. It only has to be recognisable: what the
+ * capture is showing is *that the card reaches the screen at all*, which is
+ * what every surface but an already-open chat failed to do (juno#946).
+ */
+const PERMISSION_ASKS: Record<string, Record<string, unknown>> = {
+  microphone: {
+    permission: "microphone",
+    action: "listen to you",
+    title: "Juno can listen once Microphone is on",
+    detail:
+      "Microphone is how Juno hears you, so you can talk instead of typing. It is one switch in System Settings, and you can turn it back off whenever you like.",
+    primary_action: "open_settings",
+    primary_label: "Open Settings",
+  },
+  accessibility: {
+    permission: "accessibility",
+    action: "left_click",
+    title: "Juno can do that once Accessibility is on",
+    detail:
+      "Accessibility lets Juno click and type for you. It is one switch in System Settings, and you can turn it back off whenever you like.",
+    primary_action: "open_settings",
+    primary_label: "Open Settings",
+  },
+};
 
 /**
  * A turn written in the URL, so a clip needs no new code:
@@ -965,7 +1003,7 @@ function useNaturalSize() {
 }
 
 export default function AppearancePreview() {
-  const { appearance, reducedMotion, holdState, demo, manualStart, background, theme, pinFrame, dockLow, dockCorner, ask } =
+  const { appearance, reducedMotion, holdState, demo, manualStart, background, theme, pinFrame, dockLow, dockCorner, ask, permission } =
     useMemo(readQuery, []);
 
   // With `start=manual` the script waits for the bench to say go.
@@ -1008,6 +1046,41 @@ export default function AppearancePreview() {
     document.body.style.background = background ?? "transparent";
     setReady(true);
   }, [appearance, theme, dockLow, dockCorner]);
+
+  // Juno reaching for a permission it does not have, both halves of it, the
+  // way `permission_gate::ask_inner` does: record the ask, then announce it.
+  // The event is what opens a surface; the recorded ask is what that surface
+  // reads on mount, because every one of them mounts after the event has
+  // already been delivered. Recording it before `ready` means the ask is there
+  // the moment the card first mounts, as it is in the app.
+  useLayoutEffect(() => {
+    const ask = permission ? PERMISSION_ASKS[permission] : null;
+    setStandingPermissionAsk(ask ?? null);
+    return () => setStandingPermissionAsk(null);
+  }, [permission]);
+  useEffect(() => {
+    if (!ready || !permission) return;
+    const ask = PERMISSION_ASKS[permission];
+    if (!ask) {
+      console.error(`[bar-preview] no permission ask written for '${permission}'`);
+      return;
+    }
+    // Re-sent for a moment, the way a held frame is: the looks are lazy
+    // chunks, so one that has not finished loading has no listener yet. On
+    // hardware the bar has been mounted for as long as the app has been open,
+    // so this is the preview's problem and not the app's.
+    void emit(EVENTS.PERMISSIONS_NEEDED, ask);
+    let sent = 1;
+    const timer = window.setInterval(() => {
+      if (sent >= 6) {
+        window.clearInterval(timer);
+        return;
+      }
+      sent += 1;
+      void emit(EVENTS.PERMISSIONS_NEEDED, ask);
+    }, 300);
+    return () => window.clearInterval(timer);
+  }, [ready, permission]);
 
   // Drive the script. Listening breathes the audio level; dictating reveals
   // the sentence a word at a time. Everything else is a single emit.

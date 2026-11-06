@@ -13,7 +13,7 @@
  * so the bar's listeners and geometry reads have somewhere to land.
  */
 
-import { harness } from "./barHarnessTauri";
+import { harness, setStandingPermissionAsk } from "./barHarnessTauri";
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { emit } from "@tauri-apps/api/event";
@@ -156,6 +156,30 @@ function NumberField({
 }
 
 // === THE HARNESS ===
+
+/**
+ * Juno reaching for a permission it does not have, exactly as
+ * `permission_gate::ask_inner` does it: record the ask, then announce it.
+ *
+ * Both halves matter here. The event is what opens a surface (the Island's
+ * chat face, the Pill's pane); the recorded ask is what that surface reads on
+ * mount, because it mounts after the event has already been delivered
+ * (juno#946). Emitting without recording is the bug, and it looks like an
+ * empty pane.
+ */
+function askForPermission(): void {
+  const ask = {
+    permission: "microphone",
+    action: "listen to you",
+    title: "Juno can listen once Microphone is on",
+    detail:
+      "Microphone is how Juno hears you, so you can talk instead of typing. It is one switch in System Settings, and you can turn it back off whenever you like.",
+    primary_action: "open_settings",
+    primary_label: "Open Settings",
+  };
+  setStandingPermissionAsk(ask);
+  void emit(EVENTS.PERMISSIONS_NEEDED, ask);
+}
 
 /** The snapshots Rust's `connectivity` module emits, one per status. */
 const CONNECTIVITY = {
@@ -394,6 +418,7 @@ export default function BarStateHarness() {
               hover
             </Btn>
             <Btn onClick={() => void emit(EVENTS.BAR_TOGGLE_PANE, null)}>toggle chat pane</Btn>
+            <Btn onClick={() => askForPermission()}>needs microphone</Btn>
             <Btn active={driving} onClick={() => setDriving((v) => !v)}>
               driving
             </Btn>

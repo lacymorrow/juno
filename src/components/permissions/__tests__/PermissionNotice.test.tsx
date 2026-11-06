@@ -122,6 +122,67 @@ describe("PermissionNotice", () => {
     });
   });
 
+  // ── An ask made while this surface was not on screen ───────────────────────
+  //
+  // `permission-needed` is one event, delivered to whatever happens to be
+  // mounted. Every surface that can show this card mounts it late: the Pill
+  // opens its pane *on* the event (so the card registers its listener after
+  // the payload is gone), and the Island mounts the conversation only on its
+  // chat face. Rust holding the ask is what makes a late surface work at all.
+
+  it("shows an ask Juno already made, when it mounts after the event", async () => {
+    backend(moment(), { [COMMANDS.PERMISSIONS_STANDING_ASK]: ACCESSIBILITY_NEEDED });
+    render(<PermissionNotice />);
+    await flush();
+
+    expect(screen.getByText(ACCESSIBILITY_NEEDED.title)).toBeTruthy();
+    expect(screen.getByText(ACCESSIBILITY_NEEDED.detail)).toBeTruthy();
+  });
+
+  it("stays quiet when Rust is holding no ask", async () => {
+    backend(moment(), { [COMMANDS.PERMISSIONS_STANDING_ASK]: null });
+    render(<PermissionNotice />);
+    await flush();
+
+    expect(screen.queryByTestId("permission-notice")).toBeNull();
+  });
+
+  it("leaves a live ask alone when the standing one arrives behind it", async () => {
+    // The event can land between mount and the command answering. The card the
+    // person is already reading wins.
+    let answerStanding: (ask: unknown) => void = () => {};
+    const standing = new Promise((resolve) => {
+      answerStanding = resolve;
+    });
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === COMMANDS.PERMISSIONS_STANDING_ASK) return standing;
+      if (command === COMMANDS.PERMISSIONS_PERMISSION_MOMENT) return moment();
+      return undefined;
+    });
+
+    render(<PermissionNotice />);
+    await emitNeeded(SCREEN_RECORDING_NEEDED);
+    await act(async () => {
+      answerStanding(ACCESSIBILITY_NEEDED);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(SCREEN_RECORDING_NEEDED.title)).toBeTruthy();
+    expect(screen.queryByText(ACCESSIBILITY_NEEDED.title)).toBeNull();
+  });
+
+  it("forgets the ask in Rust on Not now, so the next surface does not re-ask", async () => {
+    render(<PermissionNotice />);
+    await flush();
+    await emitNeeded(ACCESSIBILITY_NEEDED);
+
+    fireEvent.click(screen.getByText("Not now"));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith(COMMANDS.PERMISSIONS_DISMISS_ASK);
+    });
+  });
+
   it("opens the exact pane for the permission that was needed", async () => {
     render(<PermissionNotice />);
     await flush();

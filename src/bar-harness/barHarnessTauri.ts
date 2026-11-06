@@ -116,6 +116,17 @@ export function setPreviewTheme(theme: "light" | "dark" | null): void {
   previewTheme = theme;
 }
 
+/**
+ * What `standing_permission_ask` answers: the ask Juno has made and nobody has
+ * answered yet, or null. Module-level like the two above, because it steers
+ * what the bar draws rather than the simulated window frame.
+ */
+let standingPermissionAsk: Record<string, unknown> | null = null;
+
+export function setStandingPermissionAsk(ask: Record<string, unknown> | null): void {
+  standingPermissionAsk = ask;
+}
+
 function commit(next: HarnessState): void {
   state = next;
   listeners.forEach((l) => l());
@@ -361,6 +372,25 @@ function handleInvoke(cmd: string, args: Record<string, unknown> = {}): unknown 
       return { reference_audio_url: null, exaggeration: 0.5, use_hd: false };
     case COMMANDS.TTS_GET_SUPERTONIC_SETTINGS:
       return { server_url: "", voice: "", speed: 1 };
+
+    // A permission Juno has reached for. The card reads the standing ask on
+    // mount rather than only from the event, because every surface that draws
+    // it mounts after the event fires (juno#946), so the harness has to answer
+    // this for the card to appear at all.
+    case COMMANDS.PERMISSIONS_STANDING_ASK:
+      return standingPermissionAsk;
+    case COMMANDS.PERMISSIONS_DISMISS_ASK:
+      setStandingPermissionAsk(null);
+      return null;
+    case COMMANDS.PERMISSIONS_PERMISSION_MOMENT:
+      // Never granted here: the card stays the ask rather than flipping to its
+      // receipt a second and a half after it appears.
+      return {
+        permission: String(args.permission ?? ""),
+        granted: false,
+        restart_unblocks: false,
+        restart_detail: "",
+      };
 
     // Everything else the bar fires (interactions, dispatch, stop, focus,
     // dictation cancel, pane ledger, show-when-ready, webview focus, ...) has no
