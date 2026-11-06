@@ -536,6 +536,10 @@ pub fn run() {
             permission_moment,
             // Juno's own Automation moment, in place of the OS asking cold
             allow_automation_permission,
+            // The ask already made, for a surface that mounted after the event
+            // announced it, and the way to put that ask down
+            standing_permission_ask,
+            dismiss_permission_ask,
             // Permission diagnostics: the live answer, and the reset for a stale grant
             get_permission_diagnostics,
             reset_permission_grant,
