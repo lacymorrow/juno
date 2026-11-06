@@ -1,5 +1,35 @@
 name: Release Juno
 
+# Why this workflow renames its own runs: a release arrives here twice (see the
+# triggers below) and only the dispatched half builds anything. Both halves
+# used to appear in `gh run list` and the Actions UI under the same name,
+# "Release Juno", so the tag-push run -- which takes the skip arm in `gate`,
+# builds nothing and exits 0 -- sat as a green "success" row directly above the
+# red dispatch run that was the actual release. For 14 consecutive versions
+# (v0.8.253 through v0.8.266, not one of them published) that green row was the
+# newest thing on this workflow, so the run list read healthy while the app
+# shipped nothing to either channel for six days (LAC-7193).
+#
+# The dispatch rows were also indistinguishable from each other: 12 consecutive
+# failures, every one titled "Release Juno", with nothing to say which version
+# each had failed to publish. Naming the version is the cheaper half of the fix
+# and the one that makes `gh run list` usable during an outage.
+#
+# `run-name` is evaluated once, when the run is created, so it sees only what
+# the trigger carries -- which is exactly enough to say which half this is. It
+# cannot know how `gate` will decide, so it claims only "no build", which holds
+# for both push arms (the `release:` skip and the hand-pushed-tag failure).
+# `github.event.inputs` is used rather than the `inputs` context because it
+# resolves on every event, not only on a dispatch. Nothing reads this value:
+# no step, secret, permission or conclusion depends on it.
+#
+# Written on one physical line and double-quoted on purpose. A folded (`>-`)
+# scalar folds only lines at the block's own indent; a continuation indented
+# further is a "more-indented line" and keeps its newline, so the pretty
+# multi-line form silently yields a value with embedded newlines. The quotes
+# are required because the value contains ": ", which ends a plain scalar.
+run-name: "${{ github.event_name == 'workflow_dispatch' && format('Build and publish {0}', github.event.inputs.tag || github.ref_name) || format('No build: tag {0} pushed', github.ref_name) }}"
+
 on:
   push:
     tags:
