@@ -186,6 +186,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
+          set -euo pipefail
           VERSION="${{ needs.gate.outputs.version }}"
           ARM64_SHA="${{ needs.build.outputs.arm64 }}"
           X64_SHA="${{ needs.build.outputs.x64 }}"
@@ -218,4 +219,17 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/juno-cua.rb
           git commit -m "Update juno-cua to ${VERSION}" || echo "No changes"
-          git push || echo "Push failed — token may need repo scope"
+          # No `|| echo` on the push: a dead or under-scoped HOMEBREW_TAP_TOKEN
+          # still clones (the tap is public) and must turn this job red, not
+          # leave `brew install juno-cua` on a stale formula. With nothing
+          # committed, push prints "Everything up-to-date" and exits 0.
+          git push
+
+          # An exit code is not proof the ref moved: confirm the tap's HEAD is
+          # the commit we hold.
+          REMOTE_HEAD="$(git ls-remote origin HEAD | cut -f1)"
+          LOCAL_HEAD="$(git rev-parse HEAD)"
+          if [ "${REMOTE_HEAD}" != "${LOCAL_HEAD}" ]; then
+            echo "::error::homebrew-tap HEAD (${REMOTE_HEAD}) is not ${LOCAL_HEAD} after push; formula is stale"
+            exit 1
+          fi
