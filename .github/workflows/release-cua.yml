@@ -1,23 +1,92 @@
 name: Release juno-cua
 
+# Dispatched from main by release-every-merge.yml, never by a tag push (LAC-7267).
+#
+# This used to run on `cua-v*` tag pushes. The `release` environment allows
+# `main` only, and a tag policy would not help: there is no tag ruleset, so
+# anyone with push access can point a `cua-v*` tag at any tree. A tag-triggered
+# job therefore could never be put in the environment, and HOMEBREW_TAP_TOKEN
+# had to stay repo-scoped. Dispatching from main makes the run's ref `main`, so
+# the `homebrew` job below can name `environment: release`.
+#
+# `tag` is the one caller-controlled value and the environment does not
+# constrain it (it gates the ref the job runs on, not the ref it checks out), so
+# the gate job validates it and resolves it to a SHA, the same shape as
+# release-tauri.yml.
 on:
-  push:
-    tags:
-      - 'cua-v*'
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version (e.g., 0.4.11)'
+      tag:
+        description: 'CLI tag already on main (e.g., cua-v0.4.11)'
         required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
+  gate:
+    name: Which commit may this build ship?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.decide.outputs.sha }}
+      version: ${{ steps.decide.outputs.version }}
+      tag: ${{ steps.decide.outputs.tag }}
+    steps:
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error title=Dispatch from main::release-cua must be dispatched on main (got $REF). The homebrew job's environment is main-only and would refuse anyway; failing here keeps a stray branch from publishing a release first."
+            exit 1
+          fi
+
+          if ! printf '%s' "$TAG_INPUT" | grep -Eq '^cua-v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error title=Bad tag::'$TAG_INPUT' is not a cua-vX.Y.Z tag."
+            exit 1
+          fi
+
+          # Resolve the tag to the commit it points at (annotated tags are
+          # peeled), then require main to contain it. A tag anyone can push
+          # must not choose the tree that is built and published.
+          obj=$(gh api "repos/$REPO/git/ref/tags/$TAG_INPUT" --jq '.object | "\(.type) \(.sha)"')
+          type=${obj%% *}; sha=${obj#* }
+          if [ "$type" = "tag" ]; then
+            sha=$(gh api "repos/$REPO/git/tags/$sha" --jq '.object.sha')
+          fi
+          status=$(gh api "repos/$REPO/compare/$sha...main" --jq '.status')
+          case "$status" in
+            identical|ahead) ;;
+            *)
+              echo "::error title=Tag is not on main::$TAG_INPUT ($sha) is not an ancestor of main (compare status: $status). Refusing to build it."
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "sha=$sha"
+            echo "tag=$TAG_INPUT"
+            echo "version=${TAG_INPUT#cua-v}"
+          } >> "$GITHUB_OUTPUT"
+
   build:
+    needs: gate
     runs-on: macos-latest
+    outputs:
+      arm64: ${{ steps.sha.outputs.arm64 }}
+      x64: ${{ steps.sha.outputs.x64 }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
 
       # The repo pins its toolchain in rust-toolchain.toml. Installing the cross
       # targets on @stable put them on a toolchain cargo never used (rustup
@@ -62,18 +131,6 @@ jobs:
           cp target/x86_64-apple-darwin/release/juno-cua juno-cua-x64
           tar czf juno-cua-darwin-x64.tar.gz -C target/x86_64-apple-darwin/release juno-cua
 
-      - name: Determine version
-        id: version
-        run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
-            echo "tag=cua-v${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
-          else
-            TAG="${GITHUB_REF#refs/tags/cua-v}"
-            echo "version=$TAG" >> "$GITHUB_OUTPUT"
-            echo "tag=cua-v$TAG" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Compute SHA256
         id: sha
         run: |
@@ -86,10 +143,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: juno-cua ${{ steps.version.outputs.version }}
+          tag_name: ${{ needs.gate.outputs.tag }}
+          name: juno-cua ${{ needs.gate.outputs.version }}
           body: |
-            ## juno-cua ${{ steps.version.outputs.version }}
+            ## juno-cua ${{ needs.gate.outputs.version }}
 
             Headless Computer Use Agent CLI for macOS.
 
@@ -114,22 +171,24 @@ jobs:
           # so a CLI release must never become Latest.
           make_latest: false
 
-      # HOMEBREW_TAP_TOKEN stays repo-scoped on purpose (LAC-7170). This
-      # workflow runs on a `cua-v*` tag push, and the `release` environment's
-      # policy allows `main` only. Adding a `cua-v*` tag policy would not help:
-      # there is no tag ruleset, so anyone with push access can point such a
-      # tag at any tree, which hands the token straight back. Moving it needs
-      # this release dispatched from main (or a tag ruleset) first; the token
-      # is a single-repo PAT for homebrew-tap, so the blast radius is that
-      # formula.
+  # Only this job reads HOMEBREW_TAP_TOKEN, and it names the main-only `release`
+  # environment (LAC-7267). It is split out of `build` so the environment, and
+  # the token, never reach the cargo build. The token is a single-repo PAT for
+  # homebrew-tap. Once it is moved into the environment and the repo-scoped
+  # copy deleted, move HOMEBREW_TAP_TOKEN from PENDING to ENV_ONLY in
+  # secret-scope-guard.yml.
+  homebrew:
+    needs: [gate, build]
+    runs-on: macos-latest
+    environment: release
+    steps:
       - name: Update Homebrew formula
-        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          ARM64_SHA="${{ steps.sha.outputs.arm64 }}"
-          X64_SHA="${{ steps.sha.outputs.x64 }}"
+          VERSION="${{ needs.gate.outputs.version }}"
+          ARM64_SHA="${{ needs.build.outputs.arm64 }}"
+          X64_SHA="${{ needs.build.outputs.x64 }}"
 
           # Clone the tap repo and update formula
           git clone "https://x-access-token:${GH_TOKEN}@github.com/lacymorrow/homebrew-tap.git" /tmp/tap
