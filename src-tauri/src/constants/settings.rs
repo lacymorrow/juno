@@ -30,6 +30,10 @@ pub mod store_keys {
     pub const AUTOSTART_ENABLED: &str = "autostart_enabled";
     pub const ADVANCED_SETTINGS_ENABLED: &str = "advanced_settings_enabled";
     pub const BETA_FEATURES_ENABLED: &str = "beta_features_enabled";
+    /// Set once the one-time move from the Pill to the Island has run, so a
+    /// person who picks the Pill again afterwards keeps it. See
+    /// `settings::island_default`.
+    pub const ISLAND_DEFAULT_APPLIED: &str = "island_default_applied";
     pub const NOTIFICATIONS_ENABLED: &str = "notifications_enabled";
     pub const BACKGROUND_MODE: &str = "background_mode";
     pub const MOUSE_CONTROL: &str = "mouse_control";
