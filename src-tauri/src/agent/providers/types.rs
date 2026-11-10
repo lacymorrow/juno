@@ -305,11 +305,20 @@ pub struct ModelDefinition {
     /// which is how a legacy model became the default in #580.
     ///
     /// This is the documented fact. What Juno *sends* is the tool version in
-    /// `computer_use`, and for every Anthropic row the two must agree — a model
-    /// listed as toolset-GA declares `ApiVersion::ComputerToolset20260801`, and
-    /// one that is not declares an earlier version. `catalog_toolset_ga_agrees_with_the_declared_tool_version`
-    /// asserts exactly that, so the documented fact and the wire format cannot
-    /// drift apart. False for every non-Anthropic provider.
+    /// `computer_use`, and the two are not the same axis. The implication runs
+    /// one way only: a row that declares `ApiVersion::ComputerToolset20260801`
+    /// must be toolset-GA, because Anthropic answers 400 to a toolset request
+    /// from a model that does not support it.
+    ///
+    /// The reverse is deliberately false. Fable 5.1, Fable 5, Opus 5, Opus 4.8
+    /// and Sonnet 5 are all toolset-GA and still get `computer_20251124`,
+    /// because the toolset costs roughly 2x the input-token overhead and is
+    /// only worth it where nothing earlier works. Asserting agreement in both
+    /// directions would forbid that, and the previous wording of this comment
+    /// claimed exactly that biconditional, which is false for those five rows
+    /// (LAC-7413). `catalog_toolset_ga_agrees_with_the_declared_tool_version`
+    /// asserts the one safe direction, so the citation and the wire format
+    /// cannot drift apart. False for every non-Anthropic provider.
     ///
     /// Ask `uses_computer_toolset()` when you need to know which request shape
     /// to build; this field is the citation, that method is the behaviour.
@@ -571,8 +580,10 @@ impl Provider {
         // The Anthropic computer-use tool versions Juno sends today.
         //
         // `CU_20251124` is the DEFAULT. `CU_TOOLSET` is the current GA toolset,
-        // and a model gets it only when it accepts nothing earlier — today that
-        // is Opus 5.5 alone. The toolset is not an upgrade to reach for: it
+        // and a model gets it only when it accepts nothing earlier. As of
+        // 2026-11-09 that is Fable 5.2, Opus 5.5, Sonnet 5.5 and Haiku 5.5,
+        // read off the computer-use page per model, never inferred from the
+        // version number. The toolset is not an upgrade to reach for: it
         // costs roughly 2x the input-token overhead on every request (4,530 vs
         // 2,152 on an identical call, measured against the live API
         // 2026-09-22) because it ships 17 member tool definitions instead of
