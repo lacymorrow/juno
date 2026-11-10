@@ -873,6 +873,51 @@ mod tests {
                                  Re-read the LIVE pricing page and fix whichever is wrong."
                             );
                         }
+
+                        // The long-context tier is a second, independent set
+                        // of rates, and until Haiku 5.5 no model in the
+                        // catalog had one, so the loop above was the whole
+                        // cross-check and this branch was unreachable. A
+                        // tiered model whose `long_*` rates disagree
+                        // reconciles perfectly on its short rates and then
+                        // diverges silently above the threshold, which is
+                        // exactly the 5x case the tier exists to price.
+                        match (&rates.long_context, entry.get("long_context_threshold")) {
+                            (Some(long), Some(threshold)) => {
+                                let ours_threshold = long.threshold_tokens;
+                                let theirs_threshold = threshold.as_u64();
+                                assert_eq!(
+                                    theirs_threshold,
+                                    Some(ours_threshold),
+                                    "{key} long_context_threshold: Juno says \
+                                     {ours_threshold}, prices.json says {theirs_threshold:?}"
+                                );
+                                for (name, ours) in [
+                                    ("long_input", long.input),
+                                    ("long_output", long.output),
+                                    ("long_cache_read", long.cache_read),
+                                    ("long_cache_write", long.cache_write),
+                                ] {
+                                    let theirs = rate(entry, name);
+                                    assert!(
+                                        (ours - theirs).abs() < 1e-9,
+                                        "{key} {name}: Juno says {ours}, prices.json \
+                                         says {theirs}. Re-read the LIVE pricing page \
+                                         and fix whichever is wrong."
+                                    );
+                                }
+                            }
+                            (Some(_), None) => panic!(
+                                "{key} has a long-context tier in Juno but none in \
+                                 prices.json; the analyzer would price a prompt over the \
+                                 threshold at the short rates and under-report it"
+                            ),
+                            (None, Some(_)) => panic!(
+                                "{key} has a long-context tier in prices.json but none in \
+                                 Juno; price it on both sides or on neither"
+                            ),
+                            (None, None) => {}
+                        }
                     }
                     Price::Subscription => {
                         let entry = models

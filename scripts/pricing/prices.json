@@ -1,6 +1,6 @@
 {
   "_comment": "Price table for LAC-4124 pricing measurement. USD per million tokens.",
-  "_verified": "2026-10-16 Anthropic/OpenAI; Gemini rows re-verified 2026-10-27 against the live pricing page (all 3 match; 3.7-flash and 3.5-flash confirmed still unpublished). Fetched from live provider docs, not from a cached model catalog (LAC-3106).",
+  "_verified": "Fable 5.2 added and verified 2026-11-09 against the live Anthropic pricing table (input $8, output $40, 5m cache write $10, cache hit $0.20). 2026-10-16 Anthropic/OpenAI; Gemini rows re-verified 2026-10-27 against the live pricing page (all 3 match; 3.7-flash and 3.5-flash confirmed still unpublished). Fetched from live provider docs, not from a cached model catalog (LAC-3106).",
   "_sources": {
     "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
     "openai": "https://developers.openai.com/api/docs/pricing"
@@ -48,6 +48,13 @@
       "output": 50.0,
       "cache_read": 0.25,
       "cache_write": 12.5
+    },
+    "claude-fable-5-2": {
+      "billing": "metered",
+      "input": 8.0,
+      "output": 40.0,
+      "cache_read": 0.2,
+      "cache_write": 10.0
     },
     "claude-haiku-5-5": {
       "billing": "metered",
@@ -229,6 +236,7 @@
     "OpenAI reports no separate cache-write charge; cache_write is 0 and cached_tokens bill at the cache_read rate.",
     "gpt-5.5 above 272K input tokens moves to a long-context tier not published in the short-context table; long_* rates are intentionally absent so the analyzer fails loudly rather than guessing.",
     "Claude CLI models are billed as a Claude Max/Pro seat, not per token. Marginal cost to Juno is zero; the analyzer reports them separately instead of as $0.00 alongside metered models.",
+    "Claude Fable 5.2 and Fable 5.1 price a cache hit at 0.025x base input, not the usual 0.1x (Opus 5.5 and Sonnet 5.5 use 0.05x). So Fable 5.2's $0.20 cache_read against an $8 input is correct and is not a misplaced decimal; do not 'fix' it to $0.80.",
     "Opus 5.5 computer use requires computer_toolset_20260801, which roughly doubles per-request input overhead (4,530 vs 2,152 tokens, measured 2026-09-22). That overhead is already inside the reported input_tokens; do not add it again.",
     "Keys are BILLING keys, matching what Juno's cost log writes as model_id (cost_log::billing_model_id). Metered API models use the wire model id; subscription paths are prefixed with the provider, so claude-cli:opus is never averaged in with metered Anthropic traffic at $0.00.",
     "Every model in Juno's catalog is keyed here EXCEPT gemini-3.7-flash, gemini-3.5-flash and gemini-2.5-computer-use-preview-10-2025, which Google publishes no rate for. They are left out deliberately so this script raises on them rather than scoring them as free; Juno logs those turns at cost_usd 0.0 and warns.",
