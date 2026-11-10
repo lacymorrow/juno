@@ -166,6 +166,29 @@ reproduced it, cause unknown" — the factorial never got to execute, because an
 agent-launched process on this Mac no longer has a microphone grant to execute
 it with, for the reason above.
 
+## Which factors are even present in Juno today
+
+A code read, not a guess, done while the microphone was unavailable. Two of
+the ticket's four hypotheses turn out to be structurally absent on the path
+the 35 presses took, which is worth knowing before anyone spends runs on them.
+
+| factor | present? | evidence |
+|---|---|---|
+| **1. Format mismatch** | **No — guarded** | `claim_warm_input`, `devices.rs:764`: `let at_rate = fresh \|\| warm.rate_is_current();`. A rate-mismatched warm stream is rejected and the press opens the device directly, so it never reaches `resume()`. Every LAC-5281 press was warm-path, so a mismatch cannot explain them. |
+| **2. In-process output HAL client** | **Yes, conditionally** | `src-tauri/src/tts/pcm_player.rs:388-403` builds a cpal output stream on the default output device. (`say` and `afplay` are subprocesses and do not count.) Whether one is live at press time depends on TTS being mid-playback. |
+| **3. Spawned caller thread** | **Yes, always** | `controller.rs:587` calls `warm.resume()` inside the `open` closure, which runs on the `thread::spawn` audio worker (`controller.rs:684`). Never the main thread. |
+| **4. Two input clients on one device** | **No, on the measured path** | The warm stream is *lent*, not duplicated: `claim_warm_input` takes it out of the slot and `lend()` starts that same stream, so dictation only ever holds one input stream. Two exist only under a wake phrase (`WakeMicHeld`), and there the stream is already running, so a press does **no device start at all**. |
+
+Caveat on 1: only the *rate* is checked, not channel count or sample format.
+A format mismatch is unguarded, just much less likely than the rate case the
+AirPods log pointed at.
+
+So the factorial's priority order should be **`spawned-thread` first, then
+`output-client`** — factor 3 is unconditionally present on every one of the 35
+measured presses, which makes it the only hypothesis that is true every time
+the 161 ms was paid. `rate-mismatch` and `second-input` are now known not to
+apply to the measured path, and are worth running only as controls.
+
 ## What would finish it
 
 One of these, cheapest first. Both produce the factor table the probe already
