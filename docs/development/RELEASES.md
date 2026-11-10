@@ -193,7 +193,7 @@ resolves a repo-scoped secret (measured, run 42114623977).
 Of the ten names first listed here, three are done, six still hold a real value
 at repo scope, and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` holds an empty one, so
 it has nothing to move. Deleting the repo-scoped copy of any of the six breaks
-no job: every consumer of every name in the table declares
+no workflow job except the guard itself, which reddens rung 3 by design until the name moves to `ENV_ONLY`: every consumer of every name in the table declares
 `environment: release`, re-verified against `origin/main` on 2026-11-09
 (`build-tauri`, `build-demo`, `release`, `homebrew`). Read the per-row status
 below rather than this count, and the guard rather than either.
@@ -213,7 +213,7 @@ what is declared here. After moving a secret, move its name from `PENDING` to
 | Secret | Why it moves |
 |--------|--------------|
 | `TAURI_SIGNING_PRIVATE_KEY` | **The updater trust root.** The app verifies only the minisign `pubkey` in `tauri.conf.json`, so this key alone can hand every install a malicious update. Read only by `release-tauri.yml`. |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Decrypts the above. **Nothing to move**: the stored value is empty, so the updater key carries no passphrase (unchanged since 2026-09-21). Already `ENV_ONLY` in the guard, which still bites the case that matters — a real passphrase stored at repo scope reddens rung 1. The empty repo-scoped copy is deliberately left in place: unsetting a secret and setting it empty are not the same thing to the build, and there is no material here to protect. |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Decrypts the above. **Nothing to move**: the stored value is empty, so the updater key carries no passphrase (unchanged since 2026-09-21). Already `ENV_ONLY` in the guard, which still bites the case that matters — a real passphrase stored at repo scope reddens rung 1. Deleting the empty repo-scoped copy is optional and changes nothing to the build: `release-tauri.yml` maps it into `env:` with `${{ secrets.… }}`, and an undefined secret evaluates to the empty string, so the bundler sees the same empty variable either way. It is left in place only because there is no material here to protect. |
 | `APPLE_ID`, `APPLE_PASSWORD` | Notarization. Read only by `release-tauri.yml` and `demo-build.yml`, both main-only. |
 | `RELEASE_SSH_KEY` | **A direct write to `main`.** The deploy key provisioned to bypass the `main` ruleset (see `docs/rules/branch-protection.md`). Read only by the `release` job of `release-every-merge.yml`, which now declares `environment: release` (LAC-7170). |
 | `NPM_TOKEN` | Publishes `juno-cua`. Same job, same reason. |
