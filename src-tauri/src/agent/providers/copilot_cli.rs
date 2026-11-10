@@ -196,9 +196,9 @@ pub async fn cli_status() -> CliStatus {
         None => false,
     };
 
-    let sign_in = if token_in_env || in_config {
-        SignIn::SignedIn
-    } else if gh_has_a_login().await {
+    // Cheapest evidence first: `gh` is only asked when nothing else proved it.
+    let proven = token_in_env || in_config || gh_has_a_login().await;
+    let sign_in = if proven {
         SignIn::SignedIn
     } else if last_known_sign_in() == SignIn::SignedOut {
         // A turn already failed asking for a login, and nothing since has shown one.
