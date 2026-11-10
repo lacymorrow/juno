@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **cost:** Haiku 5.5 is priced with its long-context tier, so a turn over 100,000 tokens is no longer under-reported by 5x (LAC-7413)
 - **settings:** the model picker showed no models at all. It hid anything that drives the computer through `computer_toolset_20260801`, and every model in the current lineup now does, so the list had collapsed to whichever model was already selected. Juno sends the toolset, so that is no longer a reason to hide a model (LAC-6396, LAC-7413)
 
+## [0.8.272] - 2026-11-10
+
+### Fixed
+
+- **agent:** refuse the turn when background mode's shell screen cannot be armed (LAC-7421) (#964) (41f2d942)
+
 ## [0.8.266] - 2026-11-06
 
 ### Fixed
@@ -1803,7 +1809,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.266...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.272...HEAD
+[0.8.272]: https://github.com/lacymorrow/juno/compare/cua-v0.8.271...v0.8.272
 [0.8.266]: https://github.com/lacymorrow/juno/compare/cua-v0.8.265...v0.8.266
 [0.8.261]: https://github.com/lacymorrow/juno/compare/cua-v0.8.260...v0.8.261
 [0.8.260]: https://github.com/lacymorrow/juno/compare/cua-v0.8.259...v0.8.260
