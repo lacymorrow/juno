@@ -24,6 +24,33 @@ same Mac, same device, same cpal. That 3-5x gap decides the fix:
 Nothing in the repo could re-derive the 29-49 ms, so step one was to stop
 trusting it.
 
+## Where the 29-49 ms came from, and why it stands
+
+It was measured — on **2026-10-28**, on this same Mac (zero, built-in mic, F32
+48 kHz), by a standalone crate with a path dependency on this repo's vendored
+cpal. That run recorded:
+
+| what | cost |
+|---|---|
+| `build_input_stream` (patched cpal builds it stopped) | 6-27 ms |
+| **`play()` = `AudioOutputUnitStart`** | **28-49 ms** |
+| press to first sample callback | 40-58 ms |
+
+and ruled out, by measurement, `default_input_device()` (0.1 ms),
+`default_input_config()` (5-7 ms), thread spawn-to-running (0.1 ms), and the
+permission check (a cached atomic after first grant). Stream reuse was free:
+8 start/stop cycles on one stream cost the same as the first.
+
+**So the premise holds: the gap is real.** The problem was never that the
+number was wrong — it is that the crate was built in a scratch directory and
+thrown away, leaving the figure in a comment with no way to re-derive it. That
+is the hole this file and `crates/audio-start-probe` close.
+
+Note what that run recorded about permissions: *"the agent session's
+responsible app already had it, so the probe ran without a TCC prompt."* On
+2026-10-28 an agent-launched process on this Mac could open the microphone. It
+cannot today, and the next section is why.
+
 ## The probe
 
 `crates/audio-start-probe` — a workspace member, binary only, nothing depends
@@ -102,12 +129,42 @@ n=2, quoted as corroboration only; the n=35 dataset lives on LAC-5281. The
 first-press-after-launch figure being ~2.7x the next one is consistent with a
 cold authorisation path rather than with device hardware.
 
+### Why it worked on 2026-10-28 and not on 2026-11-10
+
+A TCC grant is keyed to the binary's code identity. For an unsigned Homebrew
+binary that is a content hash — here `node-55554944e3d173e54c5434e4adeb5d46975f006d`.
+Replace the binary and the grant no longer matches anything.
+
+| date | event |
+|---|---|
+| 2026-10-28 | standalone input probe runs, no TCC prompt, 28-49 ms recorded |
+| 2026-11-02 14:08 | `node 26.13.0_1` installed (`INSTALL_RECEIPT.json` mtime) |
+| 2026-11-04 21:42 | old keg removed (`/opt/homebrew/Cellar/node/` mtime) |
+| 2026-11-10 | same class of probe: `Auth Right: Unknown (None)`, prompt raised |
+
+So the Node CVE patch (LAC-5351) almost certainly revoked the fleet's
+microphone access for agent-launched processes as a side effect, silently,
+six days before anyone needed it. Stated as the likely cause rather than a
+proven one: `TCC.db` needs Full Disk Access to read, which this process does
+not have (`kTCCServiceSystemPolicyAllFiles: Denied`), so the old grant record
+cannot be inspected directly. The dates, the unchanged method and the changed
+outcome are the evidence.
+
+This is not specific to audio: it will silently break any fleet work that
+needs a TCC-gated capability from an agent-launched process, and a Homebrew
+upgrade will do it again.
+
 ## Verdict
 
-Of the ticket's two outcomes, this is the second: **the terminal probe cannot
-model Juno here**, and it cannot even run. Not "no factor reproduced it, cause
-unknown" — the factorial never got to execute, because an agent-launched
-process on this Mac has no microphone grant to execute it with.
+**The premise is confirmed, not killed.** Standalone `AudioOutputUnitStart` on
+an input device is 28-49 ms; Juno pays 161 ms for the same call. The 3-5x gap
+is real, so the factorial is still the right next step and still worth running.
+
+On *this* run, of the ticket's two honest outcomes, the answer is the second:
+**the probe cannot model Juno here**, and it cannot even run. Not "no factor
+reproduced it, cause unknown" — the factorial never got to execute, because an
+agent-launched process on this Mac no longer has a microphone grant to execute
+it with, for the reason above.
 
 ## What would finish it
 
@@ -116,15 +173,19 @@ knows how to print.
 
 1. **Run the probe from a context that already has Microphone ticked** — a real
    Terminal/iTerm window on this Mac. `cargo run -p audio-start-probe
-   --release` and paste the table. No new grant, no new code.
-2. **Grant Microphone to the fleet's `node`**, which makes agent runs able to
-   do this unattended — but it gives every agent-spawned process microphone
-   access permanently. That is a security decision for the machine's owner, not
-   something an agent should answer on a prompt.
+   --release` and paste the table. No new grant, no new code, and it answers
+   the whole factorial in one go.
+2. **Restore Microphone for the fleet's `node`**, which puts agent runs back
+   where they were on 2026-10-28 and makes this unattended again. It is a
+   restoration rather than an expansion, but it still grants every
+   agent-spawned process microphone access, so it is the machine owner's
+   decision and not one an agent should answer on a prompt. Note it will be
+   revoked again by the next `node` upgrade.
 3. **Measure in Juno's own process** — a debug Tauri command on a dev build,
    which is the route LAC-7538 pre-authorised for exactly this case. Costs a CI
    build and a manual invocation, and gives up this ticket's "touches no
-   production code" property.
+   production code" property. Worth doing on its own merits eventually: it is
+   the only option that measures the real security context Juno ships in.
 
 Until one of them runs, the pre-roll / mic-indicator tradeoff (LAC-6121) stays
 undecided, because its input is the number above.

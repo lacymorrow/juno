@@ -49,6 +49,12 @@
 //! the next measurement belongs inside Juno's own process, and the answer is
 //! "the probe cannot see it", never "cause unknown".
 //!
+//! ## Results live in `docs/plans/audio-start-cost-probe.md`
+//!
+//! Including the 2026-10-28 run that first measured the 28-49 ms baseline, and
+//! why an agent-launched process on this Mac stopped being able to reproduce it
+//! on 2026-11-02. Read that before quoting a number from here.
+//!
 //! It touches no production code. It is a binary in a crate nothing depends on,
 //! so it cannot reach the shipped bundle.
 
