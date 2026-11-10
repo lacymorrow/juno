@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (Tauri backend), the `agent-client-protocol` crate (Zed's, Apache-2.0; crates.io reported 5.1.0 on 2026-11-10, and the spike pins whatever version the registry serves on the day, never this document), existing `juno_mcp.rs`, existing `codex_session.rs` process pattern.
 
-**Status:** approved by the CEO on LAC-7609, 2026-11-10, with one amendment: the sequence is cut to the spike plus the Copilot row. Antigravity and Cursor are parked behind a conversion number (below). Tracked in LAC-7608. Written by the Product Manager; CTO owns the build. Nothing below is started.
+**Status:** approved by the CEO on LAC-7609, 2026-11-10, with one amendment: the sequence is cut to the spike plus the Copilot row. Antigravity and Cursor are parked behind a conversion number (below). The spike (LAC-7610, `docs/plans/cli-providers-spike.md`) ran the same day and the Copilot row (LAC-7611) is in progress on the **native** path, see "Spike outcome". Tracked in LAC-7608. Written by the Product Manager; CTO owns the build.
 
 ---
 
@@ -19,6 +19,19 @@
 3. **Row 2 is Antigravity CLI** (`agy acp`), **not Gemini CLI, and it is parked until Copilot converts.** Google moved every free, Google AI Pro and Google AI Ultra account off `gemini` to `agy` on 2026-06-18. `gemini` now serves Gemini Code Assist Standard and Enterprise licences only. For a person on a Mac, the Google subscription CLI is `agy`. Its installed base is unpublished, so the CEO will not commit CTO weeks to it until the Copilot row shows that "no API key" converts: the Product Manager proposes the install-or-activation number with the Copilot PR, the CEO approves it there, and Antigravity unparks when it is met.
 4. **"Azure AI Foundry" is zero Juno code.** It is Copilot CLI's bring-your-own-key feature, configured inside Copilot (`/model`, saved to `~/.copilot/providers.json`). Juno spawns `copilot`, Copilot reads its own config. Juno adds no field, no toggle, no provider.
 5. **A spike comes first and can say no.** Two to three days against `copilot --acp` and `agy acp`, measuring the six things in "The spike". Five ask whether ACP works; the sixth asks whether it is cheaper than Copilot's native `-p --output-format json` path for a single row. If ACP cannot mount an HTTP MCP server, or native is clearly cheaper for one row, Copilot ships native with no new dependency and ACP waits for row 2.
+
+---
+
+## Spike outcome (LAC-7610, 2026-11-10)
+
+Measured by the Backend Engineer against Copilot CLI 1.0.109 and the live `juno_mcp` endpoint; full numbers in `docs/plans/cli-providers-spike.md`.
+
+- **Copilot over ACP: go.** `initialize` reports protocol 1, `mcpCapabilities.http: true`, image prompts, `authMethods: [copilot-login]`. Juno's HTTP MCP server with the bearer header mounts and the `computer` tool round-trips. Permission requests reach the approval sheet and a rejection reaches the model as text. Cancel lands in 10 to 22 ms.
+- **Copilot native (`-p --output-format json`): go.** Also mounts Juno's server via `--additional-mcp-config @<file>` with the token off argv. One-shot wall 16.1 s for a screenshot prompt.
+- **Measurement 6: native about 2 days, ACP about 5 days plus a dependency and a Security stage.** The CEO's rule on LAC-7609 applies as written: native is clearly cheaper for a single row, so **the Copilot row ships native with no new dependency, and ACP returns with row 2.** The CTO was paused when the estimate was made and may overwrite it; the direction does not change unless the numbers do.
+- **Antigravity: unmeasured, not a no-go.** No `agy` on this Mac, and it is not on npm or Homebrew. The install source is Google's installer, `curl -fsSL https://antigravity.google/cli/install.sh | bash`, which puts the binary in `~/.local/bin`. Measure it when the row unparks.
+- **Carried into LAC-7611.** Copilot loads the person's skills and custom instructions into every session (one skill cost 26k input tokens in the spike), so the row has to keep Juno's sessions clear of them and measure the token baseline before and after. The signed-out `session/new` error still needs a run with an empty `HOME`, because `needs_sign_in` depends on it. The model list for `types.rs` comes from an interactive `/model`.
+- **What native gives up, and the plan's answer.** Cancel is a process kill rather than 10 ms; the bar already treats Escape as kill on the Codex one-shot path. Follow-ups pay a spawn each via `--resume`; the loading state above covers it. Permission requests go through Juno's own `juno_mcp` gate, which still prompts.
 
 ---
 
@@ -154,9 +167,9 @@ Effort: S, two to three days including CI. Output: the spike doc and a one-line 
 
 ## Build sequence (child issues 2 to 4)
 
-Each ships whole before the next starts. Effort: S under a day, M a few days, L a week or more. **Approved for filing: child issues 1 and 2.** Child issues 3 and 4 are parked (LAC-7609) and are filed only when the conversion number proposed with the Copilot PR is met.
+Each ships whole before the next starts. Effort: S under a day, M a few days, L a week or more. **Approved for filing: child issues 1 and 2.** The spike chose the native path for child issue 2, so the `acp_cli.rs` and `acp_rows.rs` files below are deferred to row 2; the provider module for Copilot is `copilot_cli.rs`, shaped like `codex_cli.rs` minus the warm app-server, parsing the six JSONL event types the spike needed. Child issues 3 and 4 are parked (LAC-7609) and are filed only when the conversion number proposed with the Copilot PR is met.
 
-### Child issue 2: `acp_cli.rs` + the Copilot row (M to L)
+### Child issue 2: the Copilot row, native path (M), LAC-7611
 
 **Files**
 - Create: `src-tauri/src/agent/providers/acp_cli.rs` (the client: process, writer and reader tasks, `initialize`, `session/new`, `session/prompt`, `session/update` routing to Juno's stream events, `session/request_permission` to the approval sheet, `session/cancel` on Escape, auth-required mapping)
