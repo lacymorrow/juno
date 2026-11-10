@@ -207,11 +207,14 @@ pub fn unscreened_spawn_refusal(
     if !skips || screened {
         return None;
     }
+    // Read by the person, in the chat, in place of the answer they asked
+    // for. So it says what Juno could not do in their terms, not in this
+    // module's: no shell screen, no arming, no CLI. The log line beside it
+    // carries the write error (LAC-7421).
     Some(
-        "Background mode is on, but Juno could not arm the shell screen for \
-         the Claude CLI, so a shell command this turn ran could take the front \
-         off you. Not starting the turn. Turning background mode off runs it \
-         unscreened."
+        "Juno could not keep its own shell commands off your screen, so it \
+         did not run that. Restarting Juno usually fixes it. You can also \
+         turn background mode off, which lets Juno's commands take the front."
             .to_string(),
     )
 }
@@ -1141,9 +1144,15 @@ mod tests {
         // did not get written.
         let why = unscreened_spawn_refusal(true, false, true, None)
             .expect("an unscreened spawn is refused");
+        // The person reads this in place of an answer, so it has to say what
+        // did not happen and how to get the turn to run.
         let said = why.to_lowercase();
+        assert!(said.contains("did not run"), "{why}");
         assert!(said.contains("background mode"), "{why}");
-        assert!(said.contains("shell screen"), "{why}");
+        assert!(
+            !said.contains("shell screen") && !said.contains("--settings"),
+            "the refusal is read by a person, not by this module: {why}"
+        );
 
         // Both of the other ways in: no tool server at all, and the asking
         // path falling back to skip-permissions because there is nothing to
