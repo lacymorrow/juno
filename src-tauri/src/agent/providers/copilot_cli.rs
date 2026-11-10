@@ -389,6 +389,9 @@ impl CopilotCliBrain {
             "--disable-builtin-mcps".to_string(),
             // An update swapping the binary mid-turn is not Juno's to allow.
             "--no-auto-update".to_string(),
+            // AGENTS.md and friends in the person's home are for their coding
+            // sessions, not for a desktop assistant.
+            "--no-custom-instructions".to_string(),
         ];
         if let Some(session) = resume {
             args.push(format!("--resume={session}"));
@@ -589,7 +592,12 @@ impl CopilotCliBrain {
 /// passed through verbatim, which is also how a spent quota is surfaced.
 fn classify_failure(reason: &str, stderr: &str, status: &std::process::ExitStatus) -> String {
     let haystack = format!("{reason}\n{stderr}").to_ascii_lowercase();
-    if haystack.contains("copilot login") || haystack.contains("not authenticated") {
+    // Signed out, measured on 1.0.109 with an empty HOME and no token: exit 1,
+    // empty stdout, stderr "Error: No authentication information found."
+    if haystack.contains("no authentication information")
+        || haystack.contains("copilot login")
+        || haystack.contains("not authenticated")
+    {
         remember_sign_in(SignIn::SignedOut);
         return SIGNED_OUT_MESSAGE.to_string();
     }
@@ -850,6 +858,7 @@ mod tests {
         assert!(joined.contains("--model auto"));
         assert!(joined.contains("--disable-builtin-mcps"));
         assert!(joined.contains("--no-ask-user"));
+        assert!(joined.contains("--no-custom-instructions"));
         assert!(joined.contains("--additional-mcp-config @/tmp/juno-copilot-mcp-1.json"));
         assert!(joined.contains("--allow-tool=juno"));
         assert!(!joined.contains("secret"));
@@ -1003,6 +1012,15 @@ mod tests {
         let status = std::process::ExitStatus::from_raw(1 << 8);
         assert_eq!(
             classify_failure("Run `copilot login` first", "", &status),
+            SIGNED_OUT_MESSAGE
+        );
+        // The real stderr of a signed-out run (1.0.109, empty HOME, no token).
+        assert_eq!(
+            classify_failure(
+                "Error: No authentication information found.\n\nCopilot can be authenticated with GitHub using an OAuth Token",
+                "",
+                &status
+            ),
             SIGNED_OUT_MESSAGE
         );
         assert_eq!(last_known_sign_in(), SignIn::SignedOut);
