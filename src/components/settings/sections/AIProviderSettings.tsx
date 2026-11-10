@@ -36,6 +36,11 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
   const [demo, setDemo] = useState<DemoInfo | null>(null);
   const [cli, setCli] = useState<ClaudeCliStatus | null>(null);
   const copilot = useCopilotStatus(settings.activeProvider === "copilot");
+  // Copilot's sign-in rides on the provider list the backend already sends
+  // (`get_providers` refreshes it), so there is no second probe to keep in step.
+  const copilotNeedsSignIn =
+    settings.providers?.find((p) => p.id === "copilot_cli")?.needs_sign_in ??
+    false;
 
   // Fields save when they lose focus, the way every other row here applies at
   // once. The group footer says "Saved" for a moment so the person knows the
@@ -125,7 +130,9 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                   ? "Nothing to enter. Juno talks to Codex on this Mac."
                   : settings.activeProvider === "copilot"
                     ? "Nothing to enter. Juno uses the GitHub sign-in already on this Mac."
-                    : "Changes save when you leave a field."
+                    : settings.activeProvider === "copilot_cli"
+                      ? "Nothing to enter. Juno talks to Copilot on this Mac."
+                      : "Changes save when you leave a field."
           }
         >
           <SettingsRow
@@ -192,6 +199,30 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                     to set up.
                   </p>
                 </div>
+              ) : settings.activeProvider === "copilot_cli" ? (
+                <div className="rounded-md border border-border bg-muted/40 p-4">
+                  <p className="text-[13px] font-medium text-foreground">
+                    {copilotNeedsSignIn
+                      ? "Copilot CLI is not signed in"
+                      : "No API key needed"}
+                  </p>
+                  <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
+                    {copilotNeedsSignIn ? (
+                      <>
+                        Run{" "}
+                        <code className="rounded bg-muted px-1 py-0.5 text-xs">
+                          copilot login
+                        </code>{" "}
+                        in your terminal, then come back to this window.
+                      </>
+                    ) : (
+                      <>
+                        Juno is using your GitHub Copilot plan through Copilot
+                        CLI. Nothing else to set up.
+                      </>
+                    )}
+                  </p>
+                </div>
               ) : (
                 <EnvironmentVariables>
                   <EnvironmentVariablesHeader>
@@ -219,13 +250,26 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
 
           {/* Applies on the next query: one-shot spawns pick it up directly,
               and a persistent CLI session is replaced via its spawn signature. */}
-          {settings.activeProvider === "claude_cli" && (
+          {(settings.activeProvider === "claude_cli" ||
+            settings.activeProvider === "copilot_cli") && (
             <SettingsRow
               advanced
               htmlFor="load-account-mcp"
-              label="Load account MCP connectors"
-              description="Use your Claude account connectors in chats."
-            info="Use the connectors on your Claude account, like Slack, Gmail, and Drive, in Juno chats. Off limits Juno to its own tools."
+              label={
+                settings.activeProvider === "copilot_cli"
+                  ? "Load your Copilot MCP servers"
+                  : "Load account MCP connectors"
+              }
+              description={
+                settings.activeProvider === "copilot_cli"
+                  ? "Use the MCP servers you set up in Copilot in chats."
+                  : "Use your Claude account connectors in chats."
+              }
+              info={
+                settings.activeProvider === "copilot_cli"
+                  ? "Use the MCP servers in your Copilot configuration in Juno chats. Off limits Juno to its own tools."
+                  : "Use the connectors on your Claude account, like Slack, Gmail, and Drive, in Juno chats. Off limits Juno to its own tools."
+              }
             >
               <Switch
                 id="load-account-mcp"
@@ -253,7 +297,8 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
         >
           {/* Max tokens / temperature — not applicable to Claude CLI (managed by the CLI) */}
           {settings.activeProvider !== "claude_cli" &&
-            settings.activeProvider !== "codex_cli" && (
+            settings.activeProvider !== "codex_cli" &&
+            settings.activeProvider !== "copilot_cli" && (
             <>
               <SettingsRow advanced htmlFor="max-tokens" label="Max Tokens">
                 <Input

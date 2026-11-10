@@ -49,7 +49,7 @@ impl Answerer {
             Provider::OpenAI | Provider::Rig => Self::OpenAi,
             Provider::Gemini => Self::Gemini,
             Provider::CodexCli => Self::Codex,
-            Provider::Copilot => Self::Copilot,
+            Provider::Copilot | Provider::CopilotCli => Self::Copilot,
         }
     }
 
@@ -402,6 +402,7 @@ async fn refresh_provider(app: &AppHandle) {
         Provider::Copilot => {
             crate::agent::providers::copilot::last_known_sign_in() != SignIn::SignedOut
         }
+        Provider::CopilotCli => crate::agent::providers::copilot_cli::is_copilot_cli_available(),
         _ => crate::agent::providers::startup_default::active_has_credential(&config),
     };
     let answerer = Answerer::for_provider(&provider);
