@@ -184,11 +184,19 @@ branches: `main` only) is the instrument here rather than another rule. A secret
 held there cannot be read by a workflow on any other branch; a repo-scoped
 secret on a public repo can be read by anyone who can push a workflow file.
 
-Move these ten into **Settings → Environments → release → Environment
+Move these into **Settings → Environments → release → Environment
 secrets**, then **delete the repository-scoped copy** — step two is the one that
 closes anything. Moving a value needs the plaintext, so it is Lacy's to do;
 nothing breaks in the meantime, because a job naming an environment still
 resolves a repo-scoped secret (measured, run 42114623977).
+
+Of the ten names first listed here, three are done, six still hold a real value
+at repo scope, and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` holds an empty one, so
+it has nothing to move. Deleting the repo-scoped copy of any of the six breaks
+no job: every consumer of every name in the table declares
+`environment: release`, re-verified against `origin/main` on 2026-11-09
+(`build-tauri`, `build-demo`, `release`, `homebrew`). Read the per-row status
+below rather than this count, and the guard rather than either.
 
 That last property is also why the first attempt at this was inert with no
 failing check anywhere (LAC-7194): the environment was attached and documented
@@ -205,12 +213,12 @@ what is declared here. After moving a secret, move its name from `PENDING` to
 | Secret | Why it moves |
 |--------|--------------|
 | `TAURI_SIGNING_PRIVATE_KEY` | **The updater trust root.** The app verifies only the minisign `pubkey` in `tauri.conf.json`, so this key alone can hand every install a malicious update. Read only by `release-tauri.yml`. |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Decrypts the above. |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Decrypts the above. **Nothing to move**: the stored value is empty, so the updater key carries no passphrase (unchanged since 2026-09-21). Already `ENV_ONLY` in the guard, which still bites the case that matters — a real passphrase stored at repo scope reddens rung 1. The empty repo-scoped copy is deliberately left in place: unsetting a secret and setting it empty are not the same thing to the build, and there is no material here to protect. |
 | `APPLE_ID`, `APPLE_PASSWORD` | Notarization. Read only by `release-tauri.yml` and `demo-build.yml`, both main-only. |
 | `RELEASE_SSH_KEY` | **A direct write to `main`.** The deploy key provisioned to bypass the `main` ruleset (see `docs/rules/branch-protection.md`). Read only by the `release` job of `release-every-merge.yml`, which now declares `environment: release` (LAC-7170). |
 | `NPM_TOKEN` | Publishes `juno-cua`. Same job, same reason. |
 | `HOMEBREW_TAP_TOKEN` | Single-repo PAT that pushes `lacymorrow/homebrew-tap`. Read only by the `homebrew` job of `release-cua.yml`, which names `environment: release`. That became possible when the CLI release moved from a `cua-v*` tag push (a tag ref the main-only environment refuses, and a tag policy would protect nothing with no tag ruleset) to a dispatch from main that `release-every-merge.yml` starts (LAC-7267). |
-| `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_P8_B64` | Notarization (App Store Connect key). **Do not exist yet** — create them directly in the environment, never at repo scope. |
+| `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_P8_B64` | Notarization (App Store Connect key). **Done 2026-11-09** (LAC-7193): created directly in the environment. They are `ENV_ONLY` in the guard, and no guard run has reddened, so no readable repo-scoped copy existed at any run since 2026-11-05; a copy added later reddens rung 1. Worth noting what that bought: the guard listed these three by name while they existed at neither scope, so creating them at repo scope would have failed a check on the next push to main. |
 
 Staying at repo scope, deliberately:
 
