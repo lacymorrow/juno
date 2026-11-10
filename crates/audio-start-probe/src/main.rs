@@ -511,7 +511,13 @@ fn measure_here(factor: &Factor, opts: &Opts) -> Result<Measurement, String> {
     let config = native.config();
     let format = native.sample_format();
     let built_for = f64::from(config.sample_rate.0);
-    let original_rate = hal::nominal_rate(id)?;
+    // Armed before anything that can fail, and dropped after the streams
+    // below it (locals drop in reverse order), so the rate goes back with the
+    // device already stopped.
+    let _rate_guard = RateGuard {
+        device: id,
+        original: hal::nominal_rate(id)?,
+    };
 
     let mut notes: Vec<String> = Vec::new();
 
@@ -609,9 +615,6 @@ fn measure_here(factor: &Factor, opts: &Opts) -> Result<Measurement, String> {
     drop(keeper);
     drop(output);
     drop(stream);
-    if (hal::nominal_rate(id)? - original_rate).abs() > 0.5 {
-        hal::set_nominal_rate(id, original_rate)?;
-    }
 
     let frames = frames.load(Ordering::SeqCst);
     if frames == 0 {
@@ -624,6 +627,40 @@ fn measure_here(factor: &Factor, opts: &Opts) -> Result<Measurement, String> {
         frames,
         note: notes.join("; "),
     })
+}
+
+/// Puts the device's sample rate back on **every** exit path, including an
+/// error return from the middle of the measurement loop.
+///
+/// The mismatch rows deliberately change a system-wide setting. Without this,
+/// one `?` leaves the Mac's microphone on a rate nobody asked for, and Juno —
+/// which watches that property and rebuilds its warm stream when it changes —
+/// would then be reacting to the probe. A leftover *stream* needs no such
+/// care: the process exits immediately after an error return, so it dies with
+/// it, whereas the device rate outlives the process.
+#[cfg(target_os = "macos")]
+struct RateGuard {
+    device: hal::DeviceId,
+    original: f64,
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for RateGuard {
+    fn drop(&mut self) {
+        match hal::nominal_rate(self.device) {
+            // Already where it started, which is the common case.
+            Ok(now) if (now - self.original).abs() < 0.5 => {}
+            Ok(_) => {
+                if let Err(e) = hal::set_nominal_rate(self.device, self.original) {
+                    eprintln!(
+                        "  (could not put the device back to {} Hz: {e})",
+                        self.original
+                    );
+                }
+            }
+            Err(e) => eprintln!("  (could not read the device's rate to restore it: {e})"),
+        }
+    }
 }
 
 /// The control row: time `AudioOutputUnitStart` on an output unit.

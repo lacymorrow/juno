@@ -21,6 +21,9 @@ const SAME_RATE: f64 = 0.5;
 /// How long to wait for a rate change to show up on a read-back.
 const RATE_CHANGE_TIMEOUT: Duration = Duration::from_millis(1000);
 
+/// A CoreAudio object id, so callers need not name `coreaudio::sys`.
+pub type DeviceId = AudioObjectID;
+
 /// The CoreAudio id cpal holds for a device.
 ///
 /// Same access path the shipped code uses (`device_identity::object_id`),
