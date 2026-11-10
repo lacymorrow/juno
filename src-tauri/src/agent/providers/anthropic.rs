@@ -2920,10 +2920,14 @@ mod computer_toolset_request_tests {
 
     #[test]
     fn toolset_only_models_select_the_toolset_path() {
-        // Claude 5.5 and later accept no earlier tool type, so they are the
-        // models worth the toolset's ~2x input-token overhead. Every other
-        // toolset-GA model stays on `computer_20251124` and is covered by the
-        // test below.
+        // These models accept no earlier tool type, so they are the ones
+        // worth the toolset's ~2x input-token overhead. Anthropic names them
+        // on the computer-use page (Fable 5.2, Mythos 5.2, Opus 5.5, Sonnet
+        // 5.5, Haiku 5.5; Mythos is deliberately absent from this catalog)
+        // instead of giving a generation rule, and Fable 5.2 is why: it sorts
+        // below 5.5 and is still toolset-only, so "5.5 and later" is false.
+        // Every other toolset-GA model stays on `computer_20251124` and is
+        // covered by the test below.
         for model in [
             model_ids::CLAUDE_FABLE_5_2,
             model_ids::CLAUDE_OPUS_5_5,

@@ -653,11 +653,17 @@ impl Provider {
                         id: model_ids::CLAUDE_SONNET_5_5,
                         name: "Claude Sonnet 5.5",
                         price: Price::per_mtok(2.0, 10.0, 0.10, 2.50),
-                        // Toolset-only on the Claude API, exactly like Opus 5.5:
-                        // "Claude 5.5 and later models support computer use only
-                        // through the computer_toolset_20260801 toolset and
-                        // return an error for the earlier computer_20251124 tool
-                        // version." Sending the legacy tool here would 400.
+                        // Toolset-only on the Claude API, exactly like Opus
+                        // 5.5. The computer-use page states this as a list of
+                        // models, not as a generation rule: Fable 5.2, Mythos
+                        // 5.2, Opus 5.5, Sonnet 5.5 and Haiku 5.5 "support
+                        // computer use through the computer_toolset_20260801
+                        // toolset", and reject the earlier computer_20251124
+                        // tool version. Sending the legacy tool here would 400.
+                        //
+                        // Do not restate that as "5.5 and later". Fable 5.2 is
+                        // on the list and sorts below 5.5, so the shorthand
+                        // gives the wrong answer for it (LAC-7413).
                         computer_use: CU_TOOLSET,
                         availability: Availability::Current,
                         toolset_ga: true,
@@ -2041,7 +2047,10 @@ mod tests {
                 "computer_toolset_20260801",
                 None,
             ),
-            // Claude 5.5 and later are toolset-only on the Claude API.
+            // Toolset-only on the Claude API. The set is the one the
+            // computer-use page enumerates (Fable 5.2, Mythos 5.2, Opus 5.5,
+            // Sonnet 5.5, Haiku 5.5), not a generation rule: Fable 5.2 sorts
+            // below 5.5 and is toolset-only, so "5.5 and later" is false.
             (
                 model_ids::CLAUDE_SONNET_5_5,
                 "computer_toolset_20260801",
