@@ -385,7 +385,7 @@ pub async fn cli_status() -> CliStatus {
 /// or a symlink somebody planted at a name as predictable as this one. The
 /// rename is atomic and keeps the mode, so a hook reading the old file reads a
 /// whole one (LAC-6475).
-fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), AgentError> {
+pub(super) fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), AgentError> {
     use std::io::Write;
 
     // Unique per call, not just per process: a turn and the warm spare can

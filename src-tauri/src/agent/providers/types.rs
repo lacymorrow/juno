@@ -409,6 +409,9 @@ pub enum Provider {
     /// endpoint, authenticated with the person's GitHub sign-in. No API key.
     /// See [`super::copilot`].
     Copilot,
+    /// Copilot CLI: subprocess-based provider, no API key needed.
+    /// Uses the locally installed `copilot` binary with the user's GitHub Copilot plan.
+    CopilotCli,
 }
 
 impl Provider {
@@ -423,6 +426,7 @@ impl Provider {
             "claude_cli" | "claude-cli" | "claudecli" => Some(Provider::ClaudeCli),
             "codex_cli" | "codex-cli" | "codexcli" => Some(Provider::CodexCli),
             "copilot" | "github_copilot" | "github-copilot" => Some(Provider::Copilot),
+            "copilot_cli" | "copilot-cli" | "copilotcli" => Some(Provider::CopilotCli),
             _ => None,
         }
     }
@@ -441,6 +445,7 @@ impl Provider {
             Provider::ClaudeCli => "claude_cli",
             Provider::CodexCli => "codex_cli",
             Provider::Copilot => "copilot",
+            Provider::CopilotCli => "copilot_cli",
         }
     }
 
@@ -454,6 +459,7 @@ impl Provider {
             Provider::ClaudeCli => "Claude CLI",
             Provider::CodexCli => "Codex CLI",
             Provider::Copilot => "GitHub Copilot",
+            Provider::CopilotCli => "Copilot CLI",
         }
     }
 
@@ -472,6 +478,9 @@ impl Provider {
             }
             Provider::Copilot => {
                 "Use Claude through your GitHub Copilot plan and GitHub sign-in, no API key required"
+            }
+            Provider::CopilotCli => {
+                "Use your local Copilot CLI installation with your GitHub Copilot plan, no API key required"
             }
         }
     }
@@ -1126,6 +1135,31 @@ impl Provider {
                 ];
                 MODELS
             }
+            // Copilot CLI: the person's GitHub Copilot plan. Drives the desktop
+            // through Juno's in-process MCP server, like the other CLIs. `auto`
+            // is the only entry on purpose: the named models a plan offers are
+            // not enumerable from outside Copilot (the ACP session lists none,
+            // `/model` is interactive, and the set differs per plan), so a
+            // hand-kept list would drift. A person who wants a specific model
+            // picks it in `copilot` and `/model`; `auto` lets Copilot choose
+            // within the plan. Bring-your-own-key (Azure AI Foundry and others)
+            // is also Copilot's own config, and Juno adds nothing for it.
+            Provider::CopilotCli => {
+                const MODELS: &[ModelDefinition] = &[ModelDefinition {
+                    id: "auto",
+                    name: "Auto (via Copilot)",
+                    price: Price::Subscription,
+                    computer_use: ComputerUse::FunctionTools,
+                    availability: Availability::Current,
+                    toolset_ga: false,
+                    image_tier: ImageTier::Standard,
+                    adaptive_thinking: false,
+                    server_side_fallback: false,
+                    is_recommended: true,
+                    router_role: None,
+                }];
+                MODELS
+            }
         }
     }
 
@@ -1216,6 +1250,7 @@ impl Provider {
                     Provider::ClaudeCli => "sonnet",
                     Provider::CodexCli => "gpt-6-luna",
                     Provider::Copilot => "claude-opus-5.5",
+                    Provider::CopilotCli => "auto",
                 }
             })
     }
@@ -1230,6 +1265,7 @@ impl Provider {
             Provider::ClaudeCli => "claude_cli",
             Provider::CodexCli => "codex_cli",
             Provider::Copilot => "copilot",
+            Provider::CopilotCli => "copilot_cli",
         }
     }
 
@@ -1546,6 +1582,7 @@ mod tests {
             Provider::ClaudeCli,
             Provider::CodexCli,
             Provider::Copilot,
+            Provider::CopilotCli,
         ] {
             let default = provider
                 .model_definitions()
@@ -2021,6 +2058,7 @@ mod tests {
             Provider::Rig,
             Provider::ClaudeCli,
             Provider::CodexCli,
+            Provider::CopilotCli,
         ] {
             for def in provider.model_definitions() {
                 assert!(
@@ -2097,6 +2135,7 @@ mod tests {
             Provider::ClaudeCli,
             Provider::CodexCli,
             Provider::Copilot,
+            Provider::CopilotCli,
         ] {
             let recommended: Vec<_> = provider
                 .model_definitions()
@@ -2193,6 +2232,7 @@ mod tests {
             Provider::ClaudeCli,
             Provider::CodexCli,
             Provider::Copilot,
+            Provider::CopilotCli,
         ] {
             for def in provider.model_definitions() {
                 let capable = def.computer_use.is_supported();

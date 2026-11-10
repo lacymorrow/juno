@@ -21,15 +21,17 @@
 //!   answer, and switching to it would trade an honest "add a key" for a
 //!   confusing "run `claude login`" they never asked to see.
 //! - *fixed order*: ties go to the first CLI in the list. Today that is
-//!   Claude first, Codex second, GitHub Copilot third. When one person has
-//!   both CLIs signed in Juno runs on Claude, because the Claude provider has
-//!   further-along tool integration and that is what their experience will
-//!   depend on. Copilot comes last because each request spends the person's
-//!   premium-request allowance, which they may be saving for their editor.
+//!   Claude first, Codex second, GitHub Copilot third, the Copilot CLI
+//!   fourth. When one person has several signed in Juno runs on the first,
+//!   because the Claude provider has further-along tool integration and that
+//!   is what their experience will depend on. Copilot comes after them because
+//!   each request spends the person's premium-request allowance, which they may
+//!   be saving for their editor; its HTTP path comes before its CLI because it
+//!   keeps Juno's own tools, cursor overlay and streaming.
 //!
-//! GitHub Copilot is not a CLI, but it fits the same shape: "installed" is
-//! "a GitHub token was found" and "signed in" is "GitHub confirmed that token
-//! has Copilot". See [`super::copilot`].
+//! GitHub Copilot (HTTP) is not a CLI, but it fits the same shape:
+//! "installed" is "a GitHub token was found" and "signed in" is "GitHub
+//! confirmed that token has Copilot". See [`super::copilot`].
 //!
 //! The same function walks it back. If Juno made the choice and the chosen
 //! CLI later disappears or signs out, Juno un-makes it rather than leaving
@@ -147,6 +149,14 @@ mod tests {
         }
     }
 
+    fn copilot_cli_candidate(installed: bool, signed_in: bool) -> CliCandidate {
+        CliCandidate {
+            provider_id: Provider::CopilotCli.id(),
+            installed,
+            signed_in,
+        }
+    }
+
     fn codex_candidate(installed: bool, signed_in: bool) -> CliCandidate {
         CliCandidate {
             provider_id: Provider::CodexCli.id(),
@@ -185,6 +195,56 @@ mod tests {
             ..fresh()
         };
         assert_eq!(decide(&state), Decision::SwitchTo("claude_cli"));
+    }
+
+    #[test]
+    fn copilot_cli_is_the_default_when_it_is_the_only_cli_signed_in() {
+        let state = SelectionState {
+            cli_candidates: vec![
+                claude_candidate(false, false),
+                codex_candidate(true, false),
+                copilot_cli_candidate(true, true),
+            ],
+            ..fresh()
+        };
+        assert_eq!(decide(&state), Decision::SwitchTo("copilot_cli"));
+    }
+
+    #[test]
+    fn codex_wins_a_tie_with_the_copilot_cli() {
+        let state = SelectionState {
+            cli_candidates: vec![
+                claude_candidate(false, false),
+                codex_candidate(true, true),
+                copilot_cli_candidate(true, true),
+            ],
+            ..fresh()
+        };
+        assert_eq!(decide(&state), Decision::SwitchTo("codex_cli"));
+    }
+
+    #[test]
+    fn an_unproven_copilot_cli_login_is_not_a_default() {
+        // Installed but no proof of a login: the rule never switches to it.
+        let state = SelectionState {
+            cli_candidates: vec![copilot_cli_candidate(true, false)],
+            ..fresh()
+        };
+        assert_eq!(decide(&state), Decision::KeepCurrent);
+    }
+
+    #[test]
+    fn copilot_over_http_wins_a_tie_with_the_copilot_cli() {
+        let state = SelectionState {
+            cli_candidates: vec![
+                claude_candidate(false, false),
+                codex_candidate(false, false),
+                copilot_candidate(true, true),
+                copilot_cli_candidate(true, true),
+            ],
+            ..fresh()
+        };
+        assert_eq!(decide(&state), Decision::SwitchTo("copilot"));
     }
 
     #[test]

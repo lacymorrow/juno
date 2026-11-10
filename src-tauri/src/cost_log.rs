@@ -39,7 +39,7 @@
 //!
 //! # Three ways a turn can cost nothing, and only one of them is free
 //!
-//! A `Subscription` model (the Claude CLI and Codex CLI paths) genuinely costs
+//! A `Subscription` model (the Claude CLI, Codex CLI and Copilot CLI paths) genuinely costs
 //! nothing at the margin — the person already pays for the seat, and that is
 //! what makes a bring-your-own-plan tier viable. An `Unpublished` model has a
 //! price nobody has looked up. A model missing from the catalog has no price
@@ -199,6 +199,7 @@ pub fn billing_model_id(provider: &Provider, model: &str) -> String {
         Provider::ClaudeCli => format!("claude-cli:{model}"),
         Provider::CodexCli => format!("codex-cli:{model}"),
         Provider::Copilot => format!("copilot:{model}"),
+        Provider::CopilotCli => format!("copilot-cli:{model}"),
         _ => model.to_string(),
     }
 }
@@ -658,6 +659,10 @@ mod tests {
             "copilot:claude-opus-5.5"
         );
         assert_eq!(
+            billing_model_id(&Provider::CopilotCli, "auto"),
+            "copilot-cli:auto"
+        );
+        assert_eq!(
             billing_model_id(&Provider::Anthropic, "claude-opus-5-5"),
             "claude-opus-5-5"
         );
@@ -814,7 +819,7 @@ mod tests {
         assert_eq!(object.get("cost_usd").and_then(|v| v.as_f64()), Some(0.0));
     }
 
-    fn all_providers() -> [Provider; 7] {
+    fn all_providers() -> [Provider; 8] {
         [
             Provider::Anthropic,
             Provider::OpenAI,
@@ -823,6 +828,7 @@ mod tests {
             Provider::ClaudeCli,
             Provider::CodexCli,
             Provider::Copilot,
+            Provider::CopilotCli,
         ]
     }
 

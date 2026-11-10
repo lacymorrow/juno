@@ -16,8 +16,10 @@ import type { ProviderInfo } from "@/types/settings";
 export function providerUnavailableReason(provider: ProviderInfo): string | null {
   if (provider.is_available) return null;
   if (provider.needs_sign_in) {
+    if (provider.id === "codex_cli") return "Sign in to Codex";
     if (provider.id === "copilot") return "Sign in to GitHub Copilot";
-    return provider.id === "codex_cli" ? "Sign in to Codex" : "Sign in to Claude Code";
+    if (provider.id === "copilot_cli") return "Sign in to Copilot";
+    return "Sign in to Claude Code";
   }
   if (provider.id === "claude_cli") return "Claude Code not installed";
   return "No API key";

@@ -157,6 +157,16 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             effort: None,
             load_account_mcp: crate::constants::settings::defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
         },
+        CentralizedProviderConfig {
+            id: Provider::CopilotCli.id().to_string(),
+            api_key: None, // Copilot CLI doesn't need an API key, it uses its own auth
+            model: Some(Provider::CopilotCli.default_model().to_string()),
+            max_tokens: Some(4096),
+            temperature: Some(0.7),
+            system_prompt: None,
+            effort: None,
+            load_account_mcp: crate::constants::settings::defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
+        },
     ]
 }
 
