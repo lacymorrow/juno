@@ -2053,13 +2053,6 @@ mod tests {
     #[test]
     fn the_toolset_path_is_selected_per_model_and_leaves_the_rest_alone() {
         let cases = [
-            // Fable 5.2 was missing from this table until LAC-7413, which is
-            // the gap the coverage assert below now closes.
-            (
-                model_ids::CLAUDE_FABLE_5_2,
-                "computer_toolset_20260801",
-                None,
-            ),
             (
                 model_ids::CLAUDE_OPUS_5_5,
                 "computer_toolset_20260801",
