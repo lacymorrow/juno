@@ -2210,6 +2210,64 @@ mod tests {
         );
     }
 
+    /// `toolset_ga` is a citation; `computer_use` is the wire format. This is
+    /// the guard that keeps the two from drifting, and the implication runs
+    /// one way only: a row that declares `computer_toolset_20260801` must be
+    /// toolset-GA, because Anthropic answers 400 to a toolset request from a
+    /// model that does not support it. A row that is GA and still declares an
+    /// earlier version is correct and deliberate, since the toolset costs
+    /// roughly 2x the input-token overhead on every request.
+    ///
+    /// Both comments that cite this test by name (the `toolset_ga` field docs
+    /// and `model_definitions`) predate the test itself, and CLAUDE.md
+    /// asserted it existed too. All three described a guard nobody had
+    /// written. Until LAC-7413 the only coverage was the enumerated table in
+    /// `the_toolset_path_is_selected_per_model_and_leaves_the_rest_alone`,
+    /// which protects exactly the models someone remembered to list, so a
+    /// newly added row was unguarded by construction. This weekly check adds
+    /// rows, which is why it is the one that had to notice.
+    #[test]
+    fn catalog_toolset_ga_agrees_with_the_declared_tool_version() {
+        let mut on_toolset = 0usize;
+        let mut ga_on_an_earlier_version = 0usize;
+
+        for def in Provider::Anthropic.model_definitions() {
+            if matches!(
+                def.computer_use,
+                ComputerUse::AnthropicTool(ApiVersion::ComputerToolset20260801)
+            ) {
+                on_toolset += 1;
+                assert!(
+                    def.toolset_ga,
+                    "{} is sent computer_toolset_20260801 but is not recorded as \
+                     toolset-GA; Anthropic answers 400 to a toolset request from a \
+                     model that does not support it",
+                    def.name
+                );
+            } else if def.toolset_ga {
+                ga_on_an_earlier_version += 1;
+            }
+        }
+
+        // Neither counter may be zero, or the sweep above proves nothing: an
+        // empty toolset arm passes vacuously, and the lineup is exactly what
+        // this weekly check moves.
+        assert!(
+            on_toolset >= 4,
+            "only {on_toolset} Anthropic rows declare the toolset; the whole current \
+             lineup is toolset-only, so this sweep has stopped covering anything"
+        );
+        // And the asymmetry is deliberate, not an oversight. If this reaches
+        // zero, someone has put every GA model on the toolset and doubled the
+        // input-token overhead on rows that do not need it.
+        assert!(
+            ga_on_an_earlier_version >= 1,
+            "no Anthropic row is toolset-GA while still being sent an earlier tool \
+             version, so the one-directional claim in the `toolset_ga` docs is \
+             untested; if that is genuinely true now, say so there"
+        );
+    }
+
     #[test]
     fn lifecycle_is_not_inferred_from_toolset_ga() {
         let by_id = |id: &str| {
