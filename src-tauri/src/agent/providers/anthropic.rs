@@ -446,7 +446,8 @@ const PRUNED_SCREENSHOT_PLACEHOLDER: &str =
 // interactive case at the loop's expense.
 //
 // COST SHAPE. A 1-hour cache write costs ~2x the base input price; a 5-minute write ~1.25x;
-// reads are ~0.1x either way (~0.025x on Fable 5.1, Juno's default model). So a 1h write pays
+// reads are ~0.1x either way (~0.05x on Opus 5.5, Juno's default model; ~0.025x on the
+// Fable line). So a 1h write pays
 // for itself the moment it is read even once more than a cold request would have been — the
 // break-even is about 1.1 reads — while a 5-minute write that expires before it is ever read is
 // strictly worse than not caching at all (1.25x for nothing).
@@ -747,10 +748,16 @@ impl AnthropicBrain {
     /// not accept adaptive thinking (older models would return 400).
     ///
     /// `block_binding.prefix_mismatch_behavior: "drop_block"` is the insurance on the
-    /// thinking blocks Juno replays on tool-use turns. From Fable 5.1 onward (so Opus 5.5,
-    /// Sonnet 5.5 and Haiku 5.5, i.e. the default model) a replayed block's signature is
-    /// bound to the prefix that produced it: the top-level `system` prompt, the `tools`
-    /// array, and every message before the block. Juno changes all three inside a live
+    /// thinking blocks Juno replays on tool-use turns. From Fable 5.1 onward (so Fable 5.2,
+    /// Opus 5.5 — the default model — Sonnet 5.5 and Haiku 5.5) a replayed block's
+    /// signature is bound to the prefix that produced it: the top-level `system` prompt,
+    /// the `tools` array, and every message before the block.
+    ///
+    /// Fable 5.2 removed the one escape hatch this used to have. On Fable 5.1 an account
+    /// created before 2026-08-31 let a failing block through, so the bug was invisible on
+    /// older accounts; on Fable 5.2 an invalid block with `prefix_mismatch_behavior` unset
+    /// is a 400 "whatever the account's age". Juno has always set it, so nothing changes
+    /// here — but the field is now load-bearing rather than belt-and-braces. Juno changes all three inside a live
     /// conversation — the system prompt is rebuilt per turn from live settings and the MCP
     /// tool list (`anthropic::next_turn_system_prompt`), and the screenshot pruner rewrites
     /// older message content in batches. The default on a mismatch is a 400 that kills the
@@ -2913,11 +2920,20 @@ mod computer_toolset_request_tests {
 
     #[test]
     fn toolset_only_models_select_the_toolset_path() {
-        // Claude 5.5 and later accept no earlier tool type, so they are the
-        // models worth the toolset's ~2x input-token overhead. Every other
-        // toolset-GA model stays on `computer_20251124` and is covered by the
-        // test below.
-        for model in [model_ids::CLAUDE_OPUS_5_5, model_ids::CLAUDE_SONNET_5_5] {
+        // These models accept no earlier tool type, so they are the ones
+        // worth the toolset's ~2x input-token overhead. Anthropic names them
+        // on the computer-use page (Fable 5.2, Mythos 5.2, Opus 5.5, Sonnet
+        // 5.5, Haiku 5.5; Mythos is deliberately absent from this catalog)
+        // instead of giving a generation rule, and Fable 5.2 is why: it sorts
+        // below 5.5 and is still toolset-only, so "5.5 and later" is false.
+        // Every other toolset-GA model stays on `computer_20251124` and is
+        // covered by the test below.
+        for model in [
+            model_ids::CLAUDE_FABLE_5_2,
+            model_ids::CLAUDE_OPUS_5_5,
+            model_ids::CLAUDE_SONNET_5_5,
+            model_ids::CLAUDE_HAIKU_5_5,
+        ] {
             let b = brain(model);
             assert!(b.uses_computer_toolset(), "{model} should use the toolset");
             assert_eq!(b.computer_toolset_name(), Some("computer"));
@@ -2964,7 +2980,12 @@ mod computer_toolset_request_tests {
     /// rather than an exact string.
     #[test]
     fn toolset_models_send_no_computer_use_beta_flag() {
-        for model in [model_ids::CLAUDE_OPUS_5_5, model_ids::CLAUDE_SONNET_5_5] {
+        for model in [
+            model_ids::CLAUDE_FABLE_5_2,
+            model_ids::CLAUDE_OPUS_5_5,
+            model_ids::CLAUDE_SONNET_5_5,
+            model_ids::CLAUDE_HAIKU_5_5,
+        ] {
             let b = brain(model);
             assert_eq!(b.resolve_computer_use_beta_header(), None, "{model}");
             let header = b.beta_header_value();
@@ -3084,9 +3105,11 @@ mod thinking_block_binding_tests {
     #[test]
     fn prefix_check_models_ask_the_api_to_drop_stale_thinking_blocks() {
         for model in [
+            model_ids::CLAUDE_FABLE_5_2,
             model_ids::CLAUDE_FABLE_5_1,
             model_ids::CLAUDE_OPUS_5_5,
             model_ids::CLAUDE_SONNET_5_5,
+            model_ids::CLAUDE_HAIKU_5_5,
         ] {
             assert_eq!(
                 binding(model),
