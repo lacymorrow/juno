@@ -4,21 +4,21 @@
 
 **Goal:** Juno runs on the coding-agent CLI a person already pays for, with no API key typed into Juno, starting with GitHub Copilot CLI.
 
-**Architecture:** One new provider, `Provider::Acp`-shaped but exposed as one `Provider` variant per CLI, that drives any Agent Client Protocol (ACP) agent as a subprocess over JSON-RPC on stdio. Juno's loopback MCP computer tool (`juno_mcp.rs`) is passed at `session/new` as an HTTP MCP server, exactly as the Claude CLI and Codex providers mount it today. Per-CLI code shrinks to one table row: binary name, launch arguments, sign-in probe, model list. Claude Code and Codex stay on their shipped native paths.
+**Architecture:** One new provider, `Provider::Acp`-shaped but exposed as one `Provider` variant per CLI, that drives any Agent Client Protocol (ACP) agent as a subprocess over JSON-RPC on stdio. Juno's loopback MCP computer tool (`juno_mcp.rs`) is passed at `session/new` as an HTTP MCP server, exactly as the Claude CLI and Codex providers mount it today. Per-CLI code shrinks to the parser half: a row names the binary, launch arguments, sign-in probe and model list, but the nine shared registration files (`types.rs`, `factory.rs`, `config.rs`, `default_selection.rs`, `startup_default.rs`, `router.rs`, `connectivity.rs`, `cost_log.rs`, `settings/reset.rs`) are touched for every provider either way. The parser is the expensive half (Codex 2,440 lines, Claude 6,868), so ACP pays back at two rows, not one. Estimate against nine shared files plus a row. Claude Code and Codex stay on their shipped native paths.
 
-**Tech Stack:** Rust (Tauri backend), `agent-client-protocol` crate 5.1.0 (Zed, Apache-2.0, 6.1M downloads, updated 2026-11-09), existing `juno_mcp.rs`, existing `codex_session.rs` process pattern.
+**Tech Stack:** Rust (Tauri backend), the `agent-client-protocol` crate (Zed's, Apache-2.0; crates.io reported 5.1.0 on 2026-11-10, and the spike pins whatever version the registry serves on the day, never this document), existing `juno_mcp.rs`, existing `codex_session.rs` process pattern.
 
-**Status:** scoping plan, 2026-11-10. Tracked in LAC-7608. Written by the Product Manager; CTO owns the build. Nothing below is started.
+**Status:** approved by the CEO on LAC-7609, 2026-11-10, with one amendment: the sequence is cut to the spike plus the Copilot row. Antigravity and Cursor are parked behind a conversion number (below). Tracked in LAC-7608. Written by the Product Manager; CTO owns the build. Nothing below is started.
 
 ---
 
 ## Decision, in five lines
 
-1. **Build one ACP client, not one parser per CLI.** Copilot, Antigravity, Gemini CLI, Cursor, OpenCode, Qwen Code and Kiro all ship an ACP server mode. Codex and Claude reach ACP only through third-party adapter binaries, and both already have native Juno providers, so they stay native.
+1. **Build one ACP client, not one parser per CLI, as a two-row bet.** Copilot, Antigravity, Gemini CLI, Cursor, OpenCode, Qwen Code and Kiro all ship an ACP server mode. Codex and Claude reach ACP only through third-party adapter binaries, and both already have native Juno providers, so they stay native. With the sequence cut to one row, the spike's sixth measurement decides whether ACP or Copilot's native path ships first; ACP returns with row 2 and pays for itself then.
 2. **Row 1 is GitHub Copilot CLI** (`copilot --acp`). Largest installed base of any qualifying CLI, wire-checked signed in on this Mac today.
-3. **Row 2 is Antigravity CLI** (`agy acp`), **not Gemini CLI.** Google moved every free, Google AI Pro and Google AI Ultra account off `gemini` to `agy` on 2026-06-18. `gemini` now serves Gemini Code Assist Standard and Enterprise licences only. For a person on a Mac, the Google subscription CLI is `agy`.
+3. **Row 2 is Antigravity CLI** (`agy acp`), **not Gemini CLI, and it is parked until Copilot converts.** Google moved every free, Google AI Pro and Google AI Ultra account off `gemini` to `agy` on 2026-06-18. `gemini` now serves Gemini Code Assist Standard and Enterprise licences only. For a person on a Mac, the Google subscription CLI is `agy`. Its installed base is unpublished, so the CEO will not commit CTO weeks to it until the Copilot row shows that "no API key" converts: the Product Manager proposes the install-or-activation number with the Copilot PR, the CEO approves it there, and Antigravity unparks when it is met.
 4. **"Azure AI Foundry" is zero Juno code.** It is Copilot CLI's bring-your-own-key feature, configured inside Copilot (`/model`, saved to `~/.copilot/providers.json`). Juno spawns `copilot`, Copilot reads its own config. Juno adds no field, no toggle, no provider.
-5. **A spike comes first and can say no.** Two to three days against `copilot --acp` and `agy acp`, measuring the five things in "The spike". If Copilot's ACP preview cannot mount an HTTP MCP server, Copilot ships on its native `-p --output-format json` path instead and the ACP decision is revisited with the measurement in hand.
+5. **A spike comes first and can say no.** Two to three days against `copilot --acp` and `agy acp`, measuring the six things in "The spike". Five ask whether ACP works; the sixth asks whether it is cheaper than Copilot's native `-p --output-format json` path for a single row. If ACP cannot mount an HTTP MCP server, or native is clearly cheaper for one row, Copilot ships native with no new dependency and ACP waits for row 2.
 
 ---
 
@@ -137,30 +137,31 @@ Written down, per the Jobs Standard.
 
 ## The spike (child issue 1, go/no-go)
 
-A Rust test harness in a branch, no UI, no shipped code. It answers five questions against `copilot --acp` (1.0.109) and `agy acp`, on this Mac, with Juno's real `juno_mcp` endpoint. Each answer is a number or a yes/no in `docs/plans/cli-providers-spike.md`.
+A Rust test harness in a branch, no UI, no shipped code. It answers six questions against `copilot --acp` (1.0.109) and `agy acp`, on this Mac, with Juno's real `juno_mcp` endpoint. Each answer is a number or a yes/no in `docs/plans/cli-providers-spike.md`. The harness pins `agent-client-protocol` to the version the registry serves that day and records it; this plan's 5.1.0 is a reading, not a pin.
 
 1. `initialize` response: `protocolVersion`, `agentCapabilities.mcpCapabilities.http`, `promptCapabilities.image`, `authMethods`. **No-go for a row if `http` is false.**
 2. `session/new` with Juno's HTTP MCP server and bearer header: does the agent list the `computer` tool, and does one `session/prompt` ("take a screenshot and tell me the frontmost app") round-trip through `run_computer_action`? Time to first `agent_message_chunk`, and to the first `tool_call`.
 3. `session/request_permission`: does the agent ask before a write-shaped tool, and does a `cancelled`/denied answer reach the model as text, as `cli_approval.rs` guarantees today?
 4. `session/cancel` latency (Codex measured 8 ms on `turn/interrupt`; the bar is "under 200 ms").
 5. Model selection: which launch flag pins the model, and what `/model` lists for this account (Copilot) and `--model` accepts (agy). Signed-out behaviour: the exact error on `session/new`.
+6. **Cost, not only capability.** The CTO's effort estimate for Copilot on its native path (`-p --output-format json`, six event types already wire-verified, no new dependency, no Security stage) against the ACP client, both counted as nine shared files plus the provider module. If native is clearly cheaper for a single row, ship native and add no dependency; ACP comes back with row 2. This is the CEO's amendment on LAC-7609.
 
 Also measured, not gating: cold start to first text versus the shipped Claude (3 to 5 s) and Codex (2.5 to 4.3 s) paths; token overhead of Juno's tool schema as the agent sees it.
 
-Effort: S, two to three days including CI. Output: the spike doc and a one-line go/no-go per row posted on LAC-7608.
+Effort: S, two to three days including CI. Output: the spike doc and a one-line go/no-go per row posted on LAC-7608, with measurement 6 stated as two numbers and a recommendation.
 
 ---
 
 ## Build sequence (child issues 2 to 4)
 
-Each ships whole before the next starts. Effort: S under a day, M a few days, L a week or more.
+Each ships whole before the next starts. Effort: S under a day, M a few days, L a week or more. **Approved for filing: child issues 1 and 2.** Child issues 3 and 4 are parked (LAC-7609) and are filed only when the conversion number proposed with the Copilot PR is met.
 
 ### Child issue 2: `acp_cli.rs` + the Copilot row (M to L)
 
 **Files**
 - Create: `src-tauri/src/agent/providers/acp_cli.rs` (the client: process, writer and reader tasks, `initialize`, `session/new`, `session/prompt`, `session/update` routing to Juno's stream events, `session/request_permission` to the approval sheet, `session/cancel` on Escape, auth-required mapping)
 - Create: `src-tauri/src/agent/providers/acp_rows.rs` (the table: one `AcpRow` per CLI with `provider`, `binary`, `launch_args(model)`, `sign_in_hint`, `display_name`, `description`; Copilot is the first row)
-- Modify: `src-tauri/Cargo.toml` (add `agent-client-protocol = "5.1"`; Security review reads this line)
+- Modify: `src-tauri/Cargo.toml` (add `agent-client-protocol` at the version the spike pinned from the registry; Security review reads this line). Skipped entirely if the spike's measurement 6 chooses the native path.
 - Modify: `src-tauri/src/agent/providers/types.rs` (`Provider::CopilotCli`; `from_str` accepts `copilot_cli`, `copilot-cli`, `copilotcli`; `id` `"copilot_cli"`; `display_name` `"Copilot CLI"`; `description` `"Use your local Copilot CLI installation with your GitHub Copilot plan, no API key required"`; `model_definitions` with `auto` recommended and the spike's list; `default_model` `"auto"`; the four tests that enumerate providers gain the variant)
 - Modify: `src-tauri/src/agent/providers/factory.rs` (list the provider only when `acp_rows::copilot().installed()`; `is_available` and `needs_sign_in` from the row's last known sign-in, the Codex pattern; both `create_brain` arms)
 - Modify: `src-tauri/src/agent/providers/default_selection.rs`, `startup_default.rs`, `settings/reset.rs` (append the `CliCandidate` after Codex; the module doc's "Claude first, Codex second" sentence gains "Copilot third")
@@ -182,12 +183,13 @@ Each ships whole before the next starts. Effort: S under a day, M a few days, L 
 - [ ] Implement the permission handler on top of `cli_approval::verdict_for` and `ask_person`.
 - [ ] Failing test: cancel token → `session/cancel` sent → `stopReason: cancelled` → turn ends under 200 ms in the fake.
 - [ ] Register `Provider::CopilotCli` across the files above; `cargo fmt`; push a draft PR; `gh pr checks --watch`.
-- [ ] Settings copy and badge; screenshots into `docs/changelog/media/<PR>/`.
+- [ ] Settings copy and badge; the BYOK vision sentence in the bar ("This model can't see the screen. Pick another model, or run `copilot` and `/model`.") ships in this PR, not after it; screenshots into `docs/changelog/media/<PR>/`.
+- [ ] In the PR body: the proposed conversion number that unparks Antigravity (Copilot-row installs or activations showing "no API key" converts), for the CEO to approve there.
 - [ ] `scripts/juno-build.sh`, run the first-ten-seconds script on this Mac, attach the recording.
 
 **Gates:** `Security review: (new dependency `agent-client-protocol`, a subprocess holding a loopback bearer token, a sign-in probe)`, `Code review:`, `QA:` with Lacy's approval stage, because the Settings copy is customer-read copy (Rule 32, judgment). The last gate owns the merge (Rule 33).
 
-### Child issue 3: the Antigravity row (S to M)
+### Child issue 3: the Antigravity row (S to M), parked
 
 **Files**
 - Modify: `acp_rows.rs` (row: binary `agy`, lookup includes `~/.local/bin`, args `["acp", "--model", <model>]` pending the spike), `types.rs` (`Provider::AntigravityCli`, id `antigravity_cli`, display `"Antigravity CLI"`, models from the spike), every enumeration site from child issue 2, `cost_log.rs` (`antigravity-cli:{model}`), `prices.json`, `connectivity.rs` (`Answerer::Google` is the right name; "Gemini" already exists for the API provider), `AIProviderSettings.tsx`, `provider-status.ts` (`"Sign in to Antigravity"`), `model-selector.tsx` (`google`)
@@ -200,7 +202,7 @@ Each ships whole before the next starts. Effort: S under a day, M a few days, L 
 
 **Gates:** `Code review:`, `QA:` (verification only, QA signs and merges; the copy pattern was approved in child issue 2).
 
-### Child issue 4: the Cursor row (S)
+### Child issue 4: the Cursor row (S), parked
 
 Only after rows 1 and 2 are live and the per-row cost is known. `agent acp` is a hidden command; the issue opens with a one-day re-check of the Cursor docs. Same files as child issue 3. **Gates:** `Code review:`.
 
