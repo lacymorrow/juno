@@ -2052,7 +2052,14 @@ mod tests {
     /// and went legacy on 2026-10-19.)
     #[test]
     fn the_toolset_path_is_selected_per_model_and_leaves_the_rest_alone() {
-        for (model, expected_type, expected_flag) in [
+        let cases = [
+            // Fable 5.2 was missing from this table until LAC-7413, which is
+            // the gap the coverage assert below now closes.
+            (
+                model_ids::CLAUDE_FABLE_5_2,
+                "computer_toolset_20260801",
+                None,
+            ),
             (
                 model_ids::CLAUDE_OPUS_5_5,
                 "computer_toolset_20260801",
@@ -2129,7 +2136,26 @@ mod tests {
                 "computer_20250124",
                 Some("computer-use-2025-01-24"),
             ),
-        ] {
+        ];
+
+        // The table is a hand-written restatement, and that is its value: an
+        // independent expectation, not a derivation of the catalog it checks.
+        // But a hand-written list is also a discovery half that can silently
+        // miss a row, and it did. Fable 5.2 was absent from here for as long
+        // as it was in the catalog, so flipping its row to `CU_20251124` was
+        // caught only by the catalog-wide tests and not by the one test whose
+        // whole subject is per-model path selection (LAC-7413, measured on a
+        // mutant in CI). Check coverage rather than syncing by hand.
+        for def in Provider::Anthropic.model_definitions() {
+            assert!(
+                cases.iter().any(|(model, _, _)| *model == def.id),
+                "{} is in the Anthropic catalog but missing from this table; \
+                 add its expected computer tool type and beta flag",
+                def.name
+            );
+        }
+
+        for &(model, expected_type, expected_flag) in &cases {
             let uses_toolset = expected_type == "computer_toolset_20260801";
             assert_eq!(
                 Provider::Anthropic.uses_computer_toolset(model),
