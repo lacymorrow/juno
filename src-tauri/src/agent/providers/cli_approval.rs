@@ -1141,8 +1141,9 @@ mod tests {
         // did not get written.
         let why = unscreened_spawn_refusal(true, false, true, None)
             .expect("an unscreened spawn is refused");
-        assert!(why.contains("background mode"), "{why}");
-        assert!(why.to_lowercase().contains("shell screen"), "{why}");
+        let said = why.to_lowercase();
+        assert!(said.contains("background mode"), "{why}");
+        assert!(said.contains("shell screen"), "{why}");
 
         // Both of the other ways in: no tool server at all, and the asking
         // path falling back to skip-permissions because there is nothing to
