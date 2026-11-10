@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **models:** the router's request classifier ran on Haiku 4.5, past its retirement floor since 2026-10-15; it now runs on Haiku 5.5, and a test fails if either router role lands on a legacy model (LAC-4856)
 - **models:** Juno would have sent Fable 5.2 the `computer_20251124` tool, which it rejects with a 400. The toolset set is now read per model instead of inferred from the version number, because Fable 5.2 is toolset-only while sorting below 5.5 (LAC-7413)
 - **cost:** Haiku 5.5 is priced with its long-context tier, so a turn over 100,000 tokens is no longer under-reported by 5x (LAC-7413)
+- **settings:** the model picker showed no models at all. It hid anything that drives the computer through `computer_toolset_20260801`, and every model in the current lineup now does, so the list had collapsed to whichever model was already selected. Juno sends the toolset, so that is no longer a reason to hide a model (LAC-6396, LAC-7413)
 
 ## [0.8.266] - 2026-11-06
 
