@@ -63,10 +63,7 @@ export default function AssistantModelPicker({
       (p) =>
         p.model_info &&
         p.model_info.some(
-          (m) =>
-            showAdvanced ||
-            (!m.is_legacy && !m.requires_computer_toolset) ||
-            m.id === currentModelId
+          (m) => showAdvanced || !m.is_legacy || m.id === currentModelId
         )
     );
     const active = withModels.filter((p) => p.id === settings.activeProvider);
@@ -80,17 +77,25 @@ export default function AssistantModelPicker({
   ]);
 
   // Juno offers the current generation and nothing else, the way an Apple
-  // product does. Models that only drive the computer through an older tool
-  // version stay out of the list unless you ask for them — with one exception:
-  // whatever is selected right now is always shown, so the list can never hide
-  // what Juno is actually running, and you can always switch off it.
+  // product does. Models the provider lists as legacy stay out of the list
+  // unless you ask for them — with one exception: whatever is selected right
+  // now is always shown, so the list can never hide what Juno is actually
+  // running, and you can always switch off it.
+  //
+  // `requires_computer_toolset` is deliberately NOT a gate here. It was one
+  // while Juno did not send `computer_toolset_20260801` and the 2x input-token
+  // overhead was an opt-in. Juno sends the toolset now and the model policy
+  // accepts that cost for the default, so a toolset model is an ordinary
+  // current model. Gating on it hid Claude Opus 5.5, the recommended default,
+  // from everyone whose selection had moved off it (LAC-6396), and as of the
+  // 2026-11-09 lineup it hides EVERY current model: Fable 5.2, Opus 5.5,
+  // Sonnet 5.5 and Haiku 5.5 are all toolset-only, so the default list
+  // collapsed to just the model already selected.
   const visibleModels = useCallback(
     (models: typeof settings.providers[number]["model_info"]) =>
       models.filter(
         (model) =>
-          showAdvanced ||
-          (!model.is_legacy && !model.requires_computer_toolset) ||
-          model.id === currentModelId
+          showAdvanced || !model.is_legacy || model.id === currentModelId
       ),
     [showAdvanced, currentModelId]
   );
