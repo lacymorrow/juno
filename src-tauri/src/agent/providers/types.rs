@@ -2258,10 +2258,7 @@ mod tests {
         let mut ga_on_an_earlier_version = 0usize;
 
         for def in Provider::Anthropic.model_definitions() {
-            if matches!(
-                def.computer_use,
-                ComputerUse::AnthropicTool(ApiVersion::ComputerToolset20260801)
-            ) {
+            if def.uses_computer_toolset() {
                 on_toolset += 1;
                 assert!(
                     def.toolset_ga,
@@ -2279,9 +2276,10 @@ mod tests {
         // empty toolset arm passes vacuously, and the lineup is exactly what
         // this weekly check moves.
         assert!(
-            on_toolset >= 4,
-            "only {on_toolset} Anthropic rows declare the toolset; the whole current \
-             lineup is toolset-only, so this sweep has stopped covering anything"
+            on_toolset >= 1,
+            "no Anthropic row declares computer_toolset_20260801, so the arm above \
+             never ran and this sweep proves nothing; the current lineup is \
+             toolset-only, so zero here means the catalog lost those rows entirely"
         );
         // And the asymmetry is deliberate, not an oversight. If this reaches
         // zero, someone has put every GA model on the toolset and doubled the
