@@ -5,6 +5,7 @@ members = [
 	"src-tauri/mcp-server-os-level",    # Binary disabled, library still available
 	"tauri-plugin-voice-transcription",
 	"crates/juno-cua",                  # Headless CUA CLI — no Tauri/GUI required
+	"crates/audio-start-probe",         # Measurement only — never shipped, see its Cargo.toml
 ]
 # Vendored upstream code is patched in, not linted as ours.
 exclude = ["vendor/tauri-plugin-store", "vendor/cpal"]

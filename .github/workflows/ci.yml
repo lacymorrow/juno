@@ -154,6 +154,15 @@ jobs:
       - name: Test the voice plugin
         run: cargo test --manifest-path tauri-plugin-voice-transcription/Cargo.toml
 
+      # Same gap as the voice plugin, one step earlier in its life: a member
+      # crate is not reached by `--manifest-path src-tauri`, which selects the
+      # `juno` package alone. Without this step `audio-start-probe` would be a
+      # committed binary that nothing ever compiles, and the measurement it
+      # exists to preserve would rot on the first cpal bump. `-p` keeps it to
+      # cpal + coreaudio; it adds seconds to a job that already built both.
+      - name: Clippy the audio start probe
+        run: cargo clippy -p audio-start-probe --all-targets -- -D warnings
+
   # The Intel half of the universal build.
   #
   # The `rust` job above compiles the runner's own architecture (arm64), so
