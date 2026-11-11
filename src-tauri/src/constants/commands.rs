@@ -471,7 +471,6 @@ pub mod onboarding {
     pub const SET_ONBOARDING_ACTIVE: &str = "set_onboarding_active";
     pub const CLOSE_ONBOARDING_WINDOW: &str = "close_onboarding_window";
     pub const CHECK_CLAUDE_CLI_AVAILABLE: &str = "check_claude_cli_available";
-    pub const CHECK_CODEX_CLI_AVAILABLE: &str = "check_codex_cli_available";
     pub const TEST_GLOBAL_SHORTCUTS_WORKING: &str = "test_global_shortcuts_working";
     pub const GET_LAST_ONBOARDING_PHASE: &str = "get_last_onboarding_phase";
     pub const RECORD_ONBOARDING_EVENT: &str = "record_onboarding_event";

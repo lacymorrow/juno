@@ -36,7 +36,6 @@ interface World {
   lastPhase: string | null;
   accessibility: boolean;
   keys: boolean;
-  codex: { available: boolean; authenticated: boolean; email: string | null };
 }
 
 let world: World;
@@ -56,7 +55,6 @@ beforeEach(() => {
     lastPhase: null,
     accessibility: false,
     keys: true,
-    codex: { available: false, authenticated: false, email: null },
   };
   invoke.mockReset();
   invoke.mockImplementation(async (cmd: string) => {
@@ -75,8 +73,6 @@ beforeEach(() => {
         return world.lastPhase;
       case COMMANDS.ONBOARDING_CHECK_CLAUDE_CLI_AVAILABLE:
         return { available: false, authenticated: false, email: null };
-      case COMMANDS.ONBOARDING_CHECK_CODEX_CLI_AVAILABLE:
-        return world.codex;
       case COMMANDS.PERMISSIONS_REQUEST_ACCESSIBILITY_PERMISSION:
         return false;
       default:
@@ -182,36 +178,14 @@ describe("the System Settings illustration", () => {
   }, 15000);
 });
 
-describe("connecting with a plan you already have", () => {
-  it("offers the Codex CLI beside Claude Code and selects it", async () => {
+describe("the Connect step", () => {
+  it("offers no provider cards beyond the Claude plan Juno can pick up", async () => {
     world.lastPhase = "api-key";
     world.keys = false;
-    world.codex = { available: true, authenticated: true, email: null };
     render(<OnboardingFlow onComplete={vi.fn()} />);
 
     await screen.findByText("Connect Your AI", {}, slow);
-    const card = (await screen.findByText("Use your ChatGPT plan", {}, slow)).closest(
-      '[role="button"]',
-    );
-    expect(card).not.toBeNull();
-    fireEvent.click(card as HTMLElement);
-
-    await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith(COMMANDS.PROVIDERS_SET_ACTIVE_PROVIDER, {
-        providerId: "codex_cli",
-      }),
-    );
-    await waitFor(() => expect(card?.getAttribute("aria-pressed")).toBe("true"));
-    // Claude Code is not installed here, so its card says so and is not a button.
-    expect(screen.getByText("Not installed. Get Claude Code")).toBeTruthy();
-  }, 15000);
-
-  it("says how to sign in when Codex is installed but signed out", async () => {
-    world.lastPhase = "api-key";
-    world.keys = false;
-    world.codex = { available: true, authenticated: false, email: null };
-    render(<OnboardingFlow onComplete={vi.fn()} />);
-
-    await screen.findByText("codex login", {}, slow);
+    await screen.findByText("Not installed. Get Claude Code", {}, slow);
+    expect(screen.queryByText("Use your ChatGPT plan")).toBeNull();
   }, 15000);
 });

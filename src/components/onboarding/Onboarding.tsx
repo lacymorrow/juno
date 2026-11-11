@@ -320,14 +320,12 @@ function firstPendingIndex(state: PermissionsState | null): number {
   return idx === -1 ? PERMISSION_FLOW.length : idx;
 }
 
-/** What a local CLI (Claude Code or Codex) can do right now, from the backend. */
+/** What the Claude CLI can do right now, from the backend. */
 interface ClaudeCliStatus {
   available: boolean;
   authenticated: boolean;
   email: string | null;
 }
-
-const CLI_NOT_FOUND: ClaudeCliStatus = { available: false, authenticated: false, email: null };
 
 /** The dictation model onboarding offers, when the backend says to. */
 interface DictationOffer {
@@ -379,8 +377,8 @@ const getOnboardingSteps = (
           id: "api-key",
           title: "Connect Your AI",
           description:
-            "Use the Claude or ChatGPT plan you already have, or paste an API key from Anthropic, OpenAI, or Google.",
-          icon: null, // Three ways in are the content; a key tile above them pushed Skip off the window.
+            "Use the Claude plan you already have, or paste an API key from Anthropic, OpenAI, or Google.",
+          icon: null, // The ways in are the content; a key tile above them pushed Skip off the window.
           action: "Continue",
         },
       ]),
@@ -668,9 +666,8 @@ function SettingsToggleDemo() {
 }
 
 // ── One "use the plan you already have" card on the Connect step ─────────────
-// Claude Code and Codex are the same offer with different names, so they are
-// the same card. Selectable only when the CLI is installed and signed in;
-// otherwise it says the one thing that would make it so.
+// Selectable only when the CLI is installed and signed in; otherwise it says
+// the one thing that would make it so.
 function CliCard({
   title,
   detail,
@@ -901,9 +898,6 @@ export default function OnboardingFlow({
   const [cliChecking, setCliChecking] = useState(true);
   const [cliSelected, setCliSelected] = useState(false);
   const [cliEmail, setCliEmail] = useState<string | null>(null);
-  // The Codex CLI, for someone on a ChatGPT plan. Same three states as Claude.
-  const [codexStatus, setCodexStatus] = useState<ClaudeCliStatus | null>(null);
-  const [selectedCli, setSelectedCli] = useState<"claude_cli" | "codex_cli">("claude_cli");
   // Which provider Juno is actually on. Read rather than assumed, because
   // when the Claude CLI is signed in the backend selects it on launch and the
   // "Connect Your AI" step never appears — so this screen is the only place
@@ -1301,12 +1295,12 @@ export default function OnboardingFlow({
     }
   }, [detectedProvider, apiKey]);
 
-  const selectCli = useCallback(async (providerId: "claude_cli" | "codex_cli") => {
+  const selectCli = useCallback(async () => {
+    const providerId = "claude_cli";
     try {
       setApiKeySaving(true);
       setApiKeyError(null);
       await invoke(COMMANDS.PROVIDERS_SET_ACTIVE_PROVIDER, { providerId });
-      setSelectedCli(providerId);
       setCliSelected(true);
     } catch (error) {
       console.error(`Failed to set ${providerId} as active provider:`, error);
@@ -1322,19 +1316,6 @@ export default function OnboardingFlow({
 
   useEffect(() => {
     let mounted = true;
-
-    const refreshCodexStatus = async () => {
-      try {
-        const status = await invoke<ClaudeCliStatus>(
-          COMMANDS.ONBOARDING_CHECK_CODEX_CLI_AVAILABLE
-        );
-        if (mounted) setCodexStatus(status ?? CLI_NOT_FOUND);
-      } catch (error) {
-        // An answer that never came is "not here", not a spinner for good.
-        console.warn("Failed to check Codex CLI availability:", error);
-        if (mounted) setCodexStatus(CLI_NOT_FOUND);
-      }
-    };
 
     const loadInitialData = async () => {
       try {
@@ -1391,8 +1372,6 @@ export default function OnboardingFlow({
           if (mounted) setCliChecking(false);
         }
         if (!mounted) return;
-        await refreshCodexStatus();
-        if (!mounted) return;
 
         try {
           const active = await invoke<string>(COMMANDS.PROVIDERS_GET_ACTIVE_PROVIDER);
@@ -1428,8 +1407,6 @@ export default function OnboardingFlow({
         setCliAvailable(cliStatus.available);
         setCliAuthenticated(cliStatus.authenticated);
         setCliEmail(cliStatus.email ?? null);
-        await refreshCodexStatus();
-        if (!mounted) return;
         setActiveProvider(await invoke<string>(COMMANDS.PROVIDERS_GET_ACTIVE_PROVIDER));
       } catch (error) {
         console.warn("Failed to refresh Claude CLI status on focus:", error);
@@ -2231,28 +2208,8 @@ export default function OnboardingFlow({
                     checking={cliChecking}
                     installed={cliAvailable}
                     signedIn={cliAuthenticated}
-                    selected={cliSelected && selectedCli === "claude_cli"}
-                    onToggle={() =>
-                      cliSelected && selectedCli === "claude_cli"
-                        ? deselectCli()
-                        : selectCli("claude_cli")
-                    }
-                  />
-                  <CliCard
-                    title="Use your ChatGPT plan"
-                    detail="No API key needed. Uses Codex on this Mac."
-                    loginCommand="codex login"
-                    installLabel="Not installed. Get Codex"
-                    installUrl="https://developers.openai.com/codex/cli"
-                    checking={codexStatus === null}
-                    installed={codexStatus?.available ?? false}
-                    signedIn={codexStatus?.authenticated ?? false}
-                    selected={cliSelected && selectedCli === "codex_cli"}
-                    onToggle={() =>
-                      cliSelected && selectedCli === "codex_cli"
-                        ? deselectCli()
-                        : selectCli("codex_cli")
-                    }
+                    selected={cliSelected}
+                    onToggle={() => (cliSelected ? deselectCli() : selectCli())}
                   />
 
                   {/* Divider */}
