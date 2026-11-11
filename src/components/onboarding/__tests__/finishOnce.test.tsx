@@ -61,6 +61,8 @@ describe("finishing setup", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Get Started" }, slow));
     await screen.findByText("Pick how Juno looks", {}, slow);
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByText("Help improve Juno", {}, slow);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await screen.findByText("You're all set", {}, slow);
 
     // The window outlives the first press by a beat, and the listener with it.

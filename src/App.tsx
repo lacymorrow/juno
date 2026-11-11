@@ -1,3 +1,4 @@
+import { trackAppOpen } from "@/lib/telemetry";
 import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
@@ -68,6 +69,11 @@ function App() {
       console.error("App: could not step down to the floating chat:", error),
     );
   });
+
+  // One app_open per launch of the main window. Gated by the Privacy switch.
+  useEffect(() => {
+    void trackAppOpen();
+  }, []);
 
   // Timer tracking for cleanup
   const pendingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
