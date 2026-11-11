@@ -194,7 +194,7 @@ teardown
 setup
 rc=$(VERSION=0.8.277 ARM64_SHA="$OLD_ARM" X64_SHA="$OLD_X64" run)
 [ "$rc" = 0 ] && in_formula 'version "0.8.277"' && in_formula "$OLD_ARM" \
-  && [ -z "$(diff <(baseline) "$formula")" ]
+  && cmp -s <(baseline) "$formula"
 check "already-published version: exits 0 and leaves the file byte-identical" $?
 teardown
 
@@ -292,6 +292,24 @@ rc=$(run)
 [ "$rc" = 1 ] && said "::error title=arm64 checksum not written" \
   && in_formula "$ARM" && not_in_formula "sha256 \"$ARM\""
 check "checksum present only in a comment: exits 1 (presence is not evidence)" $?
+teardown
+
+# 14c. ANCHORING, which is the distinction case 14 above does not reach. A
+#      commented-out checksum line satisfies an unanchored `sha256 "<value>"`
+#      check exactly, and brew reads none of it (PR #976 review round 3, 1).
+#
+#      The fixture has to get past the precondition, so the count must stay 2 -
+#      and commenting the arm64 line out keeps it: `# sha256 "..."` still
+#      contains `sha256 "`, so it still counts, and the positional rewrite still
+#      writes ARM64_SHA into it. What it is NOT is a declaration, because the
+#      line's first token is `#`. Only the anchored check can tell.
+setup
+awk '/^      sha256 "/ && !seen { sub(/^      /, "      # "); seen = 1 } { print }' \
+  "$formula" >"$work/t" && mv "$work/t" "$formula"
+rc=$(run)
+[ "$rc" = 1 ] && said "::error title=arm64 checksum not written" \
+  && in_formula "sha256 \"$ARM\"" && not_in_formula "  sha256 \"$ARM\""
+check "checksum written into a commented-out line: exits 1 (declaration, not presence)" $?
 teardown
 
 # 15. A missing formula is an error, not a no-op. The tap layout changing is

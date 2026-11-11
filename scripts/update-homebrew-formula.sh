@@ -101,8 +101,6 @@ count() {
   printf '%s\n' "$n"
 }
 
-has() { grep -qF -- "$1" "$formula"; }
-
 # One scratch file for the whole script, cleaned up on every exit path. `set -e`
 # aborting midway would otherwise leave it behind; harmless on an ephemeral
 # runner, but a leak that only ever happens on the failure path is the kind
@@ -152,7 +150,12 @@ fi
 # requires is that `version` be the first thing on the line, which is the only
 # place a formula declares one. A reindented formula that no longer matches
 # fails the assertion below rather than being quietly half-rewritten.
-rewrite "s/^\\([[:space:]]*\\)version \".*\"/\\1version \"${VERSION}\"/"
+#
+# `[^"]*` rather than `.*`, matching the checksum pattern below: BRE has no
+# non-greedy quantifier, so `.*"` on `version "1.0" # see "docs"` would run to
+# the LAST quote and delete the trailing comment. The value a formula declares
+# never contains a quote, so the character class is exact.
+rewrite "s/^\\([[:space:]]*\\)version \"[^\"]*\"/\\1version \"${VERSION}\"/"
 # CLI assets live on the cua-v* release (see the gate job's tag), not the app's
 # v* release.
 rewrite "s|releases/download/[^/]*/|releases/download/cua-v${VERSION}/|g"
@@ -188,20 +191,40 @@ grep -q -- "$version_decl" "$formula" \
 urls_total="$(count 'releases/download/')"
 urls_ours="$(count "releases/download/cua-v${VERSION}/")"
 if [ "$urls_total" != 2 ]; then
-  die "Unexpected url count" "expected 2 'releases/download/' urls in $formula, found $urls_total."
+  # The lines are named because the count alone is opaque: the url rewrite is
+  # global, so a `homepage` or `livecheck` url pointing at a release would trip
+  # this with nothing to go on. Failing is still right - a third url means the
+  # arm64/x64 pair is no longer what this script thinks it is - but the reader
+  # should not have to go and clone the tap to find out which lines it saw.
+  #
+  # `|| true` on the listing and not on anything that decides: `urls_total` is 0
+  # here when grep finds nothing, and an unguarded substitution would fail under
+  # `set -e` and kill the script before die() ever printed. A guard on a message
+  # is fine; the same guard on a check is how a gate passes silently.
+  url_lines="$(grep -nF -- 'releases/download/' "$formula" | tr '\n' ' ' || true)"
+  die "Unexpected url count" "expected 2 'releases/download/' urls in $formula, found ${urls_total}. Lines seen: ${url_lines:-<none>}"
 fi
 if [ "$urls_ours" != "$urls_total" ]; then
   die "Download urls not rewritten" "$urls_ours of $urls_total 'releases/download/' urls in $formula name cua-v${VERSION}. The rest still point at another release, so brew would fetch the wrong archive."
 fi
 
-# `sha256 "<value>"` and not the bare value: a checksum that merely appears
-# somewhere in the file - in a comment, or in a url - is not the same as one brew
-# will read, and only the quoted form proves the rewrite put it on a checksum
-# line.
-has "sha256 \"${ARM64_SHA}\"" \
-  || die "arm64 checksum not written" "$formula has no 'sha256 \"${ARM64_SHA}\"' after the rewrite."
-has "sha256 \"${X64_SHA}\"" \
-  || die "x64 checksum not written" "$formula has no 'sha256 \"${X64_SHA}\"' after the rewrite."
+# A checksum DECLARATION, anchored like the version one above: not the bare
+# value (which a comment or a url mentioning it would satisfy), and not even the
+# unanchored `sha256 "<value>"` (which `# sha256 "<value>"` would satisfy). Only
+# a line whose first token is `sha256` is one brew will read.
+#
+# A validated checksum is 64 hex characters, so it carries no regex
+# metacharacter and needs no escaping - unlike VERSION, which has dots.
+#
+# What this still does NOT prove is WHICH block each checksum landed in: both
+# anchored, both present, count 2, and swapped is indistinguishable from
+# correct. That is LAC-7748.
+sha_decl() { grep -q -- "^[[:space:]]*sha256 \"$1\"" "$formula"; }
+
+sha_decl "$ARM64_SHA" \
+  || die "arm64 checksum not written" "$formula has no 'sha256 \"${ARM64_SHA}\"' declaration after the rewrite."
+sha_decl "$X64_SHA" \
+  || die "x64 checksum not written" "$formula has no 'sha256 \"${X64_SHA}\"' declaration after the rewrite."
 
 after_shas="$(count 'sha256 "')"
 if [ "$after_shas" != "$before_shas" ]; then
