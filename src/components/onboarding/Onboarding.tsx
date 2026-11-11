@@ -923,7 +923,7 @@ export default function OnboardingFlow({
   const [cliAuthenticated, setCliAuthenticated] = useState(false);
   const [cliChecking, setCliChecking] = useState(true);
   const [cliSelected, setCliSelected] = useState(false);
-  const [cliEmail, setCliEmail] = useState<string | null>(null);
+  const [, setCliEmail] = useState<string | null>(null);
   // The Codex CLI, for someone on a ChatGPT plan. Same three states as Claude.
   const [codexStatus, setCodexStatus] = useState<ClaudeCliStatus | null>(null);
   const [selectedCli, setSelectedCli] = useState<"claude_cli" | "codex_cli">("claude_cli");
