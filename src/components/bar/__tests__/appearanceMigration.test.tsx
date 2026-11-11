@@ -39,7 +39,7 @@ import { BarHost } from "../BarHost";
 /** What a person has in their settings store, and what they must still see. */
 const STORED: readonly { value: string; name: string; look: string }[] = [
   { value: "persona", name: "Avatar", look: "avatar" },
-  { value: "dynamic", name: "Dynamic Island", look: "island" },
+  { value: "dynamic", name: "Dynamic", look: "island" },
   { value: "floating", name: "Pill", look: "pill" },
   { value: "app", name: "Bar", look: "bar" },
   { value: "voice_ai", name: "Studio", look: "studio" },
@@ -136,6 +136,6 @@ describe("a stored appearance after the rename", () => {
     const offered = APPEARANCE_CATALOG.map((e) => e.value) as string[];
     expect(offered).not.toContain(UI.BAR_APPEARANCES_FLOATING);
     expect(APPEARANCE_CATALOG.map((e) => e.name)).not.toContain("Pill");
-    expect(APPEARANCE_CATALOG[0].name).toBe("Dynamic Island");
+    expect(APPEARANCE_CATALOG[0].name).toBe("Dynamic");
   });
 });

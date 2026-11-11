@@ -143,7 +143,7 @@ pub mod bar_appearances {
     pub const NOTCH: &str = "notch";
 
     /// The look a new install (and a settings reset) starts on: the Dynamic
-    /// Island, one small shape that grows to hold the answer. The others stay
+    /// look, one small shape that grows to hold the answer. The others stay
     /// in the picker unless listed in `HIDDEN`. Every fallback in Rust and the
     /// frontend reads this, never a literal.
     pub const DEFAULT: &str = DYNAMIC;
@@ -151,7 +151,7 @@ pub mod bar_appearances {
     /// Looks kept in the code but not offered anywhere a person chooses, and
     /// not kept if already saved: `resolve` turns them into `DEFAULT`. Bringing
     /// one back is deleting it from this list. Bar and Studio are not finished.
-    /// The Pill is retired: the Dynamic Island replaced it, and anyone saved on
+    /// The Pill is retired: the Dynamic look replaced it, and anyone saved on
     /// it sees the Island.
     pub const HIDDEN: &[&str] = &[FLOATING, APP, VOICE_AI];
 

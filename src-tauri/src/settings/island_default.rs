@@ -1,4 +1,4 @@
-//! Move anyone saved on the Pill to the Dynamic Island, once.
+//! Move anyone saved on the Pill to the Dynamic look, once.
 //!
 //! The Pill is retired. It is in `bar_appearances::HIDDEN`, so a saved Pill
 //! already draws as the Island on every read; this rewrites the saved value
