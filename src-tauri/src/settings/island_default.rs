@@ -1,16 +1,12 @@
-//! Move anyone saved on the Pill to the Island, once.
+//! Move anyone saved on the Pill to the Dynamic Island, once.
 //!
-//! The Island is the default look now and the Pill is being retired as the
-//! Island takes over what it does. A new install starts on the Island through
-//! `bar_appearances::DEFAULT`; this module is for the people who already have
-//! a settings file that says Pill, most of whom never chose it: it was simply
-//! the default when they installed.
+//! The Pill is retired. It is in `bar_appearances::HIDDEN`, so a saved Pill
+//! already draws as the Island on every read; this rewrites the saved value
+//! itself the first time, so the settings file says what the person sees.
 //!
-//! It runs at launch, before the bar reads its look, so the bar comes up as
-//! the Island with no flash of the Pill first. It runs once: a marker is
-//! written whether or not anything changed, so a person who goes back to the
-//! Pill in Settings afterwards keeps it. Nothing is shown; the look is the
-//! announcement.
+//! It runs at launch, before the bar reads its look. A marker is written
+//! whether or not anything changed, so it runs once. Nothing is shown; the
+//! look is the announcement.
 
 use serde_json::Value;
 use tauri::AppHandle;

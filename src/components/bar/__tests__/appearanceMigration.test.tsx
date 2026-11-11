@@ -39,7 +39,7 @@ import { BarHost } from "../BarHost";
 /** What a person has in their settings store, and what they must still see. */
 const STORED: readonly { value: string; name: string; look: string }[] = [
   { value: "persona", name: "Avatar", look: "avatar" },
-  { value: "dynamic", name: "Island", look: "island" },
+  { value: "dynamic", name: "Dynamic Island", look: "island" },
   { value: "floating", name: "Pill", look: "pill" },
   { value: "app", name: "Bar", look: "bar" },
   { value: "voice_ai", name: "Studio", look: "studio" },
@@ -84,7 +84,7 @@ describe("a stored appearance after the rename", () => {
     for (const hidden of UI.BAR_APPEARANCES_HIDDEN) {
       expect(offered).not.toContain(hidden);
     }
-    expect(UI.BAR_APPEARANCES_HIDDEN).toEqual(["app", "voice_ai"]);
+    expect(UI.BAR_APPEARANCES_HIDDEN).toEqual(["floating", "app", "voice_ai"]);
     expect(offered).toHaveLength(STORED.length - UI.BAR_APPEARANCES_HIDDEN.length);
   });
 
@@ -132,8 +132,10 @@ describe("a stored appearance after the rename", () => {
     expect(APPEARANCE_CATALOG[0].descriptor).toMatch(/The default\.$/);
   });
 
-  it("still offers the Pill, second, and no longer calls it the default", () => {
-    expect(APPEARANCE_CATALOG[1].value).toBe(UI.BAR_APPEARANCES_FLOATING);
-    expect(APPEARANCE_CATALOG[1].descriptor).not.toMatch(/default/i);
+  it("no longer offers the Pill, in Settings or in setup, which share this catalog", () => {
+    const offered = APPEARANCE_CATALOG.map((e) => e.value) as string[];
+    expect(offered).not.toContain(UI.BAR_APPEARANCES_FLOATING);
+    expect(APPEARANCE_CATALOG.map((e) => e.name)).not.toContain("Pill");
+    expect(APPEARANCE_CATALOG[0].name).toBe("Dynamic Island");
   });
 });

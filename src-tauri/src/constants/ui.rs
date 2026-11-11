@@ -142,19 +142,18 @@ pub mod bar_appearances {
     /// peeled back from the corner. It has no well in the middle of the screen.
     pub const NOTCH: &str = "notch";
 
-    /// The look a new install (and a settings reset) starts on: the Island,
-    /// one small shape that grows to hold the answer. The Pill is on its way
-    /// out once the Island does everything it does; until then it stays in
-    /// the picker, and anyone saved on it is moved across once
-    /// (`settings::island_default`). The others stay in the picker unless
-    /// listed in `HIDDEN`. Every fallback in Rust and the frontend reads
-    /// this, never a literal.
+    /// The look a new install (and a settings reset) starts on: the Dynamic
+    /// Island, one small shape that grows to hold the answer. The others stay
+    /// in the picker unless listed in `HIDDEN`. Every fallback in Rust and the
+    /// frontend reads this, never a literal.
     pub const DEFAULT: &str = DYNAMIC;
 
     /// Looks kept in the code but not offered anywhere a person chooses, and
     /// not kept if already saved: `resolve` turns them into `DEFAULT`. Bringing
     /// one back is deleting it from this list. Bar and Studio are not finished.
-    pub const HIDDEN: &[&str] = &[APP, VOICE_AI];
+    /// The Pill is retired: the Dynamic Island replaced it, and anyone saved on
+    /// it sees the Island.
+    pub const HIDDEN: &[&str] = &[FLOATING, APP, VOICE_AI];
 
     /// Looks offered only while Settings → Advanced → Beta features is on.
     /// Presence, Halo and the Notch are still being finished; every other offered look
@@ -217,13 +216,11 @@ pub mod bar_appearances {
         #[test]
         fn hidden_looks_are_not_offered_and_resolve_to_the_default() {
             assert_eq!(DEFAULT, DYNAMIC);
-            for id in [APP, VOICE_AI] {
+            for id in [FLOATING, APP, VOICE_AI] {
                 assert!(is_hidden(id), "{id} should be hidden");
                 assert_eq!(resolve(id), DEFAULT);
             }
-            for id in [
-                FLOATING, DYNAMIC, ORB, REACT_ORB, SHADER_ORB, PERSONA, NOTCH,
-            ] {
+            for id in [DYNAMIC, ORB, REACT_ORB, SHADER_ORB, PERSONA, NOTCH] {
                 assert!(!is_hidden(id), "{id} should be offered");
                 assert_eq!(resolve(id), id);
             }
@@ -232,7 +229,7 @@ pub mod bar_appearances {
 
         #[test]
         fn presence_halo_and_notch_are_beta() {
-            for id in [FLOATING, DYNAMIC, PERSONA, SHADER_ORB] {
+            for id in [DYNAMIC, PERSONA, SHADER_ORB] {
                 assert!(!is_beta(id), "{id} should be out of beta");
                 assert_eq!(effective(id, false), id);
             }
@@ -243,6 +240,7 @@ pub mod bar_appearances {
             }
             assert_eq!(effective(DYNAMIC, false), DYNAMIC);
             assert_eq!(effective(APP, true), DEFAULT);
+            assert_eq!(effective(FLOATING, true), DEFAULT);
         }
     }
 }
