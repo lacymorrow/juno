@@ -161,12 +161,62 @@ pub fn permission_args(
         ];
     }
 
-    let mut args = vec!["--dangerously-skip-permissions".to_string()];
+    let mut args = vec![SKIP_PERMISSIONS.to_string()];
     if let Some(settings) = shell_screen {
-        args.push("--settings".to_string());
+        args.push(SETTINGS_FLAG.to_string());
         args.push(settings.display().to_string());
     }
     args
+}
+
+/// The flag that waves every permission check through.
+const SKIP_PERMISSIONS: &str = "--dangerously-skip-permissions";
+
+/// The flag that carries background mode's shell screen into the spawn.
+const SETTINGS_FLAG: &str = "--settings";
+
+/// Why this spawn must not happen, when it would run the CLI's own shell with
+/// nothing reading it and background mode is on (LAC-7421).
+///
+/// `None` is the normal answer: either something reads every `Bash` call (the
+/// `approve` tool on the asking path, the `PreToolUse` hook on the opted-out
+/// one), or background mode is off and there is no promise to keep.
+///
+/// Some, and the caller refuses to start the turn. The alternative, which is
+/// what shipped in v0.8.269, is to degrade to a bare
+/// `--dangerously-skip-permissions` on a failed screen write and say so in one
+/// log line: exactly the pre-LAC-5010 state, where `open -a Mail` takes the
+/// front off the person mid-sentence. Background mode is a promise that Juno
+/// will stay out of their way while they work, and a turn that cannot keep it
+/// should not run.
+///
+/// Read off the arguments [`permission_args`] actually returns, so the guard
+/// and the spawn cannot drift apart.
+pub fn unscreened_spawn_refusal(
+    background_mode: bool,
+    ask_before_send: bool,
+    has_mcp_server: bool,
+    shell_screen: Option<&Path>,
+) -> Option<String> {
+    if !background_mode {
+        return None;
+    }
+    let args = permission_args(ask_before_send, has_mcp_server, shell_screen);
+    let skips = args.iter().any(|a| a == SKIP_PERMISSIONS);
+    let screened = args.iter().any(|a| a == SETTINGS_FLAG);
+    if !skips || screened {
+        return None;
+    }
+    // Read by the person, in the chat, in place of the answer they asked
+    // for. So it says what Juno could not do in their terms, not in this
+    // module's: no shell screen, no arming, no CLI. The log line beside it
+    // carries the write error (LAC-7421).
+    Some(
+        "Juno could not keep its own shell commands off your screen, so it \
+         did not run that. Restarting Juno usually fixes it. You can also \
+         turn background mode off, which lets Juno's commands take the front."
+            .to_string(),
+    )
 }
 
 /// Read one `Bash` call against background mode, in the CLI's permission shape.
@@ -1079,6 +1129,50 @@ mod tests {
         assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(!args.contains(&"--permission-prompt-tool".to_string()));
         assert!(!args.contains(&"--allowedTools".to_string()));
+    }
+
+    /// LAC-7421: a failed screen write used to come back as `None`, and
+    /// `None` spawned a bare `--dangerously-skip-permissions`, which is the
+    /// pre-LAC-5010 state where `open -a Mail` takes the front. With
+    /// background mode on, that spawn is refused instead.
+    #[test]
+    fn an_unscreened_spawn_is_refused_while_background_mode_is_on() {
+        let screen = Path::new("/tmp/juno-cli-hooks-1.json");
+
+        // The failure this is here for: the tool server is up, so the
+        // `computer` tool works and nothing else looks wrong, but the screen
+        // did not get written.
+        let why = unscreened_spawn_refusal(true, false, true, None)
+            .expect("an unscreened spawn is refused");
+        // The person reads this in place of an answer, so it has to say what
+        // did not happen and how to get the turn to run.
+        let said = why.to_lowercase();
+        assert!(said.contains("did not run"), "{why}");
+        assert!(said.contains("background mode"), "{why}");
+        assert!(
+            !said.contains("shell screen") && !said.contains("--settings"),
+            "the refusal is read by a person, not by this module: {why}"
+        );
+
+        // Both of the other ways in: no tool server at all, and the asking
+        // path falling back to skip-permissions because there is nothing to
+        // serve a prompt.
+        assert!(unscreened_spawn_refusal(true, false, false, None).is_some());
+        assert!(unscreened_spawn_refusal(true, true, false, None).is_some());
+
+        // Screened: the hook reads every `Bash` call on the opted-out path...
+        assert_eq!(
+            unscreened_spawn_refusal(true, false, true, Some(screen)),
+            None
+        );
+        // ...and `approve` reads it on the asking path, where `Bash` is not
+        // pre-approved, so no `--settings` file is needed.
+        assert_eq!(unscreened_spawn_refusal(true, true, true, None), None);
+
+        // Background mode off: nothing was promised about the front, so an
+        // unscreened spawn is what the person asked for.
+        assert_eq!(unscreened_spawn_refusal(false, false, true, None), None);
+        assert_eq!(unscreened_spawn_refusal(false, false, false, None), None);
     }
 
     #[test]

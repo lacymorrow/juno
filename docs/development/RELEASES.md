@@ -27,8 +27,35 @@ downloads the signed `.app`, replaces `/Applications/Juno.app` (old copy goes
 to the Trash) and opens it. `--no-install` just downloads. A commit already
 built is downloaded again instead of rebuilt.
 
-**Pushing a `v*` tag by hand** (for example `bun run release minor` from a
-checkout) still builds a full release directly, skipping the prerelease step.
+**Pushing a `v*` tag by hand no longer builds.** Since LAC-7145 `build-tauri`
+runs in a `release` GitHub Environment whose deployment branch policy allows
+`main` and nothing else, so a build on a tag ref is refused before its first
+step. The gate fails such a push rather than building it. To build a tag shipx
+already cut, dispatch it on main:
+
+```bash
+gh workflow run release-tauri.yml --ref main -f tag=v0.9.0 -f prerelease=false
+```
+
+Note that only the *ref restriction* is live. Moving the credentials themselves
+into that environment is still outstanding and needs Lacy; see
+[Which of them belong in the `release` environment](#which-of-them-belong-in-the-release-environment)
+and LAC-7194.
+
+**That works only for a tag main already carries, at a `release:` commit.** The
+`release` environment restricts the ref the build *runs* on, not the ref it
+*checks out*, so `-f tag=` would otherwise have been a way to build any tree at
+all from an allowed ref. The gate therefore validates the input before anything
+is signed: it must be a real tag, pointing at a commit main already contains
+(`identical` or `behind` in `compare/main...<tag>`), whose message starts with
+`release:`. It is then resolved to a SHA once and the build checks out that SHA,
+so re-pointing the tag afterwards changes nothing. Anything else fails the gate
+by name (LAC-7166).
+
+In practice that means you dispatch a tag shipx already cut. To release a tree
+that has no such tag, merge it to main and let `release-every-merge.yml` cut
+one; `bun run release` (shipx) is unaffected either way, because it writes a
+`release:` commit that the gate skips in favour of that dispatch.
 
 **Latest is pinned to the highest version.** Builds finish out of order, and
 GitHub marks whichever full release was created last as Latest. After a full
@@ -142,9 +169,72 @@ is to ask for one by name.
 |--------|---------|--------|
 | `TAURI_SIGNING_PRIVATE_KEY` | Sign updater artifacts in CI | `cat ~/.tauri/juno.key` |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Decrypt the private key | What you typed when generating the key |
-| `HOMEBREW_TAP_TOKEN` | Push to lacymorrow/homebrew-tap from CI | GitHub PAT with `repo` scope |
+| `HOMEBREW_TAP_TOKEN` | Push to lacymorrow/homebrew-tap from CI | GitHub PAT with `repo` scope. Move to `release` env |
+| `RELEASE_SSH_KEY` | Deploy key that pushes the release commit past the main ruleset | `scripts/apply-branch-protection.sh`. Move to `release` env |
+| `NPM_TOKEN` | Publish juno-cua | npm automation token. Move to `release` env |
 | `GITHUB_TOKEN` | Create releases | Automatic |
 | `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | Code sign and notarize the release build | See [Code signing and notarization](#code-signing-and-notarization-apple) |
+
+### Which of them belong in the `release` environment
+
+This repo is public and every fleet agent pushes with admin-level credentials,
+and **admins bypass rulesets**. There is no admin bypass for an environment's
+deployment branch policy, which is why the `release` environment (deployment
+branches: `main` only) is the instrument here rather than another rule. A secret
+held there cannot be read by a workflow on any other branch; a repo-scoped
+secret on a public repo can be read by anyone who can push a workflow file.
+
+Move these into **Settings → Environments → release → Environment
+secrets**, then **delete the repository-scoped copy** — step two is the one that
+closes anything. Moving a value needs the plaintext, so it is Lacy's to do;
+nothing breaks in the meantime, because a job naming an environment still
+resolves a repo-scoped secret (measured, run 42114623977).
+
+Of the ten names first listed here, three are done, six still hold a real value
+at repo scope, and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` holds an empty one, so
+it has nothing to move. Deleting the repo-scoped copy of any of the six breaks
+no workflow job except the guard itself, which reddens rung 3 by design until the name moves to `ENV_ONLY`: every consumer of every name in the table declares
+`environment: release`, re-verified against `origin/main` on 2026-11-09
+(`build-tauri`, `build-demo`, `release`, `homebrew`). Read the per-row status
+below rather than this count, and the guard rather than either.
+
+That last property is also why the first attempt at this was inert with no
+failing check anywhere (LAC-7194): the environment was attached and documented
+as done, none of the seven actually moved, the only value that did move was
+`APPLE_TEAM_ID` which was meant to stay, and every build kept resolving the rest
+from repo scope exactly as before. The exposure itself is not new -- these have
+been repo-scoped since September -- but believing it closed is.
+`.github/workflows/secret-scope-guard.yml` is the executable form of this
+table — it runs a job that names no environment, so a secret it can still read
+is a secret that is still repo-scoped, and it fails when reality stops matching
+what is declared here. After moving a secret, move its name from `PENDING` to
+`ENV_ONLY` in that file; the guard reddens until you do.
+
+| Secret | Why it moves |
+|--------|--------------|
+| `TAURI_SIGNING_PRIVATE_KEY` | **The updater trust root.** The app verifies only the minisign `pubkey` in `tauri.conf.json`, so this key alone can hand every install a malicious update. Read only by `release-tauri.yml`. |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Decrypts the above. **Nothing to move**: the stored value is empty, so the updater key carries no passphrase (unchanged since 2026-09-21). Already `ENV_ONLY` in the guard, which still bites the case that matters — a real passphrase stored at repo scope reddens rung 1. Deleting the empty repo-scoped copy is optional and changes nothing to the build: `release-tauri.yml` maps it into `env:` with `${{ secrets.… }}`, and an undefined secret evaluates to the empty string, so the bundler sees the same empty variable either way. It is left in place only because there is no material here to protect. |
+| `APPLE_ID`, `APPLE_PASSWORD` | Notarization. Read only by `release-tauri.yml` and `demo-build.yml`, both main-only. |
+| `RELEASE_SSH_KEY` | **A direct write to `main`.** The deploy key provisioned to bypass the `main` ruleset (see `docs/rules/branch-protection.md`). Read only by the `release` job of `release-every-merge.yml`, which now declares `environment: release` (LAC-7170). |
+| `NPM_TOKEN` | Publishes `juno-cua`. Same job, same reason. |
+| `HOMEBREW_TAP_TOKEN` | Single-repo PAT that pushes `lacymorrow/homebrew-tap`. Read only by the `homebrew` job of `release-cua.yml`, which names `environment: release`. That became possible when the CLI release moved from a `cua-v*` tag push (a tag ref the main-only environment refuses, and a tag policy would protect nothing with no tag ruleset) to a dispatch from main that `release-every-merge.yml` starts (LAC-7267). |
+| `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_P8_B64` | Notarization (App Store Connect key). **Done 2026-11-09** (LAC-7193): created directly in the environment. They are `ENV_ONLY` in the guard, and no guard run has reddened, so no readable repo-scoped copy existed at any run since 2026-11-05; a copy added later reddens rung 1. Worth noting what that bought: the guard listed these three by name while they existed at neither scope, so creating them at repo scope would have failed a check on the next push to main. |
+
+Staying at repo scope, deliberately:
+
+- `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` —
+  `build-branch.yml` imports the certificate on arbitrary branches and `exit 1`s
+  without it, so scoping these would take "run Juno from a branch" with them. A
+  leaked certificate with no notarization credential cannot produce a build that
+  opens on a stranger's Mac, and it is revocable.
+- `APPLE_TEAM_ID` — not a secret. It is embedded in the public signing identity
+  string.
+- `GITHUB_TOKEN` — minted per run, already scoped.
+
+**Never add required reviewers to `release`.** `release-every-merge.yml`'s
+release job runs on every merge, so a reviewer rule would hold every merge
+behind a manual approval. Checked 2026-11-05: the environment's only protection
+rule is the branch policy.
 
 ## Local prerequisites
 
@@ -181,7 +271,7 @@ Builds `juno-cua` for `aarch64-apple-darwin` and `x86_64-apple-darwin`, then `li
 
 ### 4. Tag + push
 
-Tags both `v0.X.Y` (main app) and `cua-v0.X.Y` (CLI). Pushes triggers two workflows in parallel.
+Tags both `v0.X.Y` (main app) and `cua-v0.X.Y` (CLI). A tag push starts nothing: `release-every-merge.yml` dispatches `release-tauri.yml` and `release-cua.yml` from main, because only a main run can use the `release` environment (LAC-7267).
 
 ### 5. npm + homebrew (juno-cua only)
 

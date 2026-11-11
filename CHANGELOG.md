@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.276] - 2026-11-11
+
+### Fixed
+
+- **onboarding:** take the Codex card off the Connect step (LAC-7682) (#973) (6b396d10)
+
+## [0.8.274] - 2026-11-11
+
+### Fixed
+
+- **onboarding:** resume after the quit and reopen, Island by default, Codex on Connect (#968) (3bb536d5)
+
+## [0.8.272] - 2026-11-10
+
+### Fixed
+
+- **agent:** refuse the turn when background mode's shell screen cannot be armed (LAC-7421) (#964) (41f2d942)
+
+## [0.8.266] - 2026-11-06
+
+### Fixed
+
+- **permissions:** keep the ask, so a surface that opens later asks it (LAC-7015) (#954) (1387f1d1)
+- **ci:** close three silent-pass holes in the secret scope guard (LAC-7210) (#955) (adbdcb77)
+
+## [0.8.261] - 2026-11-05
+
+### Fixed
+
+- **release:** notarize with an App Store Connect API key, and make the 401 verdict say which cause it is (#942) (66854766)
+
 ## [0.8.260] - 2026-11-05
 
 ### Fixed
@@ -1779,7 +1810,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.260...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.276...HEAD
+[0.8.276]: https://github.com/lacymorrow/juno/compare/cua-v0.8.275...v0.8.276
+[0.8.274]: https://github.com/lacymorrow/juno/compare/cua-v0.8.273...v0.8.274
+[0.8.272]: https://github.com/lacymorrow/juno/compare/cua-v0.8.271...v0.8.272
+[0.8.266]: https://github.com/lacymorrow/juno/compare/cua-v0.8.265...v0.8.266
+[0.8.261]: https://github.com/lacymorrow/juno/compare/cua-v0.8.260...v0.8.261
 [0.8.260]: https://github.com/lacymorrow/juno/compare/cua-v0.8.259...v0.8.260
 [0.8.259]: https://github.com/lacymorrow/juno/compare/cua-v0.8.258...v0.8.259
 [0.8.257]: https://github.com/lacymorrow/juno/compare/cua-v0.8.256...v0.8.257

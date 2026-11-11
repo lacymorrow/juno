@@ -139,20 +139,6 @@ const KeyboardGlyph: GlyphComponent = (props) => (
   </svg>
 );
 
-/** Vertical key with round bow and two teeth (SF key style). */
-const KeyGlyph: GlyphComponent = (props) => (
-  <svg viewBox="0 0 24 24" aria-hidden {...props}>
-    <circle cx="12" cy="7" r="3.5" fill="none" stroke="currentColor" strokeWidth="2.1" />
-    <path
-      d="M12 10.5v8.4M12 15.1h2.7M12 18.7h2.2"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.1"
-      strokeLinecap="round"
-    />
-  </svg>
-);
-
 /** Prompt chevron and command line — Terminal. */
 const TerminalGlyph: GlyphComponent = (props) => (
   <svg viewBox="0 0 24 24" aria-hidden {...props}>
@@ -334,7 +320,7 @@ function firstPendingIndex(state: PermissionsState | null): number {
   return idx === -1 ? PERMISSION_FLOW.length : idx;
 }
 
-/** What the local Claude CLI can do right now, from the backend. */
+/** What the Claude CLI can do right now, from the backend. */
 interface ClaudeCliStatus {
   available: boolean;
   authenticated: boolean;
@@ -391,8 +377,8 @@ const getOnboardingSteps = (
           id: "api-key",
           title: "Connect Your AI",
           description:
-            "Use your Claude subscription, or paste an API key from Anthropic, OpenAI, or Google.",
-          icon: <IconTile icon={KeyGlyph} tint="#8E8E93" tintDark="#98989D" size={48} />,
+            "Use the Claude plan you already have, or paste an API key from Anthropic, OpenAI, or Google.",
+          icon: null, // The ways in are the content; a key tile above them pushed Skip off the window.
           action: "Continue",
         },
       ]),
@@ -434,6 +420,29 @@ const getOnboardingSteps = (
     action: "Start Using Juno",
   },
 ];
+
+/** Every step setup can show, in the order it shows them. */
+const STEP_ORDER = ["welcome", "appearance", "api-key", "permissions", "dictation-model", "complete"];
+
+/**
+ * Where to reopen setup after a quit, given the steps this launch has and the
+ * step that was on screen last time.
+ *
+ * macOS asks for a quit and reopen partway through granting permissions, so
+ * coming back mid-setup is the normal path, not an accident. The step itself
+ * if it is still here; otherwise it was finished in the meantime (a granted
+ * permission removes its step), so the next one that remains. The start only
+ * when nothing was recorded.
+ */
+export function resumeStepIndex(stepIds: readonly string[], lastPhase: string | null): number {
+  if (!lastPhase) return 0;
+  const same = stepIds.indexOf(lastPhase);
+  if (same !== -1) return same;
+  const was = STEP_ORDER.indexOf(lastPhase);
+  if (was === -1) return 0;
+  const next = stepIds.findIndex((id) => STEP_ORDER.indexOf(id) > was);
+  return next === -1 ? 0 : next;
+}
 
 /**
  * The stop key, drawn the same way a trigger key is.
@@ -574,11 +583,13 @@ function KeyboardShortcutDisplay({
 }
 
 // ── Animated System Settings illustration ────────────────────────────────────
-// A Codex-style instructional loop: a mock Settings row where the macOS
-// pointer glides in and flips the "Juno" toggle. Shown while Accessibility is
-// the active row — the one switch a human must flip — so the user sees the
-// exact gesture before Settings even opens. Pure illustration (aria-hidden);
-// with Reduce Motion on it renders the final frame, no cursor, switch on.
+// An instructional loop: a mock Settings row where the macOS pointer glides
+// in and flips the "Juno" toggle. It is a picture of System Settings, so it
+// only appears once System Settings is open (the Accessibility row is
+// waiting), under the checklist and under a caption that says where the
+// switch is. It used to sit above the checklist from the start, where it read
+// as a switch to click in this window. Pure illustration (aria-hidden); with
+// Reduce Motion on it renders the final frame, no cursor, switch on.
 function SettingsToggleDemo() {
   const prefersReducedMotion = useReducedMotion() ?? false;
   // One shared timeline keeps the cursor and the switch in sync.
@@ -586,7 +597,8 @@ function SettingsToggleDemo() {
   const TIMES = [0, 0.1, 0.45, 0.52, 0.58, 0.86, 1];
 
   return (
-    <div aria-hidden className="mb-4 flex justify-center">
+    <div aria-hidden className="pointer-events-none mt-4 flex select-none flex-col items-center gap-1.5">
+      <p className="text-[11px] text-muted-foreground">In System Settings, switch Juno on</p>
       <div className="w-[300px] rounded-xl border border-border bg-card px-3 py-2.5 shadow-sm">
         <div className="relative flex items-center gap-2.5">
           <img src="/juno.png" alt="" className="h-5 w-5 object-contain" />
@@ -653,6 +665,101 @@ function SettingsToggleDemo() {
   );
 }
 
+// ── One "use the plan you already have" card on the Connect step ─────────────
+// Selectable only when the CLI is installed and signed in; otherwise it says
+// the one thing that would make it so.
+function CliCard({
+  title,
+  detail,
+  loginCommand,
+  installLabel,
+  installUrl,
+  checking,
+  installed,
+  signedIn,
+  selected,
+  onToggle,
+}: {
+  title: string;
+  detail: string;
+  loginCommand: string;
+  installLabel: string;
+  installUrl: string;
+  checking: boolean;
+  installed: boolean;
+  signedIn: boolean;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  const ready = installed && signedIn;
+  return (
+    <div
+      className={`rounded-xl border p-4 transition-colors ${
+        selected
+          ? "border-[#007AFF] bg-[#007AFF]/[0.06] dark:border-[#0A84FF] dark:bg-[#0A84FF]/[0.10] cursor-pointer"
+          : ready
+            ? "border-border bg-card hover:bg-muted/40 cursor-pointer"
+            : "border-border bg-card"
+      }`}
+      onClick={ready ? onToggle : undefined}
+      role={ready ? "button" : undefined}
+      aria-pressed={ready ? selected : undefined}
+      tabIndex={ready ? 0 : undefined}
+      onKeyDown={
+        ready
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") onToggle();
+            }
+          : undefined
+      }
+    >
+      <div className="flex items-start gap-3">
+        <IconTile icon={TerminalGlyph} tint="#2C2C2E" tintDark="#3A3A3C" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[13px] font-medium text-foreground">{title}</span>
+            {selected && (
+              <span role="img" aria-label="Selected">
+                <CheckGlyph className="h-4 w-4 text-[#007AFF] dark:text-[#0A84FF]" />
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 text-[12px] text-muted-foreground">{detail}</p>
+          <div className="mt-1.5 text-[12px]">
+            {checking ? (
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" /> Checking
+              </span>
+            ) : ready ? (
+              // Green check beside gray text — how System Settings marks
+              // status; green text itself is not native.
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                <CheckGlyph className={`h-3 w-3 ${GREEN}`} /> Detected and signed in
+              </span>
+            ) : installed ? (
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                <AlertCircle className="h-3 w-3" /> Installed but not signed in. Run{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+                  {loginCommand}
+                </code>
+              </span>
+            ) : (
+              <a
+                href={installUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <ExternalLink className="h-3 w-3" /> {installLabel}
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── One row of the permission checklist ──────────────────────────────────────
 // Exactly one row is "active" at a time and it carries the only button on the
 // screen. Granted rows collapse to a green check; upcoming rows sit dimmed
@@ -681,63 +788,68 @@ function PermissionRow({
 
   return (
     <div
-      className={`flex items-start gap-3 px-4 py-3 text-left transition-opacity duration-200 ${
+      className={`px-4 py-3 text-left transition-opacity duration-200 ${
         upcoming ? "opacity-40" : ""
       }`}
     >
-      <IconTile icon={def.icon} tint={def.tint} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className="text-[13px] font-medium text-foreground">{def.title}</span>
-          {!def.required && (
-            <span className="text-[11px] text-muted-foreground">Optional</span>
-          )}
+      <div className="flex items-start gap-3">
+        <IconTile icon={def.icon} tint={def.tint} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span className="text-[13px] font-medium text-foreground">{def.title}</span>
+            {!def.required && (
+              <span className="text-[11px] text-muted-foreground">Optional</span>
+            )}
+          </div>
+          <p className="mt-px text-[12px] leading-[1.4] text-muted-foreground">{def.why}</p>
         </div>
-        <p className="mt-px text-[12px] leading-[1.4] text-muted-foreground">{def.why}</p>
-        {active && waiting && !granted && (
-          <p className="mt-1.5 flex items-center gap-1.5 text-[12px] text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-            Waiting. Switch Juno on in System Settings and this updates automatically.
-          </p>
-        )}
-        {autoStage && !granted && (
-          <p className="mt-1.5 flex items-center gap-1.5 text-[12px] text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-            {AUTO_STAGE_COPY[autoStage] ?? "Working…"}
-          </p>
-        )}
+        <div className="flex shrink-0 items-center gap-2 pt-0.5">
+          {granted ? (
+            <span role="img" aria-label="Granted">
+              <CheckGlyph className={`h-[18px] w-[18px] ${GREEN}`} />
+            </span>
+          ) : active ? (
+            <>
+              {/* Every row can be passed over, including the two Juno leans on
+                  most. Onboarding is not the moment to make someone trade
+                  Accessibility for a promise; the ask returns when Juno actually
+                  reaches for it, with the reason attached. */}
+              <button onClick={onSkip} className={LINK_QUIET}>
+                Later
+              </button>
+              <button
+                onClick={onRequest}
+                disabled={isRequesting}
+                className={waiting ? BTN_ROW_QUIET : BTN_ROW}
+                aria-label={`${def.hasPrompt && !waiting ? "Allow" : "Open Settings for"} ${def.title}`}
+              >
+                {isRequesting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : waiting || !def.hasPrompt ? (
+                  "Open Settings"
+                ) : (
+                  "Allow"
+                )}
+              </button>
+            </>
+          ) : null}
+        </div>
       </div>
-      <div className="flex shrink-0 items-center gap-2 pt-0.5">
-        {granted ? (
-          <span role="img" aria-label="Granted">
-            <CheckGlyph className={`h-[18px] w-[18px] ${GREEN}`} />
-          </span>
-        ) : active ? (
-          <>
-            {/* Every row can be passed over, including the two Juno leans on
-                most. Onboarding is not the moment to make someone trade
-                Accessibility for a promise; the ask returns when Juno actually
-                reaches for it, with the reason attached. */}
-            <button onClick={onSkip} className={LINK_QUIET}>
-              Later
-            </button>
-            <button
-              onClick={onRequest}
-              disabled={isRequesting}
-              className={waiting ? BTN_ROW_QUIET : BTN_ROW}
-              aria-label={`${def.hasPrompt && !waiting ? "Allow" : "Open Settings for"} ${def.title}`}
-            >
-              {isRequesting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : waiting || !def.hasPrompt ? (
-                "Open Settings"
-              ) : (
-                "Allow"
-              )}
-            </button>
-          </>
-        ) : null}
-      </div>
+      {/* Status sits under the whole row, at the text's left edge, so it gets
+          the row's full width. Inside the text column it shared the line with
+          the buttons and wrapped to five lines. */}
+      {active && waiting && !granted && (
+        <p className="mt-1.5 flex items-start gap-1.5 pl-10 text-[12px] leading-[1.4] text-muted-foreground">
+          <Loader2 className="mt-[2px] h-3 w-3 shrink-0 animate-spin" aria-hidden />
+          Waiting. Switch Juno on in System Settings and this updates automatically.
+        </p>
+      )}
+      {autoStage && !granted && (
+        <p className="mt-1.5 flex items-center gap-1.5 pl-10 text-[12px] text-muted-foreground">
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />
+          {AUTO_STAGE_COPY[autoStage] ?? "Working…"}
+        </p>
+      )}
     </div>
   );
 }
@@ -804,6 +916,9 @@ export default function OnboardingFlow({
   // The step list changes shape once these land, so resuming before then would
   // jump to a position that means something different a moment later.
   const [stepsSettled, setStepsSettled] = useState(false);
+  // True once the saved step has been read and applied (or there was none).
+  // Nothing records a step before this: see the resume effect.
+  const [resumeSettled, setResumeSettled] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [detectedProvider, setDetectedProvider] = useState<{
     id: string;
@@ -1180,23 +1295,22 @@ export default function OnboardingFlow({
     }
   }, [detectedProvider, apiKey]);
 
-  const selectClaudeCli = useCallback(async () => {
+  const selectCli = useCallback(async () => {
+    const providerId = "claude_cli";
     try {
       setApiKeySaving(true);
       setApiKeyError(null);
-      await invoke(COMMANDS.PROVIDERS_SET_ACTIVE_PROVIDER, {
-        providerId: "claude_cli",
-      });
+      await invoke(COMMANDS.PROVIDERS_SET_ACTIVE_PROVIDER, { providerId });
       setCliSelected(true);
     } catch (error) {
-      console.error("Failed to set Claude CLI as active provider:", error);
+      console.error(`Failed to set ${providerId} as active provider:`, error);
       setApiKeyError(error as string);
     } finally {
       setApiKeySaving(false);
     }
   }, []);
 
-  const deselectClaudeCli = useCallback(() => {
+  const deselectCli = useCallback(() => {
     setCliSelected(false);
   }, []);
 
@@ -1367,6 +1481,10 @@ export default function OnboardingFlow({
   // Use the step ID (not the index) so phase names are stable when the step
   // list shrinks/grows based on `permissionsAlreadyGranted` and `apiKeysAvailable`.
   useEffect(() => {
+    // Entering a step is also what saves the resume point, and this effect
+    // runs on mount with the welcome step. Recording that before the saved
+    // step was read overwrote it, so every reopen started setup over.
+    if (!resumeSettled) return;
     const currentId = onboardingSteps[currentStep]?.id;
     if (!currentId) return;
     if (recordedStepIdsRef.current.has(currentId)) return;
@@ -1376,7 +1494,7 @@ export default function OnboardingFlow({
       phase: currentId,
       t_ms_since_start: Date.now() - analyticsStartMsRef.current,
     });
-  }, [currentStep, onboardingSteps, recordEvent]);
+  }, [currentStep, onboardingSteps, recordEvent, resumeSettled]);
 
   // ── Seed the permission sub-flow to the first pending permission ─────────────
   // Runs once when we first land on the permissions step with state in hand, so
@@ -1556,6 +1674,11 @@ export default function OnboardingFlow({
   // list then shrank as the checks came back, and index 2 became the final
   // step, so a force quit during setup resumed straight to "You're all set"
   // with permissions still ungranted and no way back to them.
+  //
+  // It also has to finish before any step is recorded (`resumeSettled`),
+  // because recording a step is what saves the resume point: the welcome step
+  // on mount used to overwrite it before this read. That is why granting
+  // Accessibility, quitting and reopening as macOS asks started setup over.
   const resumeAttemptedRef = useRef(false);
   useEffect(() => {
     if (!stepsSettled || resumeAttemptedRef.current) return;
@@ -1563,15 +1686,17 @@ export default function OnboardingFlow({
     (async () => {
       try {
         const lastPhase = await invoke<string | null>(COMMANDS.ONBOARDING_GET_LAST_ONBOARDING_PHASE);
-        if (!lastPhase || !mountedRef.current) return;
-        const idx = onboardingSteps.findIndex((s) => s.id === lastPhase);
-        // Don't resume to the welcome step (always start there if no progress)
-        // or to the complete step (avoid skipping the user past final guidance).
-        if (idx > 0 && idx < onboardingSteps.length - 1 && currentStep === 0) {
-          setCurrentStep(idx);
-        }
+        if (!mountedRef.current) return;
+        const idx = resumeStepIndex(
+          onboardingSteps.map((s) => s.id),
+          lastPhase ?? null
+        );
+        // Only if the person has not already moved on by themselves.
+        if (idx > 0 && currentStep === 0) setCurrentStep(idx);
       } catch (err) {
         console.debug("[Onboarding] resume read failed:", err);
+      } finally {
+        if (mountedRef.current) setResumeSettled(true);
       }
     })();
     // Only run after steps are known and on initial mount.
@@ -1840,6 +1965,12 @@ export default function OnboardingFlow({
   // While the checklist is running, its active row owns the primary action, so
   // we hide the footer to keep exactly one primary action on screen.
   const inActivePermFlow = step.id === "permissions" && !permSubFlowComplete;
+  // After choosing to do it by hand (or stopping a run), Juno can still take
+  // over: Accessibility is on and something it can switch remains.
+  const canHandBackToJuno =
+    autoGrantMode === "manual" &&
+    !!permissionsState?.accessibility.granted &&
+    AUTOMATABLE.some((k) => !permissionsState[k].granted);
 
   // Determine if continue button should be disabled
   // Role step is intentionally optional — no guard here; handleNext saves only when a role is selected
@@ -2067,70 +2198,19 @@ export default function OnboardingFlow({
               {/* Connect step: Claude CLI + API key dual path */}
               {step.id === "api-key" && (
                 <div className="space-y-3 pt-4 text-left">
-                  {/* Claude CLI card */}
-                  <div
-                    className={`rounded-xl border p-4 transition-colors ${
-                      cliSelected
-                        ? "border-[#007AFF] bg-[#007AFF]/[0.06] dark:border-[#0A84FF] dark:bg-[#0A84FF]/[0.10] cursor-pointer"
-                        : cliAvailable && cliAuthenticated
-                          ? "border-border bg-card hover:bg-muted/40 cursor-pointer"
-                          : "border-border bg-card"
-                    }`}
-                    onClick={cliAvailable && cliAuthenticated ? (cliSelected ? deselectClaudeCli : selectClaudeCli) : undefined}
-                    role={cliAvailable && cliAuthenticated ? "button" : undefined}
-                    tabIndex={cliAvailable && cliAuthenticated ? 0 : undefined}
-                    onKeyDown={cliAvailable && cliAuthenticated ? (e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        cliSelected ? deselectClaudeCli() : selectClaudeCli();
-                      }
-                    } : undefined}
-                  >
-                    <div className="flex items-start gap-3">
-                      <IconTile icon={TerminalGlyph} tint="#2C2C2E" tintDark="#3A3A3C" />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[13px] font-medium text-foreground">
-                            Use your Claude subscription
-                          </span>
-                          {cliSelected && (
-                            <span role="img" aria-label="Selected">
-                              <CheckGlyph className="h-4 w-4 text-[#007AFF] dark:text-[#0A84FF]" />
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-0.5 text-[12px] text-muted-foreground">
-                          No API key needed. Uses Claude Code CLI authentication.
-                        </p>
-                        <div className="mt-1.5 text-[12px]">
-                          {cliChecking ? (
-                            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                              <Loader2 className="h-3 w-3 animate-spin" /> Checking
-                            </span>
-                          ) : cliAvailable && cliAuthenticated ? (
-                            // Green check beside gray text — how System Settings
-                            // marks status; green text itself is not native.
-                            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                              <CheckGlyph className={`h-3 w-3 ${GREEN}`} /> Detected and signed in
-                            </span>
-                          ) : cliAvailable ? (
-                            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                              <AlertCircle className="h-3 w-3" /> Installed but not signed in. Run{" "}
-                              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">claude login</code>
-                            </span>
-                          ) : (
-                            <a
-                              href="https://claude.ai/code"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
-                            >
-                              <ExternalLink className="h-3 w-3" /> Not installed. Get Claude Code
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  {/* A plan the person already pays for, through its CLI. */}
+                  <CliCard
+                    title="Use your Claude subscription"
+                    detail="No API key needed. Uses Claude Code on this Mac."
+                    loginCommand="claude login"
+                    installLabel="Not installed. Get Claude Code"
+                    installUrl="https://claude.ai/code"
+                    checking={cliChecking}
+                    installed={cliAvailable}
+                    signedIn={cliAuthenticated}
+                    selected={cliSelected}
+                    onToggle={() => (cliSelected ? deselectCli() : selectCli())}
+                  />
 
                   {/* Divider */}
                   <div className="flex items-center gap-3 px-2">
@@ -2208,11 +2288,6 @@ export default function OnboardingFlow({
                     </div>
                   ) : (
                     <>
-                      {/* Instructional loop for the one toggle only a human can
-                          flip. Disappears the moment Accessibility is granted. */}
-                      {PERMISSION_FLOW[permIndex]?.stateKey === "accessibility" &&
-                        !permissionsState.accessibility.granted && <SettingsToggleDemo />}
-
                       {/* The inset group, matching the Settings window. */}
                       <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
                         {PERMISSION_FLOW.map((def, i) => (
@@ -2243,6 +2318,11 @@ export default function OnboardingFlow({
                           />
                         ))}
                       </div>
+                      {/* What to do over in System Settings, shown only once it
+                          is open. Gone the moment Accessibility is granted. */}
+                      {PERMISSION_FLOW[permIndex]?.stateKey === "accessibility" &&
+                        attemptedPerms.has("accessibility") &&
+                        !permissionsState.accessibility.granted && <SettingsToggleDemo />}
                       {autoGrantMode === "offer" && (
                         <div className="mt-4 flex flex-col items-center gap-2">
                           <p className="text-[12px] leading-[1.4] text-muted-foreground">
@@ -2289,6 +2369,16 @@ export default function OnboardingFlow({
                         <div className="mt-4 flex justify-center">
                           <button onClick={skipPermissionsStep} className={LINK_QUIET}>
                             I'll do this later
+                          </button>
+                        </div>
+                      )}
+                      {/* "I'll do it myself" is not a one-way door: while there
+                          is still something Juno could switch on, the offer
+                          stays within reach, quietly, at the bottom. */}
+                      {canHandBackToJuno && (
+                        <div className="mt-1 flex justify-center">
+                          <button onClick={startAutoGrant} className={LINK_QUIET}>
+                            Let Juno switch these on instead
                           </button>
                         </div>
                       )}

@@ -860,6 +860,26 @@ pub async fn permission_moment(
     crate::permission_gate::moment_for(&permission)
 }
 
+/// The ask Juno has already made and nobody has answered yet, if there is one.
+///
+/// Every surface that can draw the card mounts after the `permission-needed`
+/// event it would have been drawn by: the Pill opens its pane *on* the event,
+/// and the Island mounts the conversation only on its chat face. So the card
+/// reads this once on mount, and the question survives being asked into a
+/// surface that was not there (juno#946).
+#[tauri::command]
+pub async fn standing_permission_ask(
+) -> Result<Option<crate::permission_gate::PermissionAsk>, String> {
+    Ok(crate::permission_gate::standing_ask())
+}
+
+/// Not now. Take the ask away so another surface does not put it back.
+#[tauri::command]
+pub async fn dismiss_permission_ask() -> Result<(), String> {
+    crate::permission_gate::forget_standing_ask();
+    Ok(())
+}
+
 /// Let macOS raise its Automation dialog, because the person pressed Allow.
 ///
 /// This is the only place the system's Automation prompt is triggered on

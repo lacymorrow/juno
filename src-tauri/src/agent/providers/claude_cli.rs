@@ -398,6 +398,29 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), AgentError> {
         AgentError::ConfigurationError(format!("Failed to {what} {}: {e}", target.display()))
     };
 
+    // The directory itself can be gone. These paths sit under
+    // `std::env::temp_dir()`, which is whatever `TMPDIR` says: a Juno launched
+    // from inside a scoped shell inherits that shell's temporary directory and
+    // outlives it, and macOS prunes `/var/folders/.../T` of anything untouched
+    // for days anyway. Measured on a live v0.8.269: the directory under the
+    // armed `--settings` path had been deleted from under a running Juno, and
+    // every later write into it failed. One `mkdir` is cheaper than the
+    // alternative the caller used to take, which was a spawn with no shell
+    // screen at all (LAC-7421). 0700, because what lands here is the token
+    // that moves the mouse; a directory that already exists keeps its own mode.
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder
+            .create(parent)
+            .map_err(|e| failed("create the directory", parent, e))?;
+    }
+
     let mut staging = path.as_os_str().to_os_string();
     staging.push(format!(".tmp{}-{nonce}", std::process::id()));
     let staging = PathBuf::from(staging);
@@ -504,9 +527,12 @@ fn write_shell_screen_settings_in(
 ///
 /// Shared by every turn and by the warm spare, so the spare is born with the
 /// same MCP config path and permission flags the turn that adopts it would use.
+///
+/// Errs rather than handing back an environment that would spawn a shell
+/// nothing reads while background mode is on (LAC-7421).
 async fn turn_environment(
     app_handle: Option<&tauri::AppHandle>,
-) -> (Option<PathBuf>, Option<PathBuf>, bool) {
+) -> Result<(Option<PathBuf>, Option<PathBuf>, bool), AgentError> {
     // Hand the CLI Juno's own computer tool. Done per run rather than when
     // the brain is built, because the server lives in the running app and
     // the brain is constructed without an app handle (and rebuilt on every
@@ -548,7 +574,31 @@ async fn turn_environment(
     // restart. Without an app handle there is no sheet to route to.
     let ask_before_send = app_handle.is_some_and(cli_approval::is_enabled);
 
-    (mcp_config, shell_screen, ask_before_send)
+    // Fail closed. Every branch above that could not write a file answered
+    // with `None`, and `None` here used to mean a spawn with nothing reading
+    // the CLI's own shell: the pre-LAC-5010 state, reached silently, with one
+    // `warn!` nobody reads as the only sign. If background mode is on, that
+    // spawn is the one thing this code exists to prevent, so the turn does
+    // not start (LAC-7421). The check is on the arguments the spawn would
+    // carry rather than on which branch failed, because both the MCP config
+    // and the screen can fail, and either one leaves the shell unread.
+    //
+    // Read per turn, like the approval setting beside it, so turning
+    // background mode on needs no restart to be honoured here.
+    if let Some(handle) = app_handle {
+        let background_mode = crate::input_control::background_mode_enabled(handle).await;
+        if let Some(why) = cli_approval::unscreened_spawn_refusal(
+            background_mode,
+            ask_before_send,
+            mcp_config.is_some(),
+            shell_screen.as_deref(),
+        ) {
+            warn!("{why}");
+            return Err(AgentError::ConfigurationError(why));
+        }
+    }
+
+    Ok((mcp_config, shell_screen, ask_before_send))
 }
 
 /// How long settings must sit still before the warm spare is re-primed, so a
@@ -632,7 +682,18 @@ pub async fn prewarm_persistent_session(app: tauri::AppHandle) {
         return;
     }
 
-    let (mcp_config, shell_screen, ask_before_send) = turn_environment(Some(&app)).await;
+    // No spare rather than an unscreened one: the turn that would have adopted
+    // it refuses for the same reason, and says so where the person can see it
+    // (LAC-7421).
+    let (mcp_config, shell_screen, ask_before_send) = match turn_environment(Some(&app)).await {
+        Ok(environment) => environment,
+        Err(e) => {
+            // Already warned about where it happened; this is only why there
+            // is no spare.
+            debug!("[CliSession] No warm spare: {e}");
+            return;
+        }
+    };
     claude_cli_session::prime_spare(
         &app,
         brain.launch_config(mcp_config, shell_screen, ask_before_send),
@@ -1125,7 +1186,7 @@ impl ClaudeCliBrain {
         let resume = conversation.as_deref().and_then(resume_id_for);
 
         let (mcp_config, shell_screen, ask_before_send) =
-            turn_environment(app_handle.as_ref()).await;
+            turn_environment(app_handle.as_ref()).await?;
 
         // A spoken turn runs at a lower effort than a typed one, unless the
         // person chose a level. Logged on the [TurnTiming] line for A/B.
@@ -2851,12 +2912,52 @@ mod tests {
         }
 
         /// Fail closed: no private file means no shell screen, rather than a
-        /// readable one. The caller treats `Err` as "spawn without it".
+        /// readable one. The caller refuses the turn rather than spawning
+        /// without it (LAC-7421).
+        ///
+        /// A directory that is merely missing is put back by the write (see
+        /// below), so this is the real unwritable case: a directory this user
+        /// cannot add a file to.
         #[test]
         fn an_unwritable_directory_fails_closed() {
             let dir = tempfile::tempdir().expect("a temp dir");
-            let missing = dir.path().join("not-there");
-            assert!(write_shell_screen_settings_in(&missing, &endpoint()).is_err());
+            let locked = dir.path().join("locked");
+            std::fs::create_dir(&locked).expect("a directory to lock");
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o500))
+                .expect("locked");
+
+            let written = write_shell_screen_settings_in(&locked, &endpoint());
+
+            // Unlocked before the assert, so a failure here still leaves a
+            // tree the temp dir can clean up.
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700))
+                .expect("unlocked");
+            assert!(
+                written.is_err(),
+                "a directory this user cannot write to must not produce a screen"
+            );
+        }
+
+        /// The live hazard in LAC-7421, measured on v0.8.269: these files sit
+        /// under `TMPDIR`, a Juno that inherited a scoped `TMPDIR` outlives
+        /// the directory, and macOS prunes the per-user temp dir on its own.
+        /// Every write after that failed, and the caller degraded to a spawn
+        /// with no shell screen. The write puts the directory back instead.
+        #[test]
+        fn a_pruned_directory_is_put_back_rather_than_failing() {
+            let dir = tempfile::tempdir().expect("a temp dir");
+            let pruned = dir.path().join("T").join("juno-7421");
+
+            let settings =
+                write_shell_screen_settings_in(&pruned, &endpoint()).expect("written anyway");
+
+            assert_eq!(mode_of(&settings), 0o600);
+            assert_eq!(mode_of(&header_file_in(&settings)), 0o600);
+            assert_eq!(
+                mode_of(&pruned) & 0o077,
+                0,
+                "the directory holding the token is this user's alone"
+            );
         }
 
         /// The MCP config beside it carries the same token (LAC-5786).

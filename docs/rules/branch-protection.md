@@ -151,13 +151,42 @@ half would carry no inputs, so `prerelease` would default to false and publish
 straight to the stable channel.
 
 `release-tauri.yml` therefore opens with a `gate` job that skips a tag pointing
-at shipx's own `release:` commit. A tag pushed by hand still builds a full
-release. The gate resolves the commit message over the API rather than reading
+at shipx's own `release:` commit. A tag pushed at any other commit used to
+build a full release; since LAC-7145 it fails there instead, because
+build-tauri runs in a `release` environment restricted to `main` and so cannot
+reach the signing secrets from a tag ref.
+The gate resolves the commit message over the API rather than reading
 `github.event.head_commit`, which GitHub documents only as "object or null" and
 does not promise for tag pushes.
 
 This consequence belongs to any bypass credential, not to deploy keys
 specifically. A personal access token would behave the same way.
+
+## An environment gates the run, not the checkout
+
+Worth stating on its own, because it is the trap the first version of that
+environment fell into (LAC-7166). A deployment branch policy constrains the ref
+a job **runs** on. It says nothing about the ref the job **checks out**, and
+`release-tauri.yml` takes a `tag` to build as a dispatch input. So
+
+```bash
+gh workflow run release-tauri.yml --ref main -f tag=<any ref>
+```
+
+satisfied a main-only policy and then built, signed and notarized whatever tree
+that ref named, with the environment's own credentials. Push access was still
+enough, which was exactly what the environment had been added to stop.
+
+The gate now validates that input before anything is signed: it must be a real
+tag, at a commit main already contains (`compare/main...<tag>` is `identical` or
+`behind`), carrying the `release:` marker. Reachability from main is the control
+that matters — an attacker writes their own commit messages, so the `release:`
+check alone would stop nothing. The tag is then resolved to a SHA **once** and
+the build checks out that SHA, because a tag re-pointed between the check and
+the checkout would otherwise swap the tree underneath a passing gate.
+
+The general rule for this repo: any job holding environment-scoped credentials
+checks out a commit some earlier job validated, never a ref a caller supplied.
 
 ## The second line of defence
 

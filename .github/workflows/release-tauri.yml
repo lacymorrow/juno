@@ -1,5 +1,35 @@
 name: Release Juno
 
+# Why this workflow renames its own runs: a release arrives here twice (see the
+# triggers below) and only the dispatched half builds anything. Both halves
+# used to appear in `gh run list` and the Actions UI under the same name,
+# "Release Juno", so the tag-push run -- which takes the skip arm in `gate`,
+# builds nothing and exits 0 -- sat as a green "success" row directly above the
+# red dispatch run that was the actual release. For 14 consecutive versions
+# (v0.8.253 through v0.8.266, not one of them published) that green row was the
+# newest thing on this workflow, so the run list read healthy while the app
+# shipped nothing to either channel for six days (LAC-7193).
+#
+# The dispatch rows were also indistinguishable from each other: 12 consecutive
+# failures, every one titled "Release Juno", with nothing to say which version
+# each had failed to publish. Naming the version is the cheaper half of the fix
+# and the one that makes `gh run list` usable during an outage.
+#
+# `run-name` is evaluated once, when the run is created, so it sees only what
+# the trigger carries -- which is exactly enough to say which half this is. It
+# cannot know how `gate` will decide, so it claims only "no build", which holds
+# for both push arms (the `release:` skip and the hand-pushed-tag failure).
+# `github.event.inputs` is used rather than the `inputs` context because it
+# resolves on every event, not only on a dispatch. Nothing reads this value:
+# no step, secret, permission or conclusion depends on it.
+#
+# Written on one physical line and double-quoted on purpose. A folded (`>-`)
+# scalar folds only lines at the block's own indent; a continuation indented
+# further is a "more-indented line" and keeps its newline, so the pretty
+# multi-line form silently yields a value with embedded newlines. The quotes
+# are required because the value contains ": ", which ends a plain scalar.
+run-name: "${{ github.event_name == 'workflow_dispatch' && format('Build and publish {0}', github.event.inputs.tag || github.ref_name) || format('No build: tag {0} pushed', github.ref_name) }}"
+
 on:
   push:
     tags:
@@ -10,8 +40,15 @@ on:
   # invisible to the app's prerelease channel: the "Publish the canary feed"
   # step below copies every build's manifest to a fixed `canary` tag, and an
   # install with "Get prereleases" on reads that instead. See
-  # src-tauri/src/updater.rs. A tag pushed by hand has no inputs, so it builds
-  # a full release as before.
+  # src-tauri/src/updater.rs.
+  #
+  # A tag pushed at a non-`release:` commit used to build a full release here.
+  # It no longer does: build-tauri runs in the main-only `release` environment,
+  # so a tag ref cannot reach the signing secrets, and the gate below fails
+  # such a push rather than building it (LAC-7145). Dispatching the same tag is
+  # not a way around that and not a loophole: the gate validates its `tag`
+  # input against main and only ever builds a commit main already carries, at a
+  # `release:` bump, resolved to a SHA (LAC-7166).
   workflow_dispatch:
     inputs:
       prerelease:
@@ -23,8 +60,15 @@ on:
       # run's ref is main and its Rust cache is saved where the next release
       # build can restore it. A cache saved on a tag ref is visible to nothing
       # else, which made every release build cold (v0.8.15: 48 min).
+      #
+      # This is the one value a caller controls, and the `release` environment
+      # does not constrain it: it gates the ref the job runs on, not the ref the
+      # job checks out. The gate below therefore validates it (a real tag, a
+      # commit main already contains, a `release:` bump) and resolves it to a
+      # SHA that build-tauri checks out instead. See there for the attack it
+      # closes (LAC-7166).
       tag:
-        description: "Tag to build (default: the ref this runs on)"
+        description: "Tag to build: a release: tag already on main (default: the ref this runs on)"
         required: false
         type: string
 
@@ -43,17 +87,22 @@ jobs:
   # release-every-merge's dispatch. The tag-triggered half is the dangerous
   # one, because it carries no inputs: `prerelease` would default to false and
   # publish straight to the stable channel, which is the audience that did not
-  # sign up to find the bugs.
+  # sign up to find the bugs. That is why the `release:` marker below skips it,
+  # and since LAC-7145 any other tag push fails there rather than building.
   #
   # Resolved over the API rather than read from `github.event.head_commit`,
   # which GitHub documents only as "object or null" and does not promise for
   # tag pushes. A guess there fails towards an accidental stable release.
   gate:
-    name: Was this tag already dispatched?
+    name: Which commit may this build sign?
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       build: ${{ steps.decide.outputs.build }}
+      # The commit build-tauri checks out. Always a resolved SHA, never a ref:
+      # see the `tag` input handling below for why that distinction is the
+      # whole point of this job.
+      sha: ${{ steps.decide.outputs.sha }}
     steps:
       - name: Decide
         id: decide
@@ -62,15 +111,92 @@ jobs:
           REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
+          DISPATCH_SHA: ${{ github.sha }}
+          TAG_INPUT: ${{ inputs.tag }}
         run: |
           set -euo pipefail
 
-          # A dispatch is always deliberate: build it.
           if [ "$EVENT" != "push" ]; then
+            # ---- dispatch ----
+            if [ -z "${TAG_INPUT:-}" ]; then
+              # No tag named, so build the ref this run was dispatched on. The
+              # `release` environment on build-tauri has already refused
+              # anything but main. Pin to the SHA rather than re-reading the
+              # branch, so a merge landing mid-run cannot change the tree that
+              # gets signed.
+              echo "build=true" >> "$GITHUB_OUTPUT"
+              echo "sha=$DISPATCH_SHA" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            # `tag` is the only attacker-controlled input on this workflow, and
+            # the environment does not cover it. A deployment branch policy
+            # gates the ref a job RUNS on; it says nothing about the ref the job
+            # CHECKS OUT. Before the checks below,
+            #
+            #   gh workflow run release-tauri.yml --ref main -f tag=<any ref>
+            #
+            # satisfied the main-only policy and then built, signed and
+            # notarized an arbitrary tree with the environment's credentials --
+            # the exact capability the environment was added to remove, one door
+            # over (LAC-7166). Everything from here to `build=true` exists to
+            # make the environment mean what it claims.
+
+            # 1. Spelling. Keeps the value out of API path traversal and out of
+            #    anything that could read as an option.
+            case "$TAG_INPUT" in
+              -*|/*|*/|*..*|*[!A-Za-z0-9._/+-]*)
+                echo "::error title=Not a tag name::'$TAG_INPUT' is not a usable tag name."
+                exit 1 ;;
+            esac
+
+            # 2. It has to be a tag that exists here. The commits endpoint used
+            #    next would equally resolve a branch name or a bare SHA, and
+            #    this value also becomes the published release's name.
+            gh api "repos/$REPO/git/ref/tags/$TAG_INPUT" --jq .ref >/dev/null || {
+              echo "::error title=No such tag::$TAG_INPUT is not a tag in $REPO."
+              exit 1
+            }
+
+            # Resolve to a commit SHA once, here. Every check after this line
+            # reads the SHA and build-tauri checks out the SHA, so a tag
+            # re-pointed between this job and the build cannot swap the tree.
+            # (This endpoint dereferences an annotated tag for us.)
+            sha=$(gh api "repos/$REPO/commits/$TAG_INPUT" --jq .sha)
+
+            # 3. The tree must be one main already carries, which is the same
+            #    bar the deployment branch policy sets for the run itself.
+            #    `behind` = an ancestor of main, `identical` = main's head.
+            #    `ahead` and `diverged` are commits main has never contained,
+            #    which is precisely the hostile-branch case.
+            status=$(gh api "repos/$REPO/compare/main...$sha" --jq .status)
+            case "$status" in
+              behind|identical) ;;
+              *)
+                echo "::error title=Not reachable from main::$TAG_INPUT ($sha) is '$status' relative to main. Only a commit main already contains can be built with the release credentials."
+                exit 1 ;;
+            esac
+
+            # 4. And it must be a version bump shipx made -- the same `release:`
+            #    marker the push path below keys on. Narrower than reachability
+            #    alone and free: release-every-merge.yml only ever dispatches
+            #    the tag it just cut, at a `release:` commit on main. Read by
+            #    SHA, not by tag, so it describes the tree being built.
+            message=$(gh api "repos/$REPO/commits/$sha" --jq '.commit.message')
+            case "$message" in
+              release:*) ;;
+              *)
+                echo "::error title=Not a release commit::$TAG_INPUT ($sha) is on main, but its commit is not a 'release:' version bump. Cut a version with 'bun run release' and let release-every-merge.yml dispatch the build."
+                exit 1 ;;
+            esac
+
+            echo "::notice title=Building::$TAG_INPUT at $sha (contained in main, release: commit)."
             echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "sha=$sha" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          # ---- tag push ----
           tag="${REF#refs/tags/}"
           message=$(gh api "repos/$REPO/commits/$tag" --jq '.commit.message')
           case "$message" in
@@ -81,21 +207,125 @@ jobs:
             release:*)
               echo "::notice title=Skipped::$tag points at shipx's own version bump; release-every-merge.yml dispatches this build with prerelease=true."
               echo "build=false" >> "$GITHUB_OUTPUT" ;;
-            # A tag pushed by hand still builds a full release, as documented
-            # on the trigger above.
+            # A tag pushed at any other commit used to build a full release
+            # here, and historically every minor and major version shipped
+            # that way (15 such builds, the last v0.8.41 on 2026-10-01). It can
+            # no longer do so: build-tauri runs in the `release` environment,
+            # whose deployment branch policy allows `main` and nothing else, so
+            # a tag ref is refused before its first step (LAC-7145). `v*` is
+            # deliberately not in that policy, because there is no tag ruleset
+            # on this repo: anyone who can push could point a v* tag at any
+            # tree, and allowing tag refs would hand the signing secrets to
+            # exactly the person the environment exists to stop.
+            #
+            # Do not send the person here to a dispatch. A dispatch on main
+            # does take the tag to build as an input:
+            #   gh workflow run release-tauri.yml --ref main -f tag=<tag>
+            # but check 4 above requires that tag to sit on a `release:` commit,
+            # and this branch is reached ONLY when it does not -- a `release:`
+            # tag matches the arm above and is skipped in favour of
+            # release-every-merge.yml's own dispatch. So for the tag as
+            # pushed, that command is guaranteed to fail "Not a release commit"
+            # (and often "Not reachable from main" first). That dispatch is the
+            # re-run path for a tag shipx already cut, not a way to build this
+            # one.
+            #
+            # The path for this tree is to get it onto main and cut a version:
+            # `bun run release` (shipx) writes the `release:` commit and tag,
+            # and release-every-merge.yml dispatches the build with
+            # prerelease=true, which is also how `prerelease` stops defaulting
+            # to the stable channel as described above the gate.
+            #
+            # Failing here rather than skipping quietly is deliberate: someone
+            # who hand-pushes a release tag wants a release, and a green run
+            # that published nothing is the worse answer.
             *)
-              echo "build=true" >> "$GITHUB_OUTPUT" ;;
+              echo "::error title=Hand-pushed tags no longer build::$tag was pushed by hand at a commit that is not a 'release:' version bump, so nothing will build it. Get this tree onto main and cut a version with 'bun run release'; release-every-merge.yml then dispatches the build. Dispatching this tag yourself will not work either: build-tauri runs in the main-only 'release' environment so a tag ref cannot reach the signing secrets, and the gate only builds a tag main already carries at a 'release:' commit. See docs/development/RELEASES.md."
+              exit 1 ;;
           esac
 
   build-tauri:
     needs: gate
-    if: needs.gate.outputs.build == 'true'
+    # Both halves deliberately. An empty `sha` means the gate reached
+    # `build=true` without resolving a commit, which it has no path to do; if a
+    # later edit gives it one, checkout would fall back to the triggering ref
+    # and the validation below would be silently skipped. Fail closed.
+    if: needs.gate.outputs.build == 'true' && needs.gate.outputs.sha != ''
     runs-on: macos-latest
+    # This job runs in the `release` GitHub Environment, whose deployment
+    # branch policy allows `main` and nothing else. A workflow pushed to any
+    # other branch that names this environment is refused before its first step
+    # runs (LAC-7145). That half is real and load-bearing today: it is why a
+    # hand-pushed `v*` tag can no longer build at all, and why the gate above
+    # redirects such a tag to a dispatch on main.
+    #
+    # The OTHER half of LAC-7145 -- moving the credentials themselves out of
+    # repository scope -- has NOT happened. This comment asserted it had from
+    # the moment #947 merged, which is the part worth noticing: the claim was
+    # never true, and nothing in CI could have said so. Measured 2026-11-05,
+    # ~40 minutes after that merge: the `release` environment holds exactly one
+    # secret, APPLE_TEAM_ID (the one value this comment says stays behind),
+    # while the updater
+    # signing key (TAURI_SIGNING_PRIVATE_KEY,
+    # TAURI_SIGNING_PRIVATE_KEY_PASSWORD), APPLE_ID and APPLE_PASSWORD are all
+    # still repository-scoped and readable by any workflow on any branch. An
+    # Environment ADDS a resolution scope, it does not SUBTRACT the repository
+    # one, so this job resolves all of them from repo scope, the build behaves
+    # identically, and nothing fails or warns. Do NOT read the `environment:`
+    # line below as meaning these secrets are scoped: push access to this repo
+    # is still enough to read the signing key.
+    #
+    # Finishing it needs a human, because secret values are write-only and no
+    # API can copy one between scopes: LAC-7194 tracks the migration, and
+    # .github/workflows/secret-scope-guard.yml asserts the actual scope of
+    # every release credential on every push to main, so neither this comment
+    # nor the next migration can go quietly inert again.
+    #
+    # The signing key is the one that matters most, and it is read only here
+    # (the two Build steps below). The app's updater verifies the minisign
+    # `pubkey` in tauri.conf.json and nothing else, so that key -- not the Apple
+    # certificate -- is what can hand every install a malicious update.
+    # build-branch.yml passes createUpdaterArtifacts:false and never reads it,
+    # so scoping it costs branch builds nothing (LAC-7166).
+    #
+    # `main` is the whole build path: release-every-merge.yml dispatches this
+    # workflow with --ref main, and a `v*` tag push never reaches this job at
+    # all (the gate above skips shipx's own tag and fails any other). `v*` is
+    # deliberately NOT in the policy: there is no tag ruleset on this repo, so
+    # anyone with push access can point a v* tag at any tree, which would hand
+    # the environment straight back.
+    #
+    # APPLE_TEAM_ID and the signing certificate itself stay repo-scoped. The
+    # team ID is not a secret (it is embedded in the public signing identity
+    # string), and build-branch.yml needs the certificate on arbitrary branches;
+    # see the note there for why that is the lesser risk. The duplicate
+    # APPLE_TEAM_ID added to the `release` environment on 2026-11-05 is
+    # redundant rather than wrong -- the environment copy simply wins here --
+    # and the scope guard ignores it for that reason.
+    environment: release
 
     steps:
+      # The SHA the gate resolved and validated, never a ref. A deployment
+      # branch policy constrains the ref this job RUNS on, not the ref it checks
+      # out, so `ref: ${{ inputs.tag }}` here was enough to build a hostile tree
+      # from an allowed ref (LAC-7166). The gate owns that decision now.
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ needs.gate.outputs.sha }}
+
+      # Cheap, and the only thing that proves the gate's verdict and this
+      # checkout refer to the same tree. Same pattern as release-every-merge's
+      # "Re-assert the checkout is the commit CI verified".
+      - name: Re-assert the checkout is the commit the gate allowed
+        env:
+          EXPECTED: ${{ needs.gate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          if [ "$head" != "$EXPECTED" ]; then
+            echo "::error title=Wrong tree::Checked out $head but the gate allowed $EXPECTED. Refusing to sign."
+            exit 1
+          fi
 
       # The repo pins its toolchain in rust-toolchain.toml. Installing the cross
       # targets on @stable put them on a toolchain cargo never used (rustup
@@ -672,7 +902,26 @@ jobs:
       issues: write
       # To name the step that actually failed, below, instead of guessing.
       actions: read
+      # To read the last published release, so the body can say how long the
+      # app has actually been unshippable rather than only naming this run.
+      contents: read
     steps:
+      # The report is a committed script now, so this job needs the repo. It
+      # needed no checkout at all while the script was inline, which is
+      # exactly why testing an edit to it meant rebuilding a throwaway /tmp
+      # harness three times in two days (LAC-7209). A checkout costs seconds
+      # in a job that only runs after a 40-minute release build.
+      #
+      # The ref is this run's own. A dispatch runs on main, so this is main's
+      # copy of the script; a tag push that gets past the gate runs on a tag
+      # at a commit main already carries. Either way it is a version of the
+      # script that main has.
+      - uses: actions/checkout@v6
+
+      # Everything the script reads, except GITHUB_RUN_ID which Actions sets
+      # itself. scripts/__tests__/release-failure-report.test.sh renders the
+      # script against these exact names, and asserts that a missing one is
+      # reported by name rather than aborting as an unbound variable.
       - name: Open, update or close the release-failure issue
         env:
           GH_TOKEN: ${{ github.token }}
@@ -680,58 +929,4 @@ jobs:
           RESULT: ${{ needs.build-tauri.result }}
           TAG: ${{ inputs.tag || github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          title="Release builds are failing"
-          open=$(gh issue list --repo "$REPO" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
-          if [ "$RESULT" = "success" ]; then
-            if [ -n "$open" ]; then
-              gh issue comment "$open" --repo "$REPO" --body "Fixed: $TAG built and published. $RUN_URL"
-              gh issue close "$open" --repo "$REPO"
-            fi
-            exit 0
-          fi
-          # Name the step that actually failed instead of guessing at a
-          # cause. The jobs API answers immediately, while run logs are
-          # usually still locked this soon after the failure, so the logs are
-          # deliberately not read here.
-          failed=$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID/jobs" \
-            --jq '.jobs[] | select(.conclusion == "failure") | .steps[] | select(.conclusion == "failure") | .name' \
-            2>/dev/null | head -5 | paste -sd '; ' - || true)
-
-          # The paragraph below used to read "Notarization failures (HTTP 401)
-          # mean the APPLE_PASSWORD app-specific password needs replacing". It
-          # asserted a cause this job cannot observe, and it was wrong: that
-          # sentence opened #926, a password was rotated on the strength of it,
-          # and the next build 401'd on the new one (LAC-6331). State the
-          # evidence and let whoever reads the log draw the conclusion.
-          #
-          # A heredoc, not a quoted string: this runs only when the release is
-          # already broken, which is the worst possible moment to find an
-          # escaping bug, so the text carries no shell metacharacters.
-          body=$(cat <<EOF
-          The release build for $TAG failed, so nothing was published and nobody gets this version.
-
-          Run: $RUN_URL
-          Failed step: ${failed:-unknown, see the run}
-
-          Read that step's log before changing anything. On a notarization failure also read the "Configure Apple code signing" step, which PASSES and is therefore invisible to "gh run view --log-failed" - its warning lines are where a malformed credential gets named, and four runs in a row were misdiagnosed because nobody looked there (LAC-6333).
-
-          A notarization "HTTP status code: 401" does not on its own mean APPLE_PASSWORD is wrong. The endpoint behind it, notary/v2/asp, IS the app-specific-password token exchange, so a runner that cannot reach Apple gets a 401 rather than a network error, and the same unchanged credential has succeeded within hours of a 401.
-
-          But if the signing step warned that APPLE_PASSWORD does not match the app-specific-password shape, the 401 is already explained and re-dispatching will not clear it. Replace the secret.
-
-          Otherwise re-dispatch the tag first:
-
-              gh workflow run release-tauri.yml --ref main -f tag=$TAG -f prerelease=true
-
-          and replace APPLE_PASSWORD only when "Check the notary service" is red on two runs in a row.
-
-          The durable fix is the App Store Connect API key path (APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_P8_B64): it signs a JWT on the runner and never calls notary/v2/asp at all.
-          EOF
-          )
-          if [ -n "$open" ]; then
-            gh issue comment "$open" --repo "$REPO" --body "$body"
-          else
-            gh issue create --repo "$REPO" --title "$title" --body "$body"
-          fi
+        run: scripts/release-failure-report.sh

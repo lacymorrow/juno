@@ -67,6 +67,11 @@ on:
 jobs:
   build-demo:
     runs-on: macos-latest
+    # Reads the notarization credentials, so it runs in the `release`
+    # environment (deployment branches: `main` only, LAC-7145). Every demo
+    # build so far has run on main, and main is the right constraint anyway for
+    # the build most likely to be handed to someone outside the team.
+    environment: release
 
     steps:
       - uses: actions/checkout@v6
@@ -248,9 +253,11 @@ jobs:
           set -euo pipefail
           dmg="$(find "$GITHUB_WORKSPACE" -path '*/bundle/dmg/Juno-Demo-*.dmg' -type f | head -1)"
           [ -n "$dmg" ] || { echo "no demo DMG found" >&2; exit 1; }
-          echo "dmg=$dmg" >> "$GITHUB_OUTPUT"
-          echo "name=$(basename "$dmg")" >> "$GITHUB_OUTPUT"
-          echo "manifest=${dmg%.dmg}.json" >> "$GITHUB_OUTPUT"
+          {
+            echo "dmg=$dmg"
+            echo "name=$(basename "$dmg")"
+            echo "manifest=${dmg%.dmg}.json"
+          } >> "$GITHUB_OUTPUT"
           echo "Found $dmg"
 
       # Always attach the DMG (and its manifest) to the run, so it is

@@ -199,11 +199,14 @@ pub struct LaunchConfig {
     /// The `--settings` file carrying background mode's shell screen, for a
     /// spawn that skips permissions (LAC-5010).
     ///
-    /// Deliberately not in the session signature: whether it is passed is
-    /// decided by `ask_before_send` and `mcp_config`, which are both in the
-    /// signature already, and the path itself is fixed for the app's life. So
-    /// nothing about it can differ between two spawns that the signature
-    /// already calls the same.
+    /// Whether it is there is in the session signature; the path is not. The
+    /// path is fixed for the app's life, so it cannot differ between two
+    /// spawns. Whether it is there can: the write that produces it has its own
+    /// failures, and a spare primed without a screen was being adopted by a
+    /// turn that had one, since `ask_before_send` and `mcp_config` were the
+    /// same on both and nothing else looked. A live process cannot be handed
+    /// a `--settings` file after the fact, so this has to replace it
+    /// (LAC-7421).
     pub shell_screen: Option<PathBuf>,
     /// Extra system-prompt guidance, appended only when `mcp_config` is present.
     pub mcp_guidance: &'static str,
@@ -742,11 +745,11 @@ fn signature_parts(
 }
 
 fn signature_of(launch: &LaunchConfig) -> String {
-    // Effort, the partial-messages flag, the binary and the MCP guidance are
-    // spawn-time too. Appended rather than threaded through `signature_parts`,
-    // whose shape the tests pin.
+    // Effort, the partial-messages flag, the binary, the MCP guidance and
+    // whether a shell screen is passed are spawn-time too. Appended rather
+    // than threaded through `signature_parts`, whose shape the tests pin.
     format!(
-        "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
+        "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
         signature_parts(
             &launch.model,
             launch.system_prompt.as_deref(),
@@ -757,14 +760,16 @@ fn signature_of(launch: &LaunchConfig) -> String {
         launch.effort,
         launch.include_partial_messages,
         launch.binary.to_string_lossy(),
-        launch.mcp_guidance
+        launch.mcp_guidance,
+        // Presence only, not the path: see `LaunchConfig::shell_screen`.
+        launch.shell_screen.is_some()
     )
 }
 
 /// Names the first spawn-time setting that differs between two signatures, in
 /// the order `signature_of` writes them.
 fn signature_change(old: &str, new: &str) -> &'static str {
-    const PARTS: [&str; 9] = [
+    const PARTS: [&str; 10] = [
         "the model changed",
         "the system prompt changed",
         "the MCP config changed",
@@ -774,6 +779,7 @@ fn signature_change(old: &str, new: &str) -> &'static str {
         "the partial-messages flag changed",
         "the CLI binary changed",
         "the MCP guidance changed",
+        "the shell screen changed",
     ];
     let mut old_parts = old.split('\u{1f}');
     let mut new_parts = new.split('\u{1f}');
@@ -2405,6 +2411,12 @@ mod tests {
             },
             LaunchConfig {
                 binary: PathBuf::from("/opt/homebrew/bin/claude"),
+                ..base.clone()
+            },
+            // A spare born with no shell screen is a different process from
+            // one born with it, and no other field says so (LAC-7421).
+            LaunchConfig {
+                shell_screen: None,
                 ..base.clone()
             },
         ];
