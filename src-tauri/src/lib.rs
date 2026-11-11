@@ -750,6 +750,7 @@ pub fn run() {
             commands::test_global_shortcuts_working,
             commands::set_onboarding_active,
             commands::check_claude_cli_available,
+            commands::check_codex_cli_available,
             // Guided onboarding state machine
             commands::get_onboarding_state,
             commands::save_user_role,
@@ -934,6 +935,10 @@ pub fn run() {
 
             // juno:// links: the one that launched the app, and later ones.
             deep_link::register(&app_handle);
+
+            // Before the bar reads its look: anyone saved on the Pill moves
+            // to the Island, once.
+            crate::settings::island_default::run(&app_handle);
 
             // The bar first, alone: every other declared window waits until it
             // is on screen (`startup_windows`). Each window is named for a demo
