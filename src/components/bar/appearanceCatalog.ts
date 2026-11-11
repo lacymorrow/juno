@@ -17,11 +17,11 @@ export interface AppearanceEntry {
 const ALL_APPEARANCES: readonly AppearanceEntry[] = [
   {
     value: UI.BAR_APPEARANCES_DYNAMIC,
-    name: "Island",
+    name: "Dynamic Island",
     descriptor: "One small shape that grows to hold the answer, then settles back. The default.",
   },
-  // On its way out: the Island is taking over what the Pill does. It stays
-  // offered until then, second, for anyone who goes back to it.
+  // Retired: hidden from every picker (`bar_appearances::HIDDEN`), and anyone
+  // saved on it is shown the Dynamic Island.
   {
     value: UI.BAR_APPEARANCES_FLOATING,
     name: "Pill",
