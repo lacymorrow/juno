@@ -17,6 +17,7 @@ import {
   type SttModelsStatus,
 } from "@/hooks/useSttModels";
 import { AppearanceStep } from "./AppearanceStep";
+import { PrivacyStep } from "./PrivacyStep";
 import { shortcutCaps, type KeyCap } from "@/components/settings/KeyCaps";
 
 // ── Visual language ──────────────────────────────────────────────────────────
@@ -366,6 +367,13 @@ const getOnboardingSteps = (
     icon: null, // The live preview is the content here.
     action: "Continue",
   },
+  {
+    id: "privacy",
+    title: "Help improve Juno",
+    description: "One switch, on by default.",
+    icon: null, // The switch and the one-sentence summary are the content.
+    action: "Continue",
+  },
   // Onboarding stays as short as possible: only what the app needs to function
   // (a provider and permissions). Role capture and the keyboard drills were
   // deliberately cut — the shortcut is taught on the final screen without a
@@ -422,7 +430,7 @@ const getOnboardingSteps = (
 ];
 
 /** Every step setup can show, in the order it shows them. */
-const STEP_ORDER = ["welcome", "appearance", "api-key", "permissions", "dictation-model", "complete"];
+const STEP_ORDER = ["welcome", "appearance", "privacy", "api-key", "permissions", "dictation-model", "complete"];
 
 /**
  * Where to reopen setup after a quit, given the steps this launch has and the
@@ -2147,6 +2155,8 @@ export default function OnboardingFlow({
               )}
 
               {step.id === "appearance" && <AppearanceStep />}
+
+              {step.id === "privacy" && <PrivacyStep />}
 
               {/* Dictation model offer: one card, one number, one decision. */}
               {step.id === "dictation-model" && dictationOffer && (
