@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.278] - 2026-11-11
+
+### Added
+
+- **appearance:** retire the Pill, and the Island is the Dynamic Island (#977) (a7924718)
+- **probe:** time AudioOutputUnitStart through Juno's own cpal (LAC-7538) (#966) (9d3425c0)
+
 ## [0.8.277] - 2026-11-11
 
 ### Fixed
@@ -1816,7 +1823,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.277...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.278...HEAD
+[0.8.278]: https://github.com/lacymorrow/juno/compare/cua-v0.8.277...v0.8.278
 [0.8.277]: https://github.com/lacymorrow/juno/compare/cua-v0.8.276...v0.8.277
 [0.8.276]: https://github.com/lacymorrow/juno/compare/cua-v0.8.275...v0.8.276
 [0.8.274]: https://github.com/lacymorrow/juno/compare/cua-v0.8.273...v0.8.274
