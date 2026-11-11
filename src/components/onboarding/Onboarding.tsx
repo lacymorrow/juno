@@ -522,6 +522,29 @@ export function demoPressEvent(hints: TriggerHints | null): string | null {
   return null;
 }
 
+/**
+ * The one line the finish screen says about a CLI plan Juno is running on.
+ * Null means say nothing: an API key, no provider, or a CLI the backend has
+ * not confirmed all leave the line absent rather than guessing. Claude also
+ * needs a confirmed sign-in, because it is the one CLI whose status this
+ * screen reads.
+ */
+export function cliPlanLine(
+  activeProvider: string | null,
+  claudeSignedIn: boolean
+): string | null {
+  switch (activeProvider) {
+    case "claude_cli":
+      return claudeSignedIn ? "Juno is using your Claude subscription." : null;
+    case "codex_cli":
+      return "Juno is using your Codex subscription.";
+    case "copilot_cli":
+      return "Juno is using your Copilot subscription.";
+    default:
+      return null;
+  }
+}
+
 /** The one step that teaches the trigger. Presses anywhere else do not count. */
 export const TRIGGER_LESSON_STEP_ID = "complete";
 
@@ -900,7 +923,7 @@ export default function OnboardingFlow({
   const [cliAuthenticated, setCliAuthenticated] = useState(false);
   const [cliChecking, setCliChecking] = useState(true);
   const [cliSelected, setCliSelected] = useState(false);
-  const [cliEmail, setCliEmail] = useState<string | null>(null);
+  const [, setCliEmail] = useState<string | null>(null);
   // The Codex CLI, for someone on a ChatGPT plan. Same three states as Claude.
   const [codexStatus, setCodexStatus] = useState<ClaudeCliStatus | null>(null);
   const [selectedCli, setSelectedCli] = useState<"claude_cli" | "codex_cli">("claude_cli");
@@ -2159,11 +2182,9 @@ export default function OnboardingFlow({
                       they are connected to. One line, and where to change it.
                       Shown only once the backend confirms it, so it can never
                       claim a subscription that is not being used. */}
-                  {activeProvider === "claude_cli" && cliAuthenticated && (
+                  {cliPlanLine(activeProvider, cliAuthenticated) && (
                     <p className="mt-4 text-[12px] leading-snug text-muted-foreground">
-                      {cliEmail
-                        ? `Using your Claude subscription (${cliEmail}). No API key needed. You can change this in Settings.`
-                        : "Using your Claude subscription. No API key needed. You can change this in Settings."}
+                      {cliPlanLine(activeProvider, cliAuthenticated)}
                     </p>
                   )}
                 </div>
