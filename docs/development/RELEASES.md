@@ -277,6 +277,8 @@ Tags both `v0.X.Y` (main app) and `cua-v0.X.Y` (CLI). A tag push starts nothing:
 
 `npm publish --access public` from `packages/juno-cua`. Updates `lacymorrow/homebrew-tap/Formula/juno-cua.rb` with new SHAs and version, commits, pushes.
 
+The formula rewrite is three pattern substitutions against a file in a repo this one does not control, so `scripts/update-homebrew-formula.sh` proves on disk that all three landed (version, both `cua-v*` download urls, both checksums) **before** anything is committed. A pattern that matches nothing — the formula reformatted, renamed, or grown a third platform block — fails the job rather than publishing a release whose tap still serves the previous version (LAC-7401). A red `Update Homebrew formula` step naming one of those means the formula's shape changed and the script needs updating, not that the release is broken; nothing was pushed to the tap. Tested by `scripts/__tests__/update-homebrew-formula.test.sh` in CI.
+
 ### 6. CI Tauri build
 
 The `v*` tag push triggers `.github/workflows/release-tauri.yml`. The release script does **not** wait for it — once the tag is pushed, the script exits. The CI build runs ~30 min and publishes the DMG, `.app.tar.gz`, `.sig`, and `latest.json` to a GitHub Release.
