@@ -252,7 +252,7 @@ function bindingLabel(binding: Binding | null): string {
  * every Control-click. A chord may be tapped, because the monitor only counts
  * a tap whose keys came up with nothing else pressed in between.
  *
- * `triggers_hold_only_matches_rust.test.ts` reads the Rust source and fails if
+ * `TriggersSettings.holdOnly.test.ts` reads the Rust source and fails if
  * these two lists stop agreeing.
  */
 const HOLD_ONLY_MODIFIERS = ["Control", "Right Option"];

@@ -19,6 +19,9 @@ import { describe, expect, it } from "vitest";
  * It reads source text rather than running either side, because the two sides
  * are a Rust `const` and a TypeScript array literal and no runtime sees both.
  */
+// The body runs to the function's own closing brace (indented four spaces),
+// not the first `}`: an inner block such as `|| { false }` would otherwise end
+// the capture early and hide every constant after it (same class as LAC-2987).
 const read = (relative: string) =>
   readFileSync(resolve(process.cwd(), relative), "utf8");
 
@@ -36,7 +39,7 @@ describe("hold-only keys", () => {
   const tsx = read("src/components/settings/sections/TriggersSettings.tsx");
 
   it("names the same keys in Rust and in the gesture menu", () => {
-    const body = rust.match(/pub fn hold_only\(self\) -> bool \{([^}]*)\}/);
+    const body = rust.match(/pub fn hold_only\(self\) -> bool \{([\s\S]*?)\n    \}/);
     expect(body, "ModifierKey::hold_only not found in triggers/mod.rs").not.toBeNull();
 
     const rustConsts = [...(body?.[1] ?? "").matchAll(/Self::([A-Z_]+)/g)].map(
@@ -65,5 +68,47 @@ describe("hold-only keys", () => {
     // prevents cannot read as two different rules.
     expect(rust).toContain('can only be held, not tapped.');
     expect(tsx).toContain('can only be held, not tapped.');
+  });
+
+  it("ends each gesture with the sentence Rust gives it", () => {
+    const fn = rust.match(/pub fn ending\(self\) -> &'static str \{([\s\S]*?)\n    \}/);
+    expect(fn, "Gesture::ending not found").not.toBeNull();
+    const fromRust = Object.fromEntries(
+      [...(fn?.[1] ?? "").matchAll(/Self::(\w+)\s*=>\s*"([^"]+)"/g)].map(
+        (m) => [m[1].toLowerCase(), m[2]],
+      ),
+    );
+    const map = tsx.match(/const GESTURE_ENDING[^=]*= \{([\s\S]*?)\n\};/);
+    expect(map, "GESTURE_ENDING not found").not.toBeNull();
+    const fromTs = Object.fromEntries(
+      [...(map?.[1] ?? "").matchAll(/(\w+):\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]),
+    );
+    expect(Object.keys(fromRust).length).toBeGreaterThan(0);
+    expect(fromTs).toEqual(fromRust);
+  });
+
+  it("resets to the factory bindings Rust ships", () => {
+    const shortcut = (name: string) => {
+      const m = rust.match(
+        new RegExp(`pub const ${name}: &str = "([^"]+)";`),
+      );
+      expect(m, `${name} not found`).not.toBeNull();
+      return m?.[1];
+    };
+    const fn = rust.match(/pub fn default_triggers\(\) -> Vec<Trigger> \{([\s\S]*?)\n\}/);
+    expect(fn, "default_triggers not found").not.toBeNull();
+    const fromRust: Record<string, string | undefined> = {};
+    for (const m of (fn?.[1] ?? "").matchAll(
+      /Gesture::(\w+),\s*TriggerTarget::(\w+),\s*Some\(Binding::Keyboard \{\s*shortcut: (\w+)\.to_string\(\)/g,
+    )) {
+      fromRust[`${m[1].toLowerCase()}:${m[2].toLowerCase()}`] = shortcut(m[3]);
+    }
+    const map = tsx.match(/const DEFAULT_BINDINGS[^=]*= \{([\s\S]*?)\n\};/);
+    expect(map, "DEFAULT_BINDINGS not found").not.toBeNull();
+    const fromTs = Object.fromEntries(
+      [...(map?.[1] ?? "").matchAll(/"([^"]+)":\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]),
+    );
+    expect(Object.keys(fromRust).length).toBeGreaterThan(0);
+    expect(fromTs).toEqual(fromRust);
   });
 });
