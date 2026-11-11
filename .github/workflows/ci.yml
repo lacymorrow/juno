@@ -254,7 +254,18 @@ jobs:
       # written around is an SC2016 finding, and a comment explaining a rule
       # outlives the rule if nothing still enforces it (LAC-7209).
       - name: Shellcheck
-        run: shellcheck scripts/release-failure-report.sh scripts/__tests__/release-failure-report.test.sh
+        run: |
+          shellcheck \
+            scripts/release-failure-report.sh \
+            scripts/__tests__/release-failure-report.test.sh \
+            scripts/notarize-dmg.sh \
+            scripts/__tests__/notarize-dmg.test.sh
 
       - name: Render the report against stubbed gh
         run: scripts/__tests__/release-failure-report.test.sh
+
+      # The release notarizes a DMG exactly once, and a lost verdict costs a
+      # 50-minute build (LAC-6333). The re-poll that recovers it is exercised
+      # here against a stubbed notarytool, not on a tag.
+      - name: Notarize the DMG against stubbed notarytool
+        run: scripts/__tests__/notarize-dmg.test.sh
