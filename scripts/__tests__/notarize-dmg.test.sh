@@ -80,6 +80,17 @@ case "$tool" in
         # otherwise STUB_WAIT decides every call. Kept as nested ifs because
         # `a || b && c` groups as `(a || b) && c` in bash, which silently
         # inverted this the first time it was written.
+        case "${STUB_WAIT:-accepted}" in
+          invalid)
+            echo "  id: cbf6a189-cab9-42f4-9d9d-9062793c2449"
+            echo "  status: Invalid"
+            exit 0 ;;
+          accepted_badrc)
+            # Apple says Accepted but notarytool still exits non-zero.
+            echo "  id: cbf6a189-cab9-42f4-9d9d-9062793c2449"
+            echo "  status: Accepted"
+            exit 1 ;;
+        esac
         accept=no
         if [ -n "${STUB_WAIT_OK_ON:-}" ]; then
           [ "$n" -ge "$STUB_WAIT_OK_ON" ] && accept=yes
@@ -275,6 +286,31 @@ setup; api_key_env; one_dmg; : >"$work/dmg/Juno_0.9.9_aarch64.dmg"
 rc=$(STUB_SUBMIT=accepted run)
 [ "$rc" = 1 ] && grep -q 'expected exactly one DMG, found 2' "$work/out" && not_called "notarytool submit"
 check "two DMGs: exits 1 rather than picking one" $?
+teardown
+
+# 14. A terminal verdict ON A RE-POLL stops the loop (PR #975 review, 1).
+setup; api_key_env; one_dmg
+rc=$(STUB_SUBMIT=pollfail STUB_WAIT=invalid run)
+[ "$rc" = 1 ] && [ "$(waits)" = 1 ] && not_called "stapler staple" \
+  && called "notarytool log cbf6a189-cab9-42f4-9d9d-9062793c2449" \
+  && grep -q 'terminal verdict Invalid' "$work/out"
+check "re-poll returns Invalid: stops after one, does not burn the backoff" $?
+teardown
+
+# 15. The re-poll and the log fetch carry the credentials, not just the submit.
+setup; api_key_env; one_dmg
+rc=$(STUB_SUBMIT=pollfail STUB_WAIT=accepted run)
+[ "$rc" = 0 ] && grep -qE -- 'notarytool wait \S+ --key .* --key-id CTPB4GJ59H --issuer ' "$state/calls"
+check "re-poll passes the credentials (dropping them would not pass unnoticed)" $?
+teardown
+
+# 16. Accepted with a non-zero exit stays a failure, and does not announce
+#     recovery first (PR #975 review, 3).
+setup; api_key_env; one_dmg
+rc=$(STUB_SUBMIT=pollfail STUB_WAIT=accepted_badrc run)
+[ "$rc" = 1 ] && [ "$(waits)" = 1 ] && not_called "stapler staple" \
+  && not_called "gh release upload" && ! grep -q 'Verdict recovered' "$work/out"
+check "Accepted but exit non-zero: fails, with no recovery claim" $?
 teardown
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"

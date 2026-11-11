@@ -29,6 +29,12 @@ set -euo pipefail
 dmg_dir="${1:-target/universal-apple-darwin/release/bundle/dmg}"
 tmp="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 delay_base="${NOTARY_REPOLL_DELAY_BASE:-20}"
+# The submit keeps the full 30m: that call is also doing the upload. A re-poll
+# is only recovering a verdict for a submission Apple already has, which it
+# reaches in minutes (v0.8.276 was Accepted inside ~2), so three of them are
+# capped at 10m each. build-tauri declares no timeout-minutes and so inherits
+# GitHub's 360m default, which means nothing else would cut a slow tail short.
+repoll_timeout="${NOTARY_REPOLL_TIMEOUT:-10m}"
 
 # The signing step exports only the secrets that exist, and the workflow step
 # is gated on APPLE_SIGNING_IDENTITY alone, so a half-configured set (a revoked
@@ -44,7 +50,9 @@ fi
 
 missing=""
 for var in $required; do
-  eval "value=\${$var:-}"
+  # Indirect expansion rather than eval: same result without evaluating a
+  # constructed string. The runner's /bin/bash is 3.2, which supports ${!name}.
+  value="${!var:-}"
   [ -n "$value" ] || missing="$missing $var"
 done
 if [ -n "$missing" ]; then
@@ -80,7 +88,9 @@ set -e
 status="$(sed -n 's/^ *status: *//p' "$log" | tail -1)"
 # Read the submission id from the SUBMIT log and keep it: the re-poll below
 # writes its own log, and the id is the only handle on work Apple already has.
-id="$(sed -n 's/^ *id: *//p' "$log" | head -1)"
+# Matched on the UUID shape rather than "the first id: line", which today is the
+# submission id twice over and nothing else, but need not stay that way.
+id="$(sed -n 's/^ *id: *\([0-9a-fA-F]\{8\}-[0-9a-fA-F]\{4\}-[0-9a-fA-F]\{4\}-[0-9a-fA-F]\{4\}-[0-9a-fA-F]\{12\}\).*$/\1/p' "$log" | head -1)"
 
 # The upload can succeed while the POLL dies. A runner network blip
 # (NSURLErrorDomain -1009, "no network route") during `--wait` takes the step
@@ -107,14 +117,27 @@ case "${status:-}" in
         echo "Submission $id returned no verdict (status: ${status:-none}, exit $rc); re-polling, attempt $attempt of 3."
         sleep $((attempt * delay_base))
         set +e
-        xcrun notarytool wait "$id" "${creds[@]}" --timeout 30m 2>&1 | tee "$waitlog"
+        xcrun notarytool wait "$id" "${creds[@]}" --timeout "$repoll_timeout" 2>&1 | tee "$waitlog"
         rc=${PIPESTATUS[0]}
         set -e
         status="$(sed -n 's/^ *status: *//p' "$waitlog" | tail -1)"
-        if [ "$status" = "Accepted" ]; then
-          echo "Verdict recovered by re-poll $attempt: Accepted."
-          break
-        fi
+        case "$status" in
+          Accepted)
+            # Only claim recovery when the verdict and the exit code agree.
+            # An Accepted line with a non-zero exit is ambiguous, so it is left
+            # to the check below to fail on, without a success line above it.
+            if [ "$rc" -eq 0 ]; then
+              echo "Verdict recovered by re-poll $attempt: Accepted."
+            fi
+            break
+            ;;
+          Invalid | Rejected)
+            # Terminal. Polling again returns the same verdict and only delays
+            # the notary log that explains it by another ~100s.
+            echo "Re-poll $attempt returned the terminal verdict $status; not polling again."
+            break
+            ;;
+        esac
       done
     fi
     ;;
