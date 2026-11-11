@@ -93,8 +93,8 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
           title="Demo access"
           footer={
             demo.cohort
-              ? `This is a demo copy of Juno (${demo.cohort}). Adding your own key below switches Juno to it.`
-              : "This is a demo copy of Juno. Adding your own key below switches Juno to it."
+              ? `This is a demo copy of Juno (${demo.cohort}). Adding your own key (Settings > Advanced on > Providers) switches Juno to it.`
+              : "This is a demo copy of Juno. Adding your own key (Settings > Advanced on > Providers) switches Juno to it."
           }
         >
           <SettingsRow
@@ -112,6 +112,7 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
       {settings.activeProvider && settings.providerSettings && (
         <SettingsGroup
           title="Provider Configuration"
+          advanced
           footer={
             savedAt !== null
               ? "Saved."
