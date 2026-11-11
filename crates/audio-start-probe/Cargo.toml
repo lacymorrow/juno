@@ -1,0 +1,38 @@
+# Times `AudioOutputUnitStart` through Juno's own vendored cpal. See src/main.rs
+# for what it measures and why; LAC-7538, carved out of LAC-5281.
+#
+# Its own workspace member, not an `examples/` target in
+# tauri-plugin-voice-transcription, for one reason: an example there links the
+# plugin's lib, which drags in whisper-rs + metal + parakeet. This Mac is a
+# 16 GB M1 shared by every agent, and the point of the ticket is to *run* the
+# probe locally. Here the whole dependency graph is cpal + coreaudio, both
+# already in Cargo.lock, so a local build compiles two crates instead of two
+# hundred.
+#
+# It is a binary in a crate nothing depends on, so it cannot reach the shipped
+# bundle: no `externalBin`, no `resources` entry, and no app crate names it.
+[package]
+name = "audio-start-probe"
+version = "0.8.273"
+edition = "2021"
+description = "Times AudioOutputUnitStart through Juno's vendored cpal (LAC-7538 / LAC-5281)"
+authors = ["Lacy Morrow <me@lacymorrow.com>"]
+publish = false
+
+[[bin]]
+name = "audio-start-probe"
+path = "src/main.rs"
+
+[dependencies]
+# Resolves to vendor/cpal via the workspace `[patch.crates-io]`, which is the
+# whole point: the probe must time the same code the app starts its microphone
+# with, including the JUNO PATCH that builds an input stream stopped.
+cpal = "0.15"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The same crate and features cpal and the voice plugin already use, so nothing
+# new is compiled. Only for the two device properties cpal does not expose.
+coreaudio-rs = { version = "0.11", default-features = false, features = [
+	"audio_unit",
+	"core_audio",
+] }
