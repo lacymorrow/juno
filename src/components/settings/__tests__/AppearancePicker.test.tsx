@@ -112,13 +112,13 @@ describe("AppearancePicker with Beta features off", () => {
     beta.enabled = false;
     render(<AppearancePicker value={UI.BAR_APPEARANCES_FLOATING} onChange={() => {}} />);
     const dots = screen.getAllByRole("tab").map((t) => t.getAttribute("aria-label"));
-    expect(dots).toEqual(["Island", "Pill", "Avatar", "Orb"]);
+    expect(dots).toEqual(["Dynamic Island", "Avatar", "Orb"]);
   });
 
   it("shows a saved beta look as the default it is drawn as", () => {
     beta.enabled = false;
     render(<AppearancePicker value={UI.BAR_APPEARANCES_REACT_ORB} onChange={() => {}} />);
-    expect(screen.getByRole("tab", { selected: true }).getAttribute("aria-label")).toBe("Island");
+    expect(screen.getByRole("tab", { selected: true }).getAttribute("aria-label")).toBe("Dynamic Island");
   });
 
   it("marks beta looks with the Beta badge when beta is on", () => {
