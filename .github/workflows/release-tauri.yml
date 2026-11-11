@@ -769,85 +769,21 @@ jobs:
       # to the release is replaced below.
       - name: Notarize and staple the DMG
         if: ${{ env.APPLE_SIGNING_IDENTITY != '' }}
-        # The notarization credentials are already in the job environment:
-        # the signing step above wrote exactly one of the two sets to
-        # $GITHUB_ENV, along with APPLE_NOTARY_MODE saying which.
+        # The notarization credentials are already in the job environment: the
+        # signing step above wrote exactly one of the two sets to $GITHUB_ENV,
+        # along with APPLE_NOTARY_MODE saying which.
+        #
+        # The body is scripts/notarize-dmg.sh rather than an inline block so
+        # the verdict and re-poll logic can be tested against a stubbed
+        # notarytool (scripts/__tests__/notarize-dmg.test.sh). A DMG is
+        # notarized once per release, so these branches cannot get their only
+        # exercise in production. ci.yml shellchecks the script to keep the
+        # coverage it had while actionlint could still see it.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag || github.ref_name }}
-        run: |
-          set -euo pipefail
-
-          # The signing step exports only the secrets that exist, and this one
-          # is gated on APPLE_SIGNING_IDENTITY alone, so a half-configured set
-          # (a revoked app-specific password, say) would otherwise surface as
-          # "APPLE_PASSWORD: unbound variable" from set -u. Name what is
-          # missing instead.
-          if [ "${APPLE_NOTARY_MODE:-password}" = api_key ]; then
-            required="APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH"
-            creds=(--key "${APPLE_API_KEY_PATH:-}" --key-id "${APPLE_API_KEY:-}" --issuer "${APPLE_API_ISSUER:-}")
-          else
-            required="APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID"
-            creds=(--apple-id "${APPLE_ID:-}" --password "${APPLE_PASSWORD:-}" --team-id "${APPLE_TEAM_ID:-}")
-          fi
-
-          missing=""
-          for var in $required; do
-            eval "value=\${$var:-}"
-            [ -n "$value" ] || missing="$missing $var"
-          done
-          if [ -n "$missing" ]; then
-            echo "::error::the build is signed but cannot be notarized; missing secret(s):$missing"
-            echo "A signed, unnotarized DMG is rejected by Gatekeeper. Add the secret(s) or unset APPLE_SIGNING_IDENTITY." >&2
-            exit 1
-          fi
-
-          shopt -s nullglob
-          dmgs=(target/universal-apple-darwin/release/bundle/dmg/*.dmg)
-          if [ ${#dmgs[@]} -ne 1 ]; then
-            echo "expected exactly one DMG, found ${#dmgs[@]}" >&2
-            # The runner's /bin/bash is 3.2, where "${arr[@]}" on an EMPTY
-            # array is an unbound variable under set -u — so the line meant to
-            # explain the failure would fail instead, taking the diagnostic
-            # with it. Same guard as scripts/tauri-build.sh.
-            printf '%s\n' ${dmgs[@]+"${dmgs[@]}"} >&2
-            exit 1
-          fi
-          dmg="${dmgs[0]}"
-          echo "Notarizing $(basename "$dmg")"
-
-          log="$RUNNER_TEMP/notary.log"
-          set +e
-          xcrun notarytool submit "$dmg" "${creds[@]}" \
-            --wait --timeout 30m 2>&1 | tee "$log"
-          rc=${PIPESTATUS[0]}
-          set -e
-
-          # notarytool has been known to exit 0 on an Invalid verdict, so the
-          # status line is checked as well as the exit code. Same guard as
-          # scripts/tauri-build.sh, which has notarized the local build
-          # correctly since #560.
-          status="$(sed -n 's/^ *status: *//p' "$log" | tail -1)"
-          if [ "$rc" -ne 0 ] || [ "$status" != "Accepted" ]; then
-            echo "::error::notarization failed (status: ${status:-none}, exit $rc)"
-            # "Invalid" alone says nothing; the log names the nested binary
-            # that was unsigned or missing the hardened runtime.
-            id="$(sed -n 's/^ *id: *//p' "$log" | head -1)"
-            if [ -n "$id" ]; then
-              xcrun notarytool log "$id" "${creds[@]}" || true
-            fi
-            exit 1
-          fi
-
-          xcrun stapler staple "$dmg"
-          xcrun stapler validate "$dmg"
-
-          # Replace the unstapled copy tauri-action uploaded. This touches only
-          # the .dmg; the updater reads .app.tar.gz + latest.json and is
-          # unaffected.
-          gh release upload "$TAG" "$dmg" --repo "$REPO" --clobber
-          echo "Stapled and re-uploaded $(basename "$dmg")."
+        run: scripts/notarize-dmg.sh
 
       # Fail the release rather than hand a stranger a disk image that is
       # Gatekeeper-blocked or has lost its branded layout. Checks signature,
