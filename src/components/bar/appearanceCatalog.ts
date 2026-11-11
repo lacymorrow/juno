@@ -17,11 +17,11 @@ export interface AppearanceEntry {
 const ALL_APPEARANCES: readonly AppearanceEntry[] = [
   {
     value: UI.BAR_APPEARANCES_DYNAMIC,
-    name: "Dynamic Island",
+    name: "Dynamic",
     descriptor: "One small shape that grows to hold the answer, then settles back. The default.",
   },
   // Retired: hidden from every picker (`bar_appearances::HIDDEN`), and anyone
-  // saved on it is shown the Dynamic Island.
+  // saved on it is shown the Dynamic look.
   {
     value: UI.BAR_APPEARANCES_FLOATING,
     name: "Pill",
