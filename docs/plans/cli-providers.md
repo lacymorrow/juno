@@ -99,6 +99,8 @@ Copilot CLI's bring-your-own-key (BYOK) lets a Copilot user route the agent to a
 
 ## What the person sees
 
+**Where the rows live (Lacy, 2026-11-10, LAC-7682).** Every CLI provider under LAC-7608 is exposed only with Advanced settings on. The default path is detection: `default_selection.rs` picks a signed-in CLI at launch with no setting changed and no choice to make. Nothing detected: setup offers Juno's own cloud inference as a subscription, else "Set up later". The cloud offer, the setup step and moving the shipped Claude and Codex rows behind the same gate are LAC-7682's scope, routed by the CEO; this plan adds nothing outside the gate. In Juno today the "Active Provider" and "Model" group in Settings → Providers is `SettingsGroup advanced`, which renders nothing while Advanced is off, so the Copilot row in PR #969 already meets the rule. QA (LAC-7614) checks it with Advanced off: Copilot absent from the picker, and the Provider Configuration card still reading "Juno is using your GitHub Copilot plan" when detection chose it. Whether that card shows at all with Advanced off is open question 3 on LAC-7682, not this plan's call.
+
 The pattern is the Codex card in Settings → Providers, which is the Claude card without the e-mail line. Nothing new is invented.
 
 **Provider list.** A CLI provider is listed only when its binary is installed (the Codex rule, LAC-4125; Claude keeps its always-listed history). Signed out greys it with the badge words below. Binaries are looked up on `PATH` plus `~/.local/bin`, because the `agy` installer puts it there and Juno launched from the Dock does not have the shell's `PATH`.
@@ -113,7 +115,7 @@ The pattern is the Codex card in Settings → Providers, which is the Claude car
 
 **Default provider.** `default_selection.rs` already walks an ordered list and picks the first signed-in CLI when nobody chose and nothing has a credential. The list becomes Claude, Codex, Copilot, Antigravity. A person with only Copilot signed in launches Juno and is on Copilot without touching Settings. A choice they make themselves is never overruled.
 
-**Setup (onboarding).** Unchanged. It offers "Use your Claude subscription" or a key. The default-selection rule covers Copilot and Antigravity with no new row.
+**Setup (onboarding).** No per-CLI row, now or later. The default-selection rule covers Copilot and Antigravity silently. What the Connect step shows instead (the Claude card, the API key field, the cloud offer, "Set up later") is decided on LAC-7682; this plan changes nothing there.
 
 **Advanced.** Max tokens and temperature stay hidden for CLI providers, as they are for Claude and Codex.
 
@@ -142,6 +144,7 @@ Written down, per the Jobs Standard.
 - **Per-CLI event parsers for new CLIs.** ACP's `session/update` is the one vocabulary. The two shipped parsers stay for the two shipped providers.
 - **Per-CLI permission plumbing.** `session/request_permission` replaces `--permission-prompt-tool`, `--allow-tool`, `--dangerously-skip-permissions` for every ACP row.
 - **Setup-screen rows per CLI.** Default selection does the work silently.
+- **Provider rows visible with Advanced off.** Lacy, 2026-11-10 (LAC-7682): a CLI provider is a choice only for someone who asked for Advanced settings. Everyone else gets the one Juno detected, or the cloud offer.
 - **Providers listed when their binary is absent.** The list does not grow with every CLI in the world.
 - **A model-parameters pane for CLI providers.** Already hidden; stays hidden.
 - **Trial-credit, cost and telemetry changes.** `billing_model_id` gets `copilot-cli:<model>` and `antigravity-cli:<model>` keys and `prices.json` gets `$0.00` subscription rows, nothing else.
@@ -196,6 +199,7 @@ Each ships whole before the next starts. Effort: S under a day, M a few days, L 
 - [ ] Implement the permission handler on top of `cli_approval::verdict_for` and `ask_person`.
 - [ ] Failing test: cancel token → `session/cancel` sent → `stopReason: cancelled` → turn ends under 200 ms in the fake.
 - [ ] Register `Provider::CopilotCli` across the files above; `cargo fmt`; push a draft PR; `gh pr checks --watch`.
+- [ ] With Advanced off: Copilot is not offered in the provider picker, and the Provider Configuration card reads "Juno is using your GitHub Copilot plan" when detection chose it. Screenshot of that state into the media folder next to the signed-in and signed-out ones (Lacy, LAC-7682).
 - [ ] Settings copy and badge; the BYOK vision sentence in the bar ("This model can't see the screen. Pick another model, or run `copilot` and `/model`.") ships in this PR, not after it; screenshots into `docs/changelog/media/<PR>/`.
 - [ ] In the PR body: the proposed conversion number that unparks Antigravity (Copilot-row installs or activations showing "no API key" converts), for the CEO to approve there.
 - [ ] `scripts/juno-build.sh`, run the first-ten-seconds script on this Mac, attach the recording.
