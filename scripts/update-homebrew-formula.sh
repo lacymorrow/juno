@@ -176,8 +176,14 @@ replace_formula
 
 # --- prove it landed ------------------------------------------------------
 
-has "version \"${VERSION}\"" \
-  || die "Version not written" "$formula has no 'version \"${VERSION}\"' after the rewrite. The version pattern matched nothing - the formula's version line changed shape. The tap would have stayed on its previous version while this release announced ${VERSION}."
+# The version DECLARATION, anchored the same way the rewrite is - not merely the
+# string somewhere in the file, which a comment mentioning the target version
+# would satisfy. Same distinction the checksum checks below make. VERSION is
+# validated above as digits and dots, so escaping the dots is all it takes to
+# make this a literal.
+version_decl="^[[:space:]]*version \"$(printf '%s' "$VERSION" | sed 's/\./\\./g')\""
+grep -q -- "$version_decl" "$formula" \
+  || die "Version not written" "$formula has no 'version \"${VERSION}\"' declaration after the rewrite. The version pattern matched nothing - the formula's version line changed shape. The tap would have stayed on its previous version while this release announced ${VERSION}."
 
 urls_total="$(count 'releases/download/')"
 urls_ours="$(count "releases/download/cua-v${VERSION}/")"

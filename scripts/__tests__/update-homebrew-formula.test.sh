@@ -253,6 +253,20 @@ rc=$(run)
 check "a comment mentioning version \"...\": left alone, real version still rewritten" $?
 teardown
 
+# 14b. Same distinction for the version: it has to be the DECLARATION, not a
+#      comment that happens to carry the target version. Reaches the assertion
+#      because the real version line is renamed (so the rewrite cannot write it)
+#      while a comment supplies the string a bare-substring check would accept.
+setup
+awk '
+  /^  version /{ print "  # publishing version \"0.8.278\" next"; sub(/^  version /, "  VERSION = ") }
+  { print }
+' "$formula" >"$work/t" && mv "$work/t" "$formula"
+rc=$(run)
+[ "$rc" = 1 ] && said "::error title=Version not written" && in_formula 'version "0.8.278"'
+check "target version present only in a comment: exits 1 (declaration, not string)" $?
+teardown
+
 # 14. The checksum has to land on a sha256 LINE, not merely appear somewhere in
 #     the file (PR #976 review, 1).
 #
