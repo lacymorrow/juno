@@ -103,14 +103,26 @@ count() {
 
 has() { grep -qF -- "$1" "$formula"; }
 
+# One scratch file for the whole script, cleaned up on every exit path. `set -e`
+# aborting midway would otherwise leave it behind; harmless on an ephemeral
+# runner, but a leak that only ever happens on the failure path is the kind
+# nobody notices until it is not harmless.
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+
+# replace_formula -- overwrite the formula with $tmp, preserving its mode.
+# `mv` would move mktemp's 0600 onto it instead. git tracks only the exec bit so
+# the committed blob is identical either way, but leaving a release artifact
+# readable only by the runner user is a pointless difference from what every
+# other writer of this file produces.
+replace_formula() { cat "$tmp" >"$formula"; }
+
 # rewrite <sed-expression> -- `sed -i` is not portable (BSD wants `-i ''`, GNU
 # refuses it), and this runs on macos-latest in the release and ubuntu-latest
-# in CI's test. A temp file plus mv behaves the same on both.
+# in CI's test. A temp file behaves the same on both.
 rewrite() {
-  local tmp
-  tmp="$(mktemp)"
   sed "$1" "$formula" >"$tmp"
-  mv "$tmp" "$formula"
+  replace_formula
 }
 
 # --- precondition ---------------------------------------------------------
@@ -132,7 +144,15 @@ fi
 
 # --- rewrite --------------------------------------------------------------
 
-rewrite "s/version \".*\"/version \"${VERSION}\"/"
+# Anchored to the line's first non-whitespace token. The unanchored
+# `s/version ".*"/.../` this replaces would also rewrite any other line
+# containing `version "` - a comment, or a `desc` that mentions one - and its
+# greedy `.*` would eat the rest of that line. The anchor takes any
+# indentation, so it is not coupled to the formula's current two spaces; what it
+# requires is that `version` be the first thing on the line, which is the only
+# place a formula declares one. A reindented formula that no longer matches
+# fails the assertion below rather than being quietly half-rewritten.
+rewrite "s/^\\([[:space:]]*\\)version \".*\"/\\1version \"${VERSION}\"/"
 # CLI assets live on the cua-v* release (see the gate job's tag), not the app's
 # v* release.
 rewrite "s|releases/download/[^/]*/|releases/download/cua-v${VERSION}/|g"
@@ -144,7 +164,6 @@ rewrite "s|releases/download/[^/]*/|releases/download/cua-v${VERSION}/|g"
 # linter read. The validation above means neither value can carry an awk-special
 # character, and the behaviour is identical for any formula passing the
 # precondition.
-tmp="$(mktemp)"
 ARM64_SHA="$ARM64_SHA" X64_SHA="$X64_SHA" awk '
   /sha256 "/ && n < 2 {
     n++
@@ -153,7 +172,7 @@ ARM64_SHA="$ARM64_SHA" X64_SHA="$X64_SHA" awk '
   }
   { print }
 ' "$formula" >"$tmp"
-mv "$tmp" "$formula"
+replace_formula
 
 # --- prove it landed ------------------------------------------------------
 
@@ -169,10 +188,14 @@ if [ "$urls_ours" != "$urls_total" ]; then
   die "Download urls not rewritten" "$urls_ours of $urls_total 'releases/download/' urls in $formula name cua-v${VERSION}. The rest still point at another release, so brew would fetch the wrong archive."
 fi
 
-has "$ARM64_SHA" \
-  || die "arm64 checksum not written" "$formula does not contain ARM64_SHA ($ARM64_SHA) after the rewrite."
-has "$X64_SHA" \
-  || die "x64 checksum not written" "$formula does not contain X64_SHA ($X64_SHA) after the rewrite."
+# `sha256 "<value>"` and not the bare value: a checksum that merely appears
+# somewhere in the file - in a comment, or in a url - is not the same as one brew
+# will read, and only the quoted form proves the rewrite put it on a checksum
+# line.
+has "sha256 \"${ARM64_SHA}\"" \
+  || die "arm64 checksum not written" "$formula has no 'sha256 \"${ARM64_SHA}\"' after the rewrite."
+has "sha256 \"${X64_SHA}\"" \
+  || die "x64 checksum not written" "$formula has no 'sha256 \"${X64_SHA}\"' after the rewrite."
 
 after_shas="$(count 'sha256 "')"
 if [ "$after_shas" != "$before_shas" ]; then

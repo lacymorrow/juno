@@ -189,7 +189,15 @@ jobs:
       # release *tooling*, versioned with the workflow that calls it. Pinning it
       # to the built tree would mean a release dispatched for an older cua-v*
       # tag looks for a script that tree never had.
+      #
+      # persist-credentials: false because this job only reads a script out of
+      # the tree. The default leaves GITHUB_TOKEN in the workspace's
+      # .git/config, and the step below then clones a different repo with a
+      # different token - no reason to leave a second credential lying next to
+      # it.
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Update Homebrew formula
         env:

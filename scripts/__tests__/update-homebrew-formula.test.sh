@@ -240,7 +240,47 @@ rc=$(VERSION=cua-v0.8.278 run)
 check "VERSION still carrying the cua-v prefix: exits 1" $?
 teardown
 
-# 13. A missing formula is an error, not a no-op. The tap layout changing is
+# 13. A line that merely mentions `version "..."` is not the version
+#     declaration, and the anchored rewrite must leave it alone. The
+#     unanchored `s/version ".*"/.../` this replaced rewrote the FIRST such
+#     line and its greedy `.*` ate the rest of it, which on this fixture means
+#     the real version line is never reached (PR #976 review, 2).
+setup
+awk '/^  version /{print "  # pin the version \"by hand\" if the tap moves"} {print}' "$formula" >"$work/t" && mv "$work/t" "$formula"
+rc=$(run)
+[ "$rc" = 0 ] && in_formula 'version "0.8.278"' \
+  && in_formula '# pin the version "by hand" if the tap moves'
+check "a comment mentioning version \"...\": left alone, real version still rewritten" $?
+teardown
+
+# 14. The checksum has to land on a sha256 LINE, not merely appear somewhere in
+#     the file (PR #976 review, 1).
+#
+#     Reaching that assertion needs a fixture that gets PAST the precondition,
+#     which is what the first attempt at this case got wrong: renaming `sha256`
+#     left 0 checksum lines, so the script died on the count and the case passed
+#     without ever running the check it was named after - green against the
+#     bare-substring version too, which is how the mutant caught it.
+#
+#     So: drop the closing quote on the first checksum line. `sha256 "` still
+#     matches, so the count is still 2 and the precondition passes, but the
+#     rewrite's `sha256 "[^"]*"` finds nothing to replace there and arm64's
+#     checksum is never written. A comment carrying that same value - a note of
+#     a previous release's checksum - is then enough to satisfy a check that
+#     only asks whether the string is present.
+setup
+awk -v arm="$ARM" '
+  /Hardware::CPU.arm\?/ { print; print "      # previous arm64 checksum was " arm; next }
+  /sha256 "/ && !seen   { sub(/"$/, ""); seen = 1 }
+  { print }
+' "$formula" >"$work/t" && mv "$work/t" "$formula"
+rc=$(run)
+[ "$rc" = 1 ] && said "::error title=arm64 checksum not written" \
+  && in_formula "$ARM" && not_in_formula "sha256 \"$ARM\""
+check "checksum present only in a comment: exits 1 (presence is not evidence)" $?
+teardown
+
+# 15. A missing formula is an error, not a no-op. The tap layout changing is
 #     exactly the class of thing that made the rewrite match nothing.
 setup
 formula="$work/does-not-exist.rb"
@@ -249,7 +289,7 @@ rc=$(run)
 check "formula path does not exist: exits 1" $?
 teardown
 
-# 14. The script is given its path, not left to guess one.
+# 16. The script is given its path, not left to guess one.
 setup
 VERSION=0.8.278 ARM64_SHA="$ARM" X64_SHA="$X64" bash "$script" >"$work/out" 2>&1
 rc=$?
