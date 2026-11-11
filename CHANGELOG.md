@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.277] - 2026-11-11
+
+### Fixed
+
+- **release:** re-poll the notary verdict instead of throwing the build away (LAC-6333) (#975) (db757443)
+
 ## [0.8.276] - 2026-11-11
 
 ### Fixed
@@ -1810,7 +1816,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.276...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.277...HEAD
+[0.8.277]: https://github.com/lacymorrow/juno/compare/cua-v0.8.276...v0.8.277
 [0.8.276]: https://github.com/lacymorrow/juno/compare/cua-v0.8.275...v0.8.276
 [0.8.274]: https://github.com/lacymorrow/juno/compare/cua-v0.8.273...v0.8.274
 [0.8.272]: https://github.com/lacymorrow/juno/compare/cua-v0.8.271...v0.8.272
