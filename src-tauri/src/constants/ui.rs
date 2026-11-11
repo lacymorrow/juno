@@ -142,11 +142,14 @@ pub mod bar_appearances {
     /// peeled back from the corner. It has no well in the middle of the screen.
     pub const NOTCH: &str = "notch";
 
-    /// The look a new install (and a settings reset) starts on: the Pill, a
-    /// small pill that opens when you speak. The others stay in the picker
-    /// unless listed in `HIDDEN`. Every fallback in Rust and the frontend
-    /// reads this, never a literal.
-    pub const DEFAULT: &str = FLOATING;
+    /// The look a new install (and a settings reset) starts on: the Island,
+    /// one small shape that grows to hold the answer. The Pill is on its way
+    /// out once the Island does everything it does; until then it stays in
+    /// the picker, and anyone saved on it is moved across once
+    /// (`settings::island_default`). The others stay in the picker unless
+    /// listed in `HIDDEN`. Every fallback in Rust and the frontend reads
+    /// this, never a literal.
+    pub const DEFAULT: &str = DYNAMIC;
 
     /// Looks kept in the code but not offered anywhere a person chooses, and
     /// not kept if already saved: `resolve` turns them into `DEFAULT`. Bringing
@@ -213,7 +216,7 @@ pub mod bar_appearances {
 
         #[test]
         fn hidden_looks_are_not_offered_and_resolve_to_the_default() {
-            assert_eq!(DEFAULT, FLOATING);
+            assert_eq!(DEFAULT, DYNAMIC);
             for id in [APP, VOICE_AI] {
                 assert!(is_hidden(id), "{id} should be hidden");
                 assert_eq!(resolve(id), DEFAULT);

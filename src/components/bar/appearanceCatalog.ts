@@ -16,19 +16,21 @@ export interface AppearanceEntry {
 
 const ALL_APPEARANCES: readonly AppearanceEntry[] = [
   {
+    value: UI.BAR_APPEARANCES_DYNAMIC,
+    name: "Island",
+    descriptor: "One small shape that grows to hold the answer, then settles back. The default.",
+  },
+  // On its way out: the Island is taking over what the Pill does. It stays
+  // offered until then, second, for anyone who goes back to it.
+  {
     value: UI.BAR_APPEARANCES_FLOATING,
     name: "Pill",
-    descriptor: "A small pill that opens when you speak. The default.",
+    descriptor: "A small pill that opens when you speak.",
   },
   {
     value: UI.BAR_APPEARANCES_PERSONA,
     name: "Avatar",
     descriptor: "A character you talk to. It leans in, thinks, and talks back with its mouth moving.",
-  },
-  {
-    value: UI.BAR_APPEARANCES_DYNAMIC,
-    name: "Island",
-    descriptor: "One small shape that grows to hold the answer, then settles back.",
   },
   {
     value: UI.BAR_APPEARANCES_NOTCH,

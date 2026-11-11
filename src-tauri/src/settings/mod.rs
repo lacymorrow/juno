@@ -9,6 +9,7 @@ use crate::constants::ui;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod island_default;
 pub mod manager;
 pub mod persist;
 pub mod registry;

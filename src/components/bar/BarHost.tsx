@@ -9,11 +9,11 @@ import { FloatingBar } from "@/components/FloatingBar";
 import { bootBarConfig } from "@/lib/barBoot";
 import { appearanceEntry } from "./appearanceCatalog";
 
-// The default look (the Pill) loads with the page; the others when chosen.
+// The default look (the Island) loads with the page, and so does the Pill
+// while it is still offered; the others load when chosen.
+import { IslandBar } from "@/components/bar/island/IslandBar";
+
 const AppBar = lazy(() => import("@/components/bar/app-bar").then((m) => ({ default: m.AppBar })));
-const IslandBar = lazy(() =>
-  import("@/components/bar/island/IslandBar").then((m) => ({ default: m.IslandBar })),
-);
 const NotchBar = lazy(() =>
   import("@/components/bar/notch/NotchBar").then((m) => ({ default: m.NotchBar })),
 );
@@ -106,12 +106,6 @@ export function BarHost() {
             <VoiceAIBar barAppearance={appearance} />
           </Suspense>
         );
-      case UI.BAR_APPEARANCES_DYNAMIC:
-        return () => (
-          <Suspense fallback={null}>
-            <IslandBar />
-          </Suspense>
-        );
       case UI.BAR_APPEARANCES_NOTCH:
         return () => (
           <Suspense fallback={null}>
@@ -143,8 +137,10 @@ export function BarHost() {
           </Suspense>
         );
       case UI.BAR_APPEARANCES_FLOATING:
-      default:
         return () => <FloatingBar barAppearance={appearance} />;
+      case UI.BAR_APPEARANCES_DYNAMIC:
+      default:
+        return () => <IslandBar />;
     }
   }, [appearance]);
 

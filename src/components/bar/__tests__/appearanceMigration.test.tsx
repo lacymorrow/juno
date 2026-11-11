@@ -123,12 +123,17 @@ describe("a stored appearance after the rename", () => {
     expect(appearanceEntry("halo").value).toBe(UI.BAR_APPEARANCES_DEFAULT);
     expect(appearanceEntry(null).value).toBe(UI.BAR_APPEARANCES_DEFAULT);
     await mount("react_bits_orb");
-    expect(screen.getByTestId("look").textContent).toBe("pill");
+    expect(screen.getByTestId("look").textContent).toBe("island");
   });
 
-  it("starts a new install on the Pill, first in the picker", () => {
-    expect(UI.BAR_APPEARANCES_DEFAULT).toBe(UI.BAR_APPEARANCES_FLOATING);
+  it("starts a new install on the Island, first in the picker", () => {
+    expect(UI.BAR_APPEARANCES_DEFAULT).toBe(UI.BAR_APPEARANCES_DYNAMIC);
     expect(APPEARANCE_CATALOG[0].value).toBe(UI.BAR_APPEARANCES_DEFAULT);
     expect(APPEARANCE_CATALOG[0].descriptor).toMatch(/The default\.$/);
+  });
+
+  it("still offers the Pill, second, and no longer calls it the default", () => {
+    expect(APPEARANCE_CATALOG[1].value).toBe(UI.BAR_APPEARANCES_FLOATING);
+    expect(APPEARANCE_CATALOG[1].descriptor).not.toMatch(/default/i);
   });
 });
