@@ -105,7 +105,11 @@ jobs:
   rust:
     name: Rust (fmt + clippy + test)
     runs-on: macos-latest
-    timeout-minutes: 45
+    # A cold build (any change to Cargo.lock) takes about 50 minutes here. At
+    # 45 the job was cancelled before it could save a cache, so the next run
+    # was cold too: `main` went red on every push and no release was cut. The
+    # limit has to clear a cold build with room to spare.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
 
@@ -120,6 +124,9 @@ jobs:
         with:
           # Cargo workspace root is the repo root, so the build lands in ./target.
           workspaces: ". -> target"
+          # Keep what was compiled even when a later step fails or the job is
+          # cancelled, so one bad run does not make the next one cold as well.
+          cache-on-failure: true
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
