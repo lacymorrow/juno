@@ -812,7 +812,6 @@ export const COMMANDS = {
   ONBOARDING_SET_ONBOARDING_ACTIVE: 'set_onboarding_active',
   ONBOARDING_CLOSE_ONBOARDING_WINDOW: 'close_onboarding_window',
   ONBOARDING_CHECK_CLAUDE_CLI_AVAILABLE: 'check_claude_cli_available',
-  ONBOARDING_CHECK_CODEX_CLI_AVAILABLE: 'check_codex_cli_available',
   ONBOARDING_TEST_GLOBAL_SHORTCUTS_WORKING: 'test_global_shortcuts_working',
   ONBOARDING_GET_LAST_ONBOARDING_PHASE: 'get_last_onboarding_phase',
   ONBOARDING_RECORD_ONBOARDING_EVENT: 'record_onboarding_event',

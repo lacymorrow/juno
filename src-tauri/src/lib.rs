@@ -750,7 +750,6 @@ pub fn run() {
             commands::test_global_shortcuts_working,
             commands::set_onboarding_active,
             commands::check_claude_cli_available,
-            commands::check_codex_cli_available,
             // Guided onboarding state machine
             commands::get_onboarding_state,
             commands::save_user_role,

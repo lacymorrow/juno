@@ -556,21 +556,6 @@ pub async fn check_claude_cli_available() -> Result<ClaudeCliStatus, String> {
     })
 }
 
-/// What the local Codex CLI can do for this person right now, in the same
-/// shape as the Claude answer so setup draws both cards the same way.
-///
-/// `authenticated` is a ChatGPT plan login specifically. An API-key login is
-/// the OpenAI provider's case, and setup already takes that key directly.
-#[tauri::command]
-pub async fn check_codex_cli_available() -> Result<ClaudeCliStatus, String> {
-    let status = crate::agent::providers::codex_cli::cli_status().await;
-    Ok(ClaudeCliStatus {
-        available: status.installed,
-        authenticated: status.is_signed_in(),
-        email: status.email,
-    })
-}
-
 /// Initialize the onboarding system and check if onboarding should be shown
 pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), String> {
     info!("Initializing onboarding system...");
