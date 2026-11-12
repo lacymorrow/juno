@@ -49,7 +49,9 @@ is the hole this file and `crates/audio-start-probe` close.
 Note what that run recorded about permissions: *"the agent session's
 responsible app already had it, so the probe ran without a TCC prompt."* On
 2026-10-28 an agent-launched process on this Mac could open the microphone. It
-cannot today, and the next section is why.
+could not on 2026-11-10 (see that attempt below), and it can again as of
+2026-11-12. That capability has now flipped twice without anyone changing
+Juno, which is why LAC-7587 tracks it separately.
 
 ## The probe
 
@@ -70,9 +72,114 @@ step: `--manifest-path src-tauri/Cargo.toml` selects the `juno` package alone
 and never reaches a sibling member, the same gap that left the voice plugin's
 tests unrun for months.
 
-## Result, 2026-11-10, M1 MacBook Air (zero), built-in mic, macOS 25.6
+## Result, 2026-11-12: the factorial ran, and idle time is the only variable that moves it
 
-### The probe cannot measure a microphone start in an agent-launched process
+The microphone grant came back (see the 2026-11-10 attempt below), so the whole
+factorial executed. M1 MacBook Air (zero), built-in mic, macOS 25.6. 25 cycles
+per row, hold 120 ms, **gap 300 ms**. Milliseconds inside
+`cpal::Stream::play()`, which is `AudioOutputUnitStart` plus a mutex.
+
+| factor | N | first | min | median | p90 | max | frames |
+|---|---|---|---|---|---|---|---|
+| `output-baseline` (control, output unit) | 25 | 18.1 | 6.4 | **11.5** | 18.1 | 31.8 | n/a |
+| `baseline` | 25 | 35.6 | 31.7 | **37.2** | 47.2 | 85.3 | 148480 |
+| `rate-mismatch` | 25 | 166.4 | 30.0 | **34.2** | 51.9 | 166.4 | **0** |
+| `output-client` | 25 | 30.0 | 30.0 | **38.7** | 57.2 | 76.9 | 144384 |
+| `second-input` | 25 | 0.3 | 0.3 | **0.8** | 7.1 | 10.7 | 148992 |
+| `spawned-thread` | 25 | 43.5 | 30.2 | **34.1** | 54.9 | 71.2 | 144384 |
+| `hal-crowd` | 25 | 0.9 | 0.6 | **1.0** | 2.7 | 5.1 | 149504 |
+| `all-factors` | 25 | 91.3 | 0.6 | **1.4** | 9.7 | 91.3 | **0** |
+
+### The baseline reproduces the premise: 37.2 ms
+
+n=25, min 31.7, p90 47.2. The 28-49 ms recorded on 2026-10-28 is confirmed,
+this time from a committed crate anyone can re-run. Juno's 161 ms for the same
+call is 4.3x it, so the gap this ticket exists to explain is real and was not
+an artefact of a lost scratch measurement.
+
+### Idle time before the start is the only variable that moves it, and the 300 ms default hid it
+
+Not one row above reaches 150 ms as a median. Re-run the same rows varying the
+one thing the table holds fixed, which is how long the device sits idle
+between starts, and they do:
+
+| row | gap 300 ms | gap 30 s | gap 120 s |
+|---|---|---|---|
+| `baseline` median | 37.2 (n=25) | 72.6 (n=5) | **84.8** (n=5) |
+| `baseline` p90 / max | 47.2 / 85.3 | 82.2 / 82.2 | **142.3 / 142.3** |
+| `spawned-thread` median | 34.1 (n=25) | **75.6** (n=12) | not run |
+| `spawned-thread` p90 / max | 54.9 / 71.2 | **148.0 / 212.4** | not run |
+
+Exactly what produced the three columns, from a checkout:
+
+```sh
+cargo build -p audio-start-probe --release
+./target/release/audio-start-probe --cycles 25                                      # gap 300 ms (default)
+./target/release/audio-start-probe --only baseline,spawned-thread --cycles 5 --gap-ms 30000
+./target/release/audio-start-probe --only spawned-thread --cycles 12 --gap-ms 30000
+./target/release/audio-start-probe --only baseline --cycles 5 --gap-ms 120000
+```
+
+The long-gap runs are slow by construction: a 12-cycle run at a 30 s gap takes
+about 6 minutes of mostly waiting, and that waiting *is* the measurement.
+
+Juno's 161 ms median sits between the `spawned-thread` p90 and max at a 30 s
+idle. This matters because Juno's warm input stream sits **paused for minutes**
+between presses, so the long-gap columns are the regime Juno actually runs in
+and the 300 ms column is not.
+
+`--gap-ms` applies only *between* cycles, which hands the measurement a control
+it was not designed to have: cycle 1 is the one cycle that never sat idle, and
+in every long-gap row it is at or near the row minimum (`baseline` at 30 s:
+first 41.8 = min; `spawned-thread` at 30 s n=5: first 37.7 = min; n=12: first
+42.0 against a min of 32.6). Same process, same stream, same device, same code,
+cost tracking idle duration. That is dose-response, not scatter.
+
+It also lines up with a number LAC-5281 measured but could not account for:
+across 35 real presses the floor was **71 ms**, and no press ever came in under
+it. `baseline` at a 30 s idle has a median of 72.6 ms.
+
+Read the Verdict before carrying this further. The effect is measured and
+dose-responsive, but LAC-5281 also recorded its *fastest* press immediately
+after a 3-day gap, which is the opposite of what a simple "longer idle costs
+more" rule predicts. Idle-inside-a-live-process and app-unused-for-days are
+not established to be the same variable.
+
+### More HAL clients is not a cost. It is the cure.
+
+`second-input` (0.8 ms) and `hal-crowd` (1.0 ms) are about **40x faster** than
+baseline, not slower, and this is the most actionable number in the table. A
+second *running* input client means the device is already going, and
+`AudioOutputUnitStart` against a live device costs ~1 ms. Factor 2 of the
+ticket's four hypotheses is not merely absent as a cause; it is inverted.
+
+This is the figure LAC-6121 (pre-roll versus the macOS mic indicator) has been
+waiting on. Keeping the device running collapses the start from 37 ms cold, or
+~75 ms after a realistic idle, to **0.8 ms**. Whatever the remaining cost is
+made of, a start against an already-running device does not pay it.
+
+### A rate-mismatched start succeeds and delivers silence
+
+`rate-mismatch` and `all-factors` report **frames = 0 on 25 of 25 cycles**,
+while every rate-matched input row delivered ~145k frames. `play()` returns
+`Ok`, the stream runs, and no sample ever arrives. For LAC-5281 that is
+first-word loss taken to its limit.
+
+It does **not** explain the 35 measured presses, because `claim_warm_input`
+rejects a rate-stale warm stream (`devices.rs:764`). But the guard compares only the
+*rate*. Channel count and sample format are unguarded.
+
+One more reading of that row: its `first` cycle is 166.4 ms against a row
+median of 34.2 ms. So it is not that a mismatch costs 166 ms; it is that the
+first start after the device has been left alone does, which is the finding
+above arriving through a different door.
+
+## The 2026-11-10 attempt, and why it could not run
+
+Kept because the TCC mechanism below is real, is not specific to audio, and
+will recur. It is history as of 2026-11-12, not the current state.
+
+### On that day the probe could not measure a microphone start at all
 
 | factor | N | min | median | p90 | max |
 |---|---|---|---|---|---|
@@ -110,8 +217,10 @@ microphone authorisation sits in the path. The in-Juno figure is 161 ms, about
 20x that, and the difference is confined to the input-specific path — which is
 exactly where coreaudiod's microphone authorisation lives.
 
-That is a hypothesis, not a measurement. Confirming it needs an input start in
-a process that *has* a microphone grant.
+That was a hypothesis, not a measurement, and it has since been tested. The
+2026-11-12 run got the grant, started the input device in 37.2 ms, and found
+no authorisation cost of that magnitude. So the reasoning in this paragraph,
+though sound at the time, pointed at the wrong suspect. See the Verdict.
 
 ### Corroboration from Juno's own logs
 
@@ -156,15 +265,59 @@ upgrade will do it again.
 
 ## Verdict
 
-**The premise is confirmed, not killed.** Standalone `AudioOutputUnitStart` on
-an input device is 28-49 ms; Juno pays 161 ms for the same call. The 3-5x gap
-is real, so the factorial is still the right next step and still worth running.
+**The premise is confirmed by direct measurement.** Standalone
+`AudioOutputUnitStart` on an input device is 37.2 ms (n=25, 2026-11-12), inside
+the 28-49 ms recorded on 2026-10-28. Juno pays 161 ms for the same call, so the
+3-5x gap this ticket exists to explain is real and was not an artefact of a
+lost scratch measurement.
 
-On *this* run, of the ticket's two honest outcomes, the answer is the second:
-**the probe cannot model Juno here**, and it cannot even run. Not "no factor
-reproduced it, cause unknown" — the factorial never got to execute, because an
-agent-launched process on this Mac no longer has a microphone grant to execute
-it with, for the reason above.
+**Against the ticket's bar, a row median of >=150 ms, no factor reproduces
+it.** That includes the one described below, whose best median is 84.8 ms. Say
+that plainly before anything else.
+
+But the four named factors are not merely under the bar, they are *flat*:
+`rate-mismatch` 34.2, `spawned-thread` 34.1, `output-client` 38.7 against a
+baseline of 37.2, all within run-to-run noise, and the two client-count rows
+are 40x **faster**. On its own terms the factorial is conclusive: none of the
+four is the cost.
+
+**The one variable that does move the number is idle time before the start**,
+and it moves monotonically with the dose: 37.2 -> 72.6 -> 84.8 ms median at
+0.3 s, 30 s and 120 s of idle, with p90 going 47 -> 148 -> 142 and a single
+start reaching 212.4 ms. A 30 s idle is the only configuration in which this
+probe starts the microphone in over 150 ms at all. The internal control is
+free: `--gap-ms` applies only between cycles, so cycle 1 never sits idle, and
+in every long-gap row cycle 1 is at or near the row minimum.
+
+**That demotes the hardened-runtime hypothesis.** This document previously
+reasoned that if no factor reproduced the cost, the explanation was probably
+coreaudiod mediating a signed, hardened, TCC-governed bundle, and that no
+terminal probe could ever show it. An unbundled, unsigned, terminal-launched
+probe now produces 148-212 ms starts. Juno's security context is not *needed*
+to explain starts of that magnitude. It is not disproved, just no longer the
+leading candidate.
+
+### What this does not settle, and the datapoint that argues against it
+
+Idle time is not established as the explanation for Juno's 161 ms, for two
+reasons that should travel with the number:
+
+1. **The residual.** 161 ms in Juno against 84.8 ms in the probe at a 120 s
+   idle is still ~1.9x, and the probe's curve is flattening (37 -> 73 -> 85),
+   so simply waiting longer does not obviously close it.
+2. **LAC-5281's 3-day press.** That dataset recorded the *fastest* of its 35
+   presses immediately after a 3-day gap. If idle time were the whole story
+   that press should have been the slowest in the set. The honest reading is
+   that "paused for 30-120 s inside one live process" and "the app sat unused
+   for days" are not the same variable. The first plausibly hits a CoreAudio
+   idle-teardown path while the process stays alive, the second does not. So
+   the effect measured here is real and reproducible, and generalising it to
+   Juno's median is a further step this ticket has not taken.
+
+Remaining candidates for the residual, in order: Juno's stream sits paused for
+minutes rather than 120 s; Juno's `Opening -> Live` brackets slightly more than
+`play()` alone (LAC-7739); and the hardened-runtime context, demoted but not
+eliminated.
 
 ## Which factors are even present in Juno today
 
@@ -183,35 +336,35 @@ Caveat on 1: only the *rate* is checked, not channel count or sample format.
 A format mismatch is unguarded, just much less likely than the rate case the
 AirPods log pointed at.
 
-So the factorial's priority order should be **`spawned-thread` first, then
-`output-client`** — factor 3 is unconditionally present on every one of the 35
-measured presses, which makes it the only hypothesis that is true every time
-the 161 ms was paid. `rate-mismatch` and `second-input` are now known not to
-apply to the measured path, and are worth running only as controls.
+That code read set the factorial's priority order, `spawned-thread` first,
+because factor 3 is unconditionally present on every one of the 35 presses
+that paid the 161 ms, making it the only hypothesis true every single time.
+The 2026-11-12 run honoured that order, and `spawned-thread` came back at
+34.1 ms against a 37.2 ms baseline: present on every press, and not the cost.
+Being always-true turned out to be the reason to test it first, not evidence
+that it was to blame.
 
-## What would finish it
+## What finished it, and what is left
 
-One of these, cheapest first. Both produce the factor table the probe already
-knows how to print.
+Options 1 and 2 as this document first listed them are spent: the microphone
+grant came back without an agent asking for it (most likely a human answered
+the prompt left pending on 2026-11-10), and the probe then ran unattended on
+2026-11-12.
 
-1. **Run the probe from a context that already has Microphone ticked** — a real
-   Terminal/iTerm window on this Mac. `cargo run -p audio-start-probe
-   --release` and paste the table. No new grant, no new code, and it answers
-   the whole factorial in one go.
-2. **Restore Microphone for the fleet's `node`**, which puts agent runs back
-   where they were on 2026-10-28 and makes this unattended again. It is a
-   restoration rather than an expansion, but it still grants every
-   agent-spawned process microphone access, so it is the machine owner's
-   decision and not one an agent should answer on a prompt. Note it will be
-   revoked again by the next `node` upgrade.
-3. **Measure in Juno's own process** — a debug Tauri command on a dev build,
-   which is the route LAC-7538 pre-authorised for exactly this case. Costs a CI
-   build and a manual invocation, and gives up this ticket's "touches no
-   production code" property. Worth doing on its own merits eventually: it is
-   the only option that measures the real security context Juno ships in.
-
-Until one of them runs, the pre-roll / mic-indicator tradeoff (LAC-6121) stays
-undecided, because its input is the number above.
+1. **Make the idle row first-class in the probe** (LAC-7739). Today the cause
+   is visible only to a caller who already knows to pass `--gap-ms`, and the
+   default quietly produces the reassuring answer. That is the single change
+   that stops this being re-discovered from scratch.
+2. **Decide pre-roll versus the mic indicator** (LAC-6121), which now has the
+   number it was waiting for, and it is the most robust result here: a start
+   against an already-running device costs **0.8 ms** against 37-85 ms for a
+   start that has to wake the device. That figure does not depend on which
+   explanation for the 161 ms turns out to be right.
+3. **Measure inside Juno's own process** via a debug Tauri command, the route
+   LAC-7538 pre-authorised. Still worth doing, and now for a sharper reason
+   than before: not to find the cause, but to close the ~1.9x residual and to
+   settle whether the 3-day-gap press above contradicts the idle effect or
+   just measures a different one.
 
 ## Traps found while building this
 
