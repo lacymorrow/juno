@@ -90,6 +90,13 @@ per row, hold 120 ms, **gap 300 ms**. Milliseconds inside
 | `hal-crowd` | 25 | 0.9 | 0.6 | **1.0** | 2.7 | 5.1 | 149504 |
 | `all-factors` | 25 | 91.3 | 0.6 | **1.4** | 9.7 | 91.3 | **0** |
 
+Two rows are timing starts that produced **no audio at all**: `rate-mismatch`
+and `all-factors` report frames = 0 on 25 of 25 cycles, for the reason in its
+own section below. Their timings are real measurements of
+`AudioOutputUnitStart` returning, but they are not valid samples of a *working*
+start. `all-factors`' 1.4 ms median especially must never be quoted as a fast
+start; it is a fast failure.
+
 ### The baseline reproduces the premise: 37.2 ms
 
 n=25, min 31.7, p90 47.2. The 28-49 ms recorded on 2026-10-28 is confirmed,
@@ -128,12 +135,19 @@ idle. This matters because Juno's warm input stream sits **paused for minutes**
 between presses, so the long-gap columns are the regime Juno actually runs in
 and the 300 ms column is not.
 
-`--gap-ms` applies only *between* cycles, which hands the measurement a control
-it was not designed to have: cycle 1 is the one cycle that never sat idle, and
-in every long-gap row it is at or near the row minimum (`baseline` at 30 s:
-first 41.8 = min; `spawned-thread` at 30 s n=5: first 37.7 = min; n=12: first
-42.0 against a min of 32.6). Same process, same stream, same device, same code,
-cost tracking idle duration. That is dose-response, not scatter.
+`--gap-ms` applies only *between* cycles, which hands the measurement a partial
+control it was not designed to have: cycle 1 is the one cycle that never sat
+idle, and in every long-gap row it comes in **near** the row minimum
+(`baseline` at 30 s: first 41.8 = min; at 120 s: first 33.0 = min;
+`spawned-thread` at 30 s n=5: first 37.7 = min; n=12: first 42.0 against a min
+of 32.6, which is 29% above it rather than at it).
+
+Partial, and the gap matters. Cycle 1 is also the first start after the stream
+was built, and the only one not preceded by a `pause()`, so it differs from the
+rest in more than idle time and cannot carry the reading on its own. The probe
+prints only the per-row summary, not the per-cycle series, so a drift over the
+course of a run cannot be ruled out from this output either. Treat cycle 1 as
+*consistent with* the idle reading, not as proof of it.
 
 It also lines up with a number LAC-5281 measured but could not account for:
 across 35 real presses the floor was **71 ms**, and no press ever came in under
@@ -166,13 +180,14 @@ while every rate-matched input row delivered ~145k frames. `play()` returns
 first-word loss taken to its limit.
 
 It does **not** explain the 35 measured presses, because `claim_warm_input`
-rejects a rate-stale warm stream (`devices.rs:764`). But the guard compares only the
+rejects a rate-stale warm stream (`claim_warm_input`, in `devices.rs`). But the guard compares only the
 *rate*. Channel count and sample format are unguarded.
 
-One more reading of that row: its `first` cycle is 166.4 ms against a row
-median of 34.2 ms. So it is not that a mismatch costs 166 ms; it is that the
-first start after the device has been left alone does, which is the finding
-above arriving through a different door.
+One more reading of that row, offered as a loose end and not a result: its
+`first` cycle is 166.4 ms against a row median of 34.2 ms. So a mismatch does
+not cost 166 ms. Something about that one cycle did, and the idle finding above
+is the obvious candidate, but this is a single sample on a row whose starts
+delivered no audio whatsoever. It is not evidence of anything by itself.
 
 ## The 2026-11-10 attempt, and why it could not run
 
@@ -281,13 +296,21 @@ baseline of 37.2, all within run-to-run noise, and the two client-count rows
 are 40x **faster**. On its own terms the factorial is conclusive: none of the
 four is the cost.
 
-**The one variable that does move the number is idle time before the start**,
-and it moves monotonically with the dose: 37.2 -> 72.6 -> 84.8 ms median at
-0.3 s, 30 s and 120 s of idle, with p90 going 47 -> 148 -> 142 and a single
-start reaching 212.4 ms. A 30 s idle is the only configuration in which this
-probe starts the microphone in over 150 ms at all. The internal control is
-free: `--gap-ms` applies only between cycles, so cycle 1 never sits idle, and
-in every long-gap row cycle 1 is at or near the row minimum.
+**The one variable that does move the number is idle time before the start.**
+Within a single row the cost rises with the dose: `baseline` medians
+37.2 -> 72.6 -> 84.8 ms at 0.3 s, 30 s and 120 s, p90 47.2 -> 82.2 -> 142.3;
+`spawned-thread` medians 34.1 -> 75.6 ms at 0.3 s and 30 s, p90 54.9 -> 148.0,
+with one start reaching 212.4 ms. A 30 s idle is the only configuration in
+which this probe starts the microphone in over 150 ms at all.
+
+Three qualifications, because those rows are thin. **Compare only within a
+row.** The figures above are quoted per row for that reason: an earlier draft of
+this paragraph read "p90 47 -> 148 -> 142", which crossed `baseline` and
+`spawned-thread` and so manufactured a fall at 120 s that is not in the data.
+**At n=5 a p90 is just the max**, so `baseline`'s 82.2 / 82.2 and 142.3 / 142.3
+are one sample each rather than a distribution. And the long-gap rows are n=5
+and n=12 against n=25 for the 300 ms column, so this is three points per row,
+not a curve.
 
 **That demotes the hardened-runtime hypothesis.** This document previously
 reasoned that if no factor reproduced the cost, the explanation was probably
@@ -327,7 +350,7 @@ the 35 presses took, which is worth knowing before anyone spends runs on them.
 
 | factor | present? | evidence |
 |---|---|---|
-| **1. Format mismatch** | **No — guarded** | `claim_warm_input`, `devices.rs:764`: `let at_rate = fresh \|\| warm.rate_is_current();`. A rate-mismatched warm stream is rejected and the press opens the device directly, so it never reaches `resume()`. Every LAC-5281 press was warm-path, so a mismatch cannot explain them. |
+| **1. Format mismatch** | **No, guarded** | `claim_warm_input` in `devices.rs`: `let at_rate = fresh \|\| warm.rate_is_current();`. A rate-mismatched warm stream is rejected and the press opens the device directly, so it never reaches `resume()`. Every LAC-5281 press was warm-path, so a mismatch cannot explain them. |
 | **2. In-process output HAL client** | **Yes, conditionally** | `src-tauri/src/tts/pcm_player.rs:388-403` builds a cpal output stream on the default output device. (`say` and `afplay` are subprocesses and do not count.) Whether one is live at press time depends on TTS being mid-playback. |
 | **3. Spawned caller thread** | **Yes, always** | `controller.rs:587` calls `warm.resume()` inside the `open` closure, which runs on the `thread::spawn` audio worker (`controller.rs:684`). Never the main thread. |
 | **4. Two input clients on one device** | **No, on the measured path** | The warm stream is *lent*, not duplicated: `claim_warm_input` takes it out of the slot and `lend()` starts that same stream, so dictation only ever holds one input stream. Two exist only under a wake phrase (`WakeMicHeld`), and there the stream is already running, so a press does **no device start at all**. |
