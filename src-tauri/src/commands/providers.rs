@@ -360,7 +360,7 @@ pub(crate) async fn check_api_keys_available(app_handle: tauri::AppHandle) -> Re
     }
     if crate::agent::providers::copilot::status(None)
         .await
-        .is_signed_in()
+        .signed_in
     {
         info!("No API keys, but GitHub Copilot is signed in");
         return Ok(true);
