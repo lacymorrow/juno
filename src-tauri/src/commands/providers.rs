@@ -573,3 +573,153 @@ pub(crate) async fn set_agent_mode(
     info!("Set agent mode to: {}", mode);
     Ok(())
 }
+
+/// What one small call with a pasted key says about it.
+///
+/// Setup asks this the moment a key lands in the box, so a person who was
+/// handed a key learns whether it works before they leave the step, in plain
+/// words, instead of at their first question.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum KeyCheck {
+    /// The provider answered with the key.
+    Ok,
+    /// The provider says this is not a key it knows.
+    Rejected,
+    /// The key is real and its account has nothing left to spend.
+    NoCredit,
+    /// No verdict: offline, a timeout, or an answer that is not about the key.
+    /// Never shown as a failure.
+    Unknown,
+}
+
+/// How long the check may take before it gives up and says nothing.
+const KEY_CHECK_TIMEOUT_SECS: u64 = 8;
+
+/// Read a provider's answer. Only a definite statement about the key or its
+/// balance counts against it; everything else (a retired model id, a rate
+/// limit, a server error) is `Unknown`, because telling someone a good key is
+/// bad is the worse mistake.
+fn classify_key_response(status: u16, body: &str) -> KeyCheck {
+    if (200..300).contains(&status) {
+        return KeyCheck::Ok;
+    }
+    let body = body.to_ascii_lowercase();
+    if body.contains("credit balance") || body.contains("insufficient_quota") {
+        return KeyCheck::NoCredit;
+    }
+    if status == 401 || body.contains("api key not valid") || body.contains("api_key_invalid") {
+        return KeyCheck::Rejected;
+    }
+    KeyCheck::Unknown
+}
+
+/// Try a key against its provider without saving it. The key is sent only to
+/// that provider and is never logged.
+#[tauri::command]
+pub(crate) async fn check_provider_api_key(
+    provider_id: String,
+    api_key: String,
+) -> Result<KeyCheck, String> {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return Ok(KeyCheck::Unknown);
+    }
+    let Some(model) = BrainFactory::list_providers()
+        .into_iter()
+        .find(|p| p.id == provider_id)
+        .map(|p| p.default_model)
+    else {
+        return Ok(KeyCheck::Unknown);
+    };
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(KEY_CHECK_TIMEOUT_SECS))
+        .build()
+    else {
+        return Ok(KeyCheck::Unknown);
+    };
+
+    // The smallest request that makes each provider look at the key and, where
+    // it has one, the balance behind it.
+    let request = match provider_id.as_str() {
+        "anthropic" => client
+            .post("https://api.anthropic.com/v1/messages")
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&serde_json::json!({
+                "model": model,
+                "max_tokens": 1,
+                "messages": [{ "role": "user", "content": "hi" }],
+            })),
+        "openai" => client
+            .post("https://api.openai.com/v1/chat/completions")
+            .bearer_auth(api_key)
+            .json(&serde_json::json!({
+                "model": model,
+                "max_completion_tokens": 16,
+                "messages": [{ "role": "user", "content": "hi" }],
+            })),
+        "gemini" => client
+            .get("https://generativelanguage.googleapis.com/v1beta/models")
+            .header("x-goog-api-key", api_key),
+        _ => return Ok(KeyCheck::Unknown),
+    };
+
+    let verdict = match request.send().await {
+        Ok(response) => {
+            let status = response.status().as_u16();
+            let body = response.text().await.unwrap_or_default();
+            classify_key_response(status, &body)
+        }
+        Err(_) => KeyCheck::Unknown,
+    };
+    info!("Key check for {}: {:?}", provider_id, verdict);
+    Ok(verdict)
+}
+
+#[cfg(test)]
+mod key_check_tests {
+    use super::*;
+
+    #[test]
+    fn a_success_is_ok() {
+        assert_eq!(classify_key_response(200, "{}"), KeyCheck::Ok);
+    }
+
+    #[test]
+    fn an_unknown_key_is_rejected() {
+        assert_eq!(
+            classify_key_response(401, r#"{"error":{"type":"authentication_error"}}"#),
+            KeyCheck::Rejected
+        );
+        assert_eq!(
+            classify_key_response(400, "API key not valid. Please pass a valid API key."),
+            KeyCheck::Rejected
+        );
+    }
+
+    #[test]
+    fn an_empty_account_is_no_credit() {
+        assert_eq!(
+            classify_key_response(400, "Your credit balance is too low to access the API."),
+            KeyCheck::NoCredit
+        );
+        assert_eq!(
+            classify_key_response(429, r#"{"error":{"type":"insufficient_quota"}}"#),
+            KeyCheck::NoCredit
+        );
+    }
+
+    #[test]
+    fn anything_else_is_not_held_against_the_key() {
+        assert_eq!(
+            classify_key_response(404, "model not found"),
+            KeyCheck::Unknown
+        );
+        assert_eq!(
+            classify_key_response(429, "rate limited"),
+            KeyCheck::Unknown
+        );
+        assert_eq!(classify_key_response(500, ""), KeyCheck::Unknown);
+    }
+}

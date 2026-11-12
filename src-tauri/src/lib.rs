@@ -483,6 +483,7 @@ pub fn run() {
             get_provider_settings,
             update_provider_api_key,
             check_api_keys_available,
+            check_provider_api_key,
             crate::demo::get_demo_info,
             crate::build_info::get_build_info,
             crate::connectivity::get_connectivity,
