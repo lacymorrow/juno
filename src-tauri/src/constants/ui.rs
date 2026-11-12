@@ -420,6 +420,7 @@ pub mod standard_resolutions {
         [
             Provider::Anthropic,
             Provider::ClaudeCli,
+            Provider::Copilot,
             Provider::OpenAI,
             Provider::Gemini,
         ]

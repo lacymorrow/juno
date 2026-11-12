@@ -598,6 +598,8 @@ export const COMMANDS = {
   PROVIDERS_UPDATE_PROVIDER_LOAD_ACCOUNT_MCP: 'update_provider_load_account_mcp',
   PROVIDERS_GET_PROVIDER_SETTINGS: 'get_provider_settings',
   PROVIDERS_CHECK_API_KEYS_AVAILABLE: 'check_api_keys_available',
+  PROVIDERS_GET_COPILOT_STATUS: 'get_copilot_status',
+  PROVIDERS_IMPORT_COPILOT_CLI_SIGN_IN: 'import_copilot_cli_sign_in',
   ALWAYS_LISTENING_START_ALWAYS_LISTENING: 'start_always_listening_mode',
   ALWAYS_LISTENING_STOP_ALWAYS_LISTENING: 'stop_always_listening_mode',
   ALWAYS_LISTENING_GET_ALWAYS_LISTENING_STATUS: 'get_always_listening_status',

@@ -19,9 +19,65 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
 pub(crate) async fn get_providers(
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<ProviderInfo>, String> {
+    // The listing is synchronous and reads Copilot's last known sign-in. Ask
+    // GitHub once, the first time, so it is not "unknown" for the session.
+    use crate::agent::providers::claude_cli::SignIn;
+    use crate::agent::providers::copilot;
+    if copilot::last_known_sign_in() == SignIn::Unknown {
+        let token = saved_copilot_token(&app_handle).await;
+        copilot::status(token.as_deref()).await;
+    }
     Ok(BrainFactory::list_providers_with_app_handle(Some(
         &app_handle,
     )))
+}
+
+/// The token saved in settings for Copilot, when somebody pasted or imported
+/// one. Usually `None`: the GitHub sign-in is found where it already lives.
+async fn saved_copilot_token(app_handle: &tauri::AppHandle) -> Option<String> {
+    let settings_manager = SettingsManager::new(app_handle.clone()).ok()?;
+    ProviderConfig::load_from_centralized_settings(&settings_manager)
+        .await
+        .ok()?
+        .resolve_provider(crate::agent::providers::Provider::Copilot)?
+        .api_key
+        .filter(|k| !k.is_empty())
+}
+
+/// Whether GitHub Copilot can run, as whom, and on what plan.
+///
+/// Checks with GitHub every time, so Settings and onboarding can call it on
+/// focus and see a `gh auth login` done in Terminal a moment ago.
+#[tauri::command]
+pub(crate) async fn get_copilot_status(
+    app_handle: tauri::AppHandle,
+) -> Result<crate::agent::providers::copilot::CopilotStatus, String> {
+    let token = saved_copilot_token(&app_handle).await;
+    Ok(crate::agent::providers::copilot::status(token.as_deref()).await)
+}
+
+/// Use the Copilot CLI's sign-in: read its token from the Keychain (macOS
+/// asks the person first), check it with GitHub, and save it for Copilot.
+///
+/// Only ever run from a button. Detection never touches the Keychain.
+#[tauri::command]
+pub(crate) async fn import_copilot_cli_sign_in(
+    app_handle: tauri::AppHandle,
+) -> Result<crate::agent::providers::copilot::CopilotStatus, String> {
+    use crate::agent::providers::copilot;
+    let token = copilot::import_copilot_cli_token().await?;
+    let status = copilot::status(Some(&token)).await;
+    if !status.signed_in {
+        return Err(copilot::not_signed_in_message(&status));
+    }
+    update_provider_api_key(
+        app_handle,
+        crate::agent::providers::Provider::Copilot.id().to_string(),
+        token,
+    )
+    .await?;
+    info!("Imported the Copilot CLI sign-in for GitHub Copilot");
+    Ok(status)
 }
 
 /// Get the current active provider
@@ -302,8 +358,15 @@ pub(crate) async fn check_api_keys_available(app_handle: tauri::AppHandle) -> Re
         info!("No API keys, but the Codex CLI is signed in with ChatGPT");
         return Ok(true);
     }
+    if crate::agent::providers::copilot::status(None)
+        .await
+        .is_signed_in()
+    {
+        info!("No API keys, but GitHub Copilot is signed in");
+        return Ok(true);
+    }
 
-    info!("No API keys found in store or environment, and no signed-in CLI");
+    info!("No API keys found in store or environment, no signed-in CLI, and no GitHub Copilot");
     Ok(false)
 }
 

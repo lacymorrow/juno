@@ -21,9 +21,15 @@
 //!   answer, and switching to it would trade an honest "add a key" for a
 //!   confusing "run `claude login`" they never asked to see.
 //! - *fixed order*: ties go to the first CLI in the list. Today that is
-//!   Claude first, Codex second. When one person has both signed in Juno
-//!   runs on Claude, because the Claude provider has further-along tool
-//!   integration and that is what their experience will depend on.
+//!   Claude first, Codex second, GitHub Copilot third. When one person has
+//!   both CLIs signed in Juno runs on Claude, because the Claude provider has
+//!   further-along tool integration and that is what their experience will
+//!   depend on. Copilot comes last because each request spends the person's
+//!   premium-request allowance, which they may be saving for their editor.
+//!
+//! GitHub Copilot is not a CLI, but it fits the same shape: "installed" is
+//! "a GitHub token was found" and "signed in" is "GitHub confirmed that token
+//! has Copilot". See [`super::copilot`].
 //!
 //! The same function walks it back. If Juno made the choice and the chosen
 //! CLI later disappears or signs out, Juno un-makes it rather than leaving
@@ -133,6 +139,14 @@ mod tests {
         }
     }
 
+    fn copilot_candidate(installed: bool, signed_in: bool) -> CliCandidate {
+        CliCandidate {
+            provider_id: Provider::Copilot.id(),
+            installed,
+            signed_in,
+        }
+    }
+
     fn codex_candidate(installed: bool, signed_in: bool) -> CliCandidate {
         CliCandidate {
             provider_id: Provider::CodexCli.id(),
@@ -180,6 +194,54 @@ mod tests {
             ..fresh()
         };
         assert_eq!(decide(&state), Decision::SwitchTo("codex_cli"));
+    }
+
+    #[test]
+    fn copilot_is_the_default_when_it_is_all_there_is() {
+        let state = SelectionState {
+            cli_candidates: vec![
+                claude_candidate(false, false),
+                codex_candidate(false, false),
+                copilot_candidate(true, true),
+            ],
+            ..fresh()
+        };
+        assert_eq!(decide(&state), Decision::SwitchTo("copilot"));
+    }
+
+    #[test]
+    fn a_signed_in_cli_wins_a_tie_with_copilot() {
+        let state = SelectionState {
+            cli_candidates: vec![
+                claude_candidate(false, false),
+                codex_candidate(true, true),
+                copilot_candidate(true, true),
+            ],
+            ..fresh()
+        };
+        assert_eq!(decide(&state), Decision::SwitchTo("codex_cli"));
+    }
+
+    #[test]
+    fn a_github_token_without_copilot_is_not_good_enough() {
+        let state = SelectionState {
+            cli_candidates: vec![copilot_candidate(true, false)],
+            ..fresh()
+        };
+        assert_eq!(decide(&state), Decision::KeepCurrent);
+    }
+
+    #[test]
+    fn copilot_juno_chose_is_given_up_when_the_sign_in_goes() {
+        let state = SelectionState {
+            active_provider: "copilot".to_string(),
+            cli_candidates: vec![copilot_candidate(true, false)],
+            ..fresh()
+        };
+        assert_eq!(
+            decide(&state),
+            Decision::SwitchTo(super::super::config::DEFAULT_PROVIDER.id())
+        );
     }
 
     #[test]

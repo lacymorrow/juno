@@ -9,8 +9,11 @@ import {
   useState,
   type CSSProperties,
   type ReactElement,
+  type ReactNode,
 } from "react";
 import { useEventListener } from "@/hooks/useEventListener";
+import { useCopilotStatus } from "@/hooks/useCopilotStatus";
+import { describeCopilotStatus, type CopilotStatus } from "@/lib/copilot-status";
 import {
   DOWNLOAD_WAITING_FOR_NETWORK,
   type SttDownloadProgress,
@@ -679,6 +682,7 @@ function CliCard({
   signedIn,
   selected,
   onToggle,
+  notReady,
 }: {
   title: string;
   detail: string;
@@ -690,6 +694,9 @@ function CliCard({
   signedIn: boolean;
   selected: boolean;
   onToggle: () => void;
+  /** Said instead of "run the login command" when there is a better next
+   * step than the terminal. */
+  notReady?: ReactNode;
 }) {
   const ready = installed && signedIn;
   return (
@@ -736,6 +743,8 @@ function CliCard({
               <span className="inline-flex items-center gap-1.5 text-muted-foreground">
                 <CheckGlyph className={`h-3 w-3 ${GREEN}`} /> Detected and signed in
               </span>
+            ) : notReady ? (
+              notReady
             ) : installed ? (
               <span className="inline-flex items-center gap-1.5 text-muted-foreground">
                 <AlertCircle className="h-3 w-3" /> Installed but not signed in. Run{" "}
@@ -896,7 +905,13 @@ export default function OnboardingFlow({
   const [cliAvailable, setCliAvailable] = useState(false);
   const [cliAuthenticated, setCliAuthenticated] = useState(false);
   const [cliChecking, setCliChecking] = useState(true);
-  const [cliSelected, setCliSelected] = useState(false);
+  // Which "plan you already have" card was picked on the Connect step.
+  const [selectedCli, setSelectedCli] = useState<"claude_cli" | "copilot" | null>(null);
+  const cliSelected = selectedCli !== null;
+  const copilot = useCopilotStatus();
+  const setCopilotStatus = copilot.setStatus;
+  const copilotText = describeCopilotStatus(copilot.status);
+  const [copilotImporting, setCopilotImporting] = useState(false);
   const [cliEmail, setCliEmail] = useState<string | null>(null);
   // Which provider Juno is actually on. Read rather than assumed, because
   // when the Claude CLI is signed in the backend selects it on launch and the
@@ -1295,13 +1310,13 @@ export default function OnboardingFlow({
     }
   }, [detectedProvider, apiKey]);
 
-  const selectCli = useCallback(async () => {
-    const providerId = "claude_cli";
+  const selectCli = useCallback(async (providerId: "claude_cli" | "copilot") => {
     try {
       setApiKeySaving(true);
       setApiKeyError(null);
       await invoke(COMMANDS.PROVIDERS_SET_ACTIVE_PROVIDER, { providerId });
-      setCliSelected(true);
+      setSelectedCli(providerId);
+      setActiveProvider(providerId);
     } catch (error) {
       console.error(`Failed to set ${providerId} as active provider:`, error);
       setApiKeyError(error as string);
@@ -1311,8 +1326,27 @@ export default function OnboardingFlow({
   }, []);
 
   const deselectCli = useCallback(() => {
-    setCliSelected(false);
+    setSelectedCli(null);
   }, []);
+
+  // The Copilot CLI keeps its sign-in in the Keychain, which macOS guards
+  // with a prompt, so it is only read when the person asks.
+  const importCopilotSignIn = useCallback(async () => {
+    try {
+      setCopilotImporting(true);
+      setApiKeyError(null);
+      const status = await invoke<CopilotStatus>(
+        COMMANDS.PROVIDERS_IMPORT_COPILOT_CLI_SIGN_IN
+      );
+      setCopilotStatus(status);
+      // They asked for this sign-in, so use it.
+      if (status.signed_in) await selectCli("copilot");
+    } catch (error) {
+      setApiKeyError(String(error));
+    } finally {
+      setCopilotImporting(false);
+    }
+  }, [setCopilotStatus, selectCli]);
 
   useEffect(() => {
     let mounted = true;
@@ -2143,6 +2177,13 @@ export default function OnboardingFlow({
                         : "Using your Claude subscription. No API key needed. You can change this in Settings."}
                     </p>
                   )}
+                  {activeProvider === "copilot" && copilot.status?.signed_in && (
+                    <p className="mt-4 text-[12px] leading-snug text-muted-foreground">
+                      {copilot.status.login
+                        ? `Using your GitHub Copilot plan (${copilot.status.login}). No API key needed. You can change this in Settings.`
+                        : "Using your GitHub Copilot plan. No API key needed. You can change this in Settings."}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -2195,7 +2236,7 @@ export default function OnboardingFlow({
                 </div>
               )}
 
-              {/* Connect step: Claude CLI + API key dual path */}
+              {/* Connect step: a plan already paid for (Claude, Copilot), or an API key */}
               {step.id === "api-key" && (
                 <div className="space-y-3 pt-4 text-left">
                   {/* A plan the person already pays for, through its CLI. */}
@@ -2208,8 +2249,53 @@ export default function OnboardingFlow({
                     checking={cliChecking}
                     installed={cliAvailable}
                     signedIn={cliAuthenticated}
-                    selected={cliSelected}
-                    onToggle={() => (cliSelected ? deselectCli() : selectCli())}
+                    selected={selectedCli === "claude_cli"}
+                    onToggle={() =>
+                      selectedCli === "claude_cli" ? deselectCli() : selectCli("claude_cli")
+                    }
+                  />
+
+                  {/* GitHub Copilot, through the GitHub sign-in already here. */}
+                  <CliCard
+                    title="Use your GitHub Copilot plan"
+                    detail={
+                      copilot.status?.signed_in && copilot.status.login
+                        ? `No API key needed. Signed in to GitHub as ${copilot.status.login}.`
+                        : "No API key needed. Uses your GitHub sign-in on this Mac."
+                    }
+                    loginCommand="gh auth login"
+                    installLabel="Not signed in. Get the GitHub CLI"
+                    installUrl="https://cli.github.com"
+                    checking={copilot.status === null}
+                    installed={
+                      !!copilot.status?.token_found || !!copilot.status?.copilot_cli_login
+                    }
+                    signedIn={!!copilot.status?.signed_in}
+                    selected={selectedCli === "copilot"}
+                    onToggle={() =>
+                      selectedCli === "copilot" ? deselectCli() : selectCli("copilot")
+                    }
+                    notReady={
+                      copilotText.canImport ? (
+                        <button
+                          type="button"
+                          onClick={importCopilotSignIn}
+                          disabled={copilotImporting}
+                          className={`inline-flex items-center gap-1.5 rounded text-[#007AFF] hover:underline disabled:opacity-60 dark:text-[#0A84FF] ${FOCUS_RING}`}
+                        >
+                          {copilotImporting ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : null}
+                          {copilotImporting
+                            ? "Waiting for macOS…"
+                            : `Use the Copilot CLI sign-in (${copilot.status?.copilot_cli_login})`}
+                        </button>
+                      ) : copilot.status?.problem ? (
+                        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                          <AlertCircle className="h-3 w-3" /> {copilot.status.problem}
+                        </span>
+                      ) : undefined
+                    }
                   />
 
                   {/* Divider */}
