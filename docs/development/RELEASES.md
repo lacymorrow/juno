@@ -107,11 +107,22 @@ mentions signing, so the failure looks like a corrupt download.
 
 ### In CI
 
-`.github/workflows/release-tauri.yml` exports whichever of `APPLE_CERTIFICATE`,
-`APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`,
-`APPLE_PASSWORD` and `APPLE_TEAM_ID` exist as repo secrets, and `tauri-action`
-signs and notarizes with them. With no secrets set the step exports nothing and
-the release build comes out unsigned.
+`.github/workflows/release-tauri.yml` signs with `APPLE_CERTIFICATE`,
+`APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` and `APPLE_TEAM_ID`, and
+then picks **exactly one** notarization credential set and exports only that
+one, because Tauri documents no precedence for having both:
+
+- **App Store Connect API key** — all three of `APPLE_API_ISSUER`,
+  `APPLE_API_KEY`, `APPLE_API_KEY_P8_B64`. This is the live path (LAC-6333),
+  and they live in the `release` environment.
+- **App-specific password** — `APPLE_ID` + `APPLE_PASSWORD`, used only when
+  none of the three API secrets are set. `APPLE_PASSWORD` was **deleted**
+  in LAC-7723, so this branch is unreachable today; the code is kept as a
+  documented shape if a real app-specific password is ever wanted again.
+
+A partial API trio is rejected outright rather than falling back silently.
+With no secrets set the step exports nothing and the release build comes out
+unsigned.
 
 ### Locally
 
@@ -173,7 +184,8 @@ is to ask for one by name.
 | `RELEASE_SSH_KEY` | Deploy key that pushes the release commit past the main ruleset | `scripts/apply-branch-protection.sh`. Move to `release` env |
 | `NPM_TOKEN` | Publish juno-cua | npm automation token. Move to `release` env |
 | `GITHUB_TOKEN` | Create releases | Automatic |
-| `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | Code sign and notarize the release build | See [Code signing and notarization](#code-signing-and-notarization-apple) |
+| `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_TEAM_ID` | Code sign the release build | See [Code signing and notarization](#code-signing-and-notarization-apple) |
+| `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_P8_B64` | Notarize the release build (App Store Connect key). All three or none | See [Code signing and notarization](#code-signing-and-notarization-apple) |
 
 ### Which of them belong in the `release` environment
 
@@ -214,7 +226,8 @@ what is declared here. After moving a secret, move its name from `PENDING` to
 |--------|--------------|
 | `TAURI_SIGNING_PRIVATE_KEY` | **The updater trust root.** The app verifies only the minisign `pubkey` in `tauri.conf.json`, so this key alone can hand every install a malicious update. Read only by `release-tauri.yml`. |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Decrypts the above. **Nothing to move**: the stored value is empty, so the updater key carries no passphrase (unchanged since 2026-09-21). Already `ENV_ONLY` in the guard, which still bites the case that matters — a real passphrase stored at repo scope reddens rung 1. Deleting the empty repo-scoped copy is optional and changes nothing to the build: `release-tauri.yml` maps it into `env:` with `${{ secrets.… }}`, and an undefined secret evaluates to the empty string, so the bundler sees the same empty variable either way. It is left in place only because there is no material here to protect. |
-| `APPLE_ID`, `APPLE_PASSWORD` | Notarization. Read only by `release-tauri.yml` and `demo-build.yml`, both main-only. |
+| `APPLE_ID` | Notarization (app-specific-password path). Read only by `release-tauri.yml` and `demo-build.yml`, both main-only. Still `PENDING`: it is an Apple ID email address, not secret material, so there is little to protect, and the branch that reads it is unreachable while the API trio is set. |
+| `APPLE_PASSWORD` | **Done 2026-11-12** (LAC-7723): **deleted**, not moved. The App Store Connect API key replaced it and the stored value could not authenticate anyway — 18 characters, where an app-specific password is always exactly 19. `ENV_ONLY` in the guard so that storing a value under this name at repo scope again reddens rung 1, which would otherwise silently re-arm a notarization path nobody watches. |
 | `RELEASE_SSH_KEY` | **A direct write to `main`.** The deploy key provisioned to bypass the `main` ruleset (see `docs/rules/branch-protection.md`). Read only by the `release` job of `release-every-merge.yml`, which now declares `environment: release` (LAC-7170). |
 | `NPM_TOKEN` | Publishes `juno-cua`. Same job, same reason. |
 | `HOMEBREW_TAP_TOKEN` | Single-repo PAT that pushes `lacymorrow/homebrew-tap`. Read only by the `homebrew` job of `release-cua.yml`, which names `environment: release`. That became possible when the CLI release moved from a `cua-v*` tag push (a tag ref the main-only environment refuses, and a tag policy would protect nothing with no tag ruleset) to a dispatch from main that `release-every-merge.yml` starts (LAC-7267). |
