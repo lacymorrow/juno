@@ -3942,3 +3942,70 @@ mod tests {
         assert_eq!(coincident, 3, "expected one 1h write per stride");
     }
 }
+
+#[cfg(test)]
+mod copilot_endpoint_tests {
+    use super::*;
+
+    fn copilot_brain(model: Option<&str>) -> AnthropicBrain {
+        let config: crate::settings::ProviderConfig = serde_json::from_value(serde_json::json!({
+            "id": "copilot",
+            "model": model,
+        }))
+        .expect("a minimal provider config deserializes");
+        AnthropicBrain::for_copilot(&config).expect("brain construction only builds an HTTP client")
+    }
+
+    fn message(role: &str, content: Value) -> ApiMessage {
+        serde_json::from_value(serde_json::json!({"role": role, "content": content}))
+            .expect("message deserializes")
+    }
+
+    /// Copilot rejects `fallbacks` with a 400, so neither the body field nor
+    /// its beta flag may ever reach it, whichever model is chosen.
+    #[test]
+    fn copilot_requests_never_ask_for_server_side_fallbacks() {
+        for model in Provider::Copilot.models() {
+            let brain = copilot_brain(Some(&model));
+            assert!(brain.fallbacks_param().is_none(), "{model}");
+            assert!(
+                !brain
+                    .beta_header_value()
+                    .contains(crate::constants::api::beta_flags::SERVER_SIDE_FALLBACK),
+                "{model}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_model_falls_back_to_copilots_default() {
+        assert_eq!(
+            copilot_brain(Some("not-a-model")).model,
+            Provider::Copilot.default_model()
+        );
+        assert_eq!(copilot_brain(None).model, Provider::Copilot.default_model());
+    }
+
+    #[test]
+    fn a_turn_that_answers_a_tool_call_is_agent_initiated() {
+        let tool_result = message(
+            "user",
+            serde_json::json!([
+                {"type": "tool_result", "tool_use_id": "toolu_1", "content": "done"},
+                {"type": "text", "text": "and also this"},
+            ]),
+        );
+        let typed = message("user", serde_json::json!("hello"));
+        let typed_blocks = message("user", serde_json::json!([{"type": "text", "text": "hi"}]));
+        let assistant = message("assistant", serde_json::json!("ok"));
+
+        let initiator = |messages: &[ApiMessage]| {
+            super::super::copilot::initiator(ends_with_tool_result(messages))
+        };
+        assert_eq!(initiator(&[typed.clone(), tool_result.clone()]), "agent");
+        assert_eq!(initiator(&[tool_result.clone(), typed]), "user");
+        assert_eq!(initiator(&[typed_blocks]), "user");
+        assert_eq!(initiator(&[tool_result, assistant]), "user");
+        assert_eq!(initiator(&[]), "user");
+    }
+}

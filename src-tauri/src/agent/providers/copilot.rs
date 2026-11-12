@@ -153,17 +153,38 @@ pub struct CopilotEndpoints {
 }
 
 impl CopilotUser {
-    /// The API host to call. Only an `https` URL is trusted; anything else
-    /// falls back to the public host rather than sending a token somewhere odd.
+    /// The API host to call. The person's GitHub token goes wherever this
+    /// points, so only an `https` URL on a Copilot host is trusted; anything
+    /// else falls back to the public host.
     pub fn api_base(&self) -> String {
         self.endpoints
             .as_ref()
             .and_then(|e| e.api.as_deref())
-            .map(|api| api.trim().trim_end_matches('/'))
-            .filter(|api| api.starts_with("https://") && api.len() > "https://".len())
-            .unwrap_or(DEFAULT_API_BASE)
-            .to_string()
+            .and_then(trusted_api_base)
+            .unwrap_or_else(|| DEFAULT_API_BASE.to_string())
     }
+}
+
+/// Hosts GitHub serves Copilot from: `api.githubcopilot.com` and its
+/// business/enterprise siblings, and GitHub Enterprise Cloud with data
+/// residency (`*.ghe.com`).
+fn is_copilot_host(host: &str) -> bool {
+    let host = host.to_ascii_lowercase();
+    host == "githubcopilot.com"
+        || host.ends_with(".githubcopilot.com")
+        || host.ends_with(".ghe.com")
+}
+
+/// `api` as a base URL, if it is `https`, carries no credentials, and names a
+/// Copilot host.
+fn trusted_api_base(api: &str) -> Option<String> {
+    let trimmed = api.trim().trim_end_matches('/');
+    let url = url::Url::parse(trimmed).ok()?;
+    let trusted = url.scheme() == "https"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.host_str().is_some_and(is_copilot_host);
+    trusted.then(|| trimmed.to_string())
 }
 
 /// How asking GitHub about a token went.
@@ -181,14 +202,21 @@ enum Validation {
 
 struct Validated {
     token: String,
-    source: TokenSource,
     user: CopilotUser,
+    /// The token saved in settings when this was checked. A different one
+    /// now means the person changed it, and the answer no longer applies.
+    configured: Option<String>,
     checked_at: std::time::Instant,
 }
 
 /// The last credential GitHub confirmed, reused by requests until it expires
 /// or the API rejects it.
 static VALIDATED: Mutex<Option<Validated>> = Mutex::new(None);
+
+/// One refresh at a time. Parallel agents that all miss the cache wait for
+/// the first to finish and then reuse its answer, instead of each running
+/// `gh` and asking GitHub.
+static REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// What the last [`status`] concluded, for synchronous callers (the provider
 /// listing runs on every Settings render and cannot make a network call).
@@ -286,9 +314,9 @@ pub fn parse_copilot_cli_login(contents: &str) -> Option<String> {
         .filter(|l| !l.is_empty())
 }
 
-fn copilot_cli_login() -> Option<String> {
+async fn copilot_cli_login() -> Option<String> {
     let path = dirs::home_dir()?.join(".copilot").join("config.json");
-    let contents = std::fs::read_to_string(path).ok()?;
+    let contents = tokio::fs::read_to_string(path).await.ok()?;
     parse_copilot_cli_login(&contents)
 }
 
@@ -412,6 +440,9 @@ async fn validate(client: &reqwest::Client, token: &str) -> Validation {
 
     // A token type `copilot_internal/user` does not accept (a fine-grained
     // PAT with only "Copilot Requests") can still call the API. Ask the API.
+    // Best effort: this asks the public host, because without the user
+    // endpoint there is no way to learn an enterprise account's own host, so
+    // such an account may be reported as having no Copilot here.
     match probe_models(client, token).await {
         Ok(true) => Validation::Ok(CopilotUser {
             login: None,
@@ -441,12 +472,12 @@ async fn probe_models(client: &reqwest::Client, token: &str) -> Result<bool, Str
     Ok(response.status().is_success())
 }
 
-fn store(found: &FoundToken, user: &CopilotUser) {
+fn store(found: &FoundToken, user: &CopilotUser, configured: Option<&str>) {
     if let Ok(mut guard) = VALIDATED.lock() {
         *guard = Some(Validated {
             token: found.token.clone(),
-            source: found.source.clone(),
             user: user.clone(),
+            configured: non_empty(configured.map(str::to_string)),
             checked_at: std::time::Instant::now(),
         });
     }
@@ -469,7 +500,7 @@ fn status_from(found: &FoundToken, user: &CopilotUser) -> CopilotStatus {
 /// `configured` is the token saved in Juno's settings for `copilot`, if any.
 pub async fn status(configured: Option<&str>) -> CopilotStatus {
     let candidates = discover(configured).await;
-    let cli_login = copilot_cli_login();
+    let cli_login = copilot_cli_login().await;
     if candidates.is_empty() {
         remember_sign_in(SignIn::SignedOut);
         invalidate();
@@ -495,7 +526,7 @@ pub async fn status(configured: Option<&str>) -> CopilotStatus {
     for found in &candidates {
         match validate(&client, &found.token).await {
             Validation::Ok(user) => {
-                store(found, &user);
+                store(found, &user, configured);
                 remember_sign_in(SignIn::SignedIn);
                 info!(
                     "[Copilot] Signed in as {} ({} plan), token {}",
@@ -550,20 +581,13 @@ pub async fn status(configured: Option<&str>) -> CopilotStatus {
 /// The credential a request should use, validated within [`VALIDATION_TTL`].
 pub async fn session(configured: Option<&str>) -> Result<Session, AgentError> {
     let configured_token = non_empty(configured.map(str::to_string));
-    if let Ok(guard) = VALIDATED.lock() {
-        if let Some(v) = guard.as_ref() {
-            // A token saved in settings outranks a discovered one, so a cached
-            // `gh` token must not shadow one the person has since pasted.
-            let shadowed = configured_token
-                .as_ref()
-                .is_some_and(|t| *t != v.token && v.source != TokenSource::Settings);
-            if !shadowed && v.checked_at.elapsed() < VALIDATION_TTL {
-                return Ok(Session {
-                    token: v.token.clone(),
-                    api_base: v.user.api_base(),
-                });
-            }
-        }
+    if let Some(session) = cached_session(configured_token.as_deref()) {
+        return Ok(session);
+    }
+    let _refreshing = REFRESH.lock().await;
+    // Whoever held the lock may have just refreshed it.
+    if let Some(session) = cached_session(configured_token.as_deref()) {
+        return Ok(session);
     }
 
     let status = status(configured_token.as_deref()).await;
@@ -578,6 +602,23 @@ pub async fn session(configured: Option<&str>) -> Result<Session, AgentError> {
     Err(AgentError::ConfigurationError(not_signed_in_message(
         &status,
     )))
+}
+
+fn cached_session(configured: Option<&str>) -> Option<Session> {
+    let guard = VALIDATED.lock().ok()?;
+    let v = guard.as_ref()?;
+    cache_is_usable(v.configured.as_deref(), v.checked_at.elapsed(), configured).then(|| Session {
+        token: v.token.clone(),
+        api_base: v.user.api_base(),
+    })
+}
+
+/// Whether a cached credential can serve a request: it is fresh, and the
+/// token saved in settings is the one it was checked against. A token pasted
+/// since outranks whatever was found then, so it is asked about; a saved token
+/// GitHub rejected in favour of `gh`'s is not asked about again every turn.
+fn cache_is_usable(checked_with: Option<&str>, age: Duration, configured: Option<&str>) -> bool {
+    checked_with == configured && age < VALIDATION_TTL
 }
 
 /// Why Copilot cannot run, and what to do about it.
@@ -603,6 +644,7 @@ pub fn not_signed_in_message(status: &CopilotStatus) -> String {
 /// pressed, never during detection.
 pub async fn import_copilot_cli_token() -> Result<String, String> {
     let login = copilot_cli_login()
+        .await
         .ok_or_else(|| "The Copilot CLI is not signed in to github.com.".to_string())?;
     read_keychain_token(&login).await
 }
@@ -745,8 +787,42 @@ mod tests {
             serde_json::from_str(r#"{"endpoints":{"api":"http://evil.example"}}"#).expect("parses");
         assert_eq!(plain.api_base(), DEFAULT_API_BASE);
 
+        for untrusted in [
+            "https://evil.example",
+            "https://api.githubcopilot.com.evil.example",
+            "https://notgithubcopilot.com",
+            "https://user:pass@api.githubcopilot.com",
+            "http://api.githubcopilot.com",
+        ] {
+            assert_eq!(trusted_api_base(untrusted), None, "{untrusted}");
+        }
+        for trusted in [
+            "https://api.githubcopilot.com",
+            "https://api.business.githubcopilot.com/",
+            "https://copilot-api.octocorp.ghe.com",
+        ] {
+            assert_eq!(
+                trusted_api_base(trusted).as_deref(),
+                Some(trusted.trim_end_matches('/')),
+                "{trusted}"
+            );
+        }
+
         let none: CopilotUser = serde_json::from_str("{}").expect("parses");
         assert_eq!(none.api_base(), DEFAULT_API_BASE);
+    }
+
+    #[test]
+    fn a_pasted_token_is_not_shadowed_by_a_cached_one() {
+        let fresh = Duration::from_secs(60);
+        assert!(cache_is_usable(None, fresh, None));
+        assert!(cache_is_usable(Some("gho_a"), fresh, Some("gho_a")));
+        // Pasted after `gh`'s token was cached: ask again.
+        assert!(!cache_is_usable(None, fresh, Some("gho_b")));
+        // Replaced, or removed, since: ask again.
+        assert!(!cache_is_usable(Some("gho_a"), fresh, Some("gho_b")));
+        assert!(!cache_is_usable(Some("gho_a"), fresh, None));
+        assert!(!cache_is_usable(None, VALIDATION_TTL, None));
     }
 
     #[test]
