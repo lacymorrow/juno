@@ -23,4 +23,10 @@ describe("findPastedKey", () => {
     expect(findPastedKey("my password is hunter2, ask-me later")).toBeNull();
     expect(findPastedKey("sk-short")).toBeNull();
   });
+
+  it("does not mistake an ordinary word for a key", () => {
+    expect(findPastedKey("the risk-assessment-for-the-project is attached")).toBeNull();
+    expect(findPastedKey("task-force-alpha-bravo-charlie")).toBeNull();
+    expect(findPastedKey("xAIza" + "e5F6".repeat(9))).toBeNull();
+  });
 });

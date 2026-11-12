@@ -640,7 +640,11 @@ pub(crate) async fn check_provider_api_key(
     };
 
     // The smallest request that makes each provider look at the key and, where
-    // it has one, the balance behind it.
+    // it has one, the balance behind it. Listing models would be free and would
+    // catch a bad key, but it answers 200 for an account with no credit, which
+    // is the failure a person handed a key is most likely to meet. So Anthropic
+    // and OpenAI get one real, tiny message. A retired default model answers
+    // 404, which reads as `Unknown`, never as a bad key.
     let request = match provider_id.as_str() {
         "anthropic" => client
             .post("https://api.anthropic.com/v1/messages")
@@ -696,6 +700,17 @@ mod key_check_tests {
             classify_key_response(400, "API key not valid. Please pass a valid API key."),
             KeyCheck::Rejected
         );
+        assert_eq!(
+            classify_key_response(
+                400,
+                r#"{"error":{"status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}"#
+            ),
+            KeyCheck::Rejected
+        );
+        assert_eq!(
+            classify_key_response(401, r#"{"error":{"code":"invalid_api_key"}}"#),
+            KeyCheck::Rejected
+        );
     }
 
     #[test]
@@ -712,6 +727,7 @@ mod key_check_tests {
 
     #[test]
     fn anything_else_is_not_held_against_the_key() {
+        assert_eq!(classify_key_response(403, "forbidden"), KeyCheck::Unknown);
         assert_eq!(
             classify_key_response(404, "model not found"),
             KeyCheck::Unknown

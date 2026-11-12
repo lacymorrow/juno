@@ -345,6 +345,9 @@ interface DictationOffer {
 /** What `check_provider_api_key` says, plus the wait for it. */
 type KeyCheck = "checking" | "ok" | "rejected" | "no_credit" | "unknown";
 
+/** How long a hand-typed key sits still before it is tried. */
+const KEY_CHECK_TYPING_PAUSE_MS = 600;
+
 const getOnboardingSteps = (
   permissionsAlreadyGranted: boolean,
   isDevelopmentMode: boolean = false,
@@ -936,6 +939,7 @@ export default function OnboardingFlow({
   // verdict) is never shown as a failure.
   const [keyCheck, setKeyCheck] = useState<KeyCheck | null>(null);
   const keyCheckRun = useRef(0);
+  const keyCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // New state for granular permissions
   const [permissionsState, setPermissionsState] =
@@ -1252,9 +1256,11 @@ export default function OnboardingFlow({
   };
 
   // The box takes whatever was pasted, the whole message included, and keeps
-  // only the key. The key is tried against its provider straight away so the
-  // person learns here, in plain words, whether it works.
-  const handleApiKeyChange = useCallback((value: string) => {
+  // only the key. The key is tried against its provider so the person learns
+  // here, in plain words, whether it works. A paste is tried at once; a key
+  // typed or edited by hand waits for a pause, so each keystroke is not a
+  // request to the provider.
+  const handleApiKeyChange = useCallback((value: string, pasted = false) => {
     const found = findPastedKey(value);
     setApiKey(found ? found.key : value);
     setApiKeySaved(false);
@@ -1262,20 +1268,33 @@ export default function OnboardingFlow({
     setDetectedProvider(found ? found.provider : null);
 
     const run = ++keyCheckRun.current;
+    if (keyCheckTimer.current) clearTimeout(keyCheckTimer.current);
     if (!found) {
       setKeyCheck(null);
       return;
     }
     setKeyCheck("checking");
-    invoke<KeyCheck>(COMMANDS.PROVIDERS_CHECK_PROVIDER_API_KEY, {
-      providerId: found.provider.id,
-      apiKey: found.key,
-    })
-      .catch(() => "unknown" as const)
-      .then((verdict) => {
-        if (keyCheckRun.current === run) setKeyCheck(verdict);
-      });
+    keyCheckTimer.current = setTimeout(
+      () => {
+        invoke<KeyCheck>(COMMANDS.PROVIDERS_CHECK_PROVIDER_API_KEY, {
+          providerId: found.provider.id,
+          apiKey: found.key,
+        })
+          .catch(() => "unknown" as const)
+          .then((verdict) => {
+            if (keyCheckRun.current === run) setKeyCheck(verdict);
+          });
+      },
+      pasted ? 0 : KEY_CHECK_TYPING_PAUSE_MS,
+    );
   }, []);
+
+  useEffect(
+    () => () => {
+      if (keyCheckTimer.current) clearTimeout(keyCheckTimer.current);
+    },
+    [],
+  );
 
   const saveApiKey = useCallback(async () => {
     if (!detectedProvider || !apiKey.trim()) return;
@@ -2237,7 +2256,7 @@ export default function OnboardingFlow({
                         const text = e.clipboardData.getData("text");
                         if (findPastedKey(text)) {
                           e.preventDefault();
-                          handleApiKeyChange(text);
+                          handleApiKeyChange(text, true);
                         }
                       }}
                       placeholder="Paste your key, or the whole message it came in"

@@ -67,6 +67,7 @@ const openStep = async () => {
   return screen.getByLabelText("Key") as HTMLInputElement;
 };
 
+/** Typing or editing: the box's value changes with no paste event. */
 const paste = (box: HTMLInputElement, text: string) =>
   fireEvent.change(box, { target: { value: text } });
 
@@ -124,5 +125,21 @@ describe("pasting a key in setup", () => {
       COMMANDS.PROVIDERS_CHECK_PROVIDER_API_KEY,
       expect.anything(),
     );
+  });
+});
+
+describe("a key typed by hand", () => {
+  it("is tried once after a pause, not once per keystroke", async () => {
+    const box = await openStep();
+    for (const end of [KEY.length - 2, KEY.length - 1, KEY.length]) {
+      paste(box, KEY.slice(0, end));
+    }
+
+    await screen.findByText("Your Anthropic key works.", {}, slow);
+    const checks = invoke.mock.calls.filter(
+      ([cmd]) => cmd === COMMANDS.PROVIDERS_CHECK_PROVIDER_API_KEY,
+    );
+    expect(checks).toHaveLength(1);
+    expect(checks[0][1]).toEqual({ providerId: "anthropic", apiKey: KEY });
   });
 });
