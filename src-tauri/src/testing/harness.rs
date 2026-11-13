@@ -53,6 +53,8 @@ impl TestHarness {
     /// No Tauri app is created — works on any thread, no macOS main-thread
     /// restriction. Use this for tests that only need `AppState`.
     pub async fn new() -> Result<Self, String> {
+        // Tests never read or write the real Keychain.
+        crate::secrets::keep_in_memory();
         headless::set_headless_mode(true);
         startup::init_environment();
         let state = startup::init_app_state(None);
@@ -70,6 +72,8 @@ impl TestHarness {
     /// A singleton Tauri app is created on first call and reused by
     /// subsequent calls (only one EventLoop per process).
     pub async fn with_app() -> Result<Self, String> {
+        // Tests never read or write the real Keychain.
+        crate::secrets::keep_in_memory();
         headless::set_headless_mode(true);
         startup::init_environment();
         let state = startup::init_app_state(None);

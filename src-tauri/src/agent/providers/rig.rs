@@ -18,13 +18,10 @@ pub struct RigBrain {
 
 impl RigBrain {
     /// Creates a new RigBrain from a CentralizedProviderConfig struct.
-    /// The api_key is expected to be pre-resolved by `ProviderConfig::resolve_provider()`
-    /// (which handles the Rig → OpenAI key fallback). Falls back to OPENAI_API_KEY env var.
+    /// The key is Rig's saved one, else OpenAI's (`secrets::provider_key`
+    /// does that fallback), else the OPENAI_API_KEY env var.
     pub fn from_config(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
-        // api_key already resolved by resolve_provider() (Rig → OpenAI fallback)
-        let openai_api_key = config
-            .api_key
-            .clone()
+        let openai_api_key = crate::secrets::provider_key(&Provider::Rig)
             .or_else(|| env::var("OPENAI_API_KEY").ok())
             .ok_or_else(|| {
                 AgentError::ConfigurationError("OpenAI API key not found for Rig provider".into())

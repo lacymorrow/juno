@@ -19,7 +19,7 @@ vi.mock("../../AdvancedSettingsContext", () => ({
     advanced.on ? children : null,
 }));
 
-const settingsFor = (activeProvider: string) =>
+const settingsFor = (activeProvider: string, hasSavedKey = false) =>
   ({
     activeProvider,
     providers: [
@@ -33,6 +33,8 @@ const settingsFor = (activeProvider: string) =>
         is_available: true,
         is_default: true,
         computer_use_supported: true,
+        needs_sign_in: false,
+        has_saved_key: hasSavedKey,
       },
     ],
     formData: { model: "m", apiKey: "", systemPrompt: "", maxTokens: 1024, temperature: 1 },
@@ -41,6 +43,7 @@ const settingsFor = (activeProvider: string) =>
     setFormData: vi.fn(),
     handleActiveProviderChange: vi.fn(),
     handleSaveProviderSettings: vi.fn(),
+    handleClearProviderApiKey: vi.fn(),
     handleLoadAccountMcpChange: vi.fn(),
   }) as never;
 
@@ -52,7 +55,7 @@ describe("AIProviderSettings Advanced gating", () => {
   it("hides provider configuration (API key, CLI rows) with Advanced off", () => {
     render(<AIProviderSettings settings={settingsFor("anthropic")} />);
     expect(screen.queryByText("Provider Configuration")).not.toBeInTheDocument();
-    expect(screen.queryByText("API Keys")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("API key")).not.toBeInTheDocument();
   });
 
   it("hides the CLI rows with Advanced off", () => {
@@ -66,7 +69,18 @@ describe("AIProviderSettings Advanced gating", () => {
     advanced.on = true;
     render(<AIProviderSettings settings={settingsFor("anthropic")} />);
     expect(screen.getByText("Provider Configuration")).toBeInTheDocument();
-    expect(screen.getByText("API Keys")).toBeInTheDocument();
+    expect(screen.getByLabelText("API key")).toHaveValue("");
+    expect(screen.queryByText(/Key saved securely/)).not.toBeInTheDocument();
+  });
+
+  it("says a key is saved without showing it, and offers to remove it", () => {
+    advanced.on = true;
+    render(<AIProviderSettings settings={settingsFor("anthropic", true)} />);
+    const field = screen.getByLabelText("API key");
+    expect(field).toHaveValue("");
+    expect(field).toHaveAttribute("type", "password");
+    expect(screen.getByText(/Key saved securely/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove key" })).toBeInTheDocument();
   });
 
   it("shows the CLI rows with Advanced on", () => {

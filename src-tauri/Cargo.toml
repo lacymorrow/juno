@@ -118,6 +118,10 @@ walkdir = "2.4"
 # System-level utilities for shell session management
 libc = "0.2"
 cron = "0.17.0"
+# API keys and the cloud device key live in the OS credential store (Keychain,
+# Windows Credential Manager), never in the settings file. Only `secrets.rs`
+# calls it. The default `v1` feature picks the platform store.
+keyring = "4.2.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Objective-C blocks for NSEvent monitor handlers (passive stop-key observer).

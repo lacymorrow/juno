@@ -73,8 +73,7 @@ pub async fn invoke_replicate_tts(text: String) -> Result<String, String> {
         return Ok("TTS_STOPPED_BY_USER".to_string());
     }
 
-    let api_key =
-        crate::tts::account_keys::key(crate::tts::account_keys::KeyedEngine::Replicate).await?;
+    let api_key = crate::tts::account_keys::key(crate::tts::account_keys::KeyedEngine::Replicate)?;
 
     // Restore default model version logic
     let model_version = env::var("REPLICATE_MODEL_VERSION").unwrap_or_else(|_| {
@@ -381,8 +380,7 @@ pub async fn invoke_chatterbox_tts(
         return Ok("TTS_STOPPED_BY_USER".to_string());
     }
 
-    let api_key =
-        crate::tts::account_keys::key(crate::tts::account_keys::KeyedEngine::Replicate).await?;
+    let api_key = crate::tts::account_keys::key(crate::tts::account_keys::KeyedEngine::Replicate)?;
 
     let model_name = if use_hd {
         "chatterbox-hd"

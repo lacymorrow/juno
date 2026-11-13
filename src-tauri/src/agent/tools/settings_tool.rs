@@ -502,9 +502,8 @@ async fn read(app: &AppHandle, key: SettingKey) -> Result<(Value, Option<Value>)
                 K::Model => json!(active.and_then(|p| p.model.clone())),
                 // Never the key or the prompt themselves: only whether there is one.
                 K::ApiKey => set_or_not(
-                    active
-                        .and_then(|p| p.api_key.as_deref())
-                        .is_some_and(|k| !k.trim().is_empty()),
+                    crate::agent::providers::Provider::from_str(&providers.active_provider)
+                        .is_some_and(|p| crate::secrets::provider_key(&p).is_some()),
                 ),
                 K::SystemPrompt => set_or_not(
                     active

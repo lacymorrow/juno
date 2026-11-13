@@ -205,7 +205,8 @@ pub struct ProviderSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
     pub id: String,
-    pub api_key: Option<String>,
+    // The provider's key is not here: it is in the credential store
+    // (`crate::secrets::provider_key`).
     pub model: Option<String>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
@@ -239,7 +240,8 @@ pub struct CloudSettings {
     pub server_url: String,
     pub device_id: Option<String>,
     pub device_name: String,
-    pub api_key: Option<String>,
+    // The device key is not here: it is in the credential store
+    // (`crate::secrets::Secret::CloudDevice`).
     pub auto_connect: bool,
     /// Seconds between reconnection attempts. See `cloud/client.rs`, which
     /// feeds it straight to `Duration::from_secs`.
@@ -309,13 +311,6 @@ pub struct AudioSettings {
     /// turning speech back on returns to it. `None` returns to the default.
     #[serde(default)]
     pub engine_before_silent: Option<String>,
-    /// The ElevenLabs account key, set in the Voice pane. See
-    /// `tts::account_keys`.
-    #[serde(default)]
-    pub elevenlabs_api_key: Option<String>,
-    /// The Replicate account key, for Replicate and Chatterbox.
-    #[serde(default)]
-    pub replicate_api_key: Option<String>,
     #[serde(default)]
     pub chatterbox_reference_audio_url: Option<String>,
     #[serde(default = "AudioSettings::default_chatterbox_exaggeration")]
@@ -696,7 +691,6 @@ impl Default for CloudSettings {
             server_url: crate::constants::api::endpoints::CLOUD_SERVER_URL.to_string(),
             device_id: None,
             device_name: "Juno-Desktop".to_string(),
-            api_key: None,
             auto_connect: defaults::AUTO_CONNECT,
             reconnect_interval: 30,
             heartbeat_interval: 60,
@@ -719,8 +713,6 @@ impl Default for AudioSettings {
             system_voice_chosen: false,
             kokoro_voice: Self::default_kokoro_voice(),
             engine_before_silent: None,
-            elevenlabs_api_key: None,
-            replicate_api_key: None,
             chatterbox_reference_audio_url: None,
             chatterbox_exaggeration: Self::default_chatterbox_exaggeration(),
             chatterbox_use_hd: false,

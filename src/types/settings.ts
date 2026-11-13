@@ -25,11 +25,13 @@ export interface ProviderInfo {
    * no usable GitHub sign-in. Fixed by signing in rather than by pasting a
    * key, so it gets its own words. */
   needs_sign_in: boolean;
+  /** A key of this provider's own is saved in the credential store. The key
+   * itself never reaches the page. */
+  has_saved_key: boolean;
 }
 
 export interface ProviderSettings {
   id: string;
-  api_key?: string;
   model?: string;
   max_tokens?: number;
   temperature?: number;

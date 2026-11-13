@@ -1,12 +1,5 @@
-import {
-  EnvironmentVariables,
-  EnvironmentVariablesHeader,
-  EnvironmentVariablesTitle,
-  EnvironmentVariablesToggle,
-  EnvironmentVariablesContent,
-  EnvironmentVariable,
-} from "@/components/ai-elements/environment-variables";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -49,6 +42,9 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
   const commit = async () => {
     if (await settings.handleSaveProviderSettings()) setSavedAt(Date.now());
   };
+  const hasSavedKey =
+    settings.providers.find((p) => p.id === settings.activeProvider)
+      ?.has_saved_key ?? false;
 
   // A demo build answers with its own key, so say so rather than letting the
   // person wonder why Juno works without one.
@@ -193,26 +189,58 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                   </p>
                 </div>
               ) : (
-                <EnvironmentVariables>
-                  <EnvironmentVariablesHeader>
-                    <EnvironmentVariablesTitle>API Keys</EnvironmentVariablesTitle>
-                    <EnvironmentVariablesToggle />
-                  </EnvironmentVariablesHeader>
-                  <EnvironmentVariablesContent>
-                    <EnvironmentVariable
-                      name={`${(settings.activeProvider ?? "").toUpperCase()}_API_KEY`}
-                      value={settings.formData.apiKey}
-                      onChange={(val) =>
-                        settings.setFormData((prev) => ({
-                          ...prev,
-                          apiKey: val,
-                        }))
-                      }
-                      onCommit={commit}
-                      required
-                    />
-                  </EnvironmentVariablesContent>
-                </EnvironmentVariables>
+                // The saved key never comes back to the page: the field is
+                // only for typing a new one, and "Key saved" says the rest.
+                <div className="space-y-2">
+                  <label
+                    htmlFor="provider-api-key"
+                    className="text-[13px] font-medium text-foreground"
+                  >
+                    API key
+                  </label>
+                  <Input
+                    id="provider-api-key"
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="font-mono text-xs"
+                    placeholder={
+                      hasSavedKey
+                        ? "Key saved. Paste a new one to replace it."
+                        : "Paste your API key"
+                    }
+                    value={settings.formData.apiKey}
+                    onChange={(e) =>
+                      settings.setFormData((prev) => ({
+                        ...prev,
+                        apiKey: e.target.value,
+                      }))
+                    }
+                    onBlur={commit}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                    }}
+                  />
+                  {hasSavedKey && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[12px] text-muted-foreground">
+                        Key saved securely on this computer.
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive"
+                        onClick={async () => {
+                          if (await settings.handleClearProviderApiKey()) {
+                            setSavedAt(Date.now());
+                          }
+                        }}
+                      >
+                        Remove key
+                      </Button>
+                    </div>
+                  )}
+                </div>
               )
             }
           />

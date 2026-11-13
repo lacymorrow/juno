@@ -363,7 +363,7 @@ pub enum ConfigCommands {
     #[command(about = "Set configuration value")]
     Set {
         /// Configuration key
-        #[arg(help = "Configuration key (e.g., provider.anthropic.api_key)")]
+        #[arg(help = "Configuration key (e.g., agent.permission_mode)")]
         key: String,
 
         /// Configuration value

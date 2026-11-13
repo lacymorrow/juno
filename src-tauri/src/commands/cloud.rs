@@ -79,7 +79,7 @@ pub async fn update_cloud_config(
     }
 
     if let Some(key) = api_key {
-        config.api_key = Some(key);
+        config.set_api_key(key).await.map_err(|e| e.to_string())?;
     }
 
     if let Some(level) = security_level {

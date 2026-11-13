@@ -207,11 +207,9 @@ impl OpenAIBrain {
     }
 
     /// Creates a new OpenAIBrain from a CentralizedProviderConfig struct.
-    /// Falls back to the OPENAI_API_KEY env var if the config has no api_key.
+    /// The key is the saved one, else the OPENAI_API_KEY env var.
     pub fn from_config(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
-        let api_key = config
-            .api_key
-            .clone()
+        let api_key = crate::secrets::provider_key(&crate::agent::providers::Provider::OpenAI)
             .or_else(|| env::var("OPENAI_API_KEY").ok())
             .ok_or_else(|| {
                 AgentError::ConfigurationError(

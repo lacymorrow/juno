@@ -312,7 +312,6 @@ async fn claude_cli_turn_writes_a_zero_cost_row() {
 
     let config = juno_lib::settings::ProviderConfig {
         id: "claude-cli".to_string(),
-        api_key: None,
         model: Some(model.to_string()),
         max_tokens: None,
         temperature: None,

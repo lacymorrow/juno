@@ -524,6 +524,14 @@ impl HeadlessRuntime {
                         )))
                     }
                 };
+                // The keys saved for the section go with it, before the
+                // provider rule runs, so it sees what is left.
+                for secret in crate::settings::reset::secrets_in_section(section.as_deref()) {
+                    crate::secrets::delete(secret).await.map_err(|e| {
+                        JunoError::ApplicationError(format!("Failed to delete a saved key: {}", e))
+                    })?;
+                }
+
                 // Reset to defaults by getting default settings and saving them
                 let defaults = crate::settings::AppSettings::default();
                 let to_save = if let Some(section_name) = section {
@@ -935,13 +943,8 @@ impl HeadlessRuntime {
                 performance: _,
             } => {
                 let state = self.app_handle.state::<AppState>();
-                // Check config + env var for API key presence
-                let config =
-                    crate::agent::providers::config::load_provider_config(Some(&self.app_handle));
-                let api_key_present = config
-                    .resolve_provider(Provider::Anthropic)
-                    .and_then(|c| c.api_key)
-                    .is_some()
+                // A saved key or the environment's
+                let api_key_present = crate::secrets::provider_key(&Provider::Anthropic).is_some()
                     || std::env::var("ANTHROPIC_API_KEY").is_ok();
 
                 let output = json!({
@@ -967,13 +970,8 @@ impl HeadlessRuntime {
                 benchmark: _,
             } => {
                 let state = self.app_handle.state::<AppState>();
-                // Check config + env var for API key presence
-                let config =
-                    crate::agent::providers::config::load_provider_config(Some(&self.app_handle));
-                let api_key_present = config
-                    .resolve_provider(Provider::Anthropic)
-                    .and_then(|c| c.api_key)
-                    .is_some()
+                // A saved key or the environment's
+                let api_key_present = crate::secrets::provider_key(&Provider::Anthropic).is_some()
                     || std::env::var("ANTHROPIC_API_KEY").is_ok();
                 let desktop_available = state.is_desktop_available();
 

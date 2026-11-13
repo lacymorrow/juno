@@ -247,8 +247,9 @@ pub struct SettingSpec {
     /// features are on, because it is known to be broken for most voices and
     /// providers. The Settings window hides the row on the same condition.
     pub beta_only: bool,
-    /// The store field the UI's write path changes, as `section.field`. Read by
-    /// the tests that keep guardrails protected, so it must be the truth.
+    /// The store field the UI's write path changes, as `section.field`, or
+    /// `secrets.*` for a value kept in the credential store. Read by the tests
+    /// that keep guardrails protected, so it must be the truth.
     pub writes: &'static str,
 }
 
@@ -661,7 +662,7 @@ impl SettingKey {
                     Pane::Providers,
                     "api-key",
                     V::Text,
-                    "providers.api_key",
+                    "secrets.provider_key",
                 )
             },
             K::SystemPrompt => SettingSpec {
@@ -958,6 +959,8 @@ mod tests {
         "tools.tools",
         "cloud.",
         "updates.",
+        // The credential store (`crate::secrets`), where provider keys live.
+        "secrets.",
     ];
 
     /// Fields under a guardrail prefix that are deliberately not guardrails.

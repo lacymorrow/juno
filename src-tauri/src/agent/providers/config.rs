@@ -27,8 +27,8 @@ const CACHE_DURATION: Duration = Duration::from_secs(5); // 5 second cache
 /// next read inside [`CACHE_DURATION`] hands back the configuration that was
 /// just overwritten. A factory reset is the case that matters: it writes the
 /// whole settings file in one go and then immediately asks which provider
-/// should run, which without this reads the pre-reset config, sees the API key
-/// that was just deleted, and concludes nothing needs to change.
+/// should run, which without this reads the pre-reset config, sees the
+/// provider choice that was just undone, and concludes nothing needs to change.
 pub fn invalidate_config_cache() {
     if let Ok(mut cache) = CONFIG_CACHE.lock() {
         cache.clear();
@@ -87,7 +87,6 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
     vec![
         CentralizedProviderConfig {
             id: Provider::Anthropic.id().to_string(),
-            api_key: None,
             model: Some(Provider::Anthropic.default_model().to_string()),
             max_tokens: Some(crate::constants::agent::config::DEFAULT_MAX_TOKENS_ANTHROPIC),
             temperature: Some(0.7),
@@ -97,7 +96,6 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
         },
         CentralizedProviderConfig {
             id: Provider::OpenAI.id().to_string(),
-            api_key: None,
             model: Some(Provider::OpenAI.default_model().to_string()),
             max_tokens: Some(4096),
             temperature: Some(0.7),
@@ -107,7 +105,6 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
         },
         CentralizedProviderConfig {
             id: Provider::Rig.id().to_string(),
-            api_key: None, // Rig uses OpenAI's API key by default
             model: Some(Provider::Rig.default_model().to_string()),
             max_tokens: Some(4096),
             temperature: Some(0.7),
@@ -117,7 +114,6 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
         },
         CentralizedProviderConfig {
             id: Provider::Gemini.id().to_string(),
-            api_key: None,
             model: Some(Provider::Gemini.default_model().to_string()),
             max_tokens: Some(4096),
             temperature: Some(0.7),
@@ -127,7 +123,6 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
         },
         CentralizedProviderConfig {
             id: Provider::ClaudeCli.id().to_string(),
-            api_key: None, // Claude CLI doesn't need an API key — uses its own auth
             model: Some(Provider::ClaudeCli.default_model().to_string()),
             max_tokens: Some(4096),
             temperature: Some(0.7),
@@ -137,7 +132,6 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
         },
         CentralizedProviderConfig {
             id: Provider::CodexCli.id().to_string(),
-            api_key: None, // Codex CLI doesn't need an API key, it uses its own auth
             model: Some(Provider::CodexCli.default_model().to_string()),
             max_tokens: Some(4096),
             temperature: Some(0.7),
@@ -147,9 +141,6 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
         },
         CentralizedProviderConfig {
             id: Provider::Copilot.id().to_string(),
-            // Usually empty: the GitHub sign-in is found at request time. Holds
-            // a token only when one was pasted or imported from the Copilot CLI.
-            api_key: None,
             model: Some(Provider::Copilot.default_model().to_string()),
             max_tokens: Some(crate::constants::agent::config::DEFAULT_MAX_TOKENS_ANTHROPIC),
             temperature: Some(0.7),
@@ -278,19 +269,6 @@ impl ProviderConfig {
         })
     }
 
-    /// Update provider API key
-    pub fn update_api_key(&mut self, provider_id: &str, api_key: String) -> Result<(), AgentError> {
-        if let Some(provider) = self.providers.iter_mut().find(|p| p.id == provider_id) {
-            provider.api_key = Some(api_key);
-            Ok(())
-        } else {
-            Err(AgentError::ConfigurationError(format!(
-                "Provider '{}' not found",
-                provider_id
-            )))
-        }
-    }
-
     /// Update provider model
     pub fn update_model(&mut self, provider_id: &str, model: String) -> Result<(), AgentError> {
         if let Some(provider) = self.providers.iter_mut().find(|p| p.id == provider_id) {
@@ -342,23 +320,10 @@ impl ProviderConfig {
         self.providers.iter().find(|p| p.id == provider_id)
     }
 
-    /// Get resolved config for a specific provider.
-    /// Returns a cloned config with special-case fallbacks applied:
-    /// - Rig provider falls back to OpenAI's API key if its own is missing.
+    /// A copy of the settings for `provider`. Its key is not among them; see
+    /// [`crate::secrets::provider_key`].
     pub fn resolve_provider(&self, provider: Provider) -> Option<CentralizedProviderConfig> {
-        let provider_id = provider.id();
-        let mut config = self.providers.iter().find(|p| p.id == provider_id)?.clone();
-        // Rig special case: fall back to OpenAI's API key
-        if provider == Provider::Rig && config.api_key.is_none() {
-            if let Some(openai) = self
-                .providers
-                .iter()
-                .find(|p| p.id == Provider::OpenAI.id())
-            {
-                config.api_key = openai.api_key.clone();
-            }
-        }
-        Some(config)
+        self.get_provider_settings(provider.id()).cloned()
     }
 }
 

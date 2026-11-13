@@ -30,7 +30,7 @@ fn env_key_for(provider: &Provider) -> Option<&'static str> {
     match provider {
         Provider::Anthropic => Some("ANTHROPIC_API_KEY"),
         Provider::OpenAI => Some("OPENAI_API_KEY"),
-        // Rig borrows OpenAI's key, which `resolve_provider` already reflects.
+        // Rig borrows OpenAI's key, which `secrets::provider_key` already reflects.
         Provider::Rig => Some("OPENAI_API_KEY"),
         Provider::Gemini => Some("GEMINI_API_KEY"),
         // The CLIs have no key by design; their credential is their login.
@@ -42,23 +42,24 @@ fn env_key_for(provider: &Provider) -> Option<&'static str> {
 
 /// Whether `config`'s active provider could actually run right now.
 pub(crate) fn active_has_credential(config: &ProviderConfig) -> bool {
+    has_credential(&config.active_provider, crate::secrets::provider_key)
+}
+
+/// [`active_has_credential`] with the saved-key lookup passed in, so tests
+/// can say which keys are saved without a credential store.
+fn has_credential(active_provider: &str, saved_key: impl Fn(&Provider) -> Option<String>) -> bool {
     // A demo build carries a compiled-in Anthropic key, so it is never short
     // of credentials and must not be moved off the provider that key is for.
     if crate::demo::is_demo_build() {
         return true;
     }
 
-    let Some(provider) = Provider::from_str(&config.active_provider) else {
+    let Some(provider) = Provider::from_str(active_provider) else {
         // An unrecognised provider id cannot run, so it has nothing to protect.
         return false;
     };
 
-    let from_settings = config
-        .resolve_provider(provider.clone())
-        .and_then(|p| p.api_key)
-        .is_some_and(|key| !key.is_empty());
-
-    from_settings
+    saved_key(&provider).is_some_and(|key| !key.is_empty())
         || env_key_for(&provider)
             .and_then(|name| std::env::var(name).ok())
             .is_some_and(|value| !value.is_empty())
@@ -93,9 +94,7 @@ pub async fn apply(settings_manager: &SettingsManager) -> Result<String, String>
     // Copilot is a network round trip to GitHub, not a subprocess. Somebody
     // with a key or a signed-in CLI never needs it decided, but asking anyway
     // keeps Settings honest about it from the first render.
-    let copilot_token = config
-        .resolve_provider(Provider::Copilot)
-        .and_then(|p| p.api_key);
+    let copilot_token = crate::secrets::provider_key(&Provider::Copilot);
     let copilot_status = copilot::status(copilot_token.as_deref()).await;
     // GitHub unreachable is not signed out: a provider Juno already chose is
     // kept while its token is still there, rather than abandoned on a blip.
@@ -189,18 +188,14 @@ pub async fn apply_for_app(app_handle: tauri::AppHandle) -> Result<String, Strin
 mod tests {
     use super::*;
 
-    /// Default settings with `active` selected, optionally carrying a key.
-    fn config_with(active: &str, api_key: Option<&str>) -> ProviderConfig {
-        let mut config = ProviderConfig {
-            active_provider: active.to_string(),
-            ..ProviderConfig::default()
-        };
-        if let Some(key) = api_key {
-            if let Some(entry) = config.providers.iter_mut().find(|p| p.id == active) {
-                entry.api_key = Some(key.to_string());
-            }
-        }
-        config
+    /// A saved-key lookup that answers `key` for `saved_for` and nothing else.
+    fn saved(saved_for: Provider, key: &str) -> impl Fn(&Provider) -> Option<String> {
+        let key = key.to_string();
+        move |p| (*p == saved_for).then(|| key.clone())
+    }
+
+    fn nothing_saved(_: &Provider) -> Option<String> {
+        None
     }
 
     /// True when the developer running the tests has this key exported, in
@@ -211,20 +206,24 @@ mod tests {
 
     #[test]
     fn a_saved_key_counts_as_a_credential() {
-        assert!(active_has_credential(&config_with(
+        assert!(has_credential(
             "anthropic",
-            Some("sk-ant-example")
-        )));
+            saved(Provider::Anthropic, "sk-ant-example")
+        ));
+        // Rig asks for its own key; `secrets::provider_key` answers with
+        // OpenAI's when Rig has none, and that answer counts.
+        assert!(has_credential(
+            "rig",
+            saved(Provider::Rig, "sk-proj-example")
+        ));
     }
 
     #[test]
     fn an_empty_key_does_not_count() {
-        // An empty string is what a cleared field leaves behind. Reading it as
-        // a credential would keep someone on a provider that cannot run.
         if env_key_is_set("ANTHROPIC_API_KEY") || crate::demo::is_demo_build() {
             return;
         }
-        assert!(!active_has_credential(&config_with("anthropic", Some(""))));
+        assert!(!has_credential("anthropic", saved(Provider::Anthropic, "")));
     }
 
     #[test]
@@ -232,18 +231,12 @@ mod tests {
         if env_key_is_set("ANTHROPIC_API_KEY") || crate::demo::is_demo_build() {
             return;
         }
-        assert!(!active_has_credential(&config_with("anthropic", None)));
-    }
-
-    #[test]
-    fn rig_borrows_the_openai_key() {
-        // `resolve_provider` already does this at query time. The rule has to
-        // agree, or Juno would move someone off a Rig setup that works.
-        let mut config = config_with("rig", None);
-        if let Some(entry) = config.providers.iter_mut().find(|p| p.id == "openai") {
-            entry.api_key = Some("sk-proj-example".to_string());
-        }
-        assert!(active_has_credential(&config));
+        assert!(!has_credential("anthropic", nothing_saved));
+        // Another provider's key is not this one's.
+        assert!(!has_credential(
+            "anthropic",
+            saved(Provider::Gemini, "gemini-key")
+        ));
     }
 
     #[test]
@@ -251,7 +244,7 @@ mod tests {
         if crate::demo::is_demo_build() {
             return;
         }
-        assert!(!active_has_credential(&config_with("not-a-provider", None)));
+        assert!(!has_credential("not-a-provider", nothing_saved));
     }
 
     #[test]

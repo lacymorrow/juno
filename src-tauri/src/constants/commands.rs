@@ -86,6 +86,7 @@ pub mod providers {
     pub const VALIDATE_PROVIDER_MODEL: &str = "validate_provider_model";
     pub const GET_PROVIDER_MODELS: &str = "get_provider_models";
     pub const UPDATE_PROVIDER_API_KEY: &str = "update_provider_api_key";
+    pub const CLEAR_PROVIDER_API_KEY: &str = "clear_provider_api_key";
     pub const UPDATE_PROVIDER_MODEL: &str = "update_provider_model";
     pub const UPDATE_PROVIDER_MAX_TOKENS: &str = "update_provider_max_tokens";
     pub const UPDATE_PROVIDER_TEMPERATURE: &str = "update_provider_temperature";

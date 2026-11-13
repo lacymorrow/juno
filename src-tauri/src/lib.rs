@@ -58,6 +58,7 @@ pub mod persistent_memory; // Cross-session persistent user memory
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
 pub mod readiness; // What is still warming up after launch, for the bar's status dot
 pub mod scheduler; // User-facing scheduled automations (cron-based agent tasks)
+pub mod secrets; // API keys and the cloud device key, in the OS credential store
 pub mod settings; // Centralized settings management with reactive updates
 pub mod shell_command; // The one place that parses a shell command string
 pub mod shortcuts; // Shortcut string parsing utilities
@@ -287,6 +288,9 @@ pub fn run() {
     startup_timing::begin();
     // Must precede any HTTP client construction anywhere in the process.
     install_crypto_provider();
+    // Every saved key, read out of the credential store once, here on the main
+    // thread before any async work, so no request ever waits on the Keychain.
+    secrets::load();
 
     // --- Execute Startup Sequence ---
     let (_desktop_arc, app_state) = match startup::StartupSequence::run() {
@@ -482,6 +486,7 @@ pub fn run() {
             get_provider_models,
             get_provider_settings,
             update_provider_api_key,
+            clear_provider_api_key,
             check_api_keys_available,
             get_copilot_status,
             import_copilot_cli_sign_in,
@@ -954,10 +959,8 @@ pub fn run() {
             tts::speech_level::bind(app_handle.clone());
             // The launch greeting, rendered in parallel with the rest of
             // startup so it plays the moment the bar appears. It renders in
-            // the engine that will actually speak, which means reading the
-            // account keys out of Settings, so the handle those reads need
-            // has to be set first (LAC-6340). Setting it twice is a no-op.
-            tts::account_keys::remember_app(&app_handle);
+            // the engine that will actually speak, which depends on the
+            // account keys `secrets::load` already read (LAC-6340).
             greeting::refresh_cache(&app_handle);
 
             // --- Initialize Settings Manager ---

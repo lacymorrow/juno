@@ -17,7 +17,6 @@
 
 use crate::agent::core::ToolDefinition;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
-use crate::agent::providers::config::{load_provider_config, ProviderConfig};
 use crate::agent::providers::types::Provider;
 use crate::constants::agent;
 use async_trait::async_trait;
@@ -26,7 +25,6 @@ use base64::Engine as _;
 use chrono::Local;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use tauri::AppHandle;
 use tracing::{error, info, warn};
 
 /// Entitlement name the LAC-4134 hook will match on. The hook is not landed
@@ -310,32 +308,22 @@ impl ImageProvider for OpenAIGptImageProvider {
 // line + palette.
 // ============================================================================
 
-/// Resolve the image provider from a `ProviderConfig`. Returns `None` when
-/// no supported key is configured; the caller surfaces that as a settings
-/// prompt, not as a hard error.
-pub fn select_provider(cfg: &ProviderConfig) -> Option<Box<dyn ImageProvider>> {
-    if let Some(key) = cfg
-        .get_provider_settings(Provider::Gemini.id())
-        .and_then(|p| p.api_key.clone())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            std::env::var("GEMINI_API_KEY")
-                .ok()
-                .filter(|s| !s.is_empty())
-        })
-    {
+/// Resolve the image provider from the saved keys, then the environment.
+/// Returns `None` when no supported key is configured; the caller surfaces
+/// that as a settings prompt, not as a hard error.
+pub fn select_provider() -> Option<Box<dyn ImageProvider>> {
+    if let Some(key) = crate::secrets::provider_key(&Provider::Gemini).or_else(|| {
+        std::env::var("GEMINI_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty())
+    }) {
         return Some(Box::new(GeminiImageProvider::new(key)));
     }
-    if let Some(key) = cfg
-        .get_provider_settings(Provider::OpenAI.id())
-        .and_then(|p| p.api_key.clone())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            std::env::var("OPENAI_API_KEY")
-                .ok()
-                .filter(|s| !s.is_empty())
-        })
-    {
+    if let Some(key) = crate::secrets::provider_key(&Provider::OpenAI).or_else(|| {
+        std::env::var("OPENAI_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty())
+    }) {
         return Some(Box::new(OpenAIGptImageProvider::new(key)));
     }
     None
@@ -468,15 +456,14 @@ fn log_cost(action: &str, provider: &dyn ImageProvider) {
     );
 }
 
-async fn generate_exec(input: Value, app_handle: AppHandle) -> Result<Value, String> {
+async fn generate_exec(input: Value) -> Result<Value, String> {
     let prompt = input
         .get("prompt")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing prompt".to_string())?;
     let size = input.get("size").and_then(|v| v.as_str());
 
-    let cfg = load_provider_config(Some(&app_handle));
-    let Some(provider) = select_provider(&cfg) else {
+    let Some(provider) = select_provider() else {
         warn!("generate_image called with no image provider configured");
         return Ok(no_key_response());
     };
@@ -497,7 +484,7 @@ async fn generate_exec(input: Value, app_handle: AppHandle) -> Result<Value, Str
     }))
 }
 
-async fn edit_exec(input: Value, app_handle: AppHandle) -> Result<Value, String> {
+async fn edit_exec(input: Value) -> Result<Value, String> {
     let image_arg = input
         .get("image")
         .and_then(|v| v.as_str())
@@ -507,8 +494,7 @@ async fn edit_exec(input: Value, app_handle: AppHandle) -> Result<Value, String>
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing instruction".to_string())?;
 
-    let cfg = load_provider_config(Some(&app_handle));
-    let Some(provider) = select_provider(&cfg) else {
+    let Some(provider) = select_provider() else {
         warn!("edit_image called with no image provider configured");
         return Ok(no_key_response());
     };
@@ -535,22 +521,13 @@ async fn edit_exec(input: Value, app_handle: AppHandle) -> Result<Value, String>
 /// Both tools carry the `image_edits` entitlement. The hook from LAC-4134 is
 /// not landed yet; while it's absent, the gate is open (the person pays their
 /// own provider).
-pub async fn register_image_tools(provider: &mut LocalToolProvider, app_handle: AppHandle) {
-    let gen_def = generate_definition();
-    let gen_handle = app_handle.clone();
-    let gen_fn = move |input| {
-        let handle = gen_handle.clone();
-        async move { generate_exec(input, handle).await }
-    };
-    provider.register_async_tool(gen_def, gen_fn).await;
-
-    let edit_def = edit_definition();
-    let edit_handle = app_handle.clone();
-    let edit_fn = move |input| {
-        let handle = edit_handle.clone();
-        async move { edit_exec(input, handle).await }
-    };
-    provider.register_async_tool(edit_def, edit_fn).await;
+pub async fn register_image_tools(provider: &mut LocalToolProvider) {
+    provider
+        .register_async_tool(generate_definition(), generate_exec)
+        .await;
+    provider
+        .register_async_tool(edit_definition(), edit_exec)
+        .await;
 
     info!(
         requires = ENTITLEMENT,
@@ -565,7 +542,6 @@ pub async fn register_image_tools(provider: &mut LocalToolProvider, app_handle: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::providers::config::ProviderConfig;
 
     /// The three `select_provider_*` tests set and clear the same process
     /// environment variables, and tests run in parallel: one clearing
@@ -577,10 +553,6 @@ mod tests {
         ENV_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    fn empty_cfg() -> ProviderConfig {
-        ProviderConfig::default()
     }
 
     #[test]
@@ -609,7 +581,7 @@ mod tests {
         std::env::remove_var("GEMINI_API_KEY");
         std::env::remove_var("OPENAI_API_KEY");
 
-        let picked = select_provider(&empty_cfg());
+        let picked = select_provider();
         assert!(picked.is_none(), "no key means no provider");
 
         if let Some(v) = gemini {
@@ -628,7 +600,7 @@ mod tests {
         std::env::set_var("GEMINI_API_KEY", "test-g");
         std::env::set_var("OPENAI_API_KEY", "test-o");
 
-        let picked = select_provider(&empty_cfg()).expect("one key is present");
+        let picked = select_provider().expect("one key is present");
         assert_eq!(picked.name(), "gemini");
 
         match prior_g {
@@ -649,7 +621,7 @@ mod tests {
         std::env::remove_var("GEMINI_API_KEY");
         std::env::set_var("OPENAI_API_KEY", "test-o");
 
-        let picked = select_provider(&empty_cfg()).expect("openai key is present");
+        let picked = select_provider().expect("openai key is present");
         assert_eq!(picked.name(), "openai");
 
         match prior_g {
