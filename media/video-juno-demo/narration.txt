@@ -1,0 +1,23 @@
+[silence until the card appears]
+
+[B01 0:12]
+This is Juno. I asked what's in a folder and it gave me a card with a button on it.
+
+[B02 0:08]
+Open. There's the folder. The answer is something you can press.
+
+[B03 0:18]
+Now a task. Watch the mouse pointer in the corner. It never moves. Juno reads the screen the way a screen reader does and acts on the element itself, so I can keep working.
+
+[B04 0:14]
+And the thing I use most. Hold a key, talk, let go.
+
+[to Juno, exact] Pick up cat food on the way home and call the vet about Tuesday.
+
+[silence while the text lands]
+
+[B05 0:06]
+Local transcription. Nothing leaves the Mac for that part.
+
+[B06 0:12]
+It's a free Mac app and it's open source. It does calendar and messages too, but I'll show you those once I've tested every one. junebug dot ai.
