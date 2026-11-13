@@ -690,17 +690,20 @@ pub async fn session(configured: Option<&str>) -> Result<Session, AgentError> {
     // `status` leaves the last confirmed credential in place even past its
     // TTL, and that is used rather than failing the turn over a blip. Only a
     // real "no" (401, no Copilot, nothing found) clears it.
-    if let Ok(guard) = VALIDATED.lock() {
-        if let Some(v) = guard.as_ref() {
-            return Ok(Session {
-                token: v.token.clone(),
-                api_base: v.user.api_base(),
-            });
-        }
-    }
-    Err(AgentError::ConfigurationError(not_signed_in_message(
-        &status,
-    )))
+    last_confirmed_session()
+        .ok_or_else(|| AgentError::ConfigurationError(not_signed_in_message(&status)))
+}
+
+/// The last credential GitHub confirmed, however long ago and whatever is
+/// saved in settings now. Only for right after a fresh [`status`], which
+/// clears it on any real "no".
+fn last_confirmed_session() -> Option<Session> {
+    let guard = VALIDATED.lock().ok()?;
+    let v = guard.as_ref()?;
+    Some(Session {
+        token: v.token.clone(),
+        api_base: v.user.api_base(),
+    })
 }
 
 fn cached_session(configured: Option<&str>) -> Option<Session> {
@@ -963,8 +966,16 @@ mod tests {
             cached_session(None).map(|s| s.token),
             Some("gho_cached".to_string())
         );
+        // Not usable as a cache hit for a different saved token, but still
+        // the credential a turn falls back on when GitHub cannot be reached.
+        assert!(cached_session(Some("gho_pasted")).is_none());
+        assert_eq!(
+            last_confirmed_session().map(|s| s.token),
+            Some("gho_cached".to_string())
+        );
         invalidate();
         assert!(cached_session(None).is_none());
+        assert!(last_confirmed_session().is_none());
     }
 
     #[test]

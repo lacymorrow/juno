@@ -534,6 +534,10 @@ pub struct AnthropicBrain {
 
 /// Whether the conversation's last message carries tool results back, which
 /// is what makes a request a follow-up step rather than a new question.
+///
+/// Only the last message is read, on purpose: anything a person typed after
+/// the tool results (a steering message) is a new question and is counted as
+/// one. Erring that way never under-reports what the person asked for.
 fn ends_with_tool_result(messages: &[ApiMessage]) -> bool {
     messages.last().is_some_and(|message| {
         message.role == "user"
@@ -618,6 +622,11 @@ impl AnthropicBrain {
     }
 
     /// A brain that talks to Claude through GitHub Copilot.
+    ///
+    /// The request is the Claude API's, minus `fallbacks`: adaptive thinking,
+    /// the thinking-binding-controls beta with `block_binding`, prompt caching
+    /// and both computer-use shapes were accepted by the live Copilot endpoint
+    /// for every catalog row (2026-11-12, see #984).
     ///
     /// Nothing is checked here: the token is found and validated on the first
     /// request (see [`super::copilot::session`]), so creating the brain never
@@ -2540,14 +2549,16 @@ impl AgentBrain for AnthropicBrain {
         // own clock inside `handle_streaming_response`, which is where its
         // record is written.
         let request_started = std::time::Instant::now();
-        let mut copilot_session = match &self.endpoint {
-            Endpoint::Copilot { configured_token } => {
-                Some(super::copilot::session(configured_token.as_deref()).await?)
-            }
-            Endpoint::Anthropic { .. } => None,
-        };
         let initiator = super::copilot::initiator(ends_with_tool_result(&request_payload.messages));
         let send = async {
+            // Inside `send`, so Escape also ends a slow sign-in check (`gh`,
+            // then GitHub); dropping the future kills the `gh` child.
+            let mut copilot_session = match &self.endpoint {
+                Endpoint::Copilot { configured_token } => {
+                    Some(super::copilot::session(configured_token.as_deref()).await?)
+                }
+                Endpoint::Anthropic { .. } => None,
+            };
             let mut attempt = 0usize;
             let mut signed_in_again = false;
             loop {
