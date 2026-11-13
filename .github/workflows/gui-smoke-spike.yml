@@ -1,0 +1,52 @@
+# SPIKE (LAC-8043): can a GitHub-hosted macOS runner capture a real Juno window?
+# Screen Recording TCC may blank the capture. This runs the capture against a
+# published release and reports whether window content is actually there.
+name: GUI smoke spike
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published Juno release tag
+        default: v0.8.281
+  pull_request:
+    paths: [scripts/gui-smoke/**, .github/workflows/gui-smoke-spike.yml]
+permissions:
+  contents: read
+jobs:
+  spike:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download release app
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || 'v0.8.281' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/app"
+          gh release download "$TAG" --pattern 'Juno_universal.app.tar.gz' --dir "$RUNNER_TEMP/app"
+          tar -xzf "$RUNNER_TEMP/app/Juno_universal.app.tar.gz" -C "$RUNNER_TEMP/app"
+          ls "$RUNNER_TEMP/app"
+      - name: Session facts
+        run: |
+          sw_vers; echo "console user: $(stat -f%Su /dev/console)"
+          swift -e 'import CoreGraphics; print("windows:", (CGWindowListCopyWindowInfo([.optionAll],0) as! [[String:Any]]).count)'
+      - name: Capture each state
+        run: |
+          mkdir -p "$RUNNER_TEMP/shots"
+          BIN="$RUNNER_TEMP/app/Juno.app/Contents/MacOS/juno"
+          rc=0
+          for s in signedin signedout notinstalled; do
+            scripts/gui-smoke/capture-state.sh "$BIN" "$s" "$RUNNER_TEMP/shots" || rc=1
+          done
+          exit $rc
+      - name: Negative control (assertion must reject a flat image)
+        run: |
+          swift -e 'import CoreGraphics;import ImageIO;import UniformTypeIdentifiers;let c=CGContext(data:nil,width:800,height:600,bitsPerComponent:8,bytesPerRow:0,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue)!;c.setFillColor(CGColor(red:0.9,green:0.9,blue:0.9,alpha:1));c.fill(CGRect(x:0,y:0,width:800,height:600));let d=CGImageDestinationCreateWithURL(URL(fileURLWithPath:CommandLine.arguments[1]) as CFURL,UTType.png.identifier as CFString,1,nil)!;CGImageDestinationAddImage(d,c.makeImage()!,nil);CGImageDestinationFinalize(d)' "$RUNNER_TEMP/blank.png"
+          if swift scripts/gui-smoke/check-png.swift "$RUNNER_TEMP/blank.png"; then echo "assertion accepted a blank image"; exit 1; fi
+          echo "blank image correctly rejected"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gui-smoke-spike
+          path: ${{ runner.temp }}/shots
