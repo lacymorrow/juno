@@ -27,6 +27,12 @@ pub(crate) async fn get_providers(
         let token = saved_copilot_token(&app_handle).await;
         copilot::status(token.as_deref()).await;
     }
+    // The listing reads the last known Copilot sign-in rather than probing, so
+    // refresh it here: somebody who ran `copilot login` and came back to this
+    // window should see the badge clear. A no-op when Copilot is not installed.
+    if crate::agent::providers::copilot_cli::is_copilot_cli_available() {
+        let _ = crate::agent::providers::copilot_cli::cli_status().await;
+    }
     Ok(BrainFactory::list_providers_with_app_handle(Some(
         &app_handle,
     )))
@@ -365,6 +371,13 @@ pub(crate) async fn check_api_keys_available(app_handle: tauri::AppHandle) -> Re
         .signed_in
     {
         info!("No API keys, but GitHub Copilot is signed in");
+        return Ok(true);
+    }
+    if crate::agent::providers::copilot_cli::cli_status()
+        .await
+        .is_signed_in()
+    {
+        info!("No API keys, but the Copilot CLI is signed in");
         return Ok(true);
     }
 

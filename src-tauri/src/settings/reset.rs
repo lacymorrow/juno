@@ -271,6 +271,11 @@ mod tests {
                     installed: false,
                     signed_in: false,
                 },
+                CliCandidate {
+                    provider_id: Provider::CopilotCli.id(),
+                    installed: false,
+                    signed_in: false,
+                },
             ],
         }
     }
@@ -357,6 +362,13 @@ mod tests {
                 .iter()
                 .any(|p| p.id == Provider::Copilot.id()),
             "the rule can switch a reset onto GitHub Copilot, so it needs an entry"
+        );
+        assert!(
+            providers
+                .providers
+                .iter()
+                .any(|p| p.id == Provider::CopilotCli.id()),
+            "the rule can switch a reset onto the Copilot CLI, so it needs an entry"
         );
     }
 

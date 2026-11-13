@@ -264,6 +264,13 @@
       "output": 0,
       "cache_read": 0,
       "cache_write": 0
+    },
+    "copilot-cli:auto": {
+      "billing": "subscription",
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
     }
   },
   "_notes": [

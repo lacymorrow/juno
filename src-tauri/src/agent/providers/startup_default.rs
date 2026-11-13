@@ -18,6 +18,7 @@ use super::claude_cli;
 use super::codex_cli;
 use super::config::ProviderConfig;
 use super::copilot;
+use super::copilot_cli;
 use super::default_selection::{decide, CliCandidate, Decision, SelectionState};
 use super::types::Provider;
 use crate::settings::manager::SettingsManager;
@@ -36,7 +37,7 @@ fn env_key_for(provider: &Provider) -> Option<&'static str> {
         // The CLIs have no key by design; their credential is their login.
         // Copilot's is a GitHub sign-in, which is checked as a candidate below
         // rather than counted as a key here.
-        Provider::ClaudeCli | Provider::CodexCli | Provider::Copilot => None,
+        Provider::ClaudeCli | Provider::CodexCli | Provider::Copilot | Provider::CopilotCli => None,
     }
 }
 
@@ -104,8 +105,16 @@ pub async fn apply(settings_manager: &SettingsManager) -> Result<String, String>
             && copilot_status.token_found
             && copilot::last_known_sign_in() == claude_cli::SignIn::Unknown);
 
+    let copilot_cli_installed = copilot_cli::is_copilot_cli_available();
+    let copilot_cli_status = if copilot_cli_installed {
+        copilot_cli::cli_status().await
+    } else {
+        copilot_cli::CliStatus::default()
+    };
+
     // Preference order lives here: Claude, then Codex, then GitHub Copilot,
-    // then (future) trial credits. The rule walks the list first-usable-wins, so this is the one
+    // then the Copilot CLI, then (future) trial credits. The rule walks the
+    // list first-usable-wins, so this is the one
     // place to touch when a provider is added or re-ordered.
     let cli_candidates = vec![
         CliCandidate {
@@ -122,6 +131,11 @@ pub async fn apply(settings_manager: &SettingsManager) -> Result<String, String>
             provider_id: Provider::Copilot.id(),
             installed: copilot_status.token_found,
             signed_in: copilot_signed_in,
+        },
+        CliCandidate {
+            provider_id: Provider::CopilotCli.id(),
+            installed: copilot_cli_status.installed,
+            signed_in: copilot_cli_status.is_signed_in(),
         },
     ];
 
@@ -168,6 +182,9 @@ pub async fn apply(settings_manager: &SettingsManager) -> Result<String, String>
                     ),
                     None => info!("[Providers] Active provider is now '{provider_id}'"),
                 },
+                id if id == Provider::CopilotCli.id() => info!(
+                    "[Providers] No API key configured and the Copilot CLI is signed in, using it"
+                ),
                 _ => info!("[Providers] Active provider is now '{provider_id}'"),
             }
             Ok(provider_id.to_string())
@@ -261,6 +278,7 @@ mod tests {
         assert_eq!(env_key_for(&Provider::ClaudeCli), None);
         assert_eq!(env_key_for(&Provider::CodexCli), None);
         assert_eq!(env_key_for(&Provider::Copilot), None);
+        assert_eq!(env_key_for(&Provider::CopilotCli), None);
     }
 
     #[test]
@@ -272,6 +290,7 @@ mod tests {
         assert!(ids.contains(&Provider::ClaudeCli.id()));
         assert!(ids.contains(&Provider::CodexCli.id()));
         assert!(ids.contains(&Provider::Copilot.id()));
+        assert!(ids.contains(&Provider::CopilotCli.id()));
         assert!(ids.contains(&super::super::config::DEFAULT_PROVIDER.id()));
     }
 }

@@ -485,6 +485,7 @@ mod tests {
             Provider::ClaudeCli,
             Provider::CodexCli,
             Provider::Copilot,
+            Provider::CopilotCli,
         ] {
             for role in [RouterRole::Classifier, RouterRole::Chat] {
                 let holders = provider
@@ -561,6 +562,7 @@ mod tests {
             Provider::ClaudeCli,
             Provider::CodexCli,
             Provider::Copilot,
+            Provider::CopilotCli,
         ] {
             let configured = provider.default_model();
             for route in [Route::Chat, Route::Tools, Route::Escalate] {
