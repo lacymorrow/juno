@@ -24,6 +24,7 @@ import type { MouseControlMode } from "@/lib/inputControl";
 import { AgentModeGroup } from "../AgentModeGroup";
 import { BuildGroup } from "../BuildGroup";
 import { OnboardingGroup } from "../OnboardingGroup";
+import { IS_WINDOWS } from "@/lib/platform";
 
 interface AdvancedSettingsProps extends SettingsSectionProps {
   onNavigateToPermissions?: () => void;
@@ -282,60 +283,62 @@ export default function AdvancedSettings({
 
   return (
     <div className="space-y-6">
-      <SettingsGroup
-        title="Background"
-        footer={
-          backgroundError
-            ? "These settings could not be loaded. Reopen Settings to try again."
-            : undefined
-        }
-      >
-        <SettingsRow
-          htmlFor="background-mode"
-          label="Work in the background"
-          description="Work in other apps without taking your cursor."
-          info="Juno acts on other apps without taking your cursor or your active window, so you can keep working."
+      {!IS_WINDOWS && (
+        <SettingsGroup
+          title="Background"
+          footer={
+            backgroundError
+              ? "These settings could not be loaded. Reopen Settings to try again."
+              : undefined
+          }
         >
-          <Switch
-            id="background-mode"
-            checked={backgroundMode}
-            onCheckedChange={handleBackgroundModeChange}
-            disabled={backgroundLoading || backgroundError}
-          />
-        </SettingsRow>
+          <SettingsRow
+            htmlFor="background-mode"
+            label="Work in the background"
+            description="Work in other apps without taking your cursor."
+            info="Juno acts on other apps without taking your cursor or your active window, so you can keep working."
+          >
+            <Switch
+              id="background-mode"
+              checked={backgroundMode}
+              onCheckedChange={handleBackgroundModeChange}
+              disabled={backgroundLoading || backgroundError}
+            />
+          </SettingsRow>
 
-        <SettingsRow
-          id="mouse-control"
-          label="Mouse control"
-          description="When a step needs the real pointer."
-          info="Some steps need the real pointer. Ask each time, or let Juno take it whenever it needs to."
-        >
-          <SegmentedChoice
+          <SettingsRow
             id="mouse-control"
             label="Mouse control"
-            value={mouseControl}
-            options={MOUSE_CONTROL_OPTIONS}
-            disabled={backgroundLoading || backgroundError}
-            onChange={handleMouseControlChange}
-          />
-        </SettingsRow>
+            description="When a step needs the real pointer."
+            info="Some steps need the real pointer. Ask each time, or let Juno take it whenever it needs to."
+          >
+            <SegmentedChoice
+              id="mouse-control"
+              label="Mouse control"
+              value={mouseControl}
+              options={MOUSE_CONTROL_OPTIONS}
+              disabled={backgroundLoading || backgroundError}
+              onChange={handleMouseControlChange}
+            />
+          </SettingsRow>
 
-        <SettingsRow
-          id="show-juno-in"
-          label="Show Juno in"
-          description="Where Juno's icon appears."
-          info="Menu bar only keeps Juno out of the Dock and the app switcher. To get the Dock icon back, click the Juno icon in the menu bar and choose Dock or Both here. Opening Juno from your Applications folder also brings its window back."
-        >
-          <SegmentedChoice
+          <SettingsRow
             id="show-juno-in"
             label="Show Juno in"
-            value={presenceOf(dockIconVisible, showTrayIcon)}
-            options={PRESENCE_OPTIONS}
-            disabled={backgroundLoading || backgroundError}
-            onChange={handlePresenceChange}
-          />
-        </SettingsRow>
-      </SettingsGroup>
+            description="Where Juno's icon appears."
+            info="Menu bar only keeps Juno out of the Dock and the app switcher. To get the Dock icon back, click the Juno icon in the menu bar and choose Dock or Both here. Opening Juno from your Applications folder also brings its window back."
+          >
+            <SegmentedChoice
+              id="show-juno-in"
+              label="Show Juno in"
+              value={presenceOf(dockIconVisible, showTrayIcon)}
+              options={PRESENCE_OPTIONS}
+              disabled={backgroundLoading || backgroundError}
+              onChange={handlePresenceChange}
+            />
+          </SettingsRow>
+        </SettingsGroup>
+      )}
 
       <SettingsGroup title="Claude CLI">
         <SettingsRow

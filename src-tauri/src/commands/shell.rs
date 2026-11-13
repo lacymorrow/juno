@@ -115,6 +115,7 @@ impl ShellSession {
     ///
     /// Idempotent and called before every spawn, so a restarted session always
     /// has it and a session whose directory was cleaned up rebuilds it.
+    #[cfg(unix)]
     fn ensure_shim_bin(&self) -> Result<std::path::PathBuf, String> {
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
@@ -130,6 +131,13 @@ impl ShellSession {
             .map_err(|e| format!("Failed to make the rm shim executable: {}", e))?;
 
         Ok(shim_dir)
+    }
+
+    /// The session is a persistent bash, which Windows does not have. Every
+    /// spawn passes through here first, so this is where the session stops.
+    #[cfg(windows)]
+    fn ensure_shim_bin(&self) -> Result<std::path::PathBuf, String> {
+        Err("The persistent bash session is not available on Windows".to_string())
     }
 
     /// Start or restart the bash process
@@ -341,6 +349,7 @@ impl ShellSession {
 
     /// Read output from stdout/stderr with timeout and completion detection
     /// Fixed: Ensures pipes are always restored to blocking mode, even on error
+    #[cfg(unix)]
     fn read_output_with_timeout_secure(
         &self,
         child: &mut Child,
@@ -458,7 +467,20 @@ impl ShellSession {
         Ok((stdout_clean, stderr_clean))
     }
 
+    /// Unreachable on Windows: `ensure_shim_bin` fails before any spawn.
+    #[cfg(windows)]
+    fn read_output_with_timeout_secure(
+        &self,
+        _child: &mut Child,
+        _completion_marker: &str,
+        _timeout: Duration,
+        _start_time: Instant,
+    ) -> Result<(String, String), String> {
+        Err("The persistent bash session is not available on Windows".to_string())
+    }
+
     /// Set file descriptor to non-blocking mode
+    #[cfg(unix)]
     fn set_nonblocking(&self, fd: i32) -> Result<(), String> {
         unsafe {
             let flags = libc::fcntl(fd, libc::F_GETFL);
@@ -473,6 +495,7 @@ impl ShellSession {
     }
 
     /// Set file descriptor to blocking mode
+    #[cfg(unix)]
     fn set_blocking(&self, fd: i32) -> Result<(), String> {
         unsafe {
             let flags = libc::fcntl(fd, libc::F_GETFL);

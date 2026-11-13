@@ -17,6 +17,8 @@ pub mod automation;
 pub mod bar_drag_follow;
 /// Click-through for a steady bar window: hit-test the cursor against what the page draws.
 pub mod bar_hit_test;
+/// Child processes without a console window on Windows; a no-op elsewhere.
+pub mod console_window;
 /// Tauri's mixed-scale screen numbers, converted to global desktop points.
 pub mod desktop_points;
 pub mod file_panels;
@@ -37,6 +39,12 @@ pub mod stop_key_monitor; // Passive mouse-button trigger observer
 pub mod synthetic_events;
 /// The system cursor's shape, for the agent cursor glow (macOS; no-op elsewhere).
 pub mod system_cursor;
+
+/// Whether this platform has a voice engine: talking to Juno, dictation and
+/// speech. macOS only until the Windows voice step (docs/plans/windows.md,
+/// step 3); the voice plugin loads no engine elsewhere, and nothing offers a
+/// microphone there.
+pub const VOICE_AVAILABLE: bool = cfg!(target_os = "macos");
 
 #[cfg(target_os = "windows")]
 pub mod windows;

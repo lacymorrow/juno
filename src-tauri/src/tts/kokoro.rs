@@ -298,7 +298,9 @@ fn load_kokoro() -> Result<KokoroModel, String> {
 /// finished either way, which is how the voice list learns there are voices
 /// on disk now, or why there are not.
 pub fn sync_with_engine(engine: &str, on_settled: impl FnOnce() + Send + 'static) {
-    if !engine.eq_ignore_ascii_case("kokoro") {
+    // Off macOS nothing plays speech yet (docs/plans/windows.md, step 3), so
+    // the model is never downloaded there.
+    if !engine.eq_ignore_ascii_case("kokoro") || cfg!(not(target_os = "macos")) {
         if KOKORO.is_ready() {
             info!("[Kokoro] Releasing the model: {} is speaking now", engine);
         }
@@ -336,6 +338,9 @@ pub fn sync_with_engine(engine: &str, on_settled: impl FnOnce() + Send + 'static
 /// format from magic bytes, not extension, so WAV bytes work fine in the .m4a
 /// temp file that play_base64_audio_with_tracking creates.
 pub async fn invoke_kokoro_tts(text: String, voice: String, speed: f64) -> Result<String, String> {
+    if cfg!(not(target_os = "macos")) {
+        return Err("Kokoro is not available on this platform yet".to_string());
+    }
     info!(
         "[Kokoro] TTS requested: {} chars, voice: {}, speed: {:.2}",
         text.chars().count(),

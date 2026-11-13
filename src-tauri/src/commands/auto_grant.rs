@@ -159,7 +159,10 @@ async fn wait_for_settings_window(
 }
 
 #[cfg(not(target_os = "macos"))]
-async fn wait_for_settings_window(_timeout_ms: u64) -> Option<(f64, f64, f64, f64)> {
+async fn wait_for_settings_window(
+    _timeout_ms: u64,
+    _token: &CancellationToken,
+) -> Option<(f64, f64, f64, f64)> {
     None
 }
 

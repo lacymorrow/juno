@@ -448,6 +448,15 @@ impl EscapeKeyCoordinator {
             return Ok(());
         }
         let binding = current_binding(app_handle);
+        if takes_key_from_every_app(&binding) {
+            info!(
+                "[EscapeKeyCoordinator] Stop key {} not registered globally on Windows; \
+                 Juno's own windows read it",
+                binding.describe()
+            );
+            *self.active() = Some(binding);
+            return Ok(());
+        }
         info!(
             "[EscapeKeyCoordinator] Activating stop key: {}",
             binding.describe()
@@ -481,6 +490,9 @@ impl EscapeKeyCoordinator {
             "[EscapeKeyCoordinator] Releasing stop key: {}",
             binding.describe()
         );
+        if takes_key_from_every_app(&binding) {
+            return Ok(());
+        }
         match &binding {
             StopKeyBinding::PassiveMonitor { .. } => {
                 crate::platform::stop_key_monitor::remove(app_handle)
@@ -497,6 +509,19 @@ impl EscapeKeyCoordinator {
                 }),
         }
     }
+}
+
+/// Windows: a bare key (Escape) as a global hot key. `RegisterHotKey` takes it
+/// from every app while it is registered, so Escape would stop working
+/// everywhere else whenever the bar's chat is open or a turn runs. There is no
+/// passive observer on Windows yet (a low-level keyboard hook that passes the
+/// key on is the Windows answer), so it is not registered at all: the bar's
+/// page and Juno's windows read Escape while they have the keyboard, and the
+/// stop button is always on the bar. A chord with a modifier is still
+/// registered, as it is everywhere.
+fn takes_key_from_every_app(binding: &StopKeyBinding) -> bool {
+    cfg!(target_os = "windows")
+        && matches!(binding, StopKeyBinding::GlobalShortcut(shortcut) if shortcut.mods.is_empty())
 }
 
 /// Resolve the binding for the stop key.

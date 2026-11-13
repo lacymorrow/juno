@@ -394,6 +394,7 @@ pub mod bar {
     pub const ORDER_ABOVE_SNAP_WELLS: &str = "bar_order_above_snap_wells";
     pub const ENSURE_SNAP_WELLS_OVERLAYS: &str = "ensure_snap_wells_overlays";
     pub const SHOW_BAR_WHEN_READY: &str = "show_bar_when_ready";
+    pub const FOCUS_BAR_FOR_TYPING: &str = "focus_bar_for_typing";
     pub const SET_BAR_PANE_OPEN: &str = "set_bar_pane_open";
     pub const UI_GET_BAR_CONFIG: &str = "ui_get_bar_config";
     pub const UI_SET_BAR_CONFIG: &str = "ui_set_bar_config";

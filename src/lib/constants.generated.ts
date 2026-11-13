@@ -767,6 +767,7 @@ export const COMMANDS = {
   BAR_ORDER_ABOVE_SNAP_WELLS: 'bar_order_above_snap_wells',
   BAR_ENSURE_SNAP_WELLS_OVERLAYS: 'ensure_snap_wells_overlays',
   BAR_SHOW_BAR_WHEN_READY: 'show_bar_when_ready',
+  BAR_FOCUS_BAR_FOR_TYPING: 'focus_bar_for_typing',
   BAR_SET_BAR_PANE_OPEN: 'set_bar_pane_open',
   BAR_UI_GET_BAR_CONFIG: 'ui_get_bar_config',
   BAR_UI_SET_BAR_CONFIG: 'ui_set_bar_config',
