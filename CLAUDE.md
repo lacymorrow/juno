@@ -374,7 +374,9 @@ Test files: `src/components/__tests__/`, `src/test/setup.ts`. Rust tests use inl
 
 ## PR feature media
 
-UI PRs attach evidence (see the `insanely-great` demo test). Capture only the new or changed feature in this PR, never unchanged screens. Commit it into the PR at `docs/changelog/media/<PR number>/` with descriptive names (`trigger-sentences-add.png`, `double-tap.mp4`), embed it in the PR body, and keep recordings small (under 5 MB, mp4/webm, no audio unless the feature is audio). Nothing lives only in `/tmp`. No private data. Fleet rule: `~/repo/paperclip-company/knowledge/agent-common.md` (PR feature media).
+One capture is the PR evidence, what Lacy watches to approve the feature, and the picture in the changelog and docs. QA shoots it at the QA stage, from the CI build of the PR head, on the recording Mac, to the standard in **`docs/media/CAPTURE.md`** (what to shoot, the stage, stills, clips, names, the checks before it passes). A feature a person can see does not pass QA without it.
+
+It is committed into the PR at `docs/changelog/media/<PR number>/` with descriptive names (`trigger-sentences-add.png`, `double-tap.mp4`) and embedded in the PR body. Capture only what the PR changed, never unchanged screens. Clips stay under 20 seconds and 5 MB, no audio unless the feature is audio. Nothing lives only in `/tmp`. No private data. If a docs page already describes the feature, its picture is updated in the same change. Fleet rule: `~/repo/paperclip-company/knowledge/agent-common.md` (PR feature media).
 
 ## Additional References
 
