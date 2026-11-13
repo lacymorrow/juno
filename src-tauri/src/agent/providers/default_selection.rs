@@ -17,6 +17,9 @@
 //!   that, and every path a human can pick through sets it.
 //! - *no credentials*: somebody who pasted an Anthropic key wants that key
 //!   used. Free is not better than what they asked for.
+//! - *no credentials, anywhere*: a key for a provider other than the active
+//!   one counts too. With nothing picked and only an OpenAI key on the Mac,
+//!   Juno moves to OpenAI, never to a plan.
 //! - *installed and signed in*: an installed-but-logged-out CLI cannot
 //!   answer, and switching to it would trade an honest "add a key" for a
 //!   confusing "run `claude login`" they never asked to see.
@@ -74,6 +77,10 @@ pub struct SelectionState {
     /// Whether the active provider has a key it could actually run with,
     /// from settings or from the environment.
     pub active_has_credential: bool,
+    /// A key provider other than the active one that has a key right now,
+    /// from settings or the environment. A key is something the person went
+    /// and got, so it outranks any plan Juno could pick for them.
+    pub keyed_provider: Option<&'static str>,
     /// Candidate CLIs, in preference order. The first usable one wins when
     /// the rule needs to switch; the first ``cli_id`` match decides whether
     /// the active provider is one of these CLIs.
@@ -110,7 +117,11 @@ pub fn decide(state: &SelectionState) -> Decision {
     // act on, rather than a sign-in error they cannot.
     if let Some(active) = state.active_candidate() {
         if !active.usable() {
-            return Decision::SwitchTo(super::config::DEFAULT_PROVIDER.id());
+            return Decision::SwitchTo(
+                state
+                    .keyed_provider
+                    .unwrap_or_else(|| super::config::DEFAULT_PROVIDER.id()),
+            );
         }
         return Decision::KeepCurrent;
     }
@@ -118,6 +129,12 @@ pub fn decide(state: &SelectionState) -> Decision {
     // The case this module exists for: nothing paid for, nothing picked, but
     // some CLI the person already has can answer.
     if !state.active_has_credential {
+        // A key for some other provider is still a key. It is used before
+        // any plan is, so nobody with `OPENAI_API_KEY` set finds Juno on
+        // their Copilot allowance instead.
+        if let Some(provider_id) = state.keyed_provider {
+            return Decision::SwitchTo(provider_id);
+        }
         if let Some(candidate) = state.cli_candidates.iter().find(|c| c.usable()) {
             return Decision::SwitchTo(candidate.provider_id);
         }
@@ -161,6 +178,7 @@ mod tests {
             active_provider: super::super::config::DEFAULT_PROVIDER.id().to_string(),
             chosen_by_user: false,
             active_has_credential: false,
+            keyed_provider: None,
             cli_candidates: vec![
                 claude_candidate(false, false),
                 codex_candidate(false, false),
@@ -250,7 +268,44 @@ mod tests {
         // because a subscription would be cheaper.
         let state = SelectionState {
             active_has_credential: true,
+            keyed_provider: None,
             cli_candidates: vec![claude_candidate(true, true), codex_candidate(true, true)],
+            ..fresh()
+        };
+        assert_eq!(decide(&state), Decision::KeepCurrent);
+    }
+
+    #[test]
+    fn a_key_for_another_provider_wins_over_every_plan() {
+        let state = SelectionState {
+            keyed_provider: Some(Provider::OpenAI.id()),
+            cli_candidates: vec![
+                claude_candidate(true, true),
+                codex_candidate(true, true),
+                copilot_candidate(true, true),
+            ],
+            ..fresh()
+        };
+        assert_eq!(decide(&state), Decision::SwitchTo("openai"));
+    }
+
+    #[test]
+    fn a_plan_that_went_away_falls_back_to_the_key_that_is_there() {
+        let state = SelectionState {
+            active_provider: "copilot".to_string(),
+            keyed_provider: Some(Provider::Gemini.id()),
+            cli_candidates: vec![copilot_candidate(true, false)],
+            ..fresh()
+        };
+        assert_eq!(decide(&state), Decision::SwitchTo("gemini"));
+    }
+
+    #[test]
+    fn a_working_plan_juno_chose_is_not_dropped_for_a_key_added_later() {
+        let state = SelectionState {
+            active_provider: "claude_cli".to_string(),
+            keyed_provider: Some(Provider::OpenAI.id()),
+            cli_candidates: vec![claude_candidate(true, true)],
             ..fresh()
         };
         assert_eq!(decide(&state), Decision::KeepCurrent);
@@ -286,6 +341,7 @@ mod tests {
             active_provider: "claude_cli".to_string(),
             chosen_by_user: false,
             active_has_credential: false,
+            keyed_provider: None,
             cli_candidates: vec![
                 claude_candidate(false, false),
                 codex_candidate(false, false),
@@ -303,6 +359,7 @@ mod tests {
             active_provider: "codex_cli".to_string(),
             chosen_by_user: false,
             active_has_credential: false,
+            keyed_provider: None,
             cli_candidates: vec![claude_candidate(false, false), codex_candidate(true, false)],
         };
         assert_eq!(
@@ -318,6 +375,7 @@ mod tests {
             active_provider: "claude_cli".to_string(),
             chosen_by_user: true,
             active_has_credential: false,
+            keyed_provider: None,
             cli_candidates: vec![
                 claude_candidate(false, false),
                 codex_candidate(false, false),
@@ -332,6 +390,7 @@ mod tests {
             active_provider: "codex_cli".to_string(),
             chosen_by_user: false,
             active_has_credential: false,
+            keyed_provider: None,
             cli_candidates: vec![claude_candidate(false, false), codex_candidate(true, true)],
         };
         assert_eq!(decide(&state), Decision::KeepCurrent);

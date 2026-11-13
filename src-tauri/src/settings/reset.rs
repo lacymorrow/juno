@@ -281,6 +281,7 @@ mod tests {
             active_provider: providers.active_provider,
             chosen_by_user: providers.provider_chosen_by_user,
             active_has_credential,
+            keyed_provider: None,
             cli_candidates: vec![
                 CliCandidate {
                     provider_id: Provider::ClaudeCli.id(),
