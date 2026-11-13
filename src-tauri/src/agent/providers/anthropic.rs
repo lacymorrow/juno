@@ -667,6 +667,114 @@ impl AnthropicBrain {
         }
     }
 
+    /// The Copilot credential for a request, or `None` on the Claude API.
+    /// `after_401` forgets the cached one first, so what comes back is
+    /// whatever sign-in is on the Mac now.
+    async fn copilot_session(
+        &self,
+        after_401: bool,
+    ) -> Result<Option<super::copilot::Session>, AgentError> {
+        match &self.endpoint {
+            Endpoint::Copilot { configured_token } => {
+                if after_401 {
+                    super::copilot::invalidate();
+                }
+                Ok(Some(
+                    super::copilot::session(configured_token.as_deref()).await?,
+                ))
+            }
+            Endpoint::Anthropic { .. } => Ok(None),
+        }
+    }
+
+    /// Send one Messages request, retrying what is worth retrying.
+    ///
+    /// `sign_in` supplies the Copilot credential (`None` on the Claude API);
+    /// it is a parameter so the retry rules can be tested against a local
+    /// server without a GitHub account.
+    async fn send_messages_request<P, F, Fut>(
+        &self,
+        payload: &P,
+        initiator: &str,
+        sign_in: F,
+    ) -> Result<reqwest::Response, AgentError>
+    where
+        P: Serialize + ?Sized,
+        F: Fn(bool) -> Fut,
+        Fut: std::future::Future<Output = Result<Option<super::copilot::Session>, AgentError>>,
+    {
+        let mut copilot_session = sign_in(false).await?;
+        let mut attempt = 0usize;
+        let mut signed_in_again = false;
+        loop {
+            let request = match (&self.endpoint, &copilot_session) {
+                (_, Some(session)) => self
+                    .client
+                    .post(session.messages_url())
+                    .bearer_auth(&session.token)
+                    .header("Copilot-Integration-Id", super::copilot::INTEGRATION_ID)
+                    .header("X-Initiator", initiator)
+                    .header("User-Agent", format!("Juno/{}", env!("CARGO_PKG_VERSION"))),
+                (Endpoint::Anthropic { api_key }, None) => self
+                    .client
+                    .post(ANTHROPIC_API_URL)
+                    .header("x-api-key", api_key),
+                (Endpoint::Copilot { .. }, None) => {
+                    return Err(AgentError::ConfigurationError(
+                        "GitHub Copilot is not signed in.".to_string(),
+                    ))
+                }
+            };
+            let sent = request
+                .header("anthropic-version", "2023-06-01") // Current stable API version
+                // Computer use beta + prompt caching (+ server-side fallbacks on supported models),
+                // comma-separated in a single header. Prompt caching reduces input token costs by
+                // ~90% and latency by ~50-80% for the stable system prompt and tool definitions.
+                .header("anthropic-beta", self.beta_header_value())
+                .header("content-type", "application/json")
+                .json(payload)
+                .send()
+                .await;
+            // A 401 from Copilot means the token was revoked or rotated
+            // since it was checked (`gh auth refresh`, a new sign-in).
+            // Find the current one and ask once more, so the person never
+            // sees it. Once only: a second 401 is a real answer, and the
+            // caller reports it.
+            let unauthorized = matches!(
+                &sent,
+                Ok(r) if r.status() == reqwest::StatusCode::UNAUTHORIZED
+            );
+            if unauthorized && !signed_in_again && copilot_session.is_some() {
+                signed_in_again = true;
+                log::warn!("GitHub Copilot answered 401; checking the GitHub sign-in again");
+                copilot_session = sign_in(true).await?;
+                continue;
+            }
+            let delay = Self::SEND_RETRY_DELAYS.get(attempt).copied();
+            match (sent, delay) {
+                (Ok(r), Some(delay)) if Self::is_retryable_status(r.status()) => {
+                    log::warn!(
+                        "{} answered {}; retrying in {:?}",
+                        self.service_name(),
+                        r.status(),
+                        delay
+                    );
+                    drop(r);
+                    tokio::time::sleep(delay).await;
+                }
+                (Err(e), Some(delay)) if e.is_connect() => {
+                    log::warn!("Anthropic request failed ({}); retrying in {:?}", e, delay);
+                    tokio::time::sleep(delay).await;
+                }
+                (Ok(r), _) => return Ok(r),
+                (Err(e), _) => {
+                    return Err(AgentError::LlmError(format!("HTTP request failed: {}", e)))
+                }
+            }
+            attempt += 1;
+        }
+    }
+
     /// Statuses worth one more try before the turn fails: rate limited,
     /// overloaded (529), or a server or gateway error.
     fn is_retryable_status(status: reqwest::StatusCode) -> bool {
@@ -2550,91 +2658,11 @@ impl AgentBrain for AnthropicBrain {
         // record is written.
         let request_started = std::time::Instant::now();
         let initiator = super::copilot::initiator(ends_with_tool_result(&request_payload.messages));
-        let send = async {
-            // Inside `send`, so Escape also ends a slow sign-in check (`gh`,
-            // then GitHub); dropping the future kills the `gh` child.
-            let mut copilot_session = match &self.endpoint {
-                Endpoint::Copilot { configured_token } => {
-                    Some(super::copilot::session(configured_token.as_deref()).await?)
-                }
-                Endpoint::Anthropic { .. } => None,
-            };
-            let mut attempt = 0usize;
-            let mut signed_in_again = false;
-            loop {
-                let request = match (&self.endpoint, &copilot_session) {
-                    (_, Some(session)) => self
-                        .client
-                        .post(session.messages_url())
-                        .bearer_auth(&session.token)
-                        .header("Copilot-Integration-Id", super::copilot::INTEGRATION_ID)
-                        .header("X-Initiator", initiator)
-                        .header("User-Agent", format!("Juno/{}", env!("CARGO_PKG_VERSION"))),
-                    (Endpoint::Anthropic { api_key }, None) => self
-                        .client
-                        .post(ANTHROPIC_API_URL)
-                        .header("x-api-key", api_key),
-                    (Endpoint::Copilot { .. }, None) => {
-                        return Err(AgentError::ConfigurationError(
-                            "GitHub Copilot is not signed in.".to_string(),
-                        ))
-                    }
-                };
-                let sent = request
-                    .header("anthropic-version", "2023-06-01") // Current stable API version
-                    // Computer use beta + prompt caching (+ server-side fallbacks on supported models),
-                    // comma-separated in a single header. Prompt caching reduces input token costs by
-                    // ~90% and latency by ~50-80% for the stable system prompt and tool definitions.
-                    .header("anthropic-beta", self.beta_header_value())
-                    .header("content-type", "application/json")
-                    .json(&request_payload)
-                    .send()
-                    .await;
-                // A 401 from Copilot means the token was revoked or rotated
-                // since it was checked (`gh auth refresh`, a new sign-in).
-                // Find the current one and ask once more, so the person never
-                // sees it. Once only: a second 401 is a real answer, and it is
-                // reported below.
-                let unauthorized = matches!(
-                    &sent,
-                    Ok(r) if r.status() == reqwest::StatusCode::UNAUTHORIZED
-                );
-                if unauthorized && !signed_in_again {
-                    if let Endpoint::Copilot { configured_token } = &self.endpoint {
-                        signed_in_again = true;
-                        log::warn!(
-                            "GitHub Copilot answered 401; checking the GitHub sign-in again"
-                        );
-                        super::copilot::invalidate();
-                        copilot_session =
-                            Some(super::copilot::session(configured_token.as_deref()).await?);
-                        continue;
-                    }
-                }
-                let delay = Self::SEND_RETRY_DELAYS.get(attempt).copied();
-                match (sent, delay) {
-                    (Ok(r), Some(delay)) if Self::is_retryable_status(r.status()) => {
-                        log::warn!(
-                            "{} answered {}; retrying in {:?}",
-                            self.service_name(),
-                            r.status(),
-                            delay
-                        );
-                        drop(r);
-                        tokio::time::sleep(delay).await;
-                    }
-                    (Err(e), Some(delay)) if e.is_connect() => {
-                        log::warn!("Anthropic request failed ({}); retrying in {:?}", e, delay);
-                        tokio::time::sleep(delay).await;
-                    }
-                    (Ok(r), _) => return Ok(r),
-                    (Err(e), _) => {
-                        return Err(AgentError::LlmError(format!("HTTP request failed: {}", e)))
-                    }
-                }
-                attempt += 1;
-            }
-        };
+        // The sign-in lookup happens inside `send`, so Escape also ends a slow
+        // one (`gh`, then GitHub); dropping the future kills the `gh` child.
+        let send = self.send_messages_request(&request_payload, initiator, |after_401| {
+            self.copilot_session(after_401)
+        });
         // Escape while the request is in flight (or between retries) ends the
         // turn here; dropping the future drops the connection.
         let response = match cancel_rx.clone() {
@@ -3992,6 +4020,125 @@ mod copilot_endpoint_tests {
     fn message(role: &str, content: Value) -> ApiMessage {
         serde_json::from_value(serde_json::json!({"role": role, "content": content}))
             .expect("message deserializes")
+    }
+
+    /// A stand-in for the Copilot API: answers each request in turn with the
+    /// next status, and returns the `Authorization` header each one carried.
+    async fn answer_in_turn(listener: &tokio::net::TcpListener, statuses: &[u16]) -> Vec<String> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut seen = Vec::new();
+        for status in statuses {
+            let (mut socket, _) = listener.accept().await.expect("a connection");
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 4096];
+            let (head, body_start) = loop {
+                let read = socket.read(&mut chunk).await.expect("request bytes");
+                assert!(read > 0, "the request ended before its headers did");
+                request.extend_from_slice(&chunk[..read]);
+                if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break (
+                        String::from_utf8_lossy(&request[..end]).to_string(),
+                        end + 4,
+                    );
+                }
+            };
+            let header = |name: &str| {
+                head.lines().find_map(|line| {
+                    let (key, value) = line.split_once(':')?;
+                    key.trim()
+                        .eq_ignore_ascii_case(name)
+                        .then(|| value.trim().to_string())
+                })
+            };
+            let length: usize = header("content-length")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+            while request.len() < body_start + length {
+                let read = socket.read(&mut chunk).await.expect("body bytes");
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+            }
+            seen.push(header("authorization").unwrap_or_default());
+            let reply = format!(
+                "HTTP/1.1 {status} Test\r\ncontent-type: application/json\r\n\
+                 content-length: 2\r\nconnection: close\r\n\r\n{{}}"
+            );
+            socket
+                .write_all(reply.as_bytes())
+                .await
+                .expect("the reply is written");
+            let _ = socket.shutdown().await;
+        }
+        seen
+    }
+
+    /// Runs the real send loop of a Copilot brain against a local server that
+    /// answers with `statuses`. Each sign-in hands out a new token
+    /// (`token-1`, `token-2`, ...), so the test can see which one was sent.
+    /// Returns the final status, the bearer tokens the server saw, and the
+    /// `after_401` flag of each sign-in.
+    async fn send_against(statuses: &[u16]) -> (u16, Vec<String>, Vec<bool>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a free port");
+        let base = format!("http://{}", listener.local_addr().expect("an address"));
+        let brain = copilot_brain(None);
+        let asked = std::sync::Mutex::new(Vec::new());
+        let sign_in = |after_401: bool| {
+            let count = {
+                let mut asked = asked.lock().expect("the lock");
+                asked.push(after_401);
+                asked.len()
+            };
+            let session = super::super::copilot::Session {
+                token: format!("token-{count}"),
+                api_base: base.clone(),
+            };
+            async move { Ok::<_, AgentError>(Some(session)) }
+        };
+        let payload = serde_json::json!({"model": "claude-opus-5.5"});
+        let (sent, seen) = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            tokio::join!(
+                brain.send_messages_request(&payload, "user", sign_in),
+                answer_in_turn(&listener, statuses),
+            )
+        })
+        .await
+        .expect("the exchange finishes");
+        let status = sent.expect("a response").status().as_u16();
+        let asked = asked.lock().expect("the lock").clone();
+        (status, seen, asked)
+    }
+
+    /// A rotated token costs the person nothing: the 401 is answered by
+    /// signing in again and sending the same request with the new token.
+    #[tokio::test]
+    async fn a_401_signs_in_again_and_sends_once_more() {
+        let (status, seen, asked) = send_against(&[401, 200]).await;
+        assert_eq!(status, 200);
+        assert_eq!(seen, vec!["Bearer token-1", "Bearer token-2"]);
+        assert_eq!(asked, vec![false, true]);
+    }
+
+    /// Once only. A second 401 is GitHub's answer, handed back to the caller
+    /// to report, not a reason to keep asking.
+    #[tokio::test]
+    async fn a_second_401_is_the_answer() {
+        let (status, seen, asked) = send_against(&[401, 401]).await;
+        assert_eq!(status, 401);
+        assert_eq!(seen, vec!["Bearer token-1", "Bearer token-2"]);
+        assert_eq!(asked, vec![false, true]);
+    }
+
+    /// A request GitHub accepts is sent once, with the cached sign-in.
+    #[tokio::test]
+    async fn an_accepted_request_never_signs_in_again() {
+        let (status, seen, asked) = send_against(&[200]).await;
+        assert_eq!(status, 200);
+        assert_eq!(seen, vec!["Bearer token-1"]);
+        assert_eq!(asked, vec![false]);
     }
 
     /// Copilot rejects `fallbacks` with a 400, so neither the body field nor
