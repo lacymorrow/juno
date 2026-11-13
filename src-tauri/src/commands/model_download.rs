@@ -197,6 +197,24 @@ pub fn looks_like_a_web_page(content_type: Option<&str>) -> bool {
     })
 }
 
+/// Whether an HTML body at this status means something stood in front of the
+/// host, rather than the host itself answering badly.
+///
+/// A success status is unambiguous: nothing on a model URL is legitimately a
+/// web page, so HTML with a 200 or a 206 is an interception page. A refusal
+/// that is never retried anyway (401, 403, 407, 451) reads the same way on a
+/// public file.
+///
+/// A 408, 429 or 5xx does not, and this is the distinction that matters: a
+/// CDN or load balancer error page is HTML and very ordinary, and that is the
+/// host being unwell rather than the network standing in front of it.
+/// `plan_response` already retries those. Calling one blocked would turn a
+/// passing cloud wobble into "Not available on this network" and stop every
+/// later download, Kokoro's voice included, until somebody pressed Try again.
+pub fn web_page_means_blocked(status: u16, content_type: Option<&str>) -> bool {
+    looks_like_a_web_page(content_type) && matches!(status, 200..=299 | 401 | 403 | 407 | 451)
+}
+
 /// What to do with a response, given what is already on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResponsePlan {
@@ -472,7 +490,7 @@ where
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
-    if looks_like_a_web_page(content_type.as_deref()) {
+    if web_page_means_blocked(status, content_type.as_deref()) {
         warn!(
             "[ModelDownload] {} answered {} with a web page, not a model file",
             target.url, status
@@ -766,6 +784,9 @@ mod tests {
         /// Answer 200 with an honest content type and a body far shorter than
         /// the file should be.
         TooShort,
+        /// Answer with this status and an HTML error page, the way a CDN or
+        /// load balancer does when it is unwell.
+        StatusHtml(u16),
     }
 
     struct Server {
@@ -826,6 +847,17 @@ mod tests {
         seen.lock().unwrap().push(range_line);
 
         let total = data.len();
+        if let Step::StatusHtml(code) = step {
+            let page = b"<html><body>502 Bad Gateway</body></html>";
+            let resp = format!(
+                "HTTP/1.1 {} X\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                code,
+                page.len()
+            );
+            let _ = sock.write_all(resp.as_bytes()).await;
+            let _ = sock.write_all(page).await;
+            return;
+        }
         if let Step::BlockPage = step {
             let page = b"<html><body>Blocked by policy</body></html>";
             let resp = format!(
@@ -1092,6 +1124,32 @@ mod tests {
     }
 
     #[test]
+    fn an_html_error_page_from_the_host_is_still_retried() {
+        // A CDN error page is HTML. That is the host being unwell, which the
+        // retry policy handles; calling it blocked would stop every later
+        // download on a passing wobble.
+        for status in [408, 429, 500, 502, 503, 504] {
+            assert!(
+                !web_page_means_blocked(status, Some("text/html")),
+                "{status} should stay retryable"
+            );
+        }
+        // A success, or a refusal that is never retried: something stood in
+        // front of the host.
+        for status in [200, 206, 401, 403, 407, 451] {
+            assert!(
+                web_page_means_blocked(status, Some("text/html; charset=utf-8")),
+                "{status} with a web page should read as blocked"
+            );
+        }
+        // A model file at any status is never a block.
+        for status in [200, 206, 403, 503] {
+            assert!(!web_page_means_blocked(status, Some("binary/octet-stream")));
+            assert!(!web_page_means_blocked(status, None));
+        }
+    }
+
+    #[test]
     fn the_blocked_line_names_no_code_and_keeps_no_partial() {
         let msg = FetchError::HostUnavailable.human_message();
         for bad in ["404", "HTTP", "http", "huggingface", "url"] {
@@ -1115,6 +1173,26 @@ mod tests {
         // Fatal, so it is not retried into a loop on a network that will
         // answer the same way every time.
         assert_eq!(run.waits, 0);
+    }
+
+    #[tokio::test]
+    async fn an_html_503_is_waited_out_and_the_download_still_lands() {
+        // The reviewer's case on #994: a transient CDN error page is HTML,
+        // and must not be mistaken for the network blocking the host.
+        let data = body(4096);
+        let server = serve(
+            vec![Step::StatusHtml(503), Step::StatusHtml(502), Step::Serve],
+            data.clone(),
+        )
+        .await;
+        let cancel = AtomicBool::new(false);
+        let (_dir, run) = run(&server.url, None, fast_policy(), &cancel).await;
+        assert_eq!(run.result, Ok(4096));
+        assert_eq!(run.on_disk, data);
+        assert!(
+            run.waits >= 2,
+            "both error pages should have been waited out"
+        );
     }
 
     #[tokio::test]
