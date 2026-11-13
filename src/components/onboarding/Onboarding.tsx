@@ -2116,7 +2116,7 @@ export default function OnboardingFlow({
                           </>
                         ) : (
                           <p className="my-8 text-[13px] text-muted-foreground">
-                            No key is set up yet. Pick one in Settings, Triggers,
+                            No key is set up yet. Pick one in Settings, Shortcuts,
                             whenever you like.
                           </p>
                         )}
