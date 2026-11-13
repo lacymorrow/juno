@@ -205,7 +205,7 @@ pub fn shell_screen_settings(endpoint: &Endpoint, header_file: &Path) -> Result<
     Ok(json!({
         "hooks": {
             "PreToolUse": [{
-                "matcher": cli_approval::BASH_TOOL,
+                "matcher": cli_approval::SHELL_TOOLS_MATCHER,
                 "hooks": [{
                     "type": "command",
                     "command": format!(
@@ -950,7 +950,7 @@ mod tests {
         let settings = shell_screen_settings(&test_endpoint(), Path::new("/tmp/hdr.txt"))
             .expect("a plain path is quotable");
         let entry = &settings["hooks"]["PreToolUse"][0];
-        assert_eq!(entry["matcher"], "Bash");
+        assert_eq!(entry["matcher"], "Bash|PowerShell");
 
         let hook = &entry["hooks"][0];
         assert_eq!(hook["type"], "command");

@@ -176,6 +176,14 @@ pub(crate) fn claude_command(binary: impl AsRef<std::ffi::OsStr>) -> tokio::proc
     let mut cmd = tokio::process::Command::new(binary);
     cmd.hide_console_window();
     // `claude` is a `#!/usr/bin/env node` script: it needs the person's PATH.
+    // On a Mac the Trash `rm` goes in front, so the CLI's own Bash deletes
+    // recoverably, as Juno's shell does (LAC-6321).
+    #[cfg(unix)]
+    cmd.env(
+        "PATH",
+        crate::trash::path_with_cli_shims(&crate::user_env::user_path_now()),
+    );
+    #[cfg(not(unix))]
     cmd.env("PATH", crate::user_env::user_path_now());
     if let Some(home) = dirs::home_dir() {
         cmd.current_dir(home);
