@@ -98,6 +98,29 @@ impl FetchError {
         }
     }
 
+    /// The error that describes a settled host answer, for a caller that is
+    /// refusing to start rather than reporting one that failed.
+    ///
+    /// The whole point of asking two questions instead of one is lost if both
+    /// answers come out of the same hole: telling someone whose Wi-Fi is off
+    /// that Hugging Face is unavailable *on this network* sends them hunting
+    /// a firewall rule that does not exist. `Offline` is a connection
+    /// problem and reads as one.
+    ///
+    /// `Unknown` and `Reachable` are not refusals and never reach here; they
+    /// map to `Network` so that a caller which gets this wrong reports a
+    /// retryable condition rather than a permanent-looking one.
+    pub fn for_host(status: crate::model_host::HostStatus) -> Self {
+        use crate::model_host::HostStatus;
+        match status {
+            HostStatus::Blocked => FetchError::HostUnavailable,
+            HostStatus::Offline => FetchError::Network("no route to the model host".into()),
+            HostStatus::Unknown | HostStatus::Reachable => {
+                FetchError::Network("host answer not settled".into())
+            }
+        }
+    }
+
     /// Whether the bytes on disk are worth keeping for a later resume.
     pub fn keeps_partial(&self) -> bool {
         matches!(self, FetchError::Network(_))
@@ -1158,6 +1181,44 @@ mod tests {
         // Nothing half-written is worth resuming: the next attempt on this
         // network would fetch the same stand-in again.
         assert!(!FetchError::HostUnavailable.keeps_partial());
+    }
+
+    #[test]
+    fn a_machine_with_no_route_is_not_told_the_network_blocks_anything() {
+        use crate::model_host::{HostStatus, NOT_ON_THIS_NETWORK};
+
+        // The refusal a download gives is the refusal the person reads, so
+        // the two answers must not collapse into one line here any more than
+        // they do in the probe. Someone whose Wi-Fi is off looking for a
+        // proxy rule is the failure this guards.
+        let offline = FetchError::for_host(HostStatus::Offline);
+        let blocked = FetchError::for_host(HostStatus::Blocked);
+        assert_eq!(blocked, FetchError::HostUnavailable);
+        assert_eq!(blocked.human_message(), NOT_ON_THIS_NETWORK);
+        assert_ne!(offline.human_message(), blocked.human_message());
+        assert_ne!(offline.human_message(), NOT_ON_THIS_NETWORK);
+        assert!(
+            offline.human_message().contains("internet"),
+            "{:?} should read as a connection problem",
+            offline.human_message()
+        );
+
+        // Neither names a code, a host or a URL.
+        for e in [&offline, &blocked] {
+            let msg = e.human_message();
+            for bad in ["404", "HTTP", "http", "huggingface", "url"] {
+                assert!(!msg.contains(bad), "{msg:?} contains {bad:?}");
+            }
+        }
+
+        // A status that permits fetching is not a refusal and must never
+        // produce the blocked line if a caller asks anyway.
+        for ok in [HostStatus::Unknown, HostStatus::Reachable] {
+            assert_ne!(
+                FetchError::for_host(ok).human_message(),
+                NOT_ON_THIS_NETWORK
+            );
+        }
     }
 
     #[tokio::test]
