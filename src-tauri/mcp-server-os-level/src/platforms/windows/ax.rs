@@ -681,6 +681,79 @@ fn caret_offset(element: &uiautomation::UIElement, before: &str) -> Option<(usiz
     Some((prefix.chars().count(), selected.chars().count()))
 }
 
+/// `EM_GETSEL`, from `CommCtrl.h`; Juno doesn't pull in the controls feature
+/// for one message number.
+const EM_GETSEL: u32 = 0x00B0;
+
+/// How long a classic edit control gets to answer `EM_GETSEL`.
+const EDIT_SELECTION_TIMEOUT_MS: u32 = 500;
+
+/// The selection of a classic Win32 edit control, when UI Automation can't
+/// give one.
+///
+/// The common file dialog's "File name" box is a plain `Edit` with a
+/// `ValuePattern` and no `TextPattern`, so `caret_offset` has nothing to read
+/// and typing used to append: `Untitled` became `UntitledC:\...\juno-note.txt`
+/// and the save never happened (LAC-6321, task 4 of the Windows task list).
+/// The dialog opens with the whole name selected, as it does for a person, and
+/// the control says so through `EM_GETSEL`.
+///
+/// Reads the return value, not the out pointers, so nothing is written across
+/// processes. That packs each end into 16 bits, which is why a longer value is
+/// left to the append path.
+fn edit_selection(element: &uiautomation::UIElement, before: &str) -> Option<(usize, usize)> {
+    let handle = element.get_native_window_handle().ok()?;
+    if handle.is_invalid() {
+        return None;
+    }
+    let hwnd: HWND = handle.into();
+    if !super::window_list::class_name(hwnd).eq_ignore_ascii_case("Edit") {
+        return None;
+    }
+    let mut result = 0usize;
+    // SAFETY: plain values in, and `result` outlives the call. The timeout
+    // keeps a hung dialog from holding the agent.
+    let answered = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            EM_GETSEL,
+            WPARAM(0),
+            LPARAM(0),
+            SMTO_ABORTIFHUNG,
+            EDIT_SELECTION_TIMEOUT_MS,
+            Some(&mut result),
+        )
+    };
+    if answered.0 == 0 {
+        return None;
+    }
+    selection_in_chars(before, result & 0xFFFF, (result >> 16) & 0xFFFF)
+}
+
+/// A selection given in UTF-16 units, as the offset and length in `char`s that
+/// `type_verified` splices with. `None` when it doesn't fit the value, or
+/// splits a character, since then the splice would be a guess.
+fn selection_in_chars(before: &str, start: usize, end: usize) -> Option<(usize, usize)> {
+    if start > end || end > before.encode_utf16().count() {
+        return None;
+    }
+    let mut start_char = None;
+    let mut end_char = None;
+    let mut units = 0usize;
+    // Every char boundary, the end of the value included.
+    for (index, c) in before.chars().map(Some).chain([None]).enumerate() {
+        if units == start {
+            start_char.get_or_insert(index);
+        }
+        if units == end {
+            end_char.get_or_insert(index);
+        }
+        units += c.map_or(0, char::len_utf16);
+    }
+    let (start_char, end_char) = (start_char?, end_char?);
+    Some((start_char, end_char - start_char))
+}
+
 /// Check the field and write, reading it back. Only a verified write is a
 /// success; anything else sends the text down the posted path.
 pub fn type_verified(target: &TypeTarget, text: &str) -> Result<AxTypeReport, AxTypeSkip> {
@@ -712,7 +785,8 @@ pub fn type_verified(target: &TypeTarget, text: &str) -> Result<AxTypeReport, Ax
     }
     let before = value.get_value().map_err(|_| AxTypeSkip::Unverifiable)?;
     let front = foreground_window();
-    let written = match caret_offset(element, &before) {
+    let selection = caret_offset(element, &before).or_else(|| edit_selection(element, &before));
+    let written = match selection {
         Some((offset, selected)) => {
             let chars: Vec<char> = before.chars().collect();
             let head: String = chars.iter().take(offset).collect();
@@ -852,4 +926,28 @@ pub fn scroll_at(window: HWND, x: f64, y: f64, direction: &str, amount: f64) -> 
         current = walker.get_parent(&candidate).ok();
     }
     Err("Nothing scrollable under that point".to_string())
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::selection_in_chars;
+
+    #[test]
+    fn a_whole_selection_is_replaced_not_appended_to() {
+        // The file dialog opens with "Untitled" selected: 0..8.
+        assert_eq!(selection_in_chars("Untitled", 0, 8), Some((0, 8)));
+        // A caret at the end, nothing selected.
+        assert_eq!(selection_in_chars("Untitled", 8, 8), Some((8, 0)));
+        assert_eq!(selection_in_chars("", 0, 0), Some((0, 0)));
+    }
+
+    #[test]
+    fn a_selection_is_counted_in_characters_not_utf16_units() {
+        // The emoji is two UTF-16 units and one char.
+        assert_eq!(selection_in_chars("a\u{1F600}b", 3, 4), Some((2, 1)));
+        // An offset inside the pair is not a place to splice.
+        assert_eq!(selection_in_chars("a\u{1F600}b", 2, 4), None);
+        assert_eq!(selection_in_chars("abc", 2, 9), None);
+        assert_eq!(selection_in_chars("abc", 2, 1), None);
+    }
 }
