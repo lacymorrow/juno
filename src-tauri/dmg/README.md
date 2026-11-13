@@ -87,17 +87,32 @@ re-uploads it over the copy `tauri-action` attached.
 
 ## Design notes
 
+**The arrow is Juno's thread.** The app icon is hand-felted and outlined in a
+teal running stitch. The arrow is that thread carried on: it comes in from the
+left edge, passes behind the Juno icon (Finder draws the icon over it), lifts
+out in a shallow arc and is sewn across to Applications, finishing in a
+stitched chevron. Each stitch casts a tight shadow and carries a thin sheen
+line; without those two the dashes read as a generic dotted arrow. The thread
+fades in from the left: direction of travel, stated without an animation we
+cannot play. (LAC-7607, after Superwhisper's waveform-as-arrow. The idea is
+borrowed, every asset is ours.)
+
 **The field is light on purpose.** Finder draws disk-image icon labels in
 black in *both* light and dark appearance, and that colour cannot be
-configured — only label size and position live in the `.DS_Store`. A dark
-background therefore needs capsules painted behind each label to stay legible
-(this is why Exodus's DMG art has two light pills in it). A light field needs
-no such device: black on `#EFEEF7` is 18.2:1. **Do not darken this art without
-re-solving that problem.**
+configured; only label size and position live in the `.DS_Store`. A dark
+background needs capsules painted behind each label to stay legible (this is
+why Exodus's DMG art has two light pills in it). Superwhisper's dark DMG skips
+the capsules, and its labels are close to invisible. A light field needs no
+such device: the darkest point of the label band is `#CDCDED`, where black is
+13.6:1. **Do not darken the lower half of this art without re-solving that
+problem.**
 
-**The palette is sampled from the app icon**, not invented: `#484D92` is the
-felt violet from the icon's lower-left corner. The arrow is the only saturated
-mark, at 7.3:1 on the field.
+**The palette is sampled from the app icon**, not invented: pink `#E8569B`
+(top-left felt) and periwinkle `#7178E1` (top-right) as the two pools under the
+icons, over a pastel diagonal of the same pair; thread `#2C7480`, the icon's
+stitching deepened so it clears 3:1 on the field (3.5:1). A fine fractal-noise
+fibre is multiplied in at 7% so the field reads as felt and not as a CSS
+gradient.
 
 **No words.** The volume is named "Juno", so Finder already puts that in the
 title bar, and it labels both icons itself. An instruction line would need
