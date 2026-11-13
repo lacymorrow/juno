@@ -48,9 +48,11 @@ import {
 } from "@/lib/snapWells";
 import { nearestNotchWell, notchWells } from "@/lib/notchWells";
 import {
+  getDockIntent,
   getDockSlot,
   monitorIndexAt,
   predictedWindowOrigin,
+  setDockProjection,
   setDockSlot,
   subscribeDockSlot,
 } from "@/lib/barDock";
@@ -700,6 +702,17 @@ export function displayFollowTarget(
  * it is busy (the Pill pauses while its chat pane is open or the agent is
  * working); a dragging or gliding bar is never moved. The payload is the
  * cursor in global points.
+ *
+ * The hop projects from the **intent** and records a **projection**, and both
+ * halves matter (LAC-4831). A well the person dragged to may not exist on the
+ * display they have just looked at (only a display at least
+ * `FIVE_STOP_MIN_LOGICAL` along an axis has the quarter points), so
+ * `wellForSlot` answers with the nearest one that does, and the bar is drawn
+ * there. Reading the drawn slot on the next hop would compound that
+ * approximation, and writing it back as a choice (which this used to do) threw
+ * the choice away: the bar came back to the big screen's centre column instead
+ * of the quarter-point one it was dragged to. Projecting from the intent every
+ * time means a trip across a smaller display is exactly round-trip.
  */
 export function useBarDisplayFollow(paused = false): void {
   const onCursorDisplayChange = useCallback(
@@ -707,7 +720,7 @@ export function useBarDisplayFollow(paused = false): void {
       if (paused || !isBarWindow()) return;
       if (barSnapBusy()) return;
       const win = getCurrentWindow();
-      const slot = getDockSlot(win.label);
+      const slot = getDockIntent(win.label);
       if (!slot) return;
       const steady = getSteady(win.label);
       try {
@@ -726,7 +739,7 @@ export function useBarDisplayFollow(paused = false): void {
           const next = steadyLayoutFor(target, rects, steady.spec);
           if (!next) return;
           await swapSteadyLayout(win.label, next, applySteadyFrame);
-          setDockSlot(win.label, { fx: target.fx, fy: target.fy });
+          setDockProjection(win.label, { fx: target.fx, fy: target.fy });
           await invoke(COMMANDS.BAR_SET_BAR_POSITION, { x: target.x, y: target.y }).catch(
             () => {},
           );
@@ -742,7 +755,7 @@ export function useBarDisplayFollow(paused = false): void {
         );
         if (!target) return;
         await win.setPosition(new LogicalPosition(target.x, target.y));
-        setDockSlot(win.label, { fx: target.fx, fy: target.fy });
+        setDockProjection(win.label, { fx: target.fx, fy: target.fy });
         await invoke(COMMANDS.BAR_SET_BAR_POSITION, { x: target.x, y: target.y }).catch(
           () => {},
         );
