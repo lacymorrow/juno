@@ -15,7 +15,9 @@
 //! 2. `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, the variables the
 //!    Copilot CLI itself honours, in its order.
 //! 3. The GitHub CLI: `gh auth token`, then `gh`'s `hosts.yml` directly when
-//!    the binary is not on a path Juno can see.
+//!    the binary is not on a path Juno can see. With several `gh` accounts
+//!    this is the active one only (`gh auth switch` changes it); Settings
+//!    shows the login it found, so the wrong account is visible.
 //!
 //! A `gho_` token from `gh` is accepted by the Copilot API as a bearer token
 //! as-is (verified against the live API 2026-11-12). The Copilot CLI keeps its
@@ -446,20 +448,21 @@ async fn validate(client: &reqwest::Client, token: &str) -> Validation {
         Err(e) => return Validation::Unreachable(e.to_string()),
     };
     let status = response.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Validation::BadToken;
-    }
-    if status.is_success() {
-        return match response.json::<CopilotUser>().await {
-            Ok(user) if user.chat_enabled == Some(false) => Validation::NoCopilot(
-                "Copilot Chat is turned off for this GitHub account.".to_string(),
-            ),
-            Ok(user) => Validation::Ok(user),
-            Err(e) => Validation::Unreachable(format!("Unreadable answer from GitHub: {e}")),
-        };
-    }
-    if status.is_server_error() {
-        return Validation::Unreachable(format!("GitHub answered {status}"));
+    match user_answer(status) {
+        UserAnswer::BadToken => return Validation::BadToken,
+        UserAnswer::Read => {
+            return match response.json::<CopilotUser>().await {
+                Ok(user) if user.chat_enabled == Some(false) => Validation::NoCopilot(
+                    "Copilot Chat is turned off for this GitHub account.".to_string(),
+                ),
+                Ok(user) => Validation::Ok(user),
+                Err(e) => Validation::Unreachable(format!("Unreadable answer from GitHub: {e}")),
+            };
+        }
+        UserAnswer::NothingLearned => {
+            return Validation::Unreachable(format!("GitHub answered {status}"));
+        }
+        UserAnswer::AskTheApi => {}
     }
 
     // A token type `copilot_internal/user` does not accept (a fine-grained
@@ -484,6 +487,34 @@ async fn validate(client: &reqwest::Client, token: &str) -> Validation {
     }
 }
 
+/// What a status from `copilot_internal/user` means for the token.
+#[derive(Debug, PartialEq, Eq)]
+enum UserAnswer {
+    /// 401: GitHub does not accept the token at all.
+    BadToken,
+    /// 2xx: the body says who it is and whether they have Copilot.
+    Read,
+    /// A server error or a rate limit (429): GitHub said nothing about the
+    /// token, so nothing changes. Calling this "no Copilot" would grey out a
+    /// provider that works.
+    NothingLearned,
+    /// Any other refusal (403, 404): the endpoint does not take this kind of
+    /// token. The API itself still might.
+    AskTheApi,
+}
+
+fn user_answer(status: reqwest::StatusCode) -> UserAnswer {
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        UserAnswer::BadToken
+    } else if status.is_success() {
+        UserAnswer::Read
+    } else if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        UserAnswer::NothingLearned
+    } else {
+        UserAnswer::AskTheApi
+    }
+}
+
 async fn probe_models(client: &reqwest::Client, token: &str) -> Result<bool, String> {
     let response = client
         .get(format!("{DEFAULT_API_BASE}/models"))
@@ -493,10 +524,11 @@ async fn probe_models(client: &reqwest::Client, token: &str) -> Result<bool, Str
         .send()
         .await
         .map_err(|e| e.to_string())?;
-    if response.status().is_server_error() {
-        return Err(format!("Copilot answered {}", response.status()));
+    let status = response.status();
+    if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Err(format!("Copilot answered {status}"));
     }
-    Ok(response.status().is_success())
+    Ok(status.is_success())
 }
 
 fn store(found: &FoundToken, user: &CopilotUser, configured: Option<&str>) {
@@ -548,7 +580,11 @@ pub async fn status(configured: Option<&str>) -> CopilotStatus {
         }
     };
 
-    let mut problem = None;
+    // Which problem to show when no candidate works. What GitHub says about
+    // an account it recognises ("no Copilot") is more use than "rejected", and
+    // within a kind the first candidate, the one that outranks the rest, wins.
+    let mut no_copilot: Option<String> = None;
+    let mut rejected = false;
     let mut unreachable = false;
     for found in &candidates {
         match validate(&client, &found.token).await {
@@ -568,15 +604,12 @@ pub async fn status(configured: Option<&str>) -> CopilotStatus {
                     "[Copilot] GitHub rejected the token {}",
                     found.source.describe()
                 );
-                if problem.is_none() {
-                    problem = Some(
-                        "GitHub rejected the saved sign-in. Run `gh auth login` and try again."
-                            .to_string(),
-                    );
-                }
+                rejected = true;
             }
             Validation::NoCopilot(why) => {
-                problem = Some(why);
+                if no_copilot.is_none() {
+                    no_copilot = Some(why);
+                }
             }
             Validation::Unreachable(why) => {
                 warn!("[Copilot] Could not check the sign-in: {why}");
@@ -598,11 +631,20 @@ pub async fn status(configured: Option<&str>) -> CopilotStatus {
     CopilotStatus {
         token_found: true,
         copilot_cli_login: cli_login,
-        problem: problem.or_else(|| {
-            unreachable.then(|| "Could not reach GitHub to check the sign-in.".to_string())
-        }),
+        problem: pick_problem(no_copilot, rejected, unreachable),
         ..CopilotStatus::default()
     }
+}
+
+/// The one problem to show for a set of candidates none of which worked.
+fn pick_problem(no_copilot: Option<String>, rejected: bool, unreachable: bool) -> Option<String> {
+    no_copilot
+        .or_else(|| {
+            rejected.then(|| {
+                "GitHub rejected the saved sign-in. Run `gh auth login` and try again.".to_string()
+            })
+        })
+        .or_else(|| unreachable.then(|| "Could not reach GitHub to check the sign-in.".to_string()))
 }
 
 /// [`status`] for a screen: a sign-in GitHub confirmed within [`DISPLAY_TTL`]
@@ -644,6 +686,10 @@ pub async fn session(configured: Option<&str>) -> Result<Session, AgentError> {
     }
 
     let status = status(configured_token.as_deref()).await;
+    // Deliberately not `cached_session`: when GitHub could not be reached,
+    // `status` leaves the last confirmed credential in place even past its
+    // TTL, and that is used rather than failing the turn over a blip. Only a
+    // real "no" (401, no Copilot, nothing found) clears it.
     if let Ok(guard) = VALIDATED.lock() {
         if let Some(v) = guard.as_ref() {
             return Ok(Session {
@@ -841,6 +887,9 @@ mod tests {
         assert_eq!(plain.api_base(), DEFAULT_API_BASE);
 
         for untrusted in [
+            "https://evilghe.com",
+            "https://ghe.com",
+            "https://octocorp.ghe.com.evil.example",
             "https://evil.example",
             "https://api.githubcopilot.com.evil.example",
             "https://notgithubcopilot.com",
@@ -916,6 +965,42 @@ mod tests {
         );
         invalidate();
         assert!(cached_session(None).is_none());
+    }
+
+    #[test]
+    fn a_rate_limit_or_outage_says_nothing_about_the_token() {
+        use reqwest::StatusCode;
+        assert_eq!(user_answer(StatusCode::OK), UserAnswer::Read);
+        assert_eq!(user_answer(StatusCode::UNAUTHORIZED), UserAnswer::BadToken);
+        for nothing in [
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::BAD_GATEWAY,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ] {
+            assert_eq!(
+                user_answer(nothing),
+                UserAnswer::NothingLearned,
+                "{nothing}"
+            );
+        }
+        for refused in [StatusCode::FORBIDDEN, StatusCode::NOT_FOUND] {
+            assert_eq!(user_answer(refused), UserAnswer::AskTheApi, "{refused}");
+        }
+    }
+
+    #[test]
+    fn the_problem_shown_does_not_depend_on_candidate_order() {
+        let why = || Some("no Copilot here".to_string());
+        // An account GitHub recognises outranks a token it rejected, whichever
+        // candidate came first.
+        assert_eq!(pick_problem(why(), true, true), why());
+        assert_eq!(pick_problem(why(), false, false), why());
+        assert!(pick_problem(None, true, true).is_some_and(|p| p.contains("gh auth login")));
+        assert!(
+            pick_problem(None, false, true).is_some_and(|p| p.contains("Could not reach GitHub"))
+        );
+        assert_eq!(pick_problem(None, false, false), None);
     }
 
     #[test]
