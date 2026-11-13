@@ -54,6 +54,14 @@ export const DOWNLOAD_DID_NOT_START = "The download didn't start. Try again.";
 /** Shown while a download waits out a lost connection. */
 export const DOWNLOAD_WAITING_FOR_NETWORK = "No internet connection. Juno will try again.";
 
+/**
+ * Whether model weights can be fetched from Hugging Face on this network.
+ * Rust owns this (`src-tauri/src/model_host.rs`); the page prints it and
+ * decides nothing. `blocked` is the work-laptop case: the internet works,
+ * Hugging Face does not reach the Mac, and no number of retries changes that.
+ */
+export type ModelHostStatus = "unknown" | "reachable" | "offline" | "blocked";
+
 export interface SttModelsStatus {
 	arch: string;
 	models: SttModelInfo[];
@@ -66,6 +74,12 @@ export interface SttModelsStatus {
 	 * wording and the threshold; print it verbatim and never as a popup.
 	 */
 	quality_notice: string | null;
+	network: ModelHostStatus;
+	/**
+	 * The one line that goes with `network`, or null. Rust owns the
+	 * wording; print it verbatim.
+	 */
+	network_note: string | null;
 }
 
 export interface SttDownloadError {
@@ -156,6 +170,12 @@ export function useSttModels() {
 		reload();
 	});
 
+	// The backend re-probes on a network change and after a failed fetch.
+	// Nothing here polls; this only redraws when the answer moves.
+	useEventListener<ModelHostStatus>(EVENTS.MODEL_HOST_CHANGED, () => {
+		reload();
+	});
+
 	const download = useCallback(
 		async (modelId: string) => {
 			setDownloadError(null);
@@ -206,6 +226,20 @@ export function useSttModels() {
 		[reload],
 	);
 
+	/**
+	 * Ask the network again. Besides the machine changing network this is
+	 * the only thing that re-checks: there is deliberately no timer.
+	 */
+	const retryNetwork = useCallback(async () => {
+		setDownloadError(null);
+		try {
+			await invoke(COMMANDS.MODEL_HOST_RECHECK);
+		} catch (error) {
+			console.warn("Could not re-check the model host:", error);
+		}
+		await reload();
+	}, [reload]);
+
 	const dismissChange = useCallback(() => setLastChange(null), []);
 
 	return {
@@ -216,6 +250,14 @@ export function useSttModels() {
 		actionError,
 		lastChange,
 		online,
+		/**
+		 * `blocked` means Hugging Face cannot be reached though the internet
+		 * works. `offline` is already covered by `online` above, which is why
+		 * only the blocked line is printed from `networkNote`.
+		 */
+		network: status?.network ?? "unknown",
+		networkNote: status?.network_note ?? null,
+		retryNetwork,
 		reload,
 		download,
 		cancelDownload,

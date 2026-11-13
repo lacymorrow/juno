@@ -24,12 +24,16 @@
 //! a tiny local HTTP server that drops, stalls and refuses on cue.
 
 use futures_util::StreamExt;
-use reqwest::header::{HeaderMap, CONTENT_RANGE, ETAG, IF_RANGE, LAST_MODIFIED, RANGE};
+use reqwest::header::{
+    HeaderMap, CONTENT_RANGE, CONTENT_TYPE, ETAG, IF_RANGE, LAST_MODIFIED, RANGE,
+};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tracing::{info, warn};
+
+use crate::model_host::NOT_ON_THIS_NETWORK;
 
 /// How hard to try before telling the person the download did not finish.
 #[derive(Debug, Clone, Copy)]
@@ -74,6 +78,11 @@ pub enum FetchError {
     /// Trying again will not help (a 404, a file that changed upstream, a
     /// disk error). What is on disk is discarded.
     Permanent(String),
+    /// What answered was not the model host. A network that blocks Hugging
+    /// Face does not refuse the request: it answers, with its own page or
+    /// with something far too short to be the model. Retrying on this
+    /// network cannot help, so the caller stops rather than backing off.
+    HostUnavailable,
 }
 
 impl FetchError {
@@ -85,6 +94,7 @@ impl FetchError {
             FetchError::Network(_) => "No internet connection. Try again when you're back online.",
             FetchError::NoSpace => "There isn't enough free space for this model.",
             FetchError::Permanent(_) => "The download didn't finish. Try again in a little while.",
+            FetchError::HostUnavailable => NOT_ON_THIS_NETWORK,
         }
     }
 
@@ -100,6 +110,7 @@ impl FetchError {
             FetchError::Network(d) => format!("network: {}", d),
             FetchError::NoSpace => "no space left on device".to_string(),
             FetchError::Permanent(d) => d.clone(),
+            FetchError::HostUnavailable => "host unavailable on this network".to_string(),
         }
     }
 }
@@ -123,6 +134,10 @@ pub struct FetchTarget<'a> {
     pub path: &'a Path,
     /// Exact size when a manifest pins it.
     pub expected_bytes: Option<u64>,
+    /// Smallest size this file could honestly be, when only an approximate
+    /// size is known. A complete-looking response far below it is a stand-in
+    /// page, not the model.
+    pub min_bytes: Option<u64>,
     /// Where the server's validator is remembered between attempts.
     pub validator_path: &'a Path,
 }
@@ -165,6 +180,21 @@ pub fn parse_unsatisfied_total(value: &str) -> Option<u64> {
         .trim()
         .parse()
         .ok()
+}
+
+/// Whether a response body is a web page rather than a model file.
+///
+/// A network that blocks Hugging Face rarely refuses the request. It answers
+/// 200 with its own HTML saying the category is not allowed, and so does a
+/// captive portal. Nothing on a model URL is ever legitimately a web page, so
+/// an HTML content type on one always means something stood in front of the
+/// host. Without this check those bytes land on disk under the model's name
+/// and surface days later as a parse failure, a long way from the cause.
+pub fn looks_like_a_web_page(content_type: Option<&str>) -> bool {
+    content_type.is_some_and(|value| {
+        let value = value.trim().to_ascii_lowercase();
+        value.starts_with("text/html") || value.starts_with("application/xhtml+xml")
+    })
 }
 
 /// What to do with a response, given what is already on disk.
@@ -348,6 +378,21 @@ where
         }
         match attempt_once(client, target, policy, cancel, on_event).await {
             Ok(size) => {
+                // A response that completed but is a fraction of the model's
+                // known size did not carry the model. Trying again on the
+                // same network would fetch the same stand-in, so this is
+                // fatal rather than transient.
+                if let Some(min) = target.min_bytes {
+                    if size < min {
+                        warn!(
+                            "[ModelDownload] {} returned {} bytes, below the {} this file must be; not a model file",
+                            target.url, size, min
+                        );
+                        discard(target.path).await;
+                        discard(target.validator_path).await;
+                        return Err(FetchError::HostUnavailable);
+                    }
+                }
                 discard(target.validator_path).await;
                 return Ok(size);
             }
@@ -422,6 +467,20 @@ where
     })?;
 
     let status = response.status().as_u16();
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    if looks_like_a_web_page(content_type.as_deref()) {
+        warn!(
+            "[ModelDownload] {} answered {} with a web page, not a model file",
+            target.url, status
+        );
+        discard(target.path).await;
+        discard(target.validator_path).await;
+        return Err(Attempt::Fatal(FetchError::HostUnavailable));
+    }
     let content_range = response
         .headers()
         .get(CONTENT_RANGE)
@@ -701,6 +760,12 @@ mod tests {
         IgnoreRange,
         /// Answer with this status and no body.
         Status(u16),
+        /// Answer 200 with an HTML page, the way a network that blocks the
+        /// host does. The body is short, like every real block page.
+        BlockPage,
+        /// Answer 200 with an honest content type and a body far shorter than
+        /// the file should be.
+        TooShort,
     }
 
     struct Server {
@@ -761,6 +826,26 @@ mod tests {
         seen.lock().unwrap().push(range_line);
 
         let total = data.len();
+        if let Step::BlockPage = step {
+            let page = b"<html><body>Blocked by policy</body></html>";
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                page.len()
+            );
+            let _ = sock.write_all(resp.as_bytes()).await;
+            let _ = sock.write_all(page).await;
+            return;
+        }
+        if let Step::TooShort = step {
+            let short = &data[..8.min(total)];
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                short.len()
+            );
+            let _ = sock.write_all(resp.as_bytes()).await;
+            let _ = sock.write_all(short).await;
+            return;
+        }
         let (status_line, start, extra) = match (&step, range_start) {
             (Step::Status(code), _) => {
                 let resp = format!(
@@ -820,6 +905,16 @@ mod tests {
         policy: RetryPolicy,
         cancel: &AtomicBool,
     ) -> (tempfile_dir::Dir, Run) {
+        run_with_floor(url, expected, None, policy, cancel).await
+    }
+
+    async fn run_with_floor(
+        url: &str,
+        expected: Option<u64>,
+        min_bytes: Option<u64>,
+        policy: RetryPolicy,
+        cancel: &AtomicBool,
+    ) -> (tempfile_dir::Dir, Run) {
         let dir = tempfile_dir::Dir::new();
         let path = dir.path().join("model.bin");
         let validator_path = dir.path().join("model.bin.validator");
@@ -828,6 +923,7 @@ mod tests {
             url,
             path: &path,
             expected_bytes: expected,
+            min_bytes,
             validator_path: &validator_path,
         };
         let mut waits = 0;
@@ -983,6 +1079,66 @@ mod tests {
         assert_eq!(run.result, Err(FetchError::Cancelled));
     }
 
+    #[test]
+    fn a_web_page_is_recognised_whatever_the_charset_or_case() {
+        assert!(looks_like_a_web_page(Some("text/html")));
+        assert!(looks_like_a_web_page(Some("text/html; charset=utf-8")));
+        assert!(looks_like_a_web_page(Some("  TEXT/HTML  ")));
+        assert!(looks_like_a_web_page(Some("application/xhtml+xml")));
+        // What a model file actually comes as.
+        assert!(!looks_like_a_web_page(Some("binary/octet-stream")));
+        assert!(!looks_like_a_web_page(Some("application/octet-stream")));
+        assert!(!looks_like_a_web_page(None));
+    }
+
+    #[test]
+    fn the_blocked_line_names_no_code_and_keeps_no_partial() {
+        let msg = FetchError::HostUnavailable.human_message();
+        for bad in ["404", "HTTP", "http", "huggingface", "url"] {
+            assert!(!msg.contains(bad), "{msg:?} contains {bad:?}");
+        }
+        // Nothing half-written is worth resuming: the next attempt on this
+        // network would fetch the same stand-in again.
+        assert!(!FetchError::HostUnavailable.keeps_partial());
+    }
+
+    #[tokio::test]
+    async fn a_block_page_served_as_200_never_lands_on_disk() {
+        // The shape of the bug: a proxy answers the model URL with its own
+        // HTML, 200, and without this the page is saved as the model.
+        let data = body(4096);
+        let server = serve(vec![Step::BlockPage], data).await;
+        let cancel = AtomicBool::new(false);
+        let (_dir, run) = run(&server.url, None, fast_policy(), &cancel).await;
+        assert_eq!(run.result, Err(FetchError::HostUnavailable));
+        assert!(run.on_disk.is_empty(), "the page was written to disk");
+        // Fatal, so it is not retried into a loop on a network that will
+        // answer the same way every time.
+        assert_eq!(run.waits, 0);
+    }
+
+    #[tokio::test]
+    async fn a_body_far_below_the_known_size_is_not_accepted_as_the_model() {
+        let data = body(4096);
+        let server = serve(vec![Step::TooShort], data).await;
+        let cancel = AtomicBool::new(false);
+        let (_dir, run) =
+            run_with_floor(&server.url, None, Some(2048), fast_policy(), &cancel).await;
+        assert_eq!(run.result, Err(FetchError::HostUnavailable));
+        assert!(run.on_disk.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_real_download_clears_its_floor() {
+        let data = body(4096);
+        let server = serve(vec![Step::Serve], data.clone()).await;
+        let cancel = AtomicBool::new(false);
+        let (_dir, run) =
+            run_with_floor(&server.url, None, Some(2048), fast_policy(), &cancel).await;
+        assert_eq!(run.result, Ok(4096));
+        assert_eq!(run.on_disk, data);
+    }
+
     #[tokio::test]
     async fn a_complete_pinned_file_on_disk_needs_no_request() {
         let dir = tempfile_dir::Dir::new();
@@ -993,6 +1149,7 @@ mod tests {
             url: "http://127.0.0.1:9/never",
             path: &path,
             expected_bytes: Some(64),
+            min_bytes: None,
             validator_path: &vpath,
         };
         let cancel = AtomicBool::new(false);

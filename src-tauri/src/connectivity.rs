@@ -339,8 +339,13 @@ pub fn network_up() -> bool {
     current().network_up()
 }
 
+/// Called on every path change the monitor reports, whether or not it changes
+/// what a surface shows. Model downloads care about a move from one usable
+/// network to another, which is not a change of status here but is a change
+/// of answer there.
 pub fn record_network(up: bool) {
     update(|h| h.network_changed(up));
+    crate::model_host::on_network_change(up);
 }
 
 pub fn record_provider_failure() {
