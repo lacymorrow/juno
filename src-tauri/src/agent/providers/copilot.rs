@@ -614,6 +614,9 @@ pub async fn status(configured: Option<&str>) -> CopilotStatus {
             Validation::Unreachable(why) => {
                 warn!("[Copilot] Could not check the sign-in: {why}");
                 unreachable = true;
+                // GitHub is the trouble, not this token, so the candidates
+                // after it would only wait out the same timeout each.
+                break;
             }
         }
     }
@@ -891,6 +894,9 @@ mod tests {
 
         for untrusted in [
             "https://evilghe.com",
+            "https://evilgithubcopilot.com",
+            "https://githubcopilot.com.evil.io",
+            "https://api.githubcopilot.com@evil.com",
             "https://ghe.com",
             "https://octocorp.ghe.com.evil.example",
             "https://evil.example",
