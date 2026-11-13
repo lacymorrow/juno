@@ -65,6 +65,22 @@ fn has_credential(active_provider: &str, saved_key: impl Fn(&Provider) -> Option
             .is_some_and(|value| !value.is_empty())
 }
 
+/// The key providers Juno will move to on the strength of a key alone, in
+/// order of preference. Rig is left out: it borrows OpenAI's key, so OpenAI
+/// is the provider that key was got for.
+const KEY_PROVIDERS: [Provider; 3] = [Provider::Anthropic, Provider::OpenAI, Provider::Gemini];
+
+/// The first key provider, other than the active one, that has a key now.
+fn keyed_provider(
+    active_provider: &str,
+    saved_key: impl Fn(&Provider) -> Option<String>,
+) -> Option<&'static str> {
+    KEY_PROVIDERS
+        .iter()
+        .map(Provider::id)
+        .find(|id| *id != active_provider && has_credential(id, &saved_key))
+}
+
 /// Work out which provider should be active and write it down if it changed.
 ///
 /// Returns the provider id that is active afterwards, which is only used by
@@ -128,6 +144,7 @@ pub async fn apply(settings_manager: &SettingsManager) -> Result<String, String>
         active_provider: config.active_provider.clone(),
         chosen_by_user: config.provider_chosen_by_user,
         active_has_credential: active_has_credential(&config),
+        keyed_provider: keyed_provider(&config.active_provider, crate::secrets::provider_key),
         cli_candidates,
     };
 
@@ -202,6 +219,25 @@ mod tests {
     /// which case the "no credential" assertions cannot mean anything.
     fn env_key_is_set(name: &str) -> bool {
         std::env::var(name).is_ok_and(|v| !v.is_empty())
+    }
+
+    #[test]
+    fn a_key_for_another_provider_is_found() {
+        if env_key_is_set("ANTHROPIC_API_KEY") || env_key_is_set("GEMINI_API_KEY") {
+            return;
+        }
+        assert_eq!(
+            keyed_provider("anthropic", saved(Provider::OpenAI, "sk-example")),
+            Some("openai")
+        );
+        // The active provider's own key is not "another provider's".
+        if !env_key_is_set("OPENAI_API_KEY") {
+            assert_eq!(
+                keyed_provider("openai", saved(Provider::OpenAI, "sk-example")),
+                None
+            );
+            assert_eq!(keyed_provider("anthropic", nothing_saved), None);
+        }
     }
 
     #[test]
