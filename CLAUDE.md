@@ -165,7 +165,8 @@ Key events: `agent-text-stream`, `agent-stream-start/end`, `provider_settings_ch
 | `src-tauri/src/state.rs` | Central `AppState` with all shared state |
 | `src-tauri/src/commands/` | 50+ Tauri command handlers (organized by domain) |
 | `src-tauri/src/agent/tools/` | 24 tool modules (computer use, browser, desktop, safari, MCP) |
-| `src-tauri/src/agent/providers/` | AI provider integrations (Anthropic, OpenAI, Gemini, Claude CLI) |
+| `src-tauri/src/agent/providers/` | AI provider integrations (Anthropic, OpenAI, Gemini, Claude CLI, Codex CLI, GitHub Copilot) |
+| `src-tauri/src/agent/providers/copilot.rs` | GitHub Copilot credentials: finds the GitHub sign-in already on the Mac, checks it has Copilot |
 | `src-tauri/src/agent/providers/claude_cli.rs` | Claude CLI subprocess provider — no API key needed |
 | `src-tauri/src/agent/prompts/` | Prompt management with `{{variable}}` substitution |
 | `src-tauri/src/cloud/connector.rs` | WebSocket cloud connector with hardware monitoring |
@@ -204,6 +205,19 @@ Alternative to direct API keys — uses the locally installed `claude` binary (C
 **Limitations**: Without an `AppHandle` (headless and test paths) no tool server is started and the CLI runs toolless. Escape cancels a running CLI query by killing the subprocess (LAC-3697).
 
 **Default provider**: When nobody has picked a provider, the provider that would otherwise run has no credential, and the CLI is installed *and* signed in, Juno selects the Claude CLI at launch rather than asking for an API key — someone on Claude Max already pays for this. The rule, and its reverse (Juno gives the CLI up if it made the choice and the CLI later disappears or signs out), lives in `agent/providers/default_selection.rs` as a pure function; the I/O around it is `agent/providers/startup_default.rs`, spawned unawaited so launch never waits on a subprocess. A choice made in Settings or in setup sets `ProviderSettings::provider_chosen_by_user` and is never overruled.
+
+
+### GitHub Copilot Provider
+
+**Purpose**: Run Juno on a GitHub Copilot plan (Individual, Business, Enterprise) with no API key, using the GitHub sign-in already on the Mac. Provider id `copilot`.
+
+**How it works**: Copilot serves Anthropic's Messages API at `{endpoints.api}/v1/messages`, so this is `AnthropicBrain` with a different endpoint (`AnthropicBrain::for_copilot`, `Endpoint::Copilot`). Streaming, prompt caching, adaptive thinking and computer use (including `computer_toolset_20260801`) all work unchanged. The request carries `Authorization: Bearer <GitHub token>`, `Copilot-Integration-Id` and `X-Initiator` (`agent` when the last message is a tool result, otherwise `user`, as the Copilot CLI does, so an agent loop is not billed as many prompts).
+
+**Credentials** (`agent/providers/copilot.rs`), first found wins: the token saved in Settings for `copilot` → `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN` → `gh auth token` (5s timeout) → `~/.config/gh/hosts.yml`. Each is validated against `api.github.com/copilot_internal/user`, which also gives the account's API host (enterprise accounts get their own); the answer is cached for 30 minutes. A 401 from the API drops it and the request is sent once more with whatever sign-in is found then, so a rotated `gh` token costs nothing visible; a second 401 fails the turn with a `gh auth login` hint. Settings and setup ask on every window focus (`status_for_display`): a confirmed sign-in is reused for 60 seconds, anything else is asked afresh. The Copilot CLI's own sign-in lives in the Keychain behind a macOS prompt, so it is read only when the person presses "Use Copilot CLI sign-in" (`import_copilot_cli_sign_in`), and then saved as the `copilot` key. Classic `ghp_` PATs do not work with Copilot. With several `gh` accounts only the active one is read (`gh auth switch`). A 429 or 5xx from GitHub while checking is "nothing learned", never "no Copilot", and the last confirmed credential keeps working through it.
+
+**Models**: only Copilot's Claude models (`claude-opus-5.5` default; Copilot uses dots, the Claude API hyphens). GPT models need `/responses` and Gemini `/chat/completions`, not wired yet. Copilot rejects `fallbacks`, so no row declares server-side fallbacks. Rows are `Price::Subscription`; cost log ids are `copilot:<model>`.
+
+**Default provider**: after the Claude CLI and Codex, Copilot is the third "plan you already pay for" `default_selection.rs` will pick at launch: installed means a GitHub token was found, signed in means GitHub confirmed Copilot access. Offline is `SignIn::Unknown`, never signed out, so a launch without network does not give Copilot up.
 
 ## Critical Development Rules
 

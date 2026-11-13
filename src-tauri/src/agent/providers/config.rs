@@ -145,6 +145,18 @@ pub fn default_provider_entries() -> Vec<CentralizedProviderConfig> {
             effort: None,
             load_account_mcp: crate::constants::settings::defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
         },
+        CentralizedProviderConfig {
+            id: Provider::Copilot.id().to_string(),
+            // Usually empty: the GitHub sign-in is found at request time. Holds
+            // a token only when one was pasted or imported from the Copilot CLI.
+            api_key: None,
+            model: Some(Provider::Copilot.default_model().to_string()),
+            max_tokens: Some(crate::constants::agent::config::DEFAULT_MAX_TOKENS_ANTHROPIC),
+            temperature: Some(0.7),
+            system_prompt: None,
+            effort: None,
+            load_account_mcp: crate::constants::settings::defaults::CLAUDE_CLI_LOAD_ACCOUNT_MCP,
+        },
     ]
 }
 

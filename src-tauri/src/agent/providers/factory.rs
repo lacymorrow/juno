@@ -96,7 +96,12 @@ pub(crate) fn check_credential(
     settings: &crate::settings::ProviderConfig,
     env_key: Option<String>,
 ) -> Result<(), AgentError> {
-    if matches!(provider, Provider::ClaudeCli | Provider::CodexCli) || crate::demo::is_demo_build()
+    // Copilot's credential is a GitHub sign-in found at request time (see
+    // `copilot::session`), which explains itself when it is missing.
+    if matches!(
+        provider,
+        Provider::ClaudeCli | Provider::CodexCli | Provider::Copilot
+    ) || crate::demo::is_demo_build()
     {
         return Ok(());
     }
@@ -115,7 +120,7 @@ fn ensure_can_run(
         Provider::Anthropic => Some("ANTHROPIC_API_KEY"),
         Provider::OpenAI | Provider::Rig => Some("OPENAI_API_KEY"),
         Provider::Gemini => Some("GEMINI_API_KEY"),
-        Provider::ClaudeCli | Provider::CodexCli => None,
+        Provider::ClaudeCli | Provider::CodexCli | Provider::Copilot => None,
     };
     check_credential(provider, settings, env_name.and_then(|n| env::var(n).ok()))
 }
@@ -295,6 +300,7 @@ impl BrainFactory {
         if codex_installed {
             providers.push(Provider::CodexCli);
         }
+        providers.push(Provider::Copilot);
         let config = Some(load_provider_config(app_handle));
         // One filesystem probe for the whole listing.
         let cli_installed = crate::agent::providers::claude_cli::is_claude_cli_available();
@@ -366,16 +372,34 @@ impl BrainFactory {
                         use crate::agent::providers::codex_cli::{last_known_auth_mode, AuthMode};
                         codex_installed && !matches!(last_known_auth_mode(), AuthMode::SignedOut)
                     }
+                    Provider::Copilot => {
+                        // Synchronous, so it reads the last check rather than
+                        // asking GitHub. Only a confirmed "no" greys it out;
+                        // a token saved in settings is worth offering until
+                        // something has said otherwise.
+                        use crate::agent::providers::claude_cli::SignIn;
+                        match crate::agent::providers::copilot::last_known_sign_in() {
+                            SignIn::SignedIn => true,
+                            SignIn::SignedOut => false,
+                            SignIn::Unknown => config
+                                .as_ref()
+                                .and_then(|c| c.get_provider_settings(provider_id))
+                                .and_then(|s| s.api_key.as_ref())
+                                .is_some_and(|k| !k.is_empty()),
+                        }
+                    }
                 };
                 // The one unavailability you fix in a terminal rather than by
                 // pasting a key.
-                let needs_sign_in = matches!(provider, Provider::ClaudeCli | Provider::CodexCli)
-                    && match provider {
-                        Provider::ClaudeCli => cli_installed,
-                        Provider::CodexCli => codex_installed,
-                        _ => false,
-                    }
-                    && !is_available;
+                let needs_sign_in = matches!(
+                    provider,
+                    Provider::ClaudeCli | Provider::CodexCli | Provider::Copilot
+                ) && match provider {
+                    Provider::ClaudeCli => cli_installed,
+                    Provider::CodexCli => codex_installed,
+                    Provider::Copilot => true,
+                    _ => false,
+                } && !is_available;
 
                 ProviderInfo {
                     id: provider_id.to_string(),
@@ -488,6 +512,11 @@ impl BrainFactory {
                 CodexCliBrain::from_config(&provider_config)
                     .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
+            Provider::Copilot => {
+                info!("Initializing GitHub Copilot brain (GitHub sign-in, no API key)...");
+                AnthropicBrain::for_copilot(&provider_config)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+            }
         }
     }
 
@@ -581,6 +610,11 @@ impl BrainFactory {
             Provider::CodexCli => {
                 info!("Initializing Codex CLI brain with custom system prompt...");
                 CodexCliBrain::from_config(&provider_config)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+            }
+            Provider::Copilot => {
+                info!("Initializing GitHub Copilot brain with custom system prompt...");
+                AnthropicBrain::for_copilot(&provider_config)
                     .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
         }
@@ -865,6 +899,14 @@ mod subscription_tests {
         let config = chose("codex_cli", true);
         let provider = select_provider(&config, None).unwrap();
         assert_eq!(provider, Provider::CodexCli);
+        assert!(check_credential(&provider, &entry(&config, provider.clone()), None).is_ok());
+    }
+
+    #[test]
+    fn a_copilot_choice_needs_no_api_key() {
+        let config = chose("copilot", true);
+        let provider = select_provider(&config, None).unwrap();
+        assert_eq!(provider, Provider::Copilot);
         assert!(check_credential(&provider, &entry(&config, provider.clone()), None).is_ok());
     }
 

@@ -17,6 +17,7 @@ use tracing::{info, warn};
 use super::claude_cli;
 use super::codex_cli;
 use super::config::ProviderConfig;
+use super::copilot;
 use super::default_selection::{decide, CliCandidate, Decision, SelectionState};
 use super::types::Provider;
 use crate::settings::manager::SettingsManager;
@@ -33,7 +34,9 @@ fn env_key_for(provider: &Provider) -> Option<&'static str> {
         Provider::Rig => Some("OPENAI_API_KEY"),
         Provider::Gemini => Some("GEMINI_API_KEY"),
         // The CLIs have no key by design; their credential is their login.
-        Provider::ClaudeCli | Provider::CodexCli => None,
+        // Copilot's is a GitHub sign-in, which is checked as a candidate below
+        // rather than counted as a key here.
+        Provider::ClaudeCli | Provider::CodexCli | Provider::Copilot => None,
     }
 }
 
@@ -87,8 +90,22 @@ pub async fn apply(settings_manager: &SettingsManager) -> Result<String, String>
         codex_cli::CliStatus::default()
     };
 
-    // Preference order lives here: Claude, then Codex, then (future) trial
-    // credits. The rule walks the list first-usable-wins, so this is the one
+    // Copilot is a network round trip to GitHub, not a subprocess. Somebody
+    // with a key or a signed-in CLI never needs it decided, but asking anyway
+    // keeps Settings honest about it from the first render.
+    let copilot_token = config
+        .resolve_provider(Provider::Copilot)
+        .and_then(|p| p.api_key);
+    let copilot_status = copilot::status(copilot_token.as_deref()).await;
+    // GitHub unreachable is not signed out: a provider Juno already chose is
+    // kept while its token is still there, rather than abandoned on a blip.
+    let copilot_signed_in = copilot_status.signed_in
+        || (config.active_provider == Provider::Copilot.id()
+            && copilot_status.token_found
+            && copilot::last_known_sign_in() == claude_cli::SignIn::Unknown);
+
+    // Preference order lives here: Claude, then Codex, then GitHub Copilot,
+    // then (future) trial credits. The rule walks the list first-usable-wins, so this is the one
     // place to touch when a provider is added or re-ordered.
     let cli_candidates = vec![
         CliCandidate {
@@ -100,6 +117,11 @@ pub async fn apply(settings_manager: &SettingsManager) -> Result<String, String>
             provider_id: Provider::CodexCli.id(),
             installed: codex_status.installed,
             signed_in: codex_status.is_signed_in(),
+        },
+        CliCandidate {
+            provider_id: Provider::Copilot.id(),
+            installed: copilot_status.token_found,
+            signed_in: copilot_signed_in,
         },
     ];
 
@@ -137,6 +159,12 @@ pub async fn apply(settings_manager: &SettingsManager) -> Result<String, String>
                 id if id == Provider::CodexCli.id() => match codex_status.email {
                     Some(email) => info!(
                         "[Providers] No API key configured and the Codex CLI is signed in with ChatGPT as {email}, using it"
+                    ),
+                    None => info!("[Providers] Active provider is now '{provider_id}'"),
+                },
+                id if id == Provider::Copilot.id() => match copilot_status.login {
+                    Some(login) => info!(
+                        "[Providers] No API key configured and GitHub Copilot is signed in as {login}, using it"
                     ),
                     None => info!("[Providers] Active provider is now '{provider_id}'"),
                 },
@@ -232,6 +260,7 @@ mod tests {
         // "unusable" and bounce someone straight back off it.
         assert_eq!(env_key_for(&Provider::ClaudeCli), None);
         assert_eq!(env_key_for(&Provider::CodexCli), None);
+        assert_eq!(env_key_for(&Provider::Copilot), None);
     }
 
     #[test]
@@ -242,6 +271,7 @@ mod tests {
         let ids: Vec<&str> = config.providers.iter().map(|p| p.id.as_str()).collect();
         assert!(ids.contains(&Provider::ClaudeCli.id()));
         assert!(ids.contains(&Provider::CodexCli.id()));
+        assert!(ids.contains(&Provider::Copilot.id()));
         assert!(ids.contains(&super::super::config::DEFAULT_PROVIDER.id()));
     }
 }

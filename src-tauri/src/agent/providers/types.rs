@@ -405,6 +405,10 @@ pub enum Provider {
     /// Codex CLI: subprocess-based provider, no API key needed.
     /// Uses the locally installed `codex` binary with the user's ChatGPT-plan auth.
     CodexCli,
+    /// GitHub Copilot: Claude through the Copilot API's Anthropic Messages
+    /// endpoint, authenticated with the person's GitHub sign-in. No API key.
+    /// See [`super::copilot`].
+    Copilot,
 }
 
 impl Provider {
@@ -418,6 +422,7 @@ impl Provider {
             "gemini" => Some(Provider::Gemini),
             "claude_cli" | "claude-cli" | "claudecli" => Some(Provider::ClaudeCli),
             "codex_cli" | "codex-cli" | "codexcli" => Some(Provider::CodexCli),
+            "copilot" | "github_copilot" | "github-copilot" => Some(Provider::Copilot),
             _ => None,
         }
     }
@@ -435,6 +440,7 @@ impl Provider {
             Provider::Gemini => "gemini",
             Provider::ClaudeCli => "claude_cli",
             Provider::CodexCli => "codex_cli",
+            Provider::Copilot => "copilot",
         }
     }
 
@@ -447,6 +453,7 @@ impl Provider {
             Provider::Gemini => "Google Gemini",
             Provider::ClaudeCli => "Claude CLI",
             Provider::CodexCli => "Codex CLI",
+            Provider::Copilot => "GitHub Copilot",
         }
     }
 
@@ -462,6 +469,9 @@ impl Provider {
             Provider::ClaudeCli => "Use your local Claude CLI installation — no API key required",
             Provider::CodexCli => {
                 "Use your local Codex CLI installation with your ChatGPT plan, no API key required"
+            }
+            Provider::Copilot => {
+                "Use Claude through your GitHub Copilot plan and GitHub sign-in, no API key required"
             }
         }
     }
@@ -513,15 +523,17 @@ impl Provider {
     /// declaration for keeps the type the tool registered with.
     pub fn resolve_tool_type(&self, tool_name: &str, registered_type: &str, model: &str) -> String {
         match self {
-            Provider::Anthropic => match self.computer_use(model).anthropic_version() {
-                Some(version) => match tool_name {
-                    "computer" => version.computer_tool_type().to_string(),
-                    "str_replace_based_edit_tool" => version.editor_tool_type().to_string(),
-                    // bash is the same type across every version Juno supports.
-                    _ => registered_type.to_string(),
-                },
-                None => registered_type.to_string(),
-            },
+            Provider::Anthropic | Provider::Copilot => {
+                match self.computer_use(model).anthropic_version() {
+                    Some(version) => match tool_name {
+                        "computer" => version.computer_tool_type().to_string(),
+                        "str_replace_based_edit_tool" => version.editor_tool_type().to_string(),
+                        // bash is the same type across every version Juno supports.
+                        _ => registered_type.to_string(),
+                    },
+                    None => registered_type.to_string(),
+                }
+            }
             _ => registered_type.to_string(),
         }
     }
@@ -1013,6 +1025,107 @@ impl Provider {
                 ];
                 MODELS
             }
+            // GitHub Copilot: the same Claude models, served by the Copilot
+            // API's Anthropic Messages endpoint under Copilot's own IDs
+            // (dotted, `claude-opus-5.5`). Every row was checked against the
+            // live API on 2026-11-12 (`GET {endpoints.api}/models`, then a
+            // computer-use request per model to `/v1/messages`):
+            //
+            // - the computer-use tool versions match the Claude API's, except
+            //   that Haiku 5.5 (Copilot-only here) takes the toolset;
+            // - `fallbacks` is rejected ("Extra inputs are not permitted"), so
+            //   no row is fallback-capable;
+            // - premium requests are covered by the plan, so the price is the
+            //   subscription.
+            //
+            // Only Claude: Copilot serves GPT models through `/responses` and
+            // Gemini through `/chat/completions`, neither of which this
+            // provider speaks.
+            Provider::Copilot => {
+                const MODELS: &[ModelDefinition] = &[
+                    ModelDefinition {
+                        id: "claude-opus-5.5",
+                        name: "Claude Opus 5.5 (via Copilot)",
+                        price: Price::Subscription,
+                        computer_use: CU_TOOLSET,
+                        availability: Availability::Current,
+                        toolset_ga: true,
+                        image_tier: ImageTier::HighResolution,
+                        adaptive_thinking: true,
+                        server_side_fallback: false,
+                        is_recommended: true,
+                        router_role: None,
+                    },
+                    ModelDefinition {
+                        id: "claude-sonnet-5.5",
+                        name: "Claude Sonnet 5.5 (via Copilot)",
+                        price: Price::Subscription,
+                        // Toolset-only, as on the Claude API: computer_20251124
+                        // returns a 400 here too.
+                        computer_use: CU_TOOLSET,
+                        availability: Availability::Current,
+                        toolset_ga: true,
+                        image_tier: ImageTier::HighResolution,
+                        adaptive_thinking: true,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                    ModelDefinition {
+                        id: "claude-haiku-5.5",
+                        name: "Claude Haiku 5.5 (via Copilot)",
+                        price: Price::Subscription,
+                        computer_use: CU_TOOLSET,
+                        availability: Availability::Current,
+                        toolset_ga: true,
+                        image_tier: ImageTier::HighResolution,
+                        adaptive_thinking: true,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                    ModelDefinition {
+                        id: "claude-haiku-4.5",
+                        name: "Claude Haiku 4.5 (via Copilot)",
+                        price: Price::Subscription,
+                        computer_use: CU_20250124,
+                        availability: Availability::Current,
+                        toolset_ga: false,
+                        image_tier: ImageTier::Standard,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                    ModelDefinition {
+                        id: "claude-opus-5",
+                        name: "Claude Opus 5 (via Copilot)",
+                        price: Price::Subscription,
+                        computer_use: CU_20251124,
+                        availability: Availability::Legacy,
+                        toolset_ga: true,
+                        image_tier: ImageTier::HighResolution,
+                        adaptive_thinking: true,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                    ModelDefinition {
+                        id: "claude-sonnet-5",
+                        name: "Claude Sonnet 5 (via Copilot)",
+                        price: Price::Subscription,
+                        computer_use: CU_20251124,
+                        availability: Availability::Legacy,
+                        toolset_ga: true,
+                        image_tier: ImageTier::HighResolution,
+                        adaptive_thinking: true,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                ];
+                MODELS
+            }
         }
     }
 
@@ -1102,6 +1215,7 @@ impl Provider {
                     Provider::Gemini => model_ids::GEMINI_2_5_COMPUTER_USE_PREVIEW,
                     Provider::ClaudeCli => "sonnet",
                     Provider::CodexCli => "gpt-6-luna",
+                    Provider::Copilot => "claude-opus-5.5",
                 }
             })
     }
@@ -1115,6 +1229,7 @@ impl Provider {
             Provider::Gemini => "gemini",
             Provider::ClaudeCli => "claude_cli",
             Provider::CodexCli => "codex_cli",
+            Provider::Copilot => "copilot",
         }
     }
 
@@ -1129,7 +1244,7 @@ impl Provider {
     /// Check if provider supports computer use capabilities
     /// Whether `model` accepts `thinking: {type: "adaptive"}` on this provider.
     pub fn supports_adaptive_thinking(&self, model: &str) -> bool {
-        matches!(self, Provider::Anthropic)
+        matches!(self, Provider::Anthropic | Provider::Copilot)
             && self
                 .model_definitions()
                 .iter()
@@ -1345,6 +1460,78 @@ mod tests {
         assert_eq!(editor, "text_editor_20250728");
     }
 
+    /// Copilot serves the same Claude models under its own IDs. Whatever the
+    /// Claude API rows say a model can do, the Copilot row for that model must
+    /// say too: a disagreement means one catalog was edited without the other.
+    #[test]
+    fn copilot_rows_agree_with_the_same_models_on_the_claude_api() {
+        let pairs = [
+            ("claude-opus-5.5", model_ids::CLAUDE_OPUS_5_5),
+            ("claude-sonnet-5.5", model_ids::CLAUDE_SONNET_5_5),
+            ("claude-haiku-4.5", model_ids::CLAUDE_HAIKU_4_5),
+            ("claude-opus-5", model_ids::CLAUDE_OPUS_5),
+            ("claude-sonnet-5", model_ids::CLAUDE_SONNET_5),
+        ];
+        let find = |provider: &Provider, id: &str| {
+            provider
+                .model_definitions()
+                .iter()
+                .find(|def| def.id == id)
+                .cloned()
+                .unwrap_or_else(|| panic!("{id} missing from {}", provider.id()))
+        };
+        for (copilot_id, anthropic_id) in pairs {
+            let copilot = find(&Provider::Copilot, copilot_id);
+            let claude = find(&Provider::Anthropic, anthropic_id);
+            assert_eq!(copilot.computer_use, claude.computer_use, "{copilot_id}");
+            assert_eq!(copilot.toolset_ga, claude.toolset_ga, "{copilot_id}");
+            assert_eq!(copilot.image_tier, claude.image_tier, "{copilot_id}");
+            assert_eq!(
+                copilot.adaptive_thinking, claude.adaptive_thinking,
+                "{copilot_id}"
+            );
+            assert_eq!(copilot.availability, claude.availability, "{copilot_id}");
+        }
+
+        // Every Copilot row is either checked above or named here with the
+        // reason, so a row added later cannot go unchecked.
+        // `claude-haiku-5.5`: the Claude API catalog has no Haiku 5.5 row yet.
+        let unpaired = ["claude-haiku-5.5"];
+        for def in Provider::Copilot.model_definitions() {
+            assert!(
+                pairs.iter().any(|(copilot_id, _)| *copilot_id == def.id)
+                    || unpaired.contains(&def.id),
+                "{} has no Claude API row to agree with",
+                def.id
+            );
+        }
+    }
+
+    /// Copilot answers `fallbacks` with a 400 ("Extra inputs are not
+    /// permitted") and bills premium requests against the plan, not tokens.
+    #[test]
+    fn copilot_sends_no_fallbacks_and_bills_the_plan() {
+        for def in Provider::Copilot.model_definitions() {
+            assert!(!def.server_side_fallback, "{}", def.name);
+            assert!(
+                !Provider::Copilot.supports_server_side_fallbacks(def.id),
+                "{}",
+                def.name
+            );
+            assert!(matches!(def.price, Price::Subscription), "{}", def.name);
+            assert!(def.supports_computer_use(), "{}", def.name);
+        }
+        assert_eq!(Provider::Copilot.default_model(), "claude-opus-5.5");
+        assert_eq!(
+            Provider::from_str("github_copilot"),
+            Some(Provider::Copilot)
+        );
+        assert_eq!(
+            Provider::from_str(Provider::Copilot.as_str()),
+            Some(Provider::Copilot)
+        );
+    }
+
     /// The bug this guards: #580 shipped `claude-opus-5` as the recommended
     /// default, and Anthropic had already moved Opus 5 to "Legacy models
     /// (still available)". No provider may ever default to a legacy model
@@ -1358,6 +1545,7 @@ mod tests {
             Provider::Gemini,
             Provider::ClaudeCli,
             Provider::CodexCli,
+            Provider::Copilot,
         ] {
             let default = provider
                 .model_definitions()
@@ -1908,6 +2096,7 @@ mod tests {
             Provider::Gemini,
             Provider::ClaudeCli,
             Provider::CodexCli,
+            Provider::Copilot,
         ] {
             let recommended: Vec<_> = provider
                 .model_definitions()
@@ -2003,6 +2192,7 @@ mod tests {
             Provider::Gemini,
             Provider::ClaudeCli,
             Provider::CodexCli,
+            Provider::Copilot,
         ] {
             for def in provider.model_definitions() {
                 let capable = def.computer_use.is_supported();

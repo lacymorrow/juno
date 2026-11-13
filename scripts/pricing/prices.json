@@ -222,6 +222,48 @@
       "output": 0,
       "cache_read": 0,
       "cache_write": 0
+    },
+    "copilot:claude-opus-5.5": {
+      "billing": "subscription",
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "copilot:claude-sonnet-5.5": {
+      "billing": "subscription",
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "copilot:claude-haiku-5.5": {
+      "billing": "subscription",
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "copilot:claude-haiku-4.5": {
+      "billing": "subscription",
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "copilot:claude-opus-5": {
+      "billing": "subscription",
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "copilot:claude-sonnet-5": {
+      "billing": "subscription",
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
     }
   },
   "_notes": [

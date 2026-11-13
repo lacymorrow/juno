@@ -116,6 +116,7 @@ const providerLogoId = (provider: string): string => {
   if (provider === "claude_cli") return "anthropic";
   // Codex CLI runs OpenAI's models on the person's ChatGPT plan
   if (provider === "codex_cli") return "openai";
+  if (provider === "copilot") return "github-copilot";
   return provider;
 };
 
