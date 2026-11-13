@@ -268,6 +268,54 @@ fn real_time_factor(synthesis_ms: u128, audio_secs: f32) -> Option<f32> {
     Some(synthesis_ms as f32 / 1000.0 / audio_secs)
 }
 
+/// The model-host answer in force when the last load failed, and the reason
+/// it gave. `None` once a load has succeeded.
+///
+/// `ModelCell::finish` empties the slot after a failure, so without a latch
+/// the next thing Juno says starts another load. That is the whole shape of
+/// LAC-7938, and it is **not only a network problem**: a full disk or a
+/// corrupt cache fails with the network perfectly fine, and the per-sentence
+/// retry (and the probe each one now fires) would come straight back.
+///
+/// Re-armed when the host answer moves, which is the one event that means
+/// something a failed fetch cares about has actually changed: a route change
+/// or the person pressing Try again. A failure that has nothing to do with
+/// the network simply stays latched, which is the calm outcome: the Mac's
+/// voice speaks, and the reason sits in Settings for whoever goes looking.
+static LAST_FAILURE: StdMutex<Option<(crate::model_host::HostStatus, String)>> =
+    StdMutex::new(None);
+
+/// The reason to refuse a fresh load without attempting one, if the last
+/// failure still stands under the host answer in force now.
+fn latched_failure() -> Option<String> {
+    let host = crate::model_host::status();
+    let slot = LAST_FAILURE.lock().ok()?;
+    let (at, reason) = slot.as_ref()?;
+    (!may_try_again(Some(*at), host)).then(|| reason.clone())
+}
+
+/// Whether a load should be attempted, given what the last one did and
+/// whether the host answer has moved since. Pure, so the latch is testable
+/// without a model or a network.
+fn may_try_again(
+    last_failure_at: Option<crate::model_host::HostStatus>,
+    now: crate::model_host::HostStatus,
+) -> bool {
+    last_failure_at != Some(now)
+}
+
+fn latch_failure(reason: &str) {
+    if let Ok(mut slot) = LAST_FAILURE.lock() {
+        *slot = Some((crate::model_host::status(), reason.to_string()));
+    }
+}
+
+fn clear_failure_latch() {
+    if let Ok(mut slot) = LAST_FAILURE.lock() {
+        *slot = None;
+    }
+}
+
 /// Record why Kokoro is not being fetched, and return the line. The log line
 /// is written once per change rather than once per sentence: this is reached
 /// from the speech path, which runs for everything Juno says.
@@ -315,6 +363,11 @@ fn load_kokoro() -> Result<KokoroModel, String> {
         if !host.may_fetch() {
             return Err(note_unavailable(host));
         }
+        // A load that already failed under this same answer is not tried
+        // again for every sentence. See `LAST_FAILURE`.
+        if let Some(reason) = latched_failure() {
+            return Err(reason);
+        }
     }
     info!("[Kokoro] Loading Kokoro-82M (first run downloads ~82MB from HuggingFace Hub)");
     let started = std::time::Instant::now();
@@ -333,18 +386,23 @@ fn load_kokoro() -> Result<KokoroModel, String> {
                 runtime
             );
             set_load_problem(None);
+            clear_failure_latch();
             Ok(Arc::from(model))
         }
         Err(e) => {
             error!("[Kokoro] Model load failed: {}", e);
+            let reason = format!("Failed to load Kokoro-82M model: {}", e);
             set_load_problem(Some(e.to_string()));
-            // `any-tts` hands back one opaque string, so the reason is not
-            // readable from it. Ask the network directly instead; the answer
-            // is what stops the next sentence asking again.
             if !on_disk {
+                // Latched first, so the answer the probe is about to change
+                // is not the one this failure is recorded under: otherwise a
+                // blocked network re-arms itself and the sentence after this
+                // one tries again. `any-tts` hands back one opaque string, so
+                // the reason is not readable from it; ask the network.
+                latch_failure(&reason);
                 crate::model_host::recheck_in_background();
             }
-            Err(format!("Failed to load Kokoro-82M model: {}", e))
+            Err(reason)
         }
     }
 }
@@ -372,6 +430,13 @@ pub fn sync_with_engine(engine: &str, on_settled: impl FnOnce() + Send + 'static
     // not ready, which is what made this the loop (LAC-7938).
     if !kokoro_can_arrive() {
         note_unavailable(crate::model_host::status());
+        return;
+    }
+    // Nothing Juno says starts a load that already failed under this same
+    // answer. Without this the spawn_blocking happens per sentence and only
+    // `load_kokoro` turns it away, which is a thread per sentence to learn
+    // what is already known.
+    if latched_failure().is_some() {
         return;
     }
 
@@ -516,6 +581,41 @@ mod tests {
         assert!(can_arrive(false, true), "not here yet, but it can come");
         // Neither: nothing is downloading and nothing will.
         assert!(!can_arrive(false, false));
+    }
+
+    /// A load that failed is not started again for every sentence, whatever
+    /// the reason was. The cell empties itself after a failure, so without
+    /// the latch the next thing Juno says tries again: that is LAC-7938 for
+    /// the network case and the identical loop for a full disk.
+    #[test]
+    fn a_failed_load_is_not_retried_until_the_host_answer_moves() {
+        use crate::model_host::HostStatus;
+        // Never failed: of course try.
+        assert!(may_try_again(None, HostStatus::Reachable));
+        // Failed with the network fine, and it is still fine. A disk that was
+        // full a sentence ago is still full; asking again costs 82MB of hope.
+        assert!(!may_try_again(
+            Some(HostStatus::Reachable),
+            HostStatus::Reachable
+        ));
+        assert!(!may_try_again(
+            Some(HostStatus::Blocked),
+            HostStatus::Blocked
+        ));
+        // The answer moved, which is a route change or Try again: worth one
+        // more go.
+        assert!(may_try_again(
+            Some(HostStatus::Blocked),
+            HostStatus::Reachable
+        ));
+        assert!(may_try_again(
+            Some(HostStatus::Reachable),
+            HostStatus::Blocked
+        ));
+        assert!(may_try_again(
+            Some(HostStatus::Unknown),
+            HostStatus::Reachable
+        ));
     }
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc;
