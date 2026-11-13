@@ -60,6 +60,11 @@ const GH_TIMEOUT: Duration = Duration::from_secs(5);
 /// Requests that come back 401 drop it immediately regardless.
 const VALIDATION_TTL: Duration = Duration::from_secs(30 * 60);
 
+/// How long a confirmed sign-in is shown in Settings and setup without asking
+/// GitHub again. Those screens ask every time their window gets focus; only a
+/// "yes" is reused, so a `gh auth login` done a moment ago still shows at once.
+const DISPLAY_TTL: Duration = Duration::from_secs(60);
+
 /// Long enough for a person to read the Keychain prompt and click Allow.
 #[cfg(target_os = "macos")]
 const KEYCHAIN_TIMEOUT: Duration = Duration::from_secs(120);
@@ -218,6 +223,16 @@ static VALIDATED: Mutex<Option<Validated>> = Mutex::new(None);
 /// `gh` and asking GitHub.
 static REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// The last confirmed sign-in shown to a person, and what it was checked with.
+struct Shown {
+    status: CopilotStatus,
+    configured: Option<String>,
+    checked_at: std::time::Instant,
+}
+
+/// Reused by [`status_for_display`] for [`DISPLAY_TTL`].
+static SHOWN: Mutex<Option<Shown>> = Mutex::new(None);
+
 /// What the last [`status`] concluded, for synchronous callers (the provider
 /// listing runs on every Settings render and cannot make a network call).
 static LAST_SIGN_IN: AtomicU8 = AtomicU8::new(0);
@@ -244,6 +259,9 @@ pub fn last_known_sign_in() -> SignIn {
 /// again. Called when the API answers 401.
 pub fn invalidate() {
     if let Ok(mut guard) = VALIDATED.lock() {
+        *guard = None;
+    }
+    if let Ok(mut guard) = SHOWN.lock() {
         *guard = None;
     }
 }
@@ -389,7 +407,13 @@ async fn discover(configured: Option<&str>) -> Vec<FoundToken> {
             source: TokenSource::GhCli,
         });
     }
-    // The same token reached by two routes only needs asking about once.
+    dedupe(found)
+}
+
+/// The same token reached by two routes only needs asking about once. The
+/// first route wins, so a saved token that is also `gh`'s reads "saved in
+/// Juno".
+fn dedupe(mut found: Vec<FoundToken>) -> Vec<FoundToken> {
     let mut seen = std::collections::HashSet::new();
     found.retain(|t| seen.insert(t.token.clone()));
     found
@@ -451,7 +475,10 @@ async fn validate(client: &reqwest::Client, token: &str) -> Validation {
             endpoints: None,
         }),
         Ok(false) => Validation::NoCopilot(
-            "This GitHub account does not have access to GitHub Copilot.".to_string(),
+            "GitHub could not confirm Copilot access for this token. If the account is on a \
+             Copilot Business or Enterprise plan, sign in with `gh auth login` instead of a \
+             personal access token."
+                .to_string(),
         ),
         Err(e) => Validation::Unreachable(e),
     }
@@ -576,6 +603,32 @@ pub async fn status(configured: Option<&str>) -> CopilotStatus {
         }),
         ..CopilotStatus::default()
     }
+}
+
+/// [`status`] for a screen: a sign-in GitHub confirmed within [`DISPLAY_TTL`]
+/// is shown again without running `gh` or asking GitHub. Anything else (signed
+/// out, a problem, offline) is always asked afresh, because that is the state
+/// the person is trying to change.
+pub async fn status_for_display(configured: Option<&str>) -> CopilotStatus {
+    let configured_token = non_empty(configured.map(str::to_string));
+    if let Ok(guard) = SHOWN.lock() {
+        if let Some(shown) = guard.as_ref() {
+            if shown.configured == configured_token && shown.checked_at.elapsed() < DISPLAY_TTL {
+                return shown.status.clone();
+            }
+        }
+    }
+    let fresh = status(configured_token.as_deref()).await;
+    if fresh.signed_in {
+        if let Ok(mut guard) = SHOWN.lock() {
+            *guard = Some(Shown {
+                status: fresh.clone(),
+                configured: configured_token,
+                checked_at: std::time::Instant::now(),
+            });
+        }
+    }
+    fresh
 }
 
 /// The credential a request should use, validated within [`VALIDATION_TTL`].
@@ -823,6 +876,46 @@ mod tests {
         assert!(!cache_is_usable(Some("gho_a"), fresh, Some("gho_b")));
         assert!(!cache_is_usable(Some("gho_a"), fresh, None));
         assert!(!cache_is_usable(None, VALIDATION_TTL, None));
+    }
+
+    #[test]
+    fn a_token_found_twice_keeps_its_first_source() {
+        let found = dedupe(vec![
+            FoundToken {
+                token: "gho_same".into(),
+                source: TokenSource::Settings,
+            },
+            FoundToken {
+                token: "gho_env".into(),
+                source: TokenSource::Env("GH_TOKEN"),
+            },
+            FoundToken {
+                token: "gho_same".into(),
+                source: TokenSource::GhCli,
+            },
+        ]);
+        assert_eq!(
+            found.iter().map(|t| &t.source).collect::<Vec<_>>(),
+            vec![&TokenSource::Settings, &TokenSource::Env("GH_TOKEN")]
+        );
+    }
+
+    /// The only test that touches the shared credential cache, so it cannot
+    /// race another.
+    #[test]
+    fn a_401_forgets_the_credential() {
+        let found = FoundToken {
+            token: "gho_cached".into(),
+            source: TokenSource::GhCli,
+        };
+        let user: CopilotUser = serde_json::from_str("{}").expect("parses");
+        store(&found, &user, None);
+        assert_eq!(
+            cached_session(None).map(|s| s.token),
+            Some("gho_cached".to_string())
+        );
+        invalidate();
+        assert!(cached_session(None).is_none());
     }
 
     #[test]

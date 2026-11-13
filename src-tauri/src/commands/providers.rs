@@ -46,14 +46,16 @@ async fn saved_copilot_token(app_handle: &tauri::AppHandle) -> Option<String> {
 
 /// Whether GitHub Copilot can run, as whom, and on what plan.
 ///
-/// Checks with GitHub every time, so Settings and onboarding can call it on
-/// focus and see a `gh auth login` done in Terminal a moment ago.
+/// Settings and onboarding call it on every window focus, so a `gh auth login`
+/// done in Terminal a moment ago shows at once. Anything short of a confirmed
+/// sign-in is asked afresh; a confirmed one is reused for a minute rather than
+/// running `gh` and asking GitHub on each focus.
 #[tauri::command]
 pub(crate) async fn get_copilot_status(
     app_handle: tauri::AppHandle,
 ) -> Result<crate::agent::providers::copilot::CopilotStatus, String> {
     let token = saved_copilot_token(&app_handle).await;
-    Ok(crate::agent::providers::copilot::status(token.as_deref()).await)
+    Ok(crate::agent::providers::copilot::status_for_display(token.as_deref()).await)
 }
 
 /// Use the Copilot CLI's sign-in: read its token from the Keychain (macOS

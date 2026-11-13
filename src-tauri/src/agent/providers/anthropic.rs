@@ -2540,7 +2540,7 @@ impl AgentBrain for AnthropicBrain {
         // own clock inside `handle_streaming_response`, which is where its
         // record is written.
         let request_started = std::time::Instant::now();
-        let copilot_session = match &self.endpoint {
+        let mut copilot_session = match &self.endpoint {
             Endpoint::Copilot { configured_token } => {
                 Some(super::copilot::session(configured_token.as_deref()).await?)
             }
@@ -2549,6 +2549,7 @@ impl AgentBrain for AnthropicBrain {
         let initiator = super::copilot::initiator(ends_with_tool_result(&request_payload.messages));
         let send = async {
             let mut attempt = 0usize;
+            let mut signed_in_again = false;
             loop {
                 let request = match (&self.endpoint, &copilot_session) {
                     (_, Some(session)) => self
@@ -2578,6 +2579,27 @@ impl AgentBrain for AnthropicBrain {
                     .json(&request_payload)
                     .send()
                     .await;
+                // A 401 from Copilot means the token was revoked or rotated
+                // since it was checked (`gh auth refresh`, a new sign-in).
+                // Find the current one and ask once more, so the person never
+                // sees it. Once only: a second 401 is a real answer, and it is
+                // reported below.
+                let unauthorized = matches!(
+                    &sent,
+                    Ok(r) if r.status() == reqwest::StatusCode::UNAUTHORIZED
+                );
+                if unauthorized && !signed_in_again {
+                    if let Endpoint::Copilot { configured_token } = &self.endpoint {
+                        signed_in_again = true;
+                        log::warn!(
+                            "GitHub Copilot answered 401; checking the GitHub sign-in again"
+                        );
+                        super::copilot::invalidate();
+                        copilot_session =
+                            Some(super::copilot::session(configured_token.as_deref()).await?);
+                        continue;
+                    }
+                }
                 let delay = Self::SEND_RETRY_DELAYS.get(attempt).copied();
                 match (sent, delay) {
                     (Ok(r), Some(delay)) if Self::is_retryable_status(r.status()) => {
@@ -2628,8 +2650,8 @@ impl AgentBrain for AnthropicBrain {
             if matches!(self.endpoint, Endpoint::Copilot { .. })
                 && status == reqwest::StatusCode::UNAUTHORIZED
             {
-                // The token was revoked or rotated since it was checked. Drop
-                // it so the next turn finds the current one.
+                // Still refused after signing in again above. Drop the token
+                // so the next turn starts from a fresh look.
                 super::copilot::invalidate();
                 return Err(AgentError::LlmError(
                     "GitHub Copilot did not accept the GitHub sign-in. Run `gh auth login` \

@@ -1492,6 +1492,19 @@ mod tests {
             );
             assert_eq!(copilot.availability, claude.availability, "{copilot_id}");
         }
+
+        // Every Copilot row is either checked above or named here with the
+        // reason, so a row added later cannot go unchecked.
+        // `claude-haiku-5.5`: the Claude API catalog has no Haiku 5.5 row yet.
+        let unpaired = ["claude-haiku-5.5"];
+        for def in Provider::Copilot.model_definitions() {
+            assert!(
+                pairs.iter().any(|(copilot_id, _)| *copilot_id == def.id)
+                    || unpaired.contains(&def.id),
+                "{} has no Claude API row to agree with",
+                def.id
+            );
+        }
     }
 
     /// Copilot answers `fallbacks` with a 400 ("Extra inputs are not
