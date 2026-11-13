@@ -10,10 +10,12 @@ import {
   distinctWells,
   dockAnchorX,
   dockGrowsUp,
+  getDockIntent,
   getDockSlot,
   monitorIndexAt,
   predictedWindowOrigin,
   resetDockSlots,
+  setDockProjection,
   setDockSlot,
   subscribeDockSlot,
 } from "../barDock";
@@ -221,5 +223,66 @@ describe("the dock slot store", () => {
     unsubscribe();
     setDockSlot("floating-bar", { fx: 0.5, fy: 0.5 });
     expect(woken).toBe(2);
+  });
+});
+
+describe("the intent behind the dock slot (LAC-4831)", () => {
+  const QUARTER = { fx: 0.25, fy: 1 };
+  const CENTRE = { fx: 0.5, fy: 1 };
+
+  beforeEach(() => resetDockSlots());
+
+  it("is the drawn slot until a projection separates them", () => {
+    expect(getDockIntent("floating-bar")).toBeNull();
+    setDockSlot("floating-bar", QUARTER);
+    expect(getDockIntent("floating-bar")).toEqual(QUARTER);
+    expect(getDockSlot("floating-bar")).toEqual(QUARTER);
+  });
+
+  it("survives a projection into a well the other display does not have", () => {
+    setDockSlot("floating-bar", QUARTER);
+    // The hop: a three-stop display has no quarter-point column, so the bar is
+    // drawn in the centre one.
+    setDockProjection("floating-bar", CENTRE);
+    expect(getDockSlot("floating-bar")).toEqual(CENTRE);
+    expect(getDockIntent("floating-bar")).toEqual(QUARTER);
+  });
+
+  it("survives a projection back and forth any number of times", () => {
+    setDockSlot("floating-bar", QUARTER);
+    for (let i = 0; i < 5; i += 1) {
+      setDockProjection("floating-bar", CENTRE);
+      setDockProjection("floating-bar", QUARTER);
+    }
+    expect(getDockIntent("floating-bar")).toEqual(QUARTER);
+  });
+
+  it("is replaced by a real choice, projected or not", () => {
+    setDockSlot("floating-bar", QUARTER);
+    setDockProjection("floating-bar", CENTRE);
+    // Dragged to the centre column while standing on the small display: the
+    // person has chosen it, so there is nothing left to come home to.
+    setDockSlot("floating-bar", CENTRE);
+    expect(getDockIntent("floating-bar")).toEqual(CENTRE);
+    expect(getDockSlot("floating-bar")).toEqual(CENTRE);
+  });
+
+  it("still wakes the layout readers a projection moved", () => {
+    let woken = 0;
+    const unsubscribe = subscribeDockSlot("floating-bar", () => {
+      woken += 1;
+    });
+    setDockSlot("floating-bar", QUARTER);
+    setDockProjection("floating-bar", CENTRE);
+    expect(woken).toBe(2);
+    // Projected into the well it is already drawn in: nothing to redraw.
+    setDockProjection("floating-bar", CENTRE);
+    expect(woken).toBe(2);
+    unsubscribe();
+  });
+
+  it("keeps an intent per window label", () => {
+    setDockSlot("floating-bar", QUARTER);
+    expect(getDockIntent("floating-panel")).toBeNull();
   });
 });
