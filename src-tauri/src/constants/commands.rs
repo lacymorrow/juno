@@ -93,6 +93,8 @@ pub mod providers {
     pub const UPDATE_PROVIDER_LOAD_ACCOUNT_MCP: &str = "update_provider_load_account_mcp";
     pub const GET_PROVIDER_SETTINGS: &str = "get_provider_settings";
     pub const CHECK_API_KEYS_AVAILABLE: &str = "check_api_keys_available";
+    pub const GET_COPILOT_STATUS: &str = "get_copilot_status";
+    pub const IMPORT_COPILOT_CLI_SIGN_IN: &str = "import_copilot_cli_sign_in";
     pub const CHECK_PROVIDER_API_KEY: &str = "check_provider_api_key";
 }
 

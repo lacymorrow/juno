@@ -498,10 +498,25 @@ const MESSAGE_CACHE_BREAKPOINTS: usize = MAX_CACHE_BREAKPOINTS - PREFIX_CACHE_BR
 /// TTL) as insurance when the newest entry misses — e.g. on the turn right after a batch prune.
 const CACHE_ANCHOR_STRIDE: usize = 8;
 
+/// Where Messages API requests go, and how they authenticate.
+#[derive(Clone)]
+enum Endpoint {
+    /// The Claude API, with an `x-api-key`.
+    Anthropic { api_key: String },
+    /// GitHub Copilot's Anthropic Messages endpoint, with the person's GitHub
+    /// token as a bearer. The token and API host are resolved per request by
+    /// [`super::copilot::session`], so a sign-in made after Juno started is
+    /// picked up without a restart.
+    Copilot { configured_token: Option<String> },
+}
+
 #[derive(Clone)]
 pub struct AnthropicBrain {
     client: Client,
-    api_key: String,
+    endpoint: Endpoint,
+    /// Whose catalog answers per-model questions (tool version, thinking,
+    /// fallbacks, price). The same model has a different ID on Copilot.
+    catalog: Provider,
     model: String,
     max_tokens: u32,
     system_prompt: Option<String>, // Optional system prompt
@@ -515,6 +530,20 @@ pub struct AnthropicBrain {
     /// history is converted back into API messages. Bounded to `THINKING_CACHE_LIMIT` turns.
     thinking_cache:
         std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<ApiContentBlock>>>>,
+}
+
+/// Whether the conversation's last message carries tool results back, which
+/// is what makes a request a follow-up step rather than a new question.
+///
+/// Only the last message is read, on purpose: anything a person typed after
+/// the tool results (a steering message) is a new question and is counted as
+/// one. Erring that way never under-reports what the person asked for.
+fn ends_with_tool_result(messages: &[ApiMessage]) -> bool {
+    messages.last().is_some_and(|message| {
+        message.role == "user"
+            && matches!(&message.content, ApiContent::Blocks(blocks)
+                if blocks.iter().any(|block| block.block_type == "tool_result"))
+    })
 }
 
 /// Maximum number of tool-use turns whose thinking blocks are retained for replay.
@@ -556,7 +585,8 @@ impl AnthropicBrain {
 
         Ok(AnthropicBrain {
             client,
-            api_key,
+            endpoint: Endpoint::Anthropic { api_key },
+            catalog: Provider::Anthropic,
             model,
             max_tokens,
             system_prompt,
@@ -591,6 +621,52 @@ impl AnthropicBrain {
         )
     }
 
+    /// A brain that talks to Claude through GitHub Copilot.
+    ///
+    /// The request is the Claude API's, minus `fallbacks`: adaptive thinking,
+    /// the thinking-binding-controls beta with `block_binding`, prompt caching
+    /// and both computer-use shapes were accepted by the live Copilot endpoint
+    /// for every catalog row (2026-11-12, see #984).
+    ///
+    /// Nothing is checked here: the token is found and validated on the first
+    /// request (see [`super::copilot::session`]), so creating the brain never
+    /// fails for want of a sign-in and the error, when there is one, says how
+    /// to sign in.
+    pub fn for_copilot(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
+        let model = config
+            .model
+            .clone()
+            .filter(|m| Provider::Copilot.knows_model(m))
+            .unwrap_or_else(|| Provider::Copilot.default_model().to_string());
+        let mut brain = Self::new(
+            String::new(),
+            Some(model),
+            config.max_tokens,
+            config.system_prompt.clone(),
+        )?;
+        brain.endpoint = Endpoint::Copilot {
+            configured_token: config.api_key.clone().filter(|k| !k.trim().is_empty()),
+        };
+        brain.catalog = Provider::Copilot;
+        Ok(brain)
+    }
+
+    /// The name people know this service by, for error messages.
+    fn service_name(&self) -> &'static str {
+        match self.endpoint {
+            Endpoint::Anthropic { .. } => "Anthropic API",
+            Endpoint::Copilot { .. } => "GitHub Copilot",
+        }
+    }
+
+    /// Whether the key in use is a demo build's rather than the person's.
+    fn using_demo_key(&self) -> bool {
+        match &self.endpoint {
+            Endpoint::Anthropic { api_key } => crate::demo::is_demo_key(api_key),
+            Endpoint::Copilot { .. } => false,
+        }
+    }
+
     /// Statuses worth one more try before the turn fails: rate limited,
     /// overloaded (529), or a server or gateway error.
     fn is_retryable_status(status: reqwest::StatusCode) -> bool {
@@ -608,6 +684,7 @@ impl AnthropicBrain {
         status: reqwest::StatusCode,
         error_body: &str,
         using_demo_key: bool,
+        service: &str,
     ) -> String {
         // A demo build's key is not the person's, so API-shaped advice about it
         // is useless to them. Tell them the demo ended and where to go next.
@@ -639,12 +716,9 @@ impl AnthropicBrain {
             if let Some(message) = message {
                 let mut formatted = match error_type {
                     Some(error_type) => {
-                        format!(
-                            "Anthropic API error {} ({}): {}",
-                            status, error_type, message
-                        )
+                        format!("{} error {} ({}): {}", service, status, error_type, message)
                     }
-                    None => format!("Anthropic API error {}: {}", status, message),
+                    None => format!("{} error {}: {}", service, status, message),
                 };
 
                 if let Some(request_id) = request_id {
@@ -657,9 +731,9 @@ impl AnthropicBrain {
 
         // Never surface raw JSON blobs to the user; keep details in logs instead.
         if trimmed.is_empty() || trimmed.starts_with('{') || trimmed.starts_with('[') {
-            format!("Anthropic API returned error {}.", status)
+            format!("{} returned error {}.", service, status)
         } else {
-            format!("Anthropic API returned error {}: {}", status, trimmed)
+            format!("{} returned error {}: {}", service, status, trimmed)
         }
     }
 
@@ -672,7 +746,7 @@ impl AnthropicBrain {
     /// model declares no computer-use tool version — a chat-only or unknown
     /// model must not advertise a computer-use beta it cannot honour.
     fn resolve_computer_use_beta_header(&self) -> Option<&'static str> {
-        Provider::Anthropic.computer_use_beta_flag(&self.model)
+        self.catalog.computer_use_beta_flag(&self.model)
     }
 
     /// Whether the selected model drives the computer through the
@@ -682,12 +756,12 @@ impl AnthropicBrain {
     /// question that selects between the two wire formats; there is no model-ID
     /// list here or anywhere else.
     fn uses_computer_toolset(&self) -> bool {
-        Provider::Anthropic.uses_computer_toolset(&self.model)
+        self.catalog.uses_computer_toolset(&self.model)
     }
 
     /// The `toolset_name` this model's computer tool calls arrive with, if any.
     fn computer_toolset_name(&self) -> Option<&'static str> {
-        Provider::Anthropic.computer_toolset_name(&self.model)
+        self.catalog.computer_toolset_name(&self.model)
     }
 
     /// Route a raw `(name, toolset_name, input)` triple from the wire into the
@@ -725,7 +799,7 @@ impl AnthropicBrain {
         if let Some(computer_use) = self.resolve_computer_use_beta_header() {
             flags.insert(0, computer_use);
         }
-        if Provider::Anthropic.supports_server_side_fallbacks(&self.model) {
+        if self.catalog.supports_server_side_fallbacks(&self.model) {
             flags.push(crate::constants::api::beta_flags::SERVER_SIDE_FALLBACK);
         }
         if self.sends_thinking() {
@@ -740,7 +814,7 @@ impl AnthropicBrain {
     /// permits the `block_binding` controls nested inside it. They must not drift — the
     /// field without the header is a 400 on every request.
     fn sends_thinking(&self) -> bool {
-        Provider::Anthropic.supports_adaptive_thinking(&self.model)
+        self.catalog.supports_adaptive_thinking(&self.model)
     }
 
     /// `thinking` request parameter for the selected model, or `None` when the model does
@@ -776,7 +850,7 @@ impl AnthropicBrain {
 
     /// `fallbacks` request parameter for the selected model.
     fn fallbacks_param(&self) -> Option<Value> {
-        if Provider::Anthropic.supports_server_side_fallbacks(&self.model) {
+        if self.catalog.supports_server_side_fallbacks(&self.model) {
             Some(Value::String("default".to_string()))
         } else {
             None
@@ -820,7 +894,8 @@ impl AnthropicBrain {
     /// Opus 4.5+ models require newer tool type identifiers (e.g. computer_20251124,
     /// text_editor_20250728) while older models use the registered defaults.
     fn resolve_tool_api_type(&self, tool_name: &str, registered_type: &str) -> String {
-        Provider::Anthropic.resolve_tool_type(tool_name, registered_type, &self.model)
+        self.catalog
+            .resolve_tool_type(tool_name, registered_type, &self.model)
     }
 
     /// How many of the oldest screenshots to prune, given how many are in the history.
@@ -1637,7 +1712,7 @@ impl AnthropicBrain {
         // those tokens were billed, and a failed task spends the person's
         // credit exactly like a successful one.
         crate::cost_log::record_turn(
-            &Provider::Anthropic,
+            &self.catalog,
             &self.model,
             turn_usage,
             request_started.elapsed().as_millis() as u64,
@@ -2465,7 +2540,7 @@ impl AgentBrain for AnthropicBrain {
             Self::sanitize_request_for_logging(&request_payload)
         );
 
-        crate::turn_timing::note_llm("anthropic", &self.model);
+        crate::turn_timing::note_llm(self.catalog.id(), &self.model);
         crate::turn_timing::mark(crate::turn_timing::Stage::LlmRequestSent);
         // A blip (connect failure, 429, 5xx, 529) before anything streamed is
         // retried twice with a short pause; nothing has reached the person
@@ -2474,13 +2549,38 @@ impl AgentBrain for AnthropicBrain {
         // own clock inside `handle_streaming_response`, which is where its
         // record is written.
         let request_started = std::time::Instant::now();
+        let initiator = super::copilot::initiator(ends_with_tool_result(&request_payload.messages));
         let send = async {
+            // Inside `send`, so Escape also ends a slow sign-in check (`gh`,
+            // then GitHub); dropping the future kills the `gh` child.
+            let mut copilot_session = match &self.endpoint {
+                Endpoint::Copilot { configured_token } => {
+                    Some(super::copilot::session(configured_token.as_deref()).await?)
+                }
+                Endpoint::Anthropic { .. } => None,
+            };
             let mut attempt = 0usize;
+            let mut signed_in_again = false;
             loop {
-                let sent = self
-                    .client
-                    .post(ANTHROPIC_API_URL)
-                    .header("x-api-key", &self.api_key)
+                let request = match (&self.endpoint, &copilot_session) {
+                    (_, Some(session)) => self
+                        .client
+                        .post(session.messages_url())
+                        .bearer_auth(&session.token)
+                        .header("Copilot-Integration-Id", super::copilot::INTEGRATION_ID)
+                        .header("X-Initiator", initiator)
+                        .header("User-Agent", format!("Juno/{}", env!("CARGO_PKG_VERSION"))),
+                    (Endpoint::Anthropic { api_key }, None) => self
+                        .client
+                        .post(ANTHROPIC_API_URL)
+                        .header("x-api-key", api_key),
+                    (Endpoint::Copilot { .. }, None) => {
+                        return Err(AgentError::ConfigurationError(
+                            "GitHub Copilot is not signed in.".to_string(),
+                        ))
+                    }
+                };
+                let sent = request
                     .header("anthropic-version", "2023-06-01") // Current stable API version
                     // Computer use beta + prompt caching (+ server-side fallbacks on supported models),
                     // comma-separated in a single header. Prompt caching reduces input token costs by
@@ -2490,10 +2590,36 @@ impl AgentBrain for AnthropicBrain {
                     .json(&request_payload)
                     .send()
                     .await;
+                // A 401 from Copilot means the token was revoked or rotated
+                // since it was checked (`gh auth refresh`, a new sign-in).
+                // Find the current one and ask once more, so the person never
+                // sees it. Once only: a second 401 is a real answer, and it is
+                // reported below.
+                let unauthorized = matches!(
+                    &sent,
+                    Ok(r) if r.status() == reqwest::StatusCode::UNAUTHORIZED
+                );
+                if unauthorized && !signed_in_again {
+                    if let Endpoint::Copilot { configured_token } = &self.endpoint {
+                        signed_in_again = true;
+                        log::warn!(
+                            "GitHub Copilot answered 401; checking the GitHub sign-in again"
+                        );
+                        super::copilot::invalidate();
+                        copilot_session =
+                            Some(super::copilot::session(configured_token.as_deref()).await?);
+                        continue;
+                    }
+                }
                 let delay = Self::SEND_RETRY_DELAYS.get(attempt).copied();
                 match (sent, delay) {
                     (Ok(r), Some(delay)) if Self::is_retryable_status(r.status()) => {
-                        log::warn!("Anthropic answered {}; retrying in {:?}", r.status(), delay);
+                        log::warn!(
+                            "{} answered {}; retrying in {:?}",
+                            self.service_name(),
+                            r.status(),
+                            delay
+                        );
                         drop(r);
                         tokio::time::sleep(delay).await;
                     }
@@ -2527,15 +2653,29 @@ impl AgentBrain for AnthropicBrain {
                 .await
                 .unwrap_or_else(|_| "Failed to read error body".to_string());
             log::error!(
-                "Anthropic API Error: Status {}, Body: {}",
+                "{} Error: Status {}, Body: {}",
+                self.service_name(),
                 status,
                 error_body
             );
+            if matches!(self.endpoint, Endpoint::Copilot { .. })
+                && status == reqwest::StatusCode::UNAUTHORIZED
+            {
+                // Still refused after signing in again above. Drop the token
+                // so the next turn starts from a fresh look.
+                super::copilot::invalidate();
+                return Err(AgentError::LlmError(
+                    "GitHub Copilot did not accept the GitHub sign-in. Run `gh auth login` \
+                     in Terminal, then try again."
+                        .to_string(),
+                ));
+            }
             return Err(AgentError::LlmError(
                 Self::format_anthropic_http_error_for_user(
                     status,
                     &error_body,
-                    crate::demo::is_demo_key(&self.api_key),
+                    self.using_demo_key(),
+                    self.service_name(),
                 ),
             ));
         }
@@ -2676,7 +2816,7 @@ impl AgentBrain for AnthropicBrain {
             Self::log_input_transformations(&response_body.input_transformations);
 
             crate::cost_log::record_turn(
-                &Provider::Anthropic,
+                &self.catalog,
                 &self.model,
                 (&response_body.usage).into(),
                 request_started.elapsed().as_millis() as u64,
@@ -3833,5 +3973,72 @@ mod tests {
             })
             .count();
         assert_eq!(coincident, 3, "expected one 1h write per stride");
+    }
+}
+
+#[cfg(test)]
+mod copilot_endpoint_tests {
+    use super::*;
+
+    fn copilot_brain(model: Option<&str>) -> AnthropicBrain {
+        let config: crate::settings::ProviderConfig = serde_json::from_value(serde_json::json!({
+            "id": "copilot",
+            "model": model,
+        }))
+        .expect("a minimal provider config deserializes");
+        AnthropicBrain::for_copilot(&config).expect("brain construction only builds an HTTP client")
+    }
+
+    fn message(role: &str, content: Value) -> ApiMessage {
+        serde_json::from_value(serde_json::json!({"role": role, "content": content}))
+            .expect("message deserializes")
+    }
+
+    /// Copilot rejects `fallbacks` with a 400, so neither the body field nor
+    /// its beta flag may ever reach it, whichever model is chosen.
+    #[test]
+    fn copilot_requests_never_ask_for_server_side_fallbacks() {
+        for model in Provider::Copilot.models() {
+            let brain = copilot_brain(Some(&model));
+            assert!(brain.fallbacks_param().is_none(), "{model}");
+            assert!(
+                !brain
+                    .beta_header_value()
+                    .contains(crate::constants::api::beta_flags::SERVER_SIDE_FALLBACK),
+                "{model}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_model_falls_back_to_copilots_default() {
+        assert_eq!(
+            copilot_brain(Some("not-a-model")).model,
+            Provider::Copilot.default_model()
+        );
+        assert_eq!(copilot_brain(None).model, Provider::Copilot.default_model());
+    }
+
+    #[test]
+    fn a_turn_that_answers_a_tool_call_is_agent_initiated() {
+        let tool_result = message(
+            "user",
+            serde_json::json!([
+                {"type": "tool_result", "tool_use_id": "toolu_1", "content": "done"},
+                {"type": "text", "text": "and also this"},
+            ]),
+        );
+        let typed = message("user", serde_json::json!("hello"));
+        let typed_blocks = message("user", serde_json::json!([{"type": "text", "text": "hi"}]));
+        let assistant = message("assistant", serde_json::json!("ok"));
+
+        let initiator = |messages: &[ApiMessage]| {
+            super::super::copilot::initiator(ends_with_tool_result(messages))
+        };
+        assert_eq!(initiator(&[typed.clone(), tool_result.clone()]), "agent");
+        assert_eq!(initiator(&[tool_result.clone(), typed]), "user");
+        assert_eq!(initiator(&[typed_blocks]), "user");
+        assert_eq!(initiator(&[tool_result, assistant]), "user");
+        assert_eq!(initiator(&[]), "user");
     }
 }

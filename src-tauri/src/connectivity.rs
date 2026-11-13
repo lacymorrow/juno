@@ -39,6 +39,7 @@ pub enum Answerer {
     OpenAi,
     Gemini,
     Codex,
+    Copilot,
 }
 
 impl Answerer {
@@ -48,6 +49,7 @@ impl Answerer {
             Provider::OpenAI | Provider::Rig => Self::OpenAi,
             Provider::Gemini => Self::Gemini,
             Provider::CodexCli => Self::Codex,
+            Provider::Copilot => Self::Copilot,
         }
     }
 
@@ -57,6 +59,7 @@ impl Answerer {
             Self::OpenAi => "OpenAI",
             Self::Gemini => "Gemini",
             Self::Codex => "Codex",
+            Self::Copilot => "GitHub Copilot",
         }
     }
 
@@ -66,6 +69,9 @@ impl Answerer {
             Self::Claude => "api.anthropic.com",
             Self::OpenAi | Self::Codex => "api.openai.com",
             Self::Gemini => "generativelanguage.googleapis.com",
+            // Business and enterprise plans are served from a sibling host,
+            // but they share this one's network path.
+            Self::Copilot => "api.githubcopilot.com",
         }
     }
 }
@@ -393,6 +399,9 @@ async fn refresh_provider(app: &AppHandle) {
                 && claude_cli::last_known_sign_in() != SignIn::SignedOut
         }
         Provider::CodexCli => crate::agent::providers::codex_cli::is_codex_cli_available(),
+        Provider::Copilot => {
+            crate::agent::providers::copilot::last_known_sign_in() != SignIn::SignedOut
+        }
         _ => crate::agent::providers::startup_default::active_has_credential(&config),
     };
     let answerer = Answerer::for_provider(&provider);

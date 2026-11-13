@@ -198,6 +198,7 @@ pub fn billing_model_id(provider: &Provider, model: &str) -> String {
     match provider {
         Provider::ClaudeCli => format!("claude-cli:{model}"),
         Provider::CodexCli => format!("codex-cli:{model}"),
+        Provider::Copilot => format!("copilot:{model}"),
         _ => model.to_string(),
     }
 }
@@ -653,6 +654,10 @@ mod tests {
             "codex-cli:gpt-6-luna"
         );
         assert_eq!(
+            billing_model_id(&Provider::Copilot, "claude-opus-5.5"),
+            "copilot:claude-opus-5.5"
+        );
+        assert_eq!(
             billing_model_id(&Provider::Anthropic, "claude-opus-5-5"),
             "claude-opus-5-5"
         );
@@ -809,7 +814,7 @@ mod tests {
         assert_eq!(object.get("cost_usd").and_then(|v| v.as_f64()), Some(0.0));
     }
 
-    fn all_providers() -> [Provider; 6] {
+    fn all_providers() -> [Provider; 7] {
         [
             Provider::Anthropic,
             Provider::OpenAI,
@@ -817,6 +822,7 @@ mod tests {
             Provider::Gemini,
             Provider::ClaudeCli,
             Provider::CodexCli,
+            Provider::Copilot,
         ]
     }
 

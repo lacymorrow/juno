@@ -16,6 +16,8 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { COMMANDS } from "@/lib/constants.generated";
 import AssistantModelPicker from "./AssistantModelPicker";
+import CopilotStatusPanel from "./CopilotStatusPanel";
+import { useCopilotStatus } from "@/hooks/useCopilotStatus";
 
 /** What a demo build carries, from the backend. */
 interface DemoInfo {
@@ -33,6 +35,7 @@ interface ClaudeCliStatus {
 export default function AIProviderSettings({ settings }: SettingsSectionProps) {
   const [demo, setDemo] = useState<DemoInfo | null>(null);
   const [cli, setCli] = useState<ClaudeCliStatus | null>(null);
+  const copilot = useCopilotStatus(settings.activeProvider === "copilot");
 
   // Fields save when they lose focus, the way every other row here applies at
   // once. The group footer says "Saved" for a moment so the person knows the
@@ -120,7 +123,9 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                 ? "Nothing to enter. Juno talks to Claude Code on this Mac."
                 : settings.activeProvider === "codex_cli"
                   ? "Nothing to enter. Juno talks to Codex on this Mac."
-                  : "Changes save when you leave a field."
+                  : settings.activeProvider === "copilot"
+                    ? "Nothing to enter. Juno uses the GitHub sign-in already on this Mac."
+                    : "Changes save when you leave a field."
           }
         >
           <SettingsRow
@@ -172,6 +177,11 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                     )}
                   </p>
                 </div>
+              ) : settings.activeProvider === "copilot" ? (
+                <CopilotStatusPanel
+                  status={copilot.status}
+                  onImported={copilot.setStatus}
+                />
               ) : settings.activeProvider === "codex_cli" ? (
                 <div className="rounded-md border border-border bg-muted/40 p-4">
                   <p className="text-[13px] font-medium text-foreground">

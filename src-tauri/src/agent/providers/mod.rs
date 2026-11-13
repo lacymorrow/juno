@@ -6,6 +6,7 @@ pub mod cli_approval;
 pub mod codex_cli;
 pub mod codex_session;
 pub mod config;
+pub mod copilot;
 pub mod default_selection;
 pub mod factory;
 pub mod gemini;

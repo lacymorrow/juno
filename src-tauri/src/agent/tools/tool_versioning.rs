@@ -96,8 +96,10 @@ impl ApiVersion {
     ///
     /// Note this is a Claude-API statement. The same toolset is still *beta* on
     /// Amazon Bedrock, Claude Platform on AWS and Microsoft Foundry. Juno talks
-    /// only to `api.anthropic.com` (see `ANTHROPIC_API_URL`), so no flag is
-    /// correct here; a future Bedrock path would need its own.
+    /// to `api.anthropic.com` (see `ANTHROPIC_API_URL`) and to GitHub Copilot's
+    /// Messages endpoint, which also accepts the toolset with no beta header
+    /// (verified 2026-11), so no flag is correct here; a future Bedrock path
+    /// would need its own.
     pub fn beta_flag(&self) -> Option<&'static str> {
         match self {
             ApiVersion::Computer20250124 => Some(beta_flags::COMPUTER_USE_2025_01_24),
