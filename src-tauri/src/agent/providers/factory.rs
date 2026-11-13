@@ -66,7 +66,7 @@ pub struct ProviderInfo {
 /// What a person is told when the provider they are on has nothing to run
 /// with. Plain words and one thing to do, never a configuration error.
 pub(crate) const NO_PROVIDER_MESSAGE: &str =
-    "Juno has no AI to talk to yet. Sign in to Claude Code, or add an API key in Settings > Providers.";
+    "Juno has no AI to talk to yet. Sign in to Claude Code, or add an API key in Settings > Advanced on > Providers.";
 
 /// Which provider a query runs on.
 ///
@@ -898,7 +898,7 @@ mod subscription_tests {
         let text = err.to_string();
         assert_eq!(text, NO_PROVIDER_MESSAGE);
         assert!(text.contains("Sign in to Claude Code"));
-        assert!(text.contains("Settings > Providers"));
+        assert!(text.contains("Settings > Advanced on > Providers"));
         assert!(!text.contains("Configuration error"));
         assert!(!text.contains("ANTHROPIC_API_KEY"));
     }
