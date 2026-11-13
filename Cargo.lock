@@ -441,7 +441,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "audio-start-probe"
-version = "0.8.281"
+version = "0.8.282"
 dependencies = [
  "coreaudio-rs",
  "cpal",
@@ -1400,7 +1400,7 @@ dependencies = [
 
 [[package]]
 name = "computer-use-ai-sdk"
-version = "0.8.281"
+version = "0.8.282"
 dependencies = [
  "accessibility",
  "accessibility-sys",
@@ -4227,7 +4227,7 @@ dependencies = [
 
 [[package]]
 name = "juno"
-version = "0.8.281"
+version = "0.8.282"
 dependencies = [
  "any-tts",
  "arboard",
@@ -4315,7 +4315,7 @@ dependencies = [
 
 [[package]]
 name = "juno-cua"
-version = "0.8.281"
+version = "0.8.282"
 dependencies = [
  "anyhow",
  "clap",
@@ -8200,7 +8200,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-voice-transcription"
-version = "0.8.281"
+version = "0.8.282"
 dependencies = [
  "base64 0.22.1",
  "block",

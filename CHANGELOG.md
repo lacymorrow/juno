@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.282] - 2026-11-13
+
+### Added
+
+- **providers:** GitHub Copilot as an inference provider (#984) (ba8d47f5)
+- **dmg:** sew the install arrow from Juno's own thread (LAC-7607) (#967) (616db617)
+- **logs:** every window's console and uncaught errors land in Juno's log (#864) (7995916e)
+- **settings:** the Shortcuts rows are editable sentences (LAC-4071) (#870) (be7a83bf)
+
+### Fixed
+
+- **ci:** secret-scope-guard rung 4 comment names the APPLE_API_* trio it actually covers (LAC-7996) (#992) (bccb0b4d)
+- **island:** the small chat preview reads its marks instead of printing them (#866) (d0fdcc95)
+- **bar:** the display hop projects the chosen well instead of replacing it (LAC-4831) (#835) (f5ea8625)
+- **settings:** provider configuration only with Advanced on (LAC-7684) (#971) (5d9acf40)
+- **ci:** assert the scope guard's two halves agree instead of asserting it in prose (LAC-7476) (#978) (aeb1d61e)
+- onboarding hint names the Shortcuts section (#990) (#991) (16555425)
+
 ## [0.8.281] - 2026-11-12
 
 ### Added
@@ -1835,7 +1853,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.281...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.282...HEAD
+[0.8.282]: https://github.com/lacymorrow/juno/compare/cua-v0.8.281...v0.8.282
 [0.8.281]: https://github.com/lacymorrow/juno/compare/cua-v0.8.280...v0.8.281
 [0.8.279]: https://github.com/lacymorrow/juno/compare/cua-v0.8.278...v0.8.279
 [0.8.278]: https://github.com/lacymorrow/juno/compare/cua-v0.8.277...v0.8.278
