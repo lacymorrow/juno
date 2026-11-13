@@ -447,7 +447,7 @@ pub fn sync_with_engine(engine: &str, on_settled: impl FnOnce() + Send + 'static
     if !crate::tts::voices::kokoro_model_on_disk()
         && crate::model_host::status() == crate::model_host::HostStatus::Unknown
     {
-        let _ = tauri::async_runtime::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             crate::model_host::ensure().await;
             begin_kokoro_load(on_settled);
         });
