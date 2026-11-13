@@ -129,6 +129,14 @@ pub mod stt_models {
     pub const SET_LIVE_PARTIAL_TRANSCRIPTION: &str = "set_live_partial_transcription";
 }
 
+/// Whether model weights can be fetched from Hugging Face on this network.
+pub mod model_host {
+    /// Ask again. The Retry button in Models.
+    pub const RECHECK: &str = "recheck_model_host";
+    /// What is known, without asking.
+    pub const GET_STATUS: &str = "get_model_host_status";
+}
+
 /// Microphone and speaker choices, and Juno's voice.
 pub mod audio {
     pub const LIST_AUDIO_DEVICES: &str = "list_audio_devices";

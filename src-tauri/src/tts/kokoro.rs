@@ -198,6 +198,13 @@ pub fn downloading() -> bool {
 /// so one that failed (offline at launch) is tried again.
 pub fn stand_in(text: &str) -> String {
     keep_downloading();
+    // "One minute while I download my voice" is a promise, and on a network
+    // that blocks the weights it is one Juno cannot keep. So she does not
+    // make it: she just speaks, in the Mac's voice, and says nothing about
+    // it. The reason is in Settings for anyone who goes looking.
+    if !kokoro_can_arrive() {
+        return text.to_string();
+    }
     stand_in_text(&STAND_IN_HEARD, text)
 }
 
@@ -261,7 +268,54 @@ fn real_time_factor(synthesis_ms: u128, audio_secs: f32) -> Option<f32> {
     Some(synthesis_ms as f32 / 1000.0 / audio_secs)
 }
 
+/// Record why Kokoro is not being fetched, and return the line. The log line
+/// is written once per change rather than once per sentence: this is reached
+/// from the speech path, which runs for everything Juno says.
+fn note_unavailable(status: crate::model_host::HostStatus) -> String {
+    let line = status
+        .note()
+        .unwrap_or(crate::model_host::NOT_ON_THIS_NETWORK)
+        .trim_end_matches('.')
+        .to_string();
+    if load_problem().as_deref() != Some(line.as_str()) {
+        info!("[Kokoro] Not fetching the voice: {}", line);
+    }
+    set_load_problem(Some(line.clone()));
+    line
+}
+
+/// Whether Kokoro could still arrive: it is on disk already, or the network
+/// would let it be fetched. Pure, so the decision it drives is testable.
+fn can_arrive(on_disk: bool, may_fetch: bool) -> bool {
+    on_disk || may_fetch
+}
+
+fn kokoro_can_arrive() -> bool {
+    can_arrive(
+        crate::tts::voices::kokoro_model_on_disk(),
+        crate::model_host::may_fetch(),
+    )
+}
+
 fn load_kokoro() -> Result<KokoroModel, String> {
+    // Kokoro's weights come from Hugging Face, so on a network that blocks it
+    // no number of attempts produces a voice. The attempt is simply not made:
+    // the Mac's own voice is already next in the chain and `tts::mod` falls
+    // to it the moment this returns an error.
+    //
+    // This is the guard that matters, because it sits in the one function
+    // every path to a download goes through: the warm-up in
+    // `sync_with_engine`, and `get_or_load` on the synthesis path. Before it,
+    // `stand_in` called `keep_downloading` on *every* utterance and the model
+    // cell reset itself to empty after each failure, so every sentence Juno
+    // spoke started a fresh Hugging Face download (LAC-7938).
+    let on_disk = crate::tts::voices::kokoro_model_on_disk();
+    if !on_disk {
+        let host = crate::model_host::status();
+        if !host.may_fetch() {
+            return Err(note_unavailable(host));
+        }
+    }
     info!("[Kokoro] Loading Kokoro-82M (first run downloads ~82MB from HuggingFace Hub)");
     let started = std::time::Instant::now();
     // Metal where the Mac has it, CPU otherwise. Both architectures.
@@ -284,6 +338,12 @@ fn load_kokoro() -> Result<KokoroModel, String> {
         Err(e) => {
             error!("[Kokoro] Model load failed: {}", e);
             set_load_problem(Some(e.to_string()));
+            // `any-tts` hands back one opaque string, so the reason is not
+            // readable from it. Ask the network directly instead; the answer
+            // is what stops the next sentence asking again.
+            if !on_disk {
+                crate::model_host::recheck_in_background();
+            }
             Err(format!("Failed to load Kokoro-82M model: {}", e))
         }
     }
@@ -306,6 +366,35 @@ pub fn sync_with_engine(engine: &str, on_settled: impl FnOnce() + Send + 'static
         return;
     }
 
+    // A network that will not hand over the weights is answered here, so an
+    // utterance does not spend a blocking thread learning what is already
+    // known. `stand_in` calls this for everything Juno says while Kokoro is
+    // not ready, which is what made this the loop (LAC-7938).
+    if !kokoro_can_arrive() {
+        note_unavailable(crate::model_host::status());
+        return;
+    }
+
+    // Classify the network before asking for 82MB of weights, not after. On
+    // a blocked network this turns the first attempt into one probe instead
+    // of one download that cannot succeed; on a good one it costs a few
+    // hundred milliseconds, once, before a minute of downloading.
+    if !crate::tts::voices::kokoro_model_on_disk()
+        && crate::model_host::status() == crate::model_host::HostStatus::Unknown
+    {
+        let _ = tauri::async_runtime::spawn(async move {
+            crate::model_host::ensure().await;
+            begin_kokoro_load(on_settled);
+        });
+        return;
+    }
+    begin_kokoro_load(on_settled);
+}
+
+/// Warm the model on a blocking thread. `load_kokoro` decides whether the
+/// network allows it; this only decides whether anyone else is already doing
+/// it.
+fn begin_kokoro_load(on_settled: impl FnOnce() + Send + 'static) {
     if !KOKORO.begin_preload() {
         return;
     }
@@ -413,6 +502,20 @@ mod tests {
         heard.store(false, Ordering::SeqCst);
         assert!(stand_in_text(&heard, "Hi.").starts_with(STAND_IN_LINE));
         assert!(!STAND_IN_LINE.contains('—') && !BACK_LINE.contains('—'));
+    }
+
+    /// A voice that cannot arrive is never promised. On a network that
+    /// blocks the weights, `stand_in` returns the words alone: the line
+    /// about downloading would be a promise Juno cannot keep, and it would
+    /// be the only thing about any of this the person ever heard.
+    #[test]
+    fn a_voice_that_cannot_arrive_is_not_promised() {
+        // On disk, or fetchable: still on its way, so the line is fair.
+        assert!(can_arrive(true, true));
+        assert!(can_arrive(true, false), "already here, network irrelevant");
+        assert!(can_arrive(false, true), "not here yet, but it can come");
+        // Neither: nothing is downloading and nothing will.
+        assert!(!can_arrive(false, false));
     }
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc;

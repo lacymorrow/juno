@@ -459,6 +459,12 @@ pub struct SttModelsStatus {
     /// below this Mac's Recommended row for more than a day, else `None`.
     /// Rust decides the wording and the threshold; the UI prints it verbatim.
     pub quality_notice: Option<String>,
+    /// Whether model weights can be fetched from Hugging Face on this
+    /// network. The pane prints a line for it and decides nothing.
+    pub network: crate::model_host::HostStatus,
+    /// The line that goes with `network`, or `None` when there is nothing to
+    /// say. Rust owns the wording here too.
+    pub network_note: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -713,6 +719,22 @@ pub async fn stt_models_status(app: &AppHandle) -> Result<SttModelsStatus, Strin
 
     let quality_notice = run_quality_clock(app, &arch, &active_id, &settings).await;
 
+    // Opening Models is someone asking what they can get, so this is a fair
+    // moment to settle the question if it has never been asked. The answer is
+    // read, never waited for: this call is what draws the pane, and a pane
+    // that spends six seconds blank on a blocked network is the symptom this
+    // ticket is about wearing a different hat. The probe arrives as
+    // `model-host-changed` and the pane redraws then. `ensure` probes only
+    // when nothing is known, so leaving Models open costs one probe and not
+    // one per redraw.
+    let network = crate::model_host::status();
+    if network == crate::model_host::HostStatus::Unknown
+        && on_disk.len() != catalog_for_arch(&arch).len()
+    {
+        // Something here is still downloadable, so the question is live.
+        crate::model_host::ensure_in_background();
+    }
+
     Ok(SttModelsStatus {
         arch,
         models,
@@ -720,6 +742,8 @@ pub async fn stt_models_status(app: &AppHandle) -> Result<SttModelsStatus, Strin
         download,
         offer_recommended,
         quality_notice,
+        network,
+        network_note: network.note().map(str::to_string),
     })
 }
 
@@ -793,6 +817,16 @@ struct FetchFile {
     /// Exact size when the manifest knows it; the server's Content-Length
     /// otherwise.
     expected_bytes: Option<u64>,
+    /// Smallest honest size, when only an approximate one is known.
+    min_bytes: Option<u64>,
+}
+
+/// The smallest a model file could honestly be, for the files the catalog
+/// sizes only approximately. Half the advertised size: far enough below any
+/// real variation to never fire on a genuine download, far enough above an
+/// interception page (a few kilobytes) to always fire on one.
+fn min_bytes_for(def: &ModelDef) -> Option<u64> {
+    (def.size_mb > 0).then(|| u64::from(def.size_mb) * 1024 * 1024 / 2)
 }
 
 fn fetch_plan(def: &ModelDef) -> Vec<FetchFile> {
@@ -801,6 +835,7 @@ fn fetch_plan(def: &ModelDef) -> Vec<FetchFile> {
             url: format!("{}/{}", WHISPER_BASE_URL, def.filename),
             name: def.filename.to_string(),
             expected_bytes: None,
+            min_bytes: min_bytes_for(def),
         }],
         Engine::Parakeet => {
             let variant = parakeet_variant(def);
@@ -810,7 +845,9 @@ fn fetch_plan(def: &ModelDef) -> Vec<FetchFile> {
                 .map(|f| FetchFile {
                     url: variant.file_url(f),
                     name: f.name.to_string(),
+                    // Pinned exactly by the manifest, so a floor adds nothing.
                     expected_bytes: Some(f.bytes),
+                    min_bytes: None,
                 })
                 .collect()
         }
@@ -909,19 +946,42 @@ pub fn start_download(
                 ""
             }
         );
-        let outcome = match run_download(&app, def, &state, &cancel, activate_when_done).await {
-            Ok(()) => Ok(()),
-            Err(_) if cancel.load(Ordering::SeqCst) => {
-                info!("[SttModels] Download of {} cancelled", model_id);
-                Err(FetchError::Cancelled)
-            }
-            Err(e) => {
-                error!(
-                    "[SttModels] Download of {} failed: {}",
-                    model_id,
-                    e.detail()
-                );
-                Err(e)
+        // Pressing Download is the person asking, so a stale "no" is never
+        // allowed to stand: it is re-checked before it refuses anything, and
+        // a network that has since been fixed works from this button alone.
+        // A known-good or not-yet-asked network is not probed at all, because
+        // the download about to start is the better probe and the person is
+        // not made to wait for a worse one.
+        let known = crate::model_host::status();
+        let host = if known.may_fetch() {
+            known
+        } else {
+            crate::model_host::recheck().await
+        };
+        let outcome = if !host.may_fetch() {
+            info!("[SttModels] Not downloading {}: {:?}", model_id, host);
+            Err(FetchError::HostUnavailable)
+        } else {
+            match run_download(&app, def, &state, &cancel, activate_when_done).await {
+                Ok(()) => Ok(()),
+                Err(_) if cancel.load(Ordering::SeqCst) => {
+                    info!("[SttModels] Download of {} cancelled", model_id);
+                    Err(FetchError::Cancelled)
+                }
+                Err(e) => {
+                    error!(
+                        "[SttModels] Download of {} failed: {}",
+                        model_id,
+                        e.detail()
+                    );
+                    // The download is the most faithful probe there is, so what
+                    // it ran into settles the question for every other model
+                    // fetch, Kokoro's voice included.
+                    if matches!(e, FetchError::Network(_) | FetchError::HostUnavailable) {
+                        crate::model_host::recheck_in_background();
+                    }
+                    Err(e)
+                }
             }
         };
 
@@ -1135,6 +1195,7 @@ async fn fetch_all(
             url: &file.url,
             path: &path,
             expected_bytes: file.expected_bytes,
+            min_bytes: file.min_bytes,
             validator_path: &validator_path,
         };
         let unsized_file = file.expected_bytes.is_none();
@@ -2045,5 +2106,36 @@ mod tests {
             quality_notice_line("aarch64", BUNDLED_ID, Some(10 * day), day),
             None
         );
+    }
+
+    #[test]
+    fn every_unpinned_file_carries_a_floor_a_block_page_cannot_clear() {
+        // Whisper files are sized only approximately by the catalog, so the
+        // exact-size check that protects Parakeet cannot run on them. The
+        // floor is what stops an interception page landing as the model.
+        for def in CATALOG.iter().filter(|d| d.engine == Engine::Whisper) {
+            let plan = fetch_plan(def);
+            for file in &plan {
+                assert!(
+                    file.expected_bytes.is_some() || file.min_bytes.is_some(),
+                    "{} has neither an exact size nor a floor",
+                    def.id
+                );
+            }
+            let floor = min_bytes_for(def).unwrap_or(0);
+            // Comfortably above any block page, comfortably below the model.
+            assert!(floor > 1024 * 1024, "{} floor is {} bytes", def.id, floor);
+            assert!(floor < u64::from(def.size_mb) * 1024 * 1024);
+        }
+    }
+
+    #[test]
+    fn parakeet_files_are_pinned_exactly_and_need_no_floor() {
+        for def in CATALOG.iter().filter(|d| d.engine == Engine::Parakeet) {
+            for file in fetch_plan(def) {
+                assert!(file.expected_bytes.is_some(), "{}", def.id);
+                assert_eq!(file.min_bytes, None, "{}", def.id);
+            }
+        }
     }
 }

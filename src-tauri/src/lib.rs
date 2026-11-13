@@ -52,6 +52,7 @@ pub mod input_control; // Background operation and consent for taking the physic
 pub mod integration; // Application integration patterns, component coordination, and event listeners
 pub mod intro; // How Juno first appears: the smoke reveal around the bar
 pub mod menu; // Menu management for app and tray menus
+pub mod model_host; // Can Juno fetch a model from Hugging Face on this network: one answer for every download
 pub mod path_gate; // The one place that answers "may this path be touched, for this purpose"
 pub mod permission_gate; // Asking for a macOS permission at the moment it is needed
 pub mod persistent_memory; // Cross-session persistent user memory
@@ -494,6 +495,8 @@ pub fn run() {
             crate::demo::get_demo_info,
             crate::build_info::get_build_info,
             crate::connectivity::get_connectivity,
+            crate::model_host::recheck_model_host,
+            crate::model_host::get_model_host_status,
             crate::readiness::get_startup_readiness,
             update_provider_model,
             update_provider_max_tokens,
