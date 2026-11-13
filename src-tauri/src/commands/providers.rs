@@ -16,32 +16,21 @@ fn format_error(template: &str, context: &str, error: impl std::fmt::Display) ->
 
 /// Get the list of available providers
 #[tauri::command]
-pub(crate) async fn get_providers(
-    app_handle: tauri::AppHandle,
-) -> Result<Vec<ProviderInfo>, String> {
+pub(crate) async fn get_providers() -> Result<Vec<ProviderInfo>, String> {
     // The listing is synchronous and reads Copilot's last known sign-in. Ask
     // GitHub once, the first time, so it is not "unknown" for the session.
     use crate::agent::providers::claude_cli::SignIn;
     use crate::agent::providers::copilot;
     if copilot::last_known_sign_in() == SignIn::Unknown {
-        let token = saved_copilot_token(&app_handle).await;
-        copilot::status(token.as_deref()).await;
+        copilot::status(saved_copilot_token().as_deref()).await;
     }
-    Ok(BrainFactory::list_providers_with_app_handle(Some(
-        &app_handle,
-    )))
+    Ok(BrainFactory::list_providers())
 }
 
-/// The token saved in settings for Copilot, when somebody pasted or imported
-/// one. Usually `None`: the GitHub sign-in is found where it already lives.
-async fn saved_copilot_token(app_handle: &tauri::AppHandle) -> Option<String> {
-    let settings_manager = SettingsManager::new(app_handle.clone()).ok()?;
-    ProviderConfig::load_from_centralized_settings(&settings_manager)
-        .await
-        .ok()?
-        .resolve_provider(crate::agent::providers::Provider::Copilot)?
-        .api_key
-        .filter(|k| !k.is_empty())
+/// The token saved for Copilot, when somebody pasted or imported one.
+/// Usually `None`: the GitHub sign-in is found where it already lives.
+fn saved_copilot_token() -> Option<String> {
+    crate::secrets::provider_key(&crate::agent::providers::Provider::Copilot)
 }
 
 /// Whether GitHub Copilot can run, as whom, and on what plan.
@@ -52,9 +41,8 @@ async fn saved_copilot_token(app_handle: &tauri::AppHandle) -> Option<String> {
 /// running `gh` and asking GitHub on each focus.
 #[tauri::command]
 pub(crate) async fn get_copilot_status(
-    app_handle: tauri::AppHandle,
 ) -> Result<crate::agent::providers::copilot::CopilotStatus, String> {
-    let token = saved_copilot_token(&app_handle).await;
+    let token = saved_copilot_token();
     Ok(crate::agent::providers::copilot::status_for_display(token.as_deref()).await)
 }
 
@@ -249,45 +237,63 @@ pub(crate) async fn get_provider_settings(
     }
 }
 
-/// Update API key for a provider
+/// The secret a provider's key is saved as, or why it has none.
+fn provider_secret(provider_id: &str) -> Result<crate::secrets::Secret, String> {
+    crate::secrets::Secret::for_provider_id(provider_id)
+        .ok_or_else(|| format!("Provider '{}' does not take an API key", provider_id))
+}
+
+/// Tell everything that follows provider settings that a key changed: the
+/// connectivity dot, the Claude CLI warm spare, and open Settings windows. The
+/// payload is the settings section, which holds no key.
+async fn announce_key_change(app_handle: &tauri::AppHandle) {
+    use tauri::Emitter;
+    let settings = match SettingsManager::new(app_handle.clone()) {
+        Ok(manager) => manager.get_provider_settings().await,
+        Err(e) => Err(e),
+    };
+    match settings {
+        Ok(settings) => {
+            if let Err(e) = app_handle.emit(
+                crate::constants::settings::events::PROVIDER_SETTINGS_CHANGED,
+                &settings,
+            ) {
+                tracing::warn!("Could not announce the API key change: {}", e);
+            }
+        }
+        Err(e) => tracing::warn!("Could not read provider settings after a key change: {}", e),
+    }
+}
+
+/// Save a provider's API key in the credential store. The key arrives from
+/// the page once, here, and never goes back to it.
 #[tauri::command]
 pub(crate) async fn update_provider_api_key(
     app_handle: tauri::AppHandle,
     provider_id: String,
     api_key: String,
 ) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
-        format_error(
-            templates::FAILED_TO_INITIALIZE,
-            components::SETTINGS_MANAGER,
-            e,
-        )
-    })?;
-
-    let mut config = ProviderConfig::load_from_centralized_settings(&settings_manager)
-        .await
-        .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::PROVIDER_SETTINGS, e))?;
-
-    // Find the provider and update its API key
-    let mut found = false;
-    for provider in &mut config.providers {
-        if provider.id == provider_id {
-            provider.api_key = Some(api_key);
-            found = true;
-            break;
-        }
-    }
-
-    if !found {
-        return Err(format!("Provider '{}' not found", provider_id));
-    }
-
-    config
-        .save_to_centralized_settings(&settings_manager)
+    let secret = provider_secret(&provider_id)?;
+    crate::secrets::save(secret, api_key)
         .await
         .map_err(|e| format_error(templates::FAILED_TO_SAVE, "API key", e))?;
+    info!("Saved an API key for provider: {}", provider_id);
+    announce_key_change(&app_handle).await;
+    Ok(())
+}
 
-    info!("Updated API key for provider: {}", provider_id);
+/// Delete a provider's saved API key.
+#[tauri::command]
+pub(crate) async fn clear_provider_api_key(
+    app_handle: tauri::AppHandle,
+    provider_id: String,
+) -> Result<(), String> {
+    let secret = provider_secret(&provider_id)?;
+    crate::secrets::delete(secret)
+        .await
+        .map_err(|e| format!("Could not remove the API key: {}", e))?;
+    info!("Removed the API key for provider: {}", provider_id);
+    announce_key_change(&app_handle).await;
     Ok(())
 }
 
@@ -302,28 +308,17 @@ pub(crate) async fn update_provider_api_key(
 /// the subprocess runs exactly in the case where the alternative is showing
 /// somebody a wall.
 #[tauri::command]
-pub(crate) async fn check_api_keys_available(app_handle: tauri::AppHandle) -> Result<bool, String> {
+pub(crate) async fn check_api_keys_available() -> Result<bool, String> {
+    use crate::secrets::Secret;
     use std::env;
 
-    // Check settings store for saved keys
-    let settings_manager = SettingsManager::new(app_handle).map_err(|e| {
-        format_error(
-            templates::FAILED_TO_INITIALIZE,
-            components::SETTINGS_MANAGER,
-            e,
-        )
-    })?;
-
-    let config = ProviderConfig::load_from_centralized_settings(&settings_manager)
-        .await
-        .map_err(|e| format_error(templates::FAILED_TO_LOAD, actions::PROVIDER_SETTINGS, e))?;
-
-    // Check if any provider has an API key in the store
-    for provider in &config.providers {
-        if provider.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
-            info!("API key found in store for provider: {}", provider.id);
-            return Ok(true);
-        }
+    // Any provider's saved key
+    if let Some(saved) = Secret::all()
+        .into_iter()
+        .find(|s| matches!(s, Secret::Provider(_)) && crate::secrets::is_saved(s))
+    {
+        info!("A saved API key was found: {:?}", saved);
+        return Ok(true);
     }
 
     // A demo build carries its own key, so the onboarding key step is moot.

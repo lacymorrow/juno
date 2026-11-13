@@ -210,12 +210,10 @@ impl GeminiBrain {
     }
 
     /// Creates a new GeminiBrain from a CentralizedProviderConfig struct.
-    /// Falls back to the GEMINI_API_KEY env var if the config has no api_key.
+    /// The key is the saved one, else the GEMINI_API_KEY env var.
     /// Note: GeminiBrain uses i32 for max_tokens, CentralizedProviderConfig uses u32.
     pub fn from_config(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
-        let api_key = config
-            .api_key
-            .clone()
+        let api_key = crate::secrets::provider_key(&crate::agent::providers::Provider::Gemini)
             .or_else(|| env::var("GEMINI_API_KEY").ok())
             .ok_or_else(|| {
                 AgentError::ConfigurationError(

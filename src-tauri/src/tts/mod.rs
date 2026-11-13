@@ -922,18 +922,16 @@ pub async fn set_tts_account_key_command(
 ) -> Result<(), String> {
     let which = account_keys::KeyedEngine::from_id(&engine)
         .ok_or_else(|| format!("{engine} does not take an account key"))?;
-    let key = Some(key.trim().to_string()).filter(|k| !k.is_empty());
+    let saved = if key.trim().is_empty() {
+        crate::secrets::delete(which.secret()).await
+    } else {
+        crate::secrets::save(which.secret(), key).await
+    };
+    saved.map_err(|e| format!("Failed to save the key: {}", e))?;
+    info!("[TTS] Account key for {:?} saved", which);
 
     let manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
         .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-    manager
-        .update_audio_settings(|audio| match which {
-            account_keys::KeyedEngine::ElevenLabs => audio.elevenlabs_api_key = key,
-            account_keys::KeyedEngine::Replicate => audio.replicate_api_key = key,
-        })
-        .await
-        .map_err(|e| format!("Failed to save the key: {}", e))?;
-    info!("[TTS] Account key for {:?} saved", which);
 
     // This key decides which engine gets prepared: without it the chosen
     // cloud engine cannot speak, so Kokoro is what is kept warm and what the
@@ -952,7 +950,7 @@ pub async fn set_tts_account_key_command(
 pub async fn has_tts_account_key_command(engine: String) -> Result<bool, String> {
     let which = account_keys::KeyedEngine::from_id(&engine)
         .ok_or_else(|| format!("{engine} does not take an account key"))?;
-    Ok(account_keys::key(which).await.is_ok())
+    Ok(account_keys::key(which).is_ok())
 }
 
 // Command to update Chatterbox settings
@@ -1665,7 +1663,7 @@ impl AccountKeys {
     async fn present_for(configured: &str) -> Self {
         let mut keys = Self::default();
         if let Some(keyed) = account_keys::KeyedEngine::from_id(configured.trim()) {
-            let present = account_keys::key(keyed).await.is_ok();
+            let present = account_keys::key(keyed).is_ok();
             match keyed {
                 account_keys::KeyedEngine::ElevenLabs => keys.elevenlabs = present,
                 account_keys::KeyedEngine::Replicate => keys.replicate = present,

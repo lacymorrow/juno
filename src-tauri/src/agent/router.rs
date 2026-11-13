@@ -297,11 +297,8 @@ pub async fn plan_route(app_handle: &tauri::AppHandle, query: &str) -> Option<Ro
         return None;
     }
 
-    let config = crate::agent::providers::config::load_provider_config(Some(app_handle));
     let api_key = crate::demo::resolve_api_key(
-        config
-            .resolve_provider(Provider::Anthropic)
-            .and_then(|c| c.api_key),
+        crate::secrets::provider_key(&Provider::Anthropic),
         std::env::var("ANTHROPIC_API_KEY").ok(),
         crate::demo::api_key(),
     )?;
