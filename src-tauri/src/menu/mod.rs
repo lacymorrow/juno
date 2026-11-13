@@ -24,7 +24,10 @@ pub use tray_menu::*;
 pub fn setup_all_menus(app_handle: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     info!("🍎 Setting up all application menus...");
 
-    // Setup application menu for all relevant windows
+    // Setup application menu for all relevant windows. macOS only: Windows
+    // draws an app menu inside every window, the transparent bar included,
+    // and there the tray menu carries the same actions.
+    #[cfg(target_os = "macos")]
     app_menu::setup_menu_for_all_windows(app_handle)?;
 
     // Setup tray menu

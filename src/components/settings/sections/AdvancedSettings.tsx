@@ -24,6 +24,7 @@ import type { MouseControlMode } from "@/lib/inputControl";
 import { AgentModeGroup } from "../AgentModeGroup";
 import { BuildGroup } from "../BuildGroup";
 import { OnboardingGroup } from "../OnboardingGroup";
+import { IS_WINDOWS } from "@/lib/platform";
 
 interface AdvancedSettingsProps extends SettingsSectionProps {
   onNavigateToPermissions?: () => void;
@@ -320,21 +321,23 @@ export default function AdvancedSettings({
           />
         </SettingsRow>
 
-        <SettingsRow
-          id="show-juno-in"
-          label="Show Juno in"
-          description="Where Juno's icon appears."
-          info="Menu bar only keeps Juno out of the Dock and the app switcher. To get the Dock icon back, click the Juno icon in the menu bar and choose Dock or Both here. Opening Juno from your Applications folder also brings its window back."
-        >
-          <SegmentedChoice
+        {!IS_WINDOWS && (
+          <SettingsRow
             id="show-juno-in"
             label="Show Juno in"
-            value={presenceOf(dockIconVisible, showTrayIcon)}
-            options={PRESENCE_OPTIONS}
-            disabled={backgroundLoading || backgroundError}
-            onChange={handlePresenceChange}
-          />
-        </SettingsRow>
+            description="Where Juno's icon appears."
+            info="Menu bar only keeps Juno out of the Dock and the app switcher. To get the Dock icon back, click the Juno icon in the menu bar and choose Dock or Both here. Opening Juno from your Applications folder also brings its window back."
+          >
+            <SegmentedChoice
+              id="show-juno-in"
+              label="Show Juno in"
+              value={presenceOf(dockIconVisible, showTrayIcon)}
+              options={PRESENCE_OPTIONS}
+              disabled={backgroundLoading || backgroundError}
+              onChange={handlePresenceChange}
+            />
+          </SettingsRow>
+        )}
       </SettingsGroup>
 
       <SettingsGroup title="Claude CLI">

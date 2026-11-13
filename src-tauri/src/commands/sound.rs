@@ -401,25 +401,15 @@ pub async fn get_sound_enabled(
     Ok(audio_settings.sound_enabled)
 }
 
-// Platform-specific audio playback (macOS plays in-process, see `native`)
+// Platform-specific audio playback (macOS plays in-process, see `native`).
+// Juno's sounds are CAF, which nothing built into Windows plays, and a
+// PowerShell per sound would flash a console window. Silent on Windows until
+// its audio step (docs/plans/windows.md).
 #[cfg(target_os = "windows")]
-fn play_audio_file(path: &PathBuf) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use std::process::Command;
-
-    let path_str = path.to_string_lossy();
-    let output = Command::new("powershell")
-        .args(&[
-            "-c",
-            &format!("(New-Object Media.SoundPlayer '{}').PlaySync()", path_str),
-        ])
-        .output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("PowerShell audio playback failed: {}", stderr).into());
-    }
-
-    Ok(())
+fn play_audio_file(
+    _path: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    Err("Sound playback is not available on Windows yet".into())
 }
 
 #[cfg(target_os = "linux")]

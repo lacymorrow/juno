@@ -50,4 +50,9 @@ pub enum AutomationError {
 
     #[error("Tool not found: {0}")]
     ToolNotFound(String),
+
+    /// Windows blocks input to a window running as administrator from a process
+    /// that isn't, and drops it with no error. The agent reads this sentence out.
+    #[error("That window is running as administrator, so I can't use it.")]
+    ElevatedWindow,
 }

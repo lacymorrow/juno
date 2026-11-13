@@ -358,8 +358,8 @@ const getOnboardingSteps = (
     id: "welcome",
     title: "Welcome to Juno",
     description: isDevelopmentMode
-      ? "Juno helps you automate tasks, manage your workflow, and get more done with your Mac. You're running in development mode, so onboarding will always show on startup."
-      : "Talk to your Mac and it gets things done. Setup takes about a minute.",
+      ? "Juno helps you automate tasks, manage your workflow, and get more done with your computer. You're running in development mode, so onboarding will always show on startup."
+      : "Talk to your computer and it gets things done. Setup takes about a minute.",
     // No shadow on the app icon — Apple setup assistants never shadow them.
     icon: <img src="/juno.png" alt="Juno" className="h-24 w-24 object-contain" />,
     action: "Get Started",
@@ -412,7 +412,7 @@ const getOnboardingSteps = (
           id: "dictation-model",
           title: "Better dictation",
           description:
-            "A speech model that runs on your Mac. More accurate than the one built in, and your voice never leaves the machine.",
+            "A speech model that runs on your computer. More accurate than the one built in, and your voice never leaves the machine.",
           icon: null, // The model card below is the content here.
           action: `Download (${dictationOffer.sizeMb} MB)`,
         },
@@ -2185,7 +2185,7 @@ export default function OnboardingFlow({
                       </span>
                     </div>
                     <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
-                      Runs on your Mac. Until it lands, dictation keeps using the built-in
+                      Runs on your computer. Until it lands, dictation keeps using the built-in
                       model; Juno switches over on its own.
                     </p>
                     {sttDownload === "started" && (

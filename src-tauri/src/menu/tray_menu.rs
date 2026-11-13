@@ -283,9 +283,25 @@ impl TrayIconManager {
 /// second it reads as the icon flashing. The combined call assigns the image
 /// once, already marked as a template. On Windows and Linux, where there is no
 /// such flag, it falls through to a plain `set_icon`.
+#[cfg(not(target_os = "windows"))]
 fn apply_tray_frame(tray_icon: &TrayIcon<tauri::Wry>, image: TauriImage<'_>) -> tauri::Result<()> {
     tray_icon.set_icon_with_as_template(Some(image), true)
 }
+
+/// Windows keeps the colored app icon (`WINDOWS_TRAY_ICON`) in every state:
+/// the waveform is a black template glyph that Windows does not tint, so on
+/// a dark taskbar it all but disappears. The tooltip still says the state.
+#[cfg(target_os = "windows")]
+fn apply_tray_frame(
+    _tray_icon: &TrayIcon<tauri::Wry>,
+    _image: TauriImage<'_>,
+) -> tauri::Result<()> {
+    Ok(())
+}
+
+/// The notification-area icon on Windows: the app's own, in color.
+#[cfg(target_os = "windows")]
+const WINDOWS_TRAY_ICON: &[u8] = include_bytes!("../../icons/32x32.png");
 
 /// One frame decoded to raw RGBA, so a running animation never has to touch a
 /// PNG decoder again.
@@ -438,7 +454,8 @@ pub struct TrayMenu {
     pub menu: tauri::menu::Menu<tauri::Wry>,
     pub status_item: MenuItem<tauri::Wry>,
     pub chat_toggle_item: MenuItem<tauri::Wry>,
-    pub talk_item: MenuItem<tauri::Wry>,
+    /// `None` where there is no voice (`platform::VOICE_AVAILABLE`).
+    pub talk_item: Option<MenuItem<tauri::Wry>>,
 }
 
 /// What the chat row should say about the surface it is going to act on.
@@ -707,6 +724,10 @@ pub fn tray_menu_spec(juno_label: &str, busy: bool) -> Vec<MenuEntry> {
         MenuEntry::Separator,
         row(tray_menu_ids::QUIT, quit_label(), Some("CmdOrCtrl+Q")),
     ];
+    // No talk row where there is no voice to talk with.
+    if !crate::platform::VOICE_AVAILABLE {
+        entries.retain(|entry| !matches!(entry, MenuEntry::Row(r) if r.id == tray_menu_ids::TALK));
+    }
     if super::SHOW_DEVELOPER_MENUS {
         let at = entries
             .iter()
@@ -871,7 +892,7 @@ pub fn create_state_aware_tray_menu(
     };
     let status_item = take(tray_menu_ids::STATUS)?;
     let show_hide_item = take(tray_menu_ids::SHOW_HIDE)?;
-    let talk_item = take(tray_menu_ids::TALK)?;
+    let talk_item = take(tray_menu_ids::TALK).ok();
 
     info!("✅ State-aware tray menu created successfully");
     Ok(TrayMenu {
@@ -895,22 +916,32 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
 
     // Load the idle frame. Template mode lets macOS tint it for the menu bar.
     let idle_frame = FRAMES_IDLE.first().ok_or("idle tray icon has no frames")?;
+    #[cfg(not(target_os = "windows"))]
     let default_icon = load_tray_icon_from_data(idle_frame)?;
+    #[cfg(target_os = "windows")]
+    let default_icon = load_tray_icon_from_data(WINDOWS_TRAY_ICON)?;
 
     // Left click opens the menu, the Mac convention for a menu bar extra;
     // right click climbs the ladder (`handle_tray_icon_event`).
     let tray_icon = TrayIconBuilder::new()
         .menu(&tray_menu)
-        .show_menu_on_left_click(true)
+        // Windows is the other way round: left click shows Juno, right click
+        // opens the menu (`CLIMB_BUTTON`).
+        .show_menu_on_left_click(cfg!(not(target_os = "windows")))
         .icon(default_icon)
-        .icon_as_template(true)
+        .icon_as_template(cfg!(not(target_os = "windows")))
         .tooltip(TrayIconState::Idle.tooltip())
         .on_tray_icon_event(|tray, event| {
+            #[cfg(target_os = "windows")]
+            open_menu_on_right_release(tray, &event);
             handle_tray_icon_event(tray.app_handle(), event);
         })
         .build(app)?;
     // Tauri only exposes the left-click switch. tray-icon also opens the menu
-    // on a right click by default, which would leave nothing for the climb.
+    // on a right click by default, which would leave nothing for the climb on
+    // the Mac. On Windows the right click is the menu's, as it is for every
+    // tray icon, and Juno opens it itself (`open_menu_on_right_release`):
+    // tray-icon's own right-click menu did not appear there.
     if let Err(e) =
         tray_icon.with_inner_tray_icon(|inner| inner.set_show_menu_on_right_click(false))
     {
@@ -925,7 +956,9 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
         manager_guard.set_tray_icon(tray_icon);
         manager_guard.set_status_item(status_item);
         manager_guard.set_chat_toggle_item(chat_toggle_item);
-        manager_guard.set_talk_item(talk_item);
+        if let Some(talk_item) = talk_item {
+            manager_guard.set_talk_item(talk_item);
+        }
         // Honour the saved "show tray icon" preference. Shown is the default,
         // so only a hidden icon needs applying.
         let visible = read_tray_icon_visible(&app_handle).await;
@@ -1419,17 +1452,41 @@ pub fn quit_app(app_handle: &AppHandle) {
 }
 
 /// Handle TrayIconEvents like clicks on the icon itself
+/// Windows: open the tray menu when the right button is released, the way
+/// every notification-area icon does.
+#[cfg(target_os = "windows")]
+fn open_menu_on_right_release(tray: &TrayIcon<tauri::Wry>, event: &tauri::tray::TrayIconEvent) {
+    if let tauri::tray::TrayIconEvent::Click {
+        button: MouseButton::Right,
+        button_state: MouseButtonState::Up,
+        ..
+    } = event
+    {
+        if let Err(e) = tray.with_inner_tray_icon(|inner| inner.show_menu()) {
+            warn!("[TrayIcon] Could not open the menu: {e}");
+        }
+    }
+}
+
+/// The button that climbs the ladder. The Mac's menu bar convention opens the
+/// menu on a left click and leaves the right one for this; on Windows a left
+/// click on a tray icon shows the app and the right one opens its menu.
+#[cfg(not(target_os = "windows"))]
+const CLIMB_BUTTON: MouseButton = MouseButton::Right;
+#[cfg(target_os = "windows")]
+const CLIMB_BUTTON: MouseButton = MouseButton::Left;
+
 pub fn handle_tray_icon_event(app_handle: &AppHandle, event: tauri::tray::TrayIconEvent) {
     match event {
         // On press, not release: menu bar extras act on the press, and the
         // release never arrives for a click posted by automation (juno-cua,
         // cliclick), which is how Juno records her own demos.
         tauri::tray::TrayIconEvent::Click {
-            button: MouseButton::Right,
+            button: CLIMB_BUTTON,
             button_state: MouseButtonState::Down,
             ..
         } => {
-            info!("[TrayIcon] Right click detected on tray icon");
+            info!("[TrayIcon] {:?} click detected on tray icon", CLIMB_BUTTON);
             // One rung up the ladder per click, the same as the Dock icon:
             // hidden to the text input, the idle bar or the text input to the
             // floating chat, the floating chat to the big chat. Putting Juno
@@ -1440,11 +1497,10 @@ pub fn handle_tray_icon_event(app_handle: &AppHandle, event: tauri::tray::TrayIc
             });
         }
         tauri::tray::TrayIconEvent::Click {
-            button: MouseButton::Left,
             button_state: MouseButtonState::Down,
             ..
         } => {
-            info!("[TrayIcon] Left click detected on tray icon");
+            info!("[TrayIcon] Menu click detected on tray icon");
             // The menu opens on its own (`show_menu_on_left_click`).
         }
         // The pointer has to cross the icon before it can open the menu, so

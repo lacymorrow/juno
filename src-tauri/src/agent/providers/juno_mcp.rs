@@ -195,14 +195,21 @@ pub fn hook_auth_header(endpoint: &Endpoint) -> String {
 /// `curl` shadowed on their `PATH` would turn the screen off silently.
 pub fn shell_screen_settings(endpoint: &Endpoint, header_file: &Path) -> Result<Value, AgentError> {
     let header_file = single_quoted(header_file)?;
+    // Windows has no /usr/bin; Windows 10 and later ship curl.exe on PATH, and
+    // so does the Git Bash the CLI runs its hooks in.
+    let curl = if cfg!(windows) {
+        "curl"
+    } else {
+        "/usr/bin/curl"
+    };
     Ok(json!({
         "hooks": {
             "PreToolUse": [{
-                "matcher": cli_approval::BASH_TOOL,
+                "matcher": cli_approval::SHELL_TOOLS_MATCHER,
                 "hooks": [{
                     "type": "command",
                     "command": format!(
-                        "/usr/bin/curl -s --max-time {HOOK_TIMEOUT_SECS} -X POST \
+                        "{curl} -s --max-time {HOOK_TIMEOUT_SECS} -X POST \
                          -H @{header_file} \
                          -H 'Content-Type: application/json' \
                          --data-binary @- '{}'",
@@ -314,6 +321,11 @@ fn authorized(headers: &HeaderMap, token: &str) -> bool {
 fn tool_list() -> Vec<Value> {
     // Only the schema is served here. The CLI picks its own tool types, so the
     // Anthropic tool version on these definitions is never sent anywhere.
+    // `computer` runs on macOS and Windows (docs/plans/windows.md, step 2). The
+    // Mac app tools below are macOS only.
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut tools: Vec<Value> = Vec::new();
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     let mut tools: Vec<Value> =
         create_versioned_tools(ToolVersionConfig::new(ApiVersion::Computer20251124))
             .into_iter()
@@ -327,6 +339,7 @@ fn tool_list() -> Vec<Value> {
             })
             .collect();
     // The same definitions the API providers register: one schema, two roads.
+    #[cfg(target_os = "macos")]
     tools.extend(mac_apps::tool_definitions().into_iter().map(|tool| {
         json!({
             "name": tool.name,
@@ -937,7 +950,7 @@ mod tests {
         let settings = shell_screen_settings(&test_endpoint(), Path::new("/tmp/hdr.txt"))
             .expect("a plain path is quotable");
         let entry = &settings["hooks"]["PreToolUse"][0];
-        assert_eq!(entry["matcher"], "Bash");
+        assert_eq!(entry["matcher"], "Bash|PowerShell");
 
         let hook = &entry["hooks"][0];
         assert_eq!(hook["type"], "command");

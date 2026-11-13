@@ -1018,7 +1018,11 @@ async fn execute_agent_internal(
                     .await;
                     return Err(err_msg);
                 }
-                info!("✅ Registered full Computer Use tools for single agent mode");
+                if crate::agent::providers::factory::DESKTOP_TOOLS_REGISTERED {
+                    info!("✅ Registered full Computer Use tools for single agent mode");
+                } else {
+                    info!("✅ Registered chat tools for single agent mode (no desktop tools on this platform)");
+                }
             } else {
                 info!("🔍 Companion mode: skipping Computer Use tools registration");
             }
@@ -1107,8 +1111,8 @@ async fn execute_agent_internal(
             let brain = match brain_result {
                 Ok(brain) => brain,
                 Err(e) => {
-                    let err_msg = format!("Failed to initialize single agent brain: {}", e);
-                    error!("{}", err_msg);
+                    error!("Failed to initialize single agent brain: {}", e);
+                    let err_msg = brain_failure_for_person(&e);
 
                     // Emit error via streaming events
                     let error_message_id = uuid::Uuid::new_v4().to_string();
@@ -1394,8 +1398,8 @@ async fn execute_agent_internal(
             let orchestrator_brain = match orchestrator_brain_result {
                 Ok(brain) => brain,
                 Err(e) => {
-                    let err_msg = format!("Failed to initialize orchestrator brain: {}", e);
-                    error!("{}", err_msg);
+                    error!("Failed to initialize orchestrator brain: {}", e);
+                    let err_msg = brain_failure_for_person(&e);
 
                     // Emit error via streaming events
                     let error_message_id = uuid::Uuid::new_v4().to_string();
@@ -2207,6 +2211,17 @@ have: the answer, the steps to follow, the command to run, or your reasoning \
 about it. Then tell them that picking a computer-use model in Settings > AI \
 Provider will let Juno carry it out. Say that once and move on. Do not \
 apologize repeatedly, and do not claim to have done anything on screen.";
+
+/// What the person reads when no brain could be built: the provider's own
+/// sentence where one was written for them (no AI set up yet), otherwise one
+/// plain line. The error itself goes to the log, never into the chat.
+fn brain_failure_for_person(e: &AgentError) -> String {
+    match e {
+        AgentError::NoProvider(message) => message.clone(),
+        _ => "Juno couldn't reach its AI just now. Try again, or check Settings > Providers."
+            .to_string(),
+    }
+}
 
 /// Append the chat-only notice when the configured model cannot drive the
 /// computer. Capable models' prompts are returned untouched.
