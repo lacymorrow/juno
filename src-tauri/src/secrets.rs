@@ -186,6 +186,10 @@ fn usable(value: &str) -> Option<String> {
 struct Vault {
     store: Box<dyn Store>,
     cache: RwLock<HashMap<Secret, String>>,
+    /// One change at a time. A save and a remove of the same secret would
+    /// otherwise interleave between the store and the cache and leave them
+    /// disagreeing. Readers never take it.
+    changing: std::sync::Mutex<()>,
 }
 
 impl Vault {
@@ -206,6 +210,7 @@ impl Vault {
         Self {
             store,
             cache: RwLock::new(cache),
+            changing: std::sync::Mutex::new(()),
         }
     }
 
@@ -234,6 +239,7 @@ impl Vault {
     /// Blocks. The cache lock is taken only after the store has answered.
     fn set(&self, secret: Secret, value: &str) -> Result<(), String> {
         let value = usable(value).ok_or("An empty key cannot be saved")?;
+        let _changing = self.changing.lock().unwrap_or_else(PoisonError::into_inner);
         self.store.write(&secret.account(), &value)?;
         self.cache_mut().insert(secret, value);
         Ok(())
@@ -241,6 +247,7 @@ impl Vault {
 
     /// Blocks. Deleting a secret that was never saved succeeds.
     fn delete(&self, secret: &Secret) -> Result<(), String> {
+        let _changing = self.changing.lock().unwrap_or_else(PoisonError::into_inner);
         self.store.remove(&secret.account())?;
         self.cache_mut().remove(secret);
         Ok(())

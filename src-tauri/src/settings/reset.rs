@@ -67,7 +67,13 @@ pub async fn reset_to_available_defaults(
     // The saved keys are settings too, kept in the credential store rather
     // than the file. They go first, so the provider rule below sees a Juno
     // with no key, which is what the person now has.
-    crate::secrets::delete_all().await?;
+    // A key the credential store would not give up (a denied Keychain
+    // prompt) must not stop the rest: a Reset that does nothing is worse than
+    // one that leaves a key behind, and the key that stayed is still shown as
+    // saved, so nothing is hidden.
+    if let Err(e) = crate::secrets::delete_all().await {
+        warn!("[Settings] Reset left saved keys behind: {e}");
+    }
     let active = apply_reset(settings_manager, &AppSettings::default()).await?;
 
     // A few switches live in the store beside the sections, not in them, so
