@@ -27,7 +27,7 @@ for _ in $(seq 1 40); do
   [ -n "$WIN" ] && break
   sleep 1
 done
-[ -n "$WIN" ] || { echo "FAIL: no window found for pid $PID"; exit 1; }
+[ -n "$WIN" ] || { echo "FAIL: no window found for pid $PID"; swift "$HERE/dump-windows.swift" "$PID" || true; screencapture -x "$OUT/$STATE-fullscreen-debug.png" || true; exit 1; }
 sleep 3  # let the first paint settle
 PNG="$OUT/$STATE.png"
 screencapture -x -o -l "$WIN" "$PNG" || { echo "FAIL: screencapture exited non-zero"; exit 1; }
