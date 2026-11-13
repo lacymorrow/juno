@@ -599,12 +599,12 @@ impl AnthropicBrain {
     }
 
     /// Creates a new AnthropicBrain from a CentralizedProviderConfig struct.
-    /// The key comes from the settings store, then the ANTHROPIC_API_KEY env
-    /// var (a .env file rather than the Tauri Store), then the key baked into
-    /// a demo build. The person's own key always wins.
+    /// The key comes from the credential store (`crate::secrets`), then the
+    /// ANTHROPIC_API_KEY env var, then the key baked into a demo build. The
+    /// person's own key always wins.
     pub fn from_config(config: &crate::settings::ProviderConfig) -> Result<Self, AgentError> {
         let api_key = crate::demo::resolve_api_key(
-            config.api_key.clone(),
+            crate::secrets::provider_key(&Provider::Anthropic),
             env::var("ANTHROPIC_API_KEY").ok(),
             crate::demo::api_key(),
         )
@@ -645,7 +645,7 @@ impl AnthropicBrain {
             config.system_prompt.clone(),
         )?;
         brain.endpoint = Endpoint::Copilot {
-            configured_token: config.api_key.clone().filter(|k| !k.trim().is_empty()),
+            configured_token: crate::secrets::provider_key(&Provider::Copilot),
         };
         brain.catalog = Provider::Copilot;
         Ok(brain)

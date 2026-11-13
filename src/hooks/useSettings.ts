@@ -281,7 +281,9 @@ export function useSettings() {
 	const [mcpLoading, setMcpLoading] = useState<boolean>(false);
 	const [mcpJsonData, setMcpJsonData] = useState<string>("");
 
-	// Form state for provider settings
+	// Form state for provider settings. `apiKey` is only a key being typed:
+	// a saved key never comes back from the backend, which reports
+	// `has_saved_key` on the provider instead.
 	const [formData, setFormData] = useState<{
 		apiKey: string;
 		model: string;
@@ -361,7 +363,6 @@ export function useSettings() {
 					active_provider: string;
 					providers: {
 						id: string;
-						api_key?: string;
 						model?: string;
 						max_tokens?: number;
 						temperature?: number;
@@ -386,14 +387,15 @@ export function useSettings() {
 						// Update provider settings state
 						setProviderSettings(currentProviderSettings);
 
-						// Update form data to reflect the changes
-						setFormData({
-							apiKey: currentProviderSettings.api_key || "",
+						// Update form data to reflect the changes. A key being
+						// typed is kept: the event carries no key to replace it.
+						setFormData((prev) => ({
+							apiKey: prev.apiKey,
 							model: currentProviderSettings.model || "",
 							maxTokens: currentProviderSettings.max_tokens?.toString() || "",
 							temperature: currentProviderSettings.temperature?.toString() || "",
 							systemPrompt: currentProviderSettings.system_prompt || "",
-						});
+						}));
 					} else {
 						console.warn("useSettings: Could not find settings for active provider:", fullProviderSettings.active_provider);
 					}
@@ -546,7 +548,7 @@ export function useSettings() {
 				});
 				setProviderSettings(settings);
 				setFormData({
-					apiKey: settings.api_key || "",
+					apiKey: "",
 					model: settings.model || "",
 					maxTokens: settings.max_tokens?.toString() || "",
 					temperature: settings.temperature?.toString() || "",
@@ -937,7 +939,7 @@ export function useSettings() {
 			});
 			setProviderSettings(settings);
 			setFormData({
-				apiKey: settings.api_key || "",
+				apiKey: "",
 				model: settings.model || "",
 				maxTokens: settings.max_tokens?.toString() || "",
 				temperature: settings.temperature?.toString() || "",
@@ -963,6 +965,27 @@ export function useSettings() {
 		console.log("========================");
 	}, [activeProvider, providers, providerSettings, formData, isLoading]);
 
+	// Re-reads the provider list, which carries `has_saved_key`.
+	const refreshProviders = async () => {
+		invalidateCache("providers");
+		setProviders(await invokeCommand<ProviderInfo[]>(COMMANDS.PROVIDERS_GET_PROVIDERS));
+	};
+
+	// Deletes the active provider's saved key from the credential store.
+	const handleClearProviderApiKey = async (): Promise<boolean> => {
+		if (!activeProvider) return false;
+		try {
+			await invoke(COMMANDS.PROVIDERS_CLEAR_PROVIDER_API_KEY, { providerId: activeProvider });
+			setFormData((prev) => ({ ...prev, apiKey: "" }));
+			await refreshProviders();
+			return true;
+		} catch (error) {
+			console.error("Failed to remove the API key:", error);
+			toast.error("Failed to remove the API key");
+			return false;
+		}
+	};
+
 	// Saves whatever differs from the stored provider settings. Called when a
 	// field loses focus, so there is no Save button; the pane shows "Saved"
 	// inline on `true`. Nothing to save also returns true.
@@ -975,12 +998,15 @@ export function useSettings() {
 		try {
 			console.log("Saving provider settings changes...");
 
-			// Update API key
-			if (formData.apiKey !== providerSettings?.api_key) {
+			// A key typed into the field goes to the credential store. An
+			// empty field means nothing was typed; removing a saved key is
+			// its own action (handleClearProviderApiKey).
+			if (formData.apiKey.trim()) {
 				await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_API_KEY, {
 					providerId: activeProvider,
 					apiKey: formData.apiKey,
 				});
+				await refreshProviders();
 			}
 
 			// Update model
@@ -1024,7 +1050,7 @@ export function useSettings() {
 
 			// Update form data to reflect saved changes
 			setFormData({
-				apiKey: updatedSettings.api_key || "",
+				apiKey: "",
 				model: updatedSettings.model || "",
 				maxTokens: updatedSettings.max_tokens?.toString() || "",
 				temperature: updatedSettings.temperature?.toString() || "",
@@ -1271,6 +1297,7 @@ export function useSettings() {
 		handleSupertonicSettingsChange,
 		handleActiveProviderChange,
 		handleSaveProviderSettings,
+		handleClearProviderApiKey,
 		handleLoadAccountMcpChange,
 		handleSoundEnabledChange,
 		handlePerformanceMonitoringChange,

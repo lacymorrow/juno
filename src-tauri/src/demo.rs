@@ -130,11 +130,11 @@ pub fn ended_message(status: u16, error_body: &str) -> Option<&'static str> {
 /// Where an Anthropic key comes from, in order. The person's own key always
 /// wins: a demo build they later add a key to stops spending the demo budget.
 pub fn resolve_api_key(
-    from_settings: Option<String>,
+    saved: Option<String>,
     from_env: Option<String>,
     from_demo: Option<&'static str>,
 ) -> Option<String> {
-    from_settings
+    saved
         .filter(|k| !k.is_empty())
         .or_else(|| from_env.filter(|k| !k.is_empty()))
         .or_else(|| from_demo.map(str::to_string))

@@ -1196,7 +1196,6 @@ static ENGINE_SYNC_GENERATION: AtomicU64 = AtomicU64::new(0);
 /// (`tts::effective_engine_now`, LAC-6340). Returns immediately.
 pub fn sync_engine_model(app_handle: &AppHandle, provider: &str) {
     crate::tts::kokoro::remember_app(app_handle);
-    crate::tts::account_keys::remember_app(app_handle);
     // The greeting rendered ahead follows the engine and voice in force.
     crate::greeting::refresh_cache(app_handle);
     let generation = ENGINE_SYNC_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;

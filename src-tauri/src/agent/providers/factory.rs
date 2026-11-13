@@ -61,6 +61,9 @@ pub struct ProviderInfo {
     /// Installed, but signed out — the one unavailability the person fixes in
     /// a terminal rather than by pasting a key. Only ever true for the CLI.
     pub needs_sign_in: bool,
+    /// A key of this provider's own is saved. The key itself never leaves
+    /// the backend; Settings shows this instead.
+    pub has_saved_key: bool,
 }
 
 /// What a person is told when the provider they are on has nothing to run
@@ -90,10 +93,10 @@ pub(crate) fn select_provider(
 ///
 /// The CLIs never need a key: their credential is the login the `claude` or
 /// `codex` binary already holds, so they are never refused here. Every other
-/// provider needs a key from settings or its environment variable.
+/// provider needs a saved key or its environment variable.
 pub(crate) fn check_credential(
     provider: &Provider,
-    settings: &crate::settings::ProviderConfig,
+    saved_key: Option<String>,
     env_key: Option<String>,
 ) -> Result<(), AgentError> {
     // Copilot's credential is a GitHub sign-in found at request time (see
@@ -106,23 +109,24 @@ pub(crate) fn check_credential(
         return Ok(());
     }
     let has = |k: &Option<String>| k.as_deref().is_some_and(|v| !v.is_empty());
-    if has(&settings.api_key) || has(&env_key) {
+    if has(&saved_key) || has(&env_key) {
         return Ok(());
     }
     Err(AgentError::NoProvider(NO_PROVIDER_MESSAGE.to_string()))
 }
 
-fn ensure_can_run(
-    provider: &Provider,
-    settings: &crate::settings::ProviderConfig,
-) -> Result<(), AgentError> {
+fn ensure_can_run(provider: &Provider) -> Result<(), AgentError> {
     let env_name = match provider {
         Provider::Anthropic => Some("ANTHROPIC_API_KEY"),
         Provider::OpenAI | Provider::Rig => Some("OPENAI_API_KEY"),
         Provider::Gemini => Some("GEMINI_API_KEY"),
         Provider::ClaudeCli | Provider::CodexCli | Provider::Copilot => None,
     };
-    check_credential(provider, settings, env_name.and_then(|n| env::var(n).ok()))
+    check_credential(
+        provider,
+        crate::secrets::provider_key(provider),
+        env_name.and_then(|n| env::var(n).ok()),
+    )
 }
 
 /// Factory for creating provider-specific AgentBrain implementations
@@ -273,16 +277,9 @@ impl BrainFactory {
         Provider::from_str(&provider_str).unwrap_or(Provider::Anthropic)
     }
 
-    /// Get list of all available providers with their status
+    /// Every provider with its status: available means a saved key, the
+    /// environment's key, or a signed-in CLI or GitHub account.
     pub fn list_providers() -> Vec<ProviderInfo> {
-        Self::list_providers_with_app_handle(None)
-    }
-
-    /// List providers with optional app handle to read store-saved API keys.
-    /// Without an app handle, only env vars are checked for availability.
-    pub fn list_providers_with_app_handle(
-        app_handle: Option<&tauri::AppHandle>,
-    ) -> Vec<ProviderInfo> {
         let current_provider = Self::get_current_provider();
         // Codex CLI follows the capability-shaped UX described in LAC-4125:
         // if the binary is not installed, hide the provider from the Settings
@@ -301,53 +298,24 @@ impl BrainFactory {
             providers.push(Provider::CodexCli);
         }
         providers.push(Provider::Copilot);
-        let config = Some(load_provider_config(app_handle));
         // One filesystem probe for the whole listing.
         let cli_installed = crate::agent::providers::claude_cli::is_claude_cli_available();
+        let env_set = |name: &str| env::var(name).is_ok_and(|v| !v.is_empty());
 
         providers
             .into_iter()
             .map(|provider| {
                 let provider_id = provider.id();
+                // Rig's saved key falls back to OpenAI's inside `provider_key`.
+                let has_saved_key = crate::secrets::provider_key(&provider).is_some();
                 let is_available = match provider {
                     Provider::Anthropic => {
                         crate::demo::is_demo_build()
-                            || env::var("ANTHROPIC_API_KEY").is_ok_and(|v| !v.is_empty())
-                            || config
-                                .as_ref()
-                                .and_then(|c| c.get_provider_settings(provider_id))
-                                .and_then(|s| s.api_key.as_ref())
-                                .is_some_and(|k| !k.is_empty())
+                            || env_set("ANTHROPIC_API_KEY")
+                            || has_saved_key
                     }
-                    Provider::OpenAI => {
-                        env::var("OPENAI_API_KEY").is_ok_and(|v| !v.is_empty())
-                            || config
-                                .as_ref()
-                                .and_then(|c| c.get_provider_settings(provider_id))
-                                .and_then(|s| s.api_key.as_ref())
-                                .is_some_and(|k| !k.is_empty())
-                    }
-                    Provider::Rig => {
-                        env::var("OPENAI_API_KEY").is_ok_and(|v| !v.is_empty())
-                            || config
-                                .as_ref()
-                                .and_then(|c| c.get_provider_settings(Provider::OpenAI.id()))
-                                .and_then(|s| s.api_key.as_ref())
-                                .is_some_and(|k| !k.is_empty())
-                            || config
-                                .as_ref()
-                                .and_then(|c| c.get_provider_settings(provider_id))
-                                .and_then(|s| s.api_key.as_ref())
-                                .is_some_and(|k| !k.is_empty())
-                    }
-                    Provider::Gemini => {
-                        env::var("GEMINI_API_KEY").is_ok_and(|v| !v.is_empty())
-                            || config
-                                .as_ref()
-                                .and_then(|c| c.get_provider_settings(provider_id))
-                                .and_then(|s| s.api_key.as_ref())
-                                .is_some_and(|k| !k.is_empty())
-                    }
+                    Provider::OpenAI | Provider::Rig => env_set("OPENAI_API_KEY") || has_saved_key,
+                    Provider::Gemini => env_set("GEMINI_API_KEY") || has_saved_key,
                     Provider::ClaudeCli => {
                         // The binary existing is not the same as it being able
                         // to answer, and this listing is what Settings offers
@@ -375,17 +343,13 @@ impl BrainFactory {
                     Provider::Copilot => {
                         // Synchronous, so it reads the last check rather than
                         // asking GitHub. Only a confirmed "no" greys it out;
-                        // a token saved in settings is worth offering until
-                        // something has said otherwise.
+                        // a saved token is worth offering until something has
+                        // said otherwise.
                         use crate::agent::providers::claude_cli::SignIn;
                         match crate::agent::providers::copilot::last_known_sign_in() {
                             SignIn::SignedIn => true,
                             SignIn::SignedOut => false,
-                            SignIn::Unknown => config
-                                .as_ref()
-                                .and_then(|c| c.get_provider_settings(provider_id))
-                                .and_then(|s| s.api_key.as_ref())
-                                .is_some_and(|k| !k.is_empty()),
+                            SignIn::Unknown => has_saved_key,
                         }
                     }
                 };
@@ -412,6 +376,9 @@ impl BrainFactory {
                     is_default: provider == current_provider,
                     computer_use_supported: provider.supports_computer_use(),
                     needs_sign_in,
+                    has_saved_key: crate::secrets::is_saved(&crate::secrets::Secret::Provider(
+                        provider,
+                    )),
                 }
             })
             .collect()
@@ -424,7 +391,7 @@ impl BrainFactory {
 
     /// Create an AgentBrain implementation with app handle for proper prompt loading.
     /// Configuration flows: Store → ProviderConfig struct → from_config() constructor.
-    /// No env::set_var() calls — reading env vars is safe and used only as fallback for api_key.
+    /// The key comes from `crate::secrets`, then the environment; no env::set_var().
     pub async fn create_brain_with_app_handle(
         app_handle: Option<&tauri::AppHandle>,
     ) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
@@ -479,7 +446,7 @@ impl BrainFactory {
             crate::utils::coordinates::set_current_model(model);
         }
 
-        ensure_can_run(&provider, &provider_config)?;
+        ensure_can_run(&provider)?;
 
         match provider {
             Provider::Anthropic => {
@@ -579,7 +546,7 @@ impl BrainFactory {
             crate::utils::coordinates::set_current_model(model);
         }
 
-        ensure_can_run(&provider, &provider_config)?;
+        ensure_can_run(&provider)?;
 
         match provider {
             Provider::Anthropic => {
@@ -741,7 +708,7 @@ impl BrainFactory {
 
         // Register image generation + editing tools (LAC-4206). Both declare
         // the `image_edits` entitlement; LAC-4134 wires the hook.
-        crate::agent::tools::image_tools::register_image_tools(provider, app_handle.clone()).await;
+        crate::agent::tools::image_tools::register_image_tools(provider).await;
 
         // Register self-awareness and introspection tools (per-provider instance, development mode only)
         crate::agent::tools::register_self_awareness_tools(provider).await;
@@ -881,17 +848,13 @@ mod subscription_tests {
         }
     }
 
-    fn entry(config: &ProviderConfig, p: Provider) -> crate::settings::ProviderConfig {
-        config.resolve_provider(p).expect("default entry exists")
-    }
-
     #[test]
     fn subscription_choice_selects_the_cli_and_needs_no_api_key() {
         let config = chose("claude_cli", true);
         let provider = select_provider(&config, None).unwrap();
         assert_eq!(provider, Provider::ClaudeCli);
         // No key in settings, none in the environment.
-        assert!(check_credential(&provider, &entry(&config, provider.clone()), None).is_ok());
+        assert!(check_credential(&provider, None, None).is_ok());
     }
 
     #[test]
@@ -899,7 +862,7 @@ mod subscription_tests {
         let config = chose("codex_cli", true);
         let provider = select_provider(&config, None).unwrap();
         assert_eq!(provider, Provider::CodexCli);
-        assert!(check_credential(&provider, &entry(&config, provider.clone()), None).is_ok());
+        assert!(check_credential(&provider, None, None).is_ok());
     }
 
     #[test]
@@ -907,7 +870,7 @@ mod subscription_tests {
         let config = chose("copilot", true);
         let provider = select_provider(&config, None).unwrap();
         assert_eq!(provider, Provider::Copilot);
-        assert!(check_credential(&provider, &entry(&config, provider.clone()), None).is_ok());
+        assert!(check_credential(&provider, None, None).is_ok());
     }
 
     #[test]
@@ -930,28 +893,22 @@ mod subscription_tests {
         if crate::demo::is_demo_build() {
             return;
         }
-        let config = chose("anthropic", false);
-        let err = check_credential(
-            &Provider::Anthropic,
-            &entry(&config, Provider::Anthropic),
-            None,
-        )
-        .unwrap_err();
+        let err = check_credential(&Provider::Anthropic, None, None).unwrap_err();
         let text = err.to_string();
         assert_eq!(text, NO_PROVIDER_MESSAGE);
         assert!(text.contains("Sign in to Claude Code"));
         assert!(text.contains("Settings > Advanced on > Providers"));
         assert!(!text.contains("Configuration error"));
         assert!(!text.contains("ANTHROPIC_API_KEY"));
+        // An empty key is what a cleared field used to leave; still none.
+        assert!(check_credential(&Provider::Anthropic, Some(String::new()), None).is_err());
     }
 
     #[test]
-    fn a_key_in_settings_or_environment_is_a_credential() {
-        let config = chose("anthropic", false);
-        let mut with_key = entry(&config, Provider::Anthropic);
-        with_key.api_key = Some("sk-ant-example".into());
-        assert!(check_credential(&Provider::Anthropic, &with_key, None).is_ok());
-        let bare = entry(&config, Provider::Anthropic);
-        assert!(check_credential(&Provider::Anthropic, &bare, Some("sk-ant-env".into())).is_ok());
+    fn a_saved_or_environment_key_is_a_credential() {
+        assert!(
+            check_credential(&Provider::Anthropic, Some("sk-ant-example".into()), None).is_ok()
+        );
+        assert!(check_credential(&Provider::Anthropic, None, Some("sk-ant-env".into())).is_ok());
     }
 }

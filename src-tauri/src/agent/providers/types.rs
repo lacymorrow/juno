@@ -393,7 +393,7 @@ impl From<&ModelDefinition> for ModelInfo {
 }
 
 /// Enumeration of available AI providers
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Provider {
     Anthropic,
     OpenAI,

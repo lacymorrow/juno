@@ -1,23 +1,15 @@
-//! The API keys the cloud voice engines need, from Settings.
+//! The API keys the cloud voice engines need.
 //!
 //! ElevenLabs and Replicate used to read their key from the process
 //! environment and nowhere else. An app opened from the Dock or Finder has no
 //! shell environment, so in the installed app neither engine could ever speak:
 //! choosing ElevenLabs in Settings fell back to Kokoro on every sentence, after
 //! a failed attempt and a cold model load, which is most of why speech felt
-//! slow "whatever the provider". The key now lives in the audio settings, set
-//! from the Voice pane. The environment variable is still read after it, so a
-//! developer's shell setup keeps working.
+//! slow "whatever the provider". The key is set from the Voice pane and kept in
+//! the credential store (`crate::secrets`). The environment variable is still
+//! read after it, so a developer's shell setup keeps working.
 
-use std::sync::OnceLock;
-use tauri::AppHandle;
-
-static APP: OnceLock<AppHandle> = OnceLock::new();
-
-/// Called once at startup, beside `kokoro::remember_app`.
-pub fn remember_app(app: &AppHandle) {
-    let _ = APP.set(app.clone());
-}
+use crate::secrets::Secret;
 
 /// An engine that speaks with an account key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +25,14 @@ impl KeyedEngine {
             "elevenlabs" => Some(Self::ElevenLabs),
             "replicate" | "chatterbox" => Some(Self::Replicate),
             _ => None,
+        }
+    }
+
+    /// Where the key is saved.
+    pub fn secret(self) -> Secret {
+        match self {
+            Self::ElevenLabs => Secret::ElevenLabs,
+            Self::Replicate => Secret::Replicate,
         }
     }
 
@@ -53,33 +53,17 @@ impl KeyedEngine {
     }
 }
 
-fn stored(settings: &crate::settings::AudioSettings, engine: KeyedEngine) -> Option<String> {
-    let key = match engine {
-        KeyedEngine::ElevenLabs => settings.elevenlabs_api_key.as_deref(),
-        KeyedEngine::Replicate => settings.replicate_api_key.as_deref(),
-    };
-    key.map(str::trim)
-        .filter(|k| !k.is_empty())
-        .map(str::to_string)
-}
-
 /// The key for `engine`: the one saved in Settings, else the environment's,
 /// else, for ElevenLabs in a demo build, the one compiled in (`demo`). The
 /// person's own key always wins, so a demo they add a key to stops spending
 /// the demo's characters.
-pub async fn key(engine: KeyedEngine) -> Result<String, String> {
-    if let Some(app) = APP.get() {
-        if let Ok(manager) = crate::settings::manager::SettingsManager::new(app.clone()) {
-            if let Ok(audio) = manager.get_audio_settings().await {
-                if let Some(key) = stored(&audio, engine) {
-                    return Ok(key);
-                }
-            }
-        }
-    }
-    std::env::var(engine.env_var())
-        .ok()
-        .filter(|k| !k.trim().is_empty())
+pub fn key(engine: KeyedEngine) -> Result<String, String> {
+    crate::secrets::get(&engine.secret())
+        .or_else(|| {
+            std::env::var(engine.env_var())
+                .ok()
+                .filter(|k| !k.trim().is_empty())
+        })
         .or_else(|| match engine {
             KeyedEngine::ElevenLabs => crate::demo::elevenlabs_key().map(str::to_string),
             KeyedEngine::Replicate => None,
@@ -90,7 +74,6 @@ pub async fn key(engine: KeyedEngine) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::AudioSettings;
 
     #[test]
     fn chatterbox_speaks_with_the_replicate_key() {
@@ -103,19 +86,6 @@ mod tests {
             Some(KeyedEngine::ElevenLabs)
         );
         assert_eq!(KeyedEngine::from_id("kokoro"), None);
-    }
-
-    #[test]
-    fn a_blank_saved_key_is_no_key() {
-        let audio = AudioSettings {
-            elevenlabs_api_key: Some("  ".to_string()),
-            replicate_api_key: Some(" r8_abc ".to_string()),
-            ..AudioSettings::default()
-        };
-        assert_eq!(stored(&audio, KeyedEngine::ElevenLabs), None);
-        assert_eq!(
-            stored(&audio, KeyedEngine::Replicate).as_deref(),
-            Some("r8_abc")
-        );
+        assert_eq!(KeyedEngine::Replicate.secret(), Secret::Replicate);
     }
 }

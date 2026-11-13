@@ -76,6 +76,9 @@ pub struct CloudConfig {
     pub server_url: String,
     pub device_id: Option<String>,
     pub device_name: String,
+    /// The device key, read from the credential store (`crate::secrets`) when
+    /// the config is built. Never serialized, and never written to settings.
+    #[serde(skip)]
     pub api_key: Option<String>,
     pub auto_connect: bool,
     pub reconnect_interval: u64, // seconds
@@ -258,14 +261,13 @@ impl CloudConfig {
         }
     }
 
-    /// Update API key and save
-    pub async fn set_api_key(
-        &mut self,
-        api_key: String,
-        settings_manager: &crate::settings::manager::SettingsManager,
-    ) -> Result<(), CloudError> {
-        self.api_key = Some(api_key);
-        self.save_to_centralized_settings(settings_manager).await
+    /// Save the device key in the credential store and use it from now on.
+    pub async fn set_api_key(&mut self, api_key: String) -> Result<(), CloudError> {
+        crate::secrets::save(crate::secrets::Secret::CloudDevice, api_key)
+            .await
+            .map_err(CloudError::ConfigError)?;
+        self.api_key = crate::secrets::get(&crate::secrets::Secret::CloudDevice);
+        Ok(())
     }
 
     /// Enable cloud connectivity
@@ -374,7 +376,6 @@ impl CloudConfig {
             server_url: self.server_url.clone(),
             device_id: self.device_id.clone(),
             device_name: self.device_name.clone(),
-            api_key: self.api_key.clone(),
             auto_connect: self.auto_connect,
             reconnect_interval: self.reconnect_interval,
             heartbeat_interval: self.heartbeat_interval,
@@ -394,7 +395,7 @@ impl CloudConfig {
             server_url: settings.server_url.clone(),
             device_id: settings.device_id.clone(),
             device_name: settings.device_name.clone(),
-            api_key: settings.api_key.clone(),
+            api_key: crate::secrets::get(&crate::secrets::Secret::CloudDevice),
             auto_connect: settings.auto_connect,
             reconnect_interval: settings.reconnect_interval,
             heartbeat_interval: settings.heartbeat_interval,

@@ -54,6 +54,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tracing::warn;
 
 use crate::agent::providers::{config as provider_config, startup_default};
+use crate::secrets::Secret;
 use crate::settings::manager::SettingsManager;
 use crate::settings::AppSettings;
 
@@ -63,6 +64,10 @@ use crate::settings::AppSettings;
 pub async fn reset_to_available_defaults(
     settings_manager: &SettingsManager,
 ) -> Result<String, String> {
+    // The saved keys are settings too, kept in the credential store rather
+    // than the file. They go first, so the provider rule below sees a Juno
+    // with no key, which is what the person now has.
+    crate::secrets::delete_all().await?;
     let active = apply_reset(settings_manager, &AppSettings::default()).await?;
 
     // A few switches live in the store beside the sections, not in them, so
@@ -73,6 +78,26 @@ pub async fn reset_to_available_defaults(
     }
 
     Ok(active)
+}
+
+/// The saved keys that belong to a settings section, so resetting the section
+/// deletes them with it. `None` is every section.
+pub fn secrets_in_section(section: Option<&str>) -> Vec<Secret> {
+    let all = Secret::all();
+    match section {
+        None => all,
+        Some(section) => all
+            .into_iter()
+            .filter(|secret| {
+                let owner = match secret {
+                    Secret::Provider(_) => "providers",
+                    Secret::ElevenLabs | Secret::Replicate => "audio",
+                    Secret::CloudDevice => "cloud",
+                };
+                owner == section
+            })
+            .collect(),
+    }
 }
 
 /// What the running app was showing before a reset, for the parts that only
@@ -207,9 +232,8 @@ pub async fn apply_reset(
     settings_manager.save_all_settings(settings).await?;
 
     // The write above went straight to the store, so the cached provider
-    // configuration still holds the settings that were just thrown away,
-    // including the API key whose absence is the whole input to the rule
-    // below. Ask the rule about the machine as it is now.
+    // configuration still holds the settings that were just thrown away.
+    // Ask the rule below about the machine as it is now.
     provider_config::invalidate_config_cache();
 
     match startup_default::apply(settings_manager).await {
@@ -241,12 +265,8 @@ mod tests {
     /// `AppSettings::default()`.
     fn state_after_reset(cli_installed: bool, cli_signed_in: bool) -> SelectionState {
         let providers = AppSettings::default().providers;
-        let active_has_credential = providers
-            .providers
-            .iter()
-            .find(|p| p.id == providers.active_provider)
-            .and_then(|p| p.api_key.as_deref())
-            .is_some_and(|key| !key.is_empty());
+        // A reset deletes every saved key before the rule runs.
+        let active_has_credential = false;
 
         // These tests predate Codex and read Claude as "the CLI". The second
         // candidate stays absent so the rule's answer is unchanged in cases
@@ -283,6 +303,23 @@ mod tests {
             decide(&state_after_reset(true, true)),
             Decision::SwitchTo(Provider::ClaudeCli.id())
         );
+    }
+
+    #[test]
+    fn resetting_a_section_deletes_the_keys_saved_for_it() {
+        assert_eq!(secrets_in_section(None).len(), Secret::all().len());
+        assert_eq!(secrets_in_section(Some("cloud")), vec![Secret::CloudDevice]);
+        assert_eq!(
+            secrets_in_section(Some("audio")),
+            vec![Secret::ElevenLabs, Secret::Replicate]
+        );
+        assert!(secrets_in_section(Some("providers"))
+            .iter()
+            .all(|s| matches!(s, Secret::Provider(_))));
+        assert!(
+            secrets_in_section(Some("providers")).contains(&Secret::Provider(Provider::Copilot))
+        );
+        assert!(secrets_in_section(Some("agent")).is_empty());
     }
 
     #[test]

@@ -97,7 +97,6 @@ pub mod cloud_keys {
     pub const SERVER_URL: &str = "server_url";
     pub const DEVICE_ID: &str = "device_id";
     pub const DEVICE_NAME: &str = "device_name";
-    pub const API_KEY: &str = "api_key";
     pub const AUTO_CONNECT: &str = "auto_connect";
     pub const RECONNECT_INTERVAL: &str = "reconnect_interval";
     pub const HEARTBEAT_INTERVAL: &str = "heartbeat_interval";
@@ -139,7 +138,6 @@ pub mod tool_keys {
 pub mod provider_keys {
     pub const ACTIVE_PROVIDER: &str = "active_provider";
     pub const PROVIDERS: &str = "providers";
-    pub const API_KEY: &str = "api_key";
     pub const MODEL: &str = "model";
     pub const MAX_TOKENS: &str = "max_tokens";
     pub const TEMPERATURE: &str = "temperature";
