@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.281] - 2026-11-12
+
+### Added
+
+- **onboarding:** paste the whole message, Juno finds the key and tests it (#986) (dd30d118)
+
 ## [0.8.279] - 2026-11-11
 
 ### Added
@@ -1829,7 +1835,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.279...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.281...HEAD
+[0.8.281]: https://github.com/lacymorrow/juno/compare/cua-v0.8.280...v0.8.281
 [0.8.279]: https://github.com/lacymorrow/juno/compare/cua-v0.8.278...v0.8.279
 [0.8.278]: https://github.com/lacymorrow/juno/compare/cua-v0.8.277...v0.8.278
 [0.8.277]: https://github.com/lacymorrow/juno/compare/cua-v0.8.276...v0.8.277

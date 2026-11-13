@@ -485,6 +485,7 @@ pub fn run() {
             check_api_keys_available,
             get_copilot_status,
             import_copilot_cli_sign_in,
+            check_provider_api_key,
             crate::demo::get_demo_info,
             crate::build_info::get_build_info,
             crate::connectivity::get_connectivity,
@@ -567,6 +568,7 @@ pub fn run() {
 
             // Dock icon / menu-bar-only mode
             commands::dock_icon::get_dock_icon_visible,
+            commands::frontend_log::frontend_log,
             commands::dock_icon::set_dock_icon_visible,
 
             // Sound Commands

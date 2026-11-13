@@ -95,6 +95,7 @@ pub mod providers {
     pub const CHECK_API_KEYS_AVAILABLE: &str = "check_api_keys_available";
     pub const GET_COPILOT_STATUS: &str = "get_copilot_status";
     pub const IMPORT_COPILOT_CLI_SIGN_IN: &str = "import_copilot_cli_sign_in";
+    pub const CHECK_PROVIDER_API_KEY: &str = "check_provider_api_key";
 }
 
 /// Always listening command names
@@ -367,6 +368,8 @@ pub mod agent_sessions {
 /// App-level commands: build info, config directory, diagnostics
 pub mod app {
     pub const GET_BUILD_INFO: &str = "get_build_info";
+    /// A page's console output and uncaught errors, into Juno's log.
+    pub const FRONTEND_LOG: &str = "frontend_log";
     /// Network and provider health, for the bar's status dot.
     pub const GET_CONNECTIVITY: &str = "get_connectivity";
     /// What is still loading after launch, for the bar's status dot.

@@ -110,8 +110,25 @@ export function predictedWindowOrigin(
 // unrelated readers need it: whichever bar look is mounted (to lay itself out
 // against the docked edges) and `useWindowSize` (to anchor every resize on
 // them), and the second is not a component.
+//
+// Two slots per label, not one, and the difference is the whole of LAC-4831.
+// The **dock slot** is where the bar is drawn right now, which is what every
+// layout reader wants. The **intent** is the well someone put it in, which is
+// what a display hop has to project from. They agree until the bar visits a
+// display that does not have that well: `axisStops` gives an axis of
+// `FIVE_STOP_MIN_LOGICAL` or more five stops and a shorter one three, so a bar
+// dragged to the quarter-point column on a 5K has no such column to sit in on
+// a laptop and is *drawn* in the centre one there.
+//
+// With one slot, that projection was written back over the choice: the hop
+// destroyed it, and the bar came home to the 5K's centre column instead of the
+// quarter-point one it was dragged to. Projection is lossy by nature and must
+// stay that way, because the bar has to be drawn somewhere. What must not be
+// lossy is the record of what was asked for. So the hop projects and leaves
+// the intent alone, and the round trip comes back exact.
 
 const slotByLabel = new Map<string, WellSlot | null>();
+const intentByLabel = new Map<string, WellSlot | null>();
 const listenersByLabel = new Map<string, Set<() => void>>();
 
 /** The well the window with this label is docked in, or null before it lands. */
@@ -120,10 +137,41 @@ export function getDockSlot(label: string): WellSlot | null {
 }
 
 /**
- * Record where the window landed. A no-op when the slot is unchanged, so a
- * re-settle into the same well cannot wake every subscriber.
+ * The well someone last put this window in: a drag release, the tray's
+ * "Center Floating Bar", the position restored at launch. A display hop never
+ * writes it, so it is still the quarter-point column after a trip across a
+ * three-stop laptop. Falls back to the drawn slot, which is all there is
+ * before anything has been chosen.
+ */
+export function getDockIntent(label: string): WellSlot | null {
+  return intentByLabel.get(label) ?? slotByLabel.get(label) ?? null;
+}
+
+/**
+ * Record where the window landed because someone put it there. Sets the drawn
+ * slot and the intent together: every caller but the display hop is a choice,
+ * so this stays the default and the exception has to say so.
  */
 export function setDockSlot(label: string, slot: WellSlot | null): void {
+  intentByLabel.set(label, slot);
+  writeDockSlot(label, slot);
+}
+
+/**
+ * Record where the window is drawn after a move nobody asked for: the display
+ * hop, which puts the bar on the cursor's display in the nearest well that
+ * display happens to have. The intent is left untouched, so the bar returns to
+ * the well it was dragged to the moment it is back on a display with one.
+ */
+export function setDockProjection(label: string, slot: WellSlot | null): void {
+  writeDockSlot(label, slot);
+}
+
+/**
+ * Move the drawn slot and wake its readers. A no-op when the slot is
+ * unchanged, so a re-settle into the same well cannot wake every subscriber.
+ */
+function writeDockSlot(label: string, slot: WellSlot | null): void {
   const prev = slotByLabel.get(label) ?? null;
   if (prev === slot) return;
   if (prev && slot && prev.fx === slot.fx && prev.fy === slot.fy) return;
@@ -147,4 +195,5 @@ export function subscribeDockSlot(label: string, fn: () => void): () => void {
 /** Forget every slot. For tests, which share one module instance per file. */
 export function resetDockSlots(): void {
   slotByLabel.clear();
+  intentByLabel.clear();
 }

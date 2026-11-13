@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { EVENTS, COMMANDS } from "@/lib/constants.generated";
+import { findPastedKey } from "@/lib/pastedKey";
 import { Eye, EyeOff, AlertCircle, Loader2, ExternalLink } from "lucide-react";
 import {
   useCallback,
@@ -344,6 +345,12 @@ interface DictationOffer {
   sizeMb: number;
 }
 
+/** What `check_provider_api_key` says, plus the wait for it. */
+type KeyCheck = "checking" | "ok" | "rejected" | "no_credit" | "unknown";
+
+/** How long a hand-typed key sits still before it is tried. */
+const KEY_CHECK_TYPING_PAUSE_MS = 600;
+
 const getOnboardingSteps = (
   permissionsAlreadyGranted: boolean,
   isDevelopmentMode: boolean = false,
@@ -380,7 +387,7 @@ const getOnboardingSteps = (
           id: "api-key",
           title: "Connect Your AI",
           description:
-            "Use the Claude plan you already have, or paste an API key from Anthropic, OpenAI, or Google.",
+            "Use the Claude plan you already have, or paste a key someone sent you.",
           icon: null, // The ways in are the content; a key tile above them pushed Skip off the window.
           action: "Continue",
         },
@@ -943,6 +950,11 @@ export default function OnboardingFlow({
   const [apiKeySaving, setApiKeySaving] = useState(false);
   const [apiKeySaved, setApiKeySaved] = useState(false);
   const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+  // What the provider said about the pasted key. "unknown" (offline, no
+  // verdict) is never shown as a failure.
+  const [keyCheck, setKeyCheck] = useState<KeyCheck | null>(null);
+  const keyCheckRun = useRef(0);
+  const keyCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // New state for granular permissions
   const [permissionsState, setPermissionsState] =
@@ -1258,35 +1270,45 @@ export default function OnboardingFlow({
     }
   };
 
-  // Auto-detect provider from API key prefix
-  const detectProvider = useCallback(
-    (key: string): { id: string; name: string } | null => {
-      const trimmed = key.trim();
-      // Anthropic keys: sk-ant-api03-...
-      if (trimmed.startsWith("sk-ant-")) {
-        return { id: "anthropic", name: "Anthropic" };
-      }
-      // OpenAI keys: sk-proj-... (current) or sk-... (legacy, but not sk-ant-)
-      if (trimmed.startsWith("sk-proj-") || (trimmed.startsWith("sk-") && !trimmed.startsWith("sk-ant-"))) {
-        return { id: "openai", name: "OpenAI" };
-      }
-      // Google Gemini keys: AIza...
-      if (trimmed.startsWith("AIza")) {
-        return { id: "gemini", name: "Google Gemini" };
-      }
-      return null;
-    },
-    []
-  );
+  // The box takes whatever was pasted, the whole message included, and keeps
+  // only the key. The key is tried against its provider so the person learns
+  // here, in plain words, whether it works. A paste is tried at once; a key
+  // typed or edited by hand waits for a pause, so each keystroke is not a
+  // request to the provider.
+  const handleApiKeyChange = useCallback((value: string, pasted = false) => {
+    const found = findPastedKey(value);
+    setApiKey(found ? found.key : value);
+    setApiKeySaved(false);
+    setApiKeyError(null);
+    setDetectedProvider(found ? found.provider : null);
 
-  const handleApiKeyChange = useCallback(
-    (value: string) => {
-      setApiKey(value);
-      setApiKeySaved(false);
-      setApiKeyError(null);
-      setDetectedProvider(detectProvider(value));
+    const run = ++keyCheckRun.current;
+    if (keyCheckTimer.current) clearTimeout(keyCheckTimer.current);
+    if (!found) {
+      setKeyCheck(null);
+      return;
+    }
+    setKeyCheck("checking");
+    keyCheckTimer.current = setTimeout(
+      () => {
+        invoke<KeyCheck>(COMMANDS.PROVIDERS_CHECK_PROVIDER_API_KEY, {
+          providerId: found.provider.id,
+          apiKey: found.key,
+        })
+          .catch(() => "unknown" as const)
+          .then((verdict) => {
+            if (keyCheckRun.current === run) setKeyCheck(verdict);
+          });
+      },
+      pasted ? 0 : KEY_CHECK_TYPING_PAUSE_MS,
+    );
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (keyCheckTimer.current) clearTimeout(keyCheckTimer.current);
     },
-    [detectProvider]
+    [],
   );
 
   const saveApiKey = useCallback(async () => {
@@ -2010,6 +2032,8 @@ export default function OnboardingFlow({
   // Role step is intentionally optional — no guard here; handleNext saves only when a role is selected
   const isContinueDisabled =
     (step.id === "api-key" && !detectedProvider && !cliSelected) ||
+    // A key its provider turned down is not one to save and move on with.
+    (step.id === "api-key" && keyCheck === "rejected" && !cliSelected) ||
     (step.id === "api-key" && apiKeySaving);
 
   // Skip stays available on the permissions step however little is granted:
@@ -2126,7 +2150,7 @@ export default function OnboardingFlow({
                           </>
                         ) : (
                           <p className="my-8 text-[13px] text-muted-foreground">
-                            No key is set up yet. Pick one in Settings, Triggers,
+                            No key is set up yet. Pick one in Settings, Shortcuts,
                             whenever you like.
                           </p>
                         )}
@@ -2242,7 +2266,7 @@ export default function OnboardingFlow({
                   {/* A plan the person already pays for, through its CLI. */}
                   <CliCard
                     title="Use your Claude subscription"
-                    detail="No API key needed. Uses Claude Code on this Mac."
+                    detail="No key needed. Uses Claude Code on this Mac."
                     loginCommand="claude login"
                     installLabel="Not installed. Get Claude Code"
                     installUrl="https://claude.ai/code"
@@ -2311,18 +2335,28 @@ export default function OnboardingFlow({
                       type={showApiKey ? "text" : "password"}
                       value={apiKey}
                       onChange={(e) => handleApiKeyChange(e.target.value)}
-                      placeholder="Paste your API key"
+                      // A one-line box glues pasted lines together, which would run
+                      // the key into the next line of the message. Read the paste
+                      // itself, line breaks intact.
+                      onPaste={(e) => {
+                        const text = e.clipboardData.getData("text");
+                        if (findPastedKey(text)) {
+                          e.preventDefault();
+                          handleApiKeyChange(text, true);
+                        }
+                      }}
+                      placeholder="Paste your key, or the whole message it came in"
                       className={`h-10 w-full rounded-[10px] border border-border bg-card px-3 pr-10 font-mono text-[13px] text-foreground placeholder:font-sans placeholder:text-muted-foreground transition-colors focus:border-[#007AFF] dark:focus:border-[#0A84FF] ${FOCUS_RING}`}
                       spellCheck={false}
                       autoComplete="off"
-                      aria-label="API key"
+                      aria-label="Key"
                       disabled={cliSelected}
                     />
                     <button
                       type="button"
                       onClick={() => setShowApiKey(!showApiKey)}
                       className={`absolute right-2.5 top-1/2 -translate-y-1/2 rounded text-muted-foreground transition-colors hover:text-foreground ${FOCUS_RING}`}
-                      aria-label={showApiKey ? "Hide API key" : "Show API key"}
+                      aria-label={showApiKey ? "Hide key" : "Show key"}
                     >
                       {showApiKey ? (
                         <EyeOff className="h-4 w-4" />
@@ -2336,21 +2370,34 @@ export default function OnboardingFlow({
                   <div className="min-h-[18px] text-center text-[12px]">
                     {apiKeyError ? (
                       <span className="text-red-600 dark:text-red-400">Couldn't save: {apiKeyError}</span>
+                    ) : keyCheck === "rejected" ? (
+                      <span className="text-red-600 dark:text-red-400">
+                        This key isn't working. Copy all of it and paste again, or ask for a new one.
+                      </span>
+                    ) : keyCheck === "no_credit" ? (
+                      <span className="text-red-600 dark:text-red-400">
+                        This key's account has no credit left. Ask whoever sent it to add some.
+                      </span>
                     ) : apiKeySaved ? (
                       <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                        <CheckGlyph className={`h-3 w-3 ${GREEN}`} /> Saved. {detectedProvider?.name} is your active provider
+                        <CheckGlyph className={`h-3 w-3 ${GREEN}`} /> Saved. Juno is connected.
                       </span>
+                    ) : keyCheck === "checking" ? (
+                      <span className="text-muted-foreground">Checking your key…</span>
                     ) : detectedProvider ? (
                       <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                        <CheckGlyph className={`h-3 w-3 ${GREEN}`} /> {detectedProvider.name} key detected
+                        <CheckGlyph className={`h-3 w-3 ${GREEN}`} />{" "}
+                        {keyCheck === "ok"
+                          ? `Your ${detectedProvider.name} key works.`
+                          : `${detectedProvider.name} key found.`}
                       </span>
                     ) : apiKey.trim().length > 0 ? (
                       <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                        <AlertCircle className="h-3 w-3" /> Unrecognized key format
+                        <AlertCircle className="h-3 w-3" /> Juno can't find a key in that. Paste the whole message you were sent.
                       </span>
                     ) : (
                       <span className="text-muted-foreground">
-                        Anthropic (sk-ant-), OpenAI (sk-proj-), or Google (AIza)
+                        Works with keys from Anthropic, OpenAI and Google.
                       </span>
                     )}
                   </div>

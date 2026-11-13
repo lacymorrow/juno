@@ -11,6 +11,10 @@ import { VoiceProvider } from "./contexts/VoiceContext";
 // (about 3 MB of script) before drawing anything, the bar included.
 import { IntroReveal } from "./components/intro/IntroReveal";
 import { BarHost } from "./components/bar/BarHost";
+import { installForwardLogs } from "./lib/forwardLogs";
+
+// Before anything renders, so a page's first lines reach Juno's log too.
+installForwardLogs();
 
 const App = lazy(() => import("./App"));
 const ModularSettingsWindow = lazy(() => import("./components/settings/ModularSettingsWindow"));
