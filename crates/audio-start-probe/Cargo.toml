@@ -13,7 +13,7 @@
 # bundle: no `externalBin`, no `resources` entry, and no app crate names it.
 [package]
 name = "audio-start-probe"
-version = "0.8.285"
+version = "0.8.286"
 edition = "2021"
 description = "Times AudioOutputUnitStart through Juno's vendored cpal (LAC-7538 / LAC-5281)"
 authors = ["Lacy Morrow <me@lacymorrow.com>"]
