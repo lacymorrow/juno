@@ -138,6 +138,145 @@ exit $status
     )
 }
 
+/// The same construction for the CLI's own shell (LAC-6321).
+///
+/// The shim above is installed in Juno's own shell session. The Claude CLI
+/// runs its `Bash` tool in a process Juno spawns, so it needs the shim on that
+/// process's `PATH` too, or `rm -rf` from the CLI deletes for good. Measured on
+/// `claude` 2.1.317: a directory prepended to the spawn's `PATH` is what the
+/// CLI's Bash resolves `rm` to.
+///
+/// Written once per app run under the temporary directory, and `None` when it
+/// cannot be written, in which case the CLI runs with the plain `PATH`.
+#[cfg(unix)]
+pub fn cli_shim_dir() -> Option<std::path::PathBuf> {
+    use std::sync::OnceLock;
+    static DIR: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+    DIR.get_or_init(|| {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir()
+            .join(format!("juno-cli-shims-{}", std::process::id()))
+            .join(SHIM_DIR_NAME);
+        let write = || -> std::io::Result<()> {
+            fs::create_dir_all(&dir)?;
+            let rm = dir.join("rm");
+            fs::write(&rm, rm_shim_script())?;
+            fs::set_permissions(&rm, fs::Permissions::from_mode(0o755))
+        };
+        match write() {
+            Ok(()) => Some(dir),
+            Err(e) => {
+                tracing::warn!(
+                    "The CLI's rm shim could not be written, so its deletes are permanent: {e}"
+                );
+                None
+            }
+        }
+    })
+    .clone()
+}
+
+/// `path` with the CLI shim directory in front, or `path` unchanged.
+#[cfg(unix)]
+pub fn path_with_cli_shims(path: &str) -> String {
+    match cli_shim_dir() {
+        Some(dir) if path.is_empty() => dir.display().to_string(),
+        Some(dir) => format!("{}:{path}", dir.display()),
+        None => path.to_string(),
+    }
+}
+
+/// Windows has no `rm` to put on a `PATH`: the CLI's shell there is its
+/// `PowerShell` tool, and a delete is `Remove-Item` or one of its aliases
+/// (`rm`, `del`, `erase`, `rd`, `rmdir`, `ri`). A cmdlet cannot be shadowed by
+/// a file, but it can by a function, which PowerShell resolves before a
+/// cmdlet, aliases included. So the command runs with this function defined
+/// in front of it.
+///
+/// It finds what the caller named with `Get-Item`, so wildcards, `-Filter`,
+/// `-Include`, `-Exclude` and pipeline input resolve the way they do for the
+/// real cmdlet, then sends each file or folder to the Recycle Bin. Like the
+/// Mac shim it refuses rather than deletes when the Recycle Bin cannot take
+/// something (a network path, a removable drive), and a folder with items in
+/// it still needs `-Recurse`. Anything outside the file system (the registry,
+/// `env:`) goes to the real cmdlet unchanged.
+///
+/// Verified on the Windows 11 VM in the desktop session Juno runs in: a file
+/// by alias, piped `Get-ChildItem` output, a wildcard through `del`, and a
+/// whole folder with `-Recurse -Force -Confirm:$false` all landed in the
+/// Recycle Bin. Run from an SSH session the same calls delete permanently,
+/// because the shell has no Recycle Bin there; Juno never runs that way.
+///
+/// What it does not cover, like the Mac shim and `/bin/rm`: a
+/// module-qualified `Microsoft.PowerShell.Management\Remove-Item`, `cmd /c
+/// del`, and .NET calls such as `[IO.File]::Delete`.
+pub const POWERSHELL_RECYCLE_PRELUDE: &str = r#"function Remove-Item {
+  [CmdletBinding(DefaultParameterSetName = 'Path')]
+  param(
+    [Parameter(ParameterSetName = 'Path', Position = 0, Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)][string[]]$Path,
+    [Parameter(ParameterSetName = 'LiteralPath', Mandatory = $true, ValueFromPipelineByPropertyName = $true)][Alias('PSPath', 'LP')][string[]]$LiteralPath,
+    [string]$Filter, [string[]]$Include, [string[]]$Exclude,
+    [switch]$Recurse, [switch]$Force, [switch]$WhatIf, [switch]$Confirm
+  )
+  begin { Add-Type -AssemblyName Microsoft.VisualBasic }
+  process {
+    $find = @{ Force = $true; ErrorAction = 'Stop' }
+    if ($PSCmdlet.ParameterSetName -eq 'LiteralPath') { $find.LiteralPath = $LiteralPath } else { $find.Path = $Path }
+    if ($Filter) { $find.Filter = $Filter }
+    if ($Include) { $find.Include = $Include }
+    if ($Exclude) { $find.Exclude = $Exclude }
+    try { $items = @(Get-Item @find) } catch { Write-Error $_; return }
+    foreach ($item in $items) {
+      if ($item.PSProvider.Name -ne 'FileSystem') {
+        Microsoft.PowerShell.Management\Remove-Item -LiteralPath $item.PSPath -Recurse:$Recurse -Force:$Force -WhatIf:$WhatIf
+        continue
+      }
+      $full = $item.FullName
+      $root = [System.IO.Path]::GetPathRoot($full)
+      $fixed = $false
+      if ($root -and -not $root.StartsWith('\\')) { try { $fixed = ([System.IO.DriveInfo]::new($root)).DriveType -eq 'Fixed' } catch { } }
+      if (-not $fixed) { Write-Error "Not deleted: $full is not on a local drive, so it can't go to the Recycle Bin."; continue }
+      $isDir = $item.PSIsContainer
+      if ($isDir -and -not $Recurse -and @(Get-ChildItem -LiteralPath $full -Force -ErrorAction SilentlyContinue).Count -gt 0) {
+        Write-Error "Not deleted: $full has items in it and -Recurse was not given."; continue
+      }
+      if ($WhatIf) { "What if: moving $full to the Recycle Bin"; continue }
+      try {
+        if ($isDir) { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($full, 'OnlyErrorDialogs', 'SendToRecycleBin') }
+        else { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($full, 'OnlyErrorDialogs', 'SendToRecycleBin') }
+      } catch { Write-Error "Not deleted: $full could not go to the Recycle Bin: $($_.Exception.Message)" }
+    }
+  }
+}"#;
+
+/// The words that delete in PowerShell: the cmdlet and its built-in aliases.
+const POWERSHELL_DELETE_WORDS: &[&str] =
+    &["remove-item", "rm", "del", "erase", "rd", "rmdir", "ri"];
+
+/// Whether a PowerShell command names a delete anywhere in it.
+///
+/// Deliberately loose: a match costs only a longer command, so a word inside a
+/// string also counts. Missing a delete is the failure that matters.
+pub fn powershell_deletes(command: &str) -> bool {
+    command
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .any(|word| {
+            POWERSHELL_DELETE_WORDS
+                .iter()
+                .any(|delete| word.eq_ignore_ascii_case(delete))
+        })
+}
+
+/// The command to run in place of `command`: with the Recycle Bin
+/// `Remove-Item` in front when it deletes, `None` when it does not.
+pub fn powershell_with_recycle(command: &str) -> Option<String> {
+    if !powershell_deletes(command) || command.starts_with(POWERSHELL_RECYCLE_PRELUDE) {
+        return None;
+    }
+    Some(format!("{POWERSHELL_RECYCLE_PRELUDE}\n{command}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,5 +345,64 @@ mod tests {
         assert!(script.contains("targets=()"));
         // No unexpanded format placeholders left behind.
         assert!(!script.contains("{trash_bin}"));
+    }
+
+    #[test]
+    fn a_powershell_delete_gets_the_recycle_bin_in_front() {
+        for command in [
+            "Remove-Item -LiteralPath C:\\Users\\me\\JunoTest -Recurse -Force",
+            "rm .\\a.txt",
+            "Get-ChildItem *.log | del",
+            "erase x; rd y",
+            "REMOVE-ITEM z",
+        ] {
+            let rewritten = powershell_with_recycle(command)
+                .unwrap_or_else(|| panic!("`{command}` deletes and was left alone"));
+            assert!(rewritten.starts_with(POWERSHELL_RECYCLE_PRELUDE));
+            assert!(rewritten.ends_with(command));
+        }
+    }
+
+    #[test]
+    fn a_powershell_command_that_does_not_delete_is_left_alone() {
+        for command in [
+            "Get-ChildItem C:\\Users",
+            "Rename-Item draft-1.txt final-1.txt",
+            "Set-ItemProperty HKCU:\\x -Name y -Value 0",
+            "Write-Output removed",
+        ] {
+            assert_eq!(powershell_with_recycle(command), None, "`{command}`");
+        }
+    }
+
+    #[test]
+    fn the_recycle_prelude_is_added_once() {
+        let once = powershell_with_recycle("rm a").unwrap_or_default();
+        assert_eq!(powershell_with_recycle(&once), None);
+    }
+
+    #[test]
+    fn the_recycle_prelude_refuses_rather_than_deletes() {
+        assert!(POWERSHELL_RECYCLE_PRELUDE.contains("function Remove-Item"));
+        assert!(POWERSHELL_RECYCLE_PRELUDE.contains("SendToRecycleBin"));
+        assert!(POWERSHELL_RECYCLE_PRELUDE.contains("Not deleted"));
+        // The real cmdlet is reached only for paths outside the file system.
+        assert_eq!(
+            POWERSHELL_RECYCLE_PRELUDE
+                .matches("Microsoft.PowerShell.Management\\Remove-Item")
+                .count(),
+            1
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_cli_path_starts_with_the_rm_shim() {
+        let path = path_with_cli_shims("/usr/bin:/bin");
+        let dir = cli_shim_dir().expect("the shim directory is writable in tests");
+        assert!(path.starts_with(&dir.display().to_string()));
+        assert!(path.ends_with(":/usr/bin:/bin"));
+        let script = std::fs::read_to_string(dir.join("rm")).expect("shim written");
+        assert_eq!(script, rm_shim_script());
     }
 }

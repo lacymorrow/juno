@@ -60,9 +60,16 @@ pub const APPROVE_TOOL_NAME: &str = "approve";
 pub const ALLOWED_TOOLS: &str = "Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,NotebookEdit,\
      TodoWrite,Task,mcp__juno__computer,mcp__juno__settings";
 
-/// The CLI's own shell tool, as the permission prompt names it, and as the
-/// hook's `matcher` names it.
+/// The CLI's own shell tool on a Mac, as the permission prompt names it.
 pub const BASH_TOOL: &str = "Bash";
+
+/// The CLI's own shell tool on Windows, where it runs PowerShell instead of
+/// bash. It reaches `approve` and the hook the same way `Bash` does.
+pub const POWERSHELL_TOOL: &str = "PowerShell";
+
+/// The hook's `matcher`: both of the CLI's shell tools. Claude Code reads a
+/// matcher as a pattern, so `|` matches either name.
+pub const SHELL_TOOLS_MATCHER: &str = "Bash|PowerShell";
 
 /// The hook event the shell screen answers. Claude Code routes a hook answer
 /// by this name, so a wrong one is silently ignored.
@@ -225,6 +232,23 @@ fn shell_verdict(background_mode: bool, tool_name: &str, input: &Value) -> Optio
     }
 }
 
+/// A PowerShell call that deletes, with the Recycle Bin `Remove-Item` in
+/// front of it (LAC-6321), or `None` for any other call.
+///
+/// This is the Windows half of the construction that let `rm` stop asking:
+/// on a Mac the CLI's `rm` resolves to the Trash shim on its `PATH`, and a
+/// cmdlet has no `PATH` to sit on, so the definition travels with the command.
+/// It applies whatever the settings say, because it removes no question: it
+/// makes the delete that already runs one that can be undone.
+fn recycled_powershell(tool_name: &str, input: &Value) -> Option<Value> {
+    if tool_name != POWERSHELL_TOOL {
+        return None;
+    }
+    let command = input.get("command").and_then(Value::as_str)?;
+    let rewritten = crate::trash::powershell_with_recycle(command)?;
+    Some(with_command(input, &rewritten))
+}
+
 /// The same call with its command replaced.
 ///
 /// Everything else the model wrote is carried through. Both envelopes replace
@@ -256,6 +280,16 @@ fn with_command(input: &Value, command: &str) -> Value {
 /// Pure in the one piece of live state it needs, so every shape is pinned in
 /// tests without an app in the loop.
 fn hook_answer_for(background_mode: bool, tool_name: &str, input: &Value) -> Value {
+    if let Some(updated) = recycled_powershell(tool_name, input) {
+        return json!({
+            "hookSpecificOutput": {
+                "hookEventName": HOOK_EVENT,
+                "permissionDecision": "allow",
+                "permissionDecisionReason": "Deletes go to the Recycle Bin.",
+                "updatedInput": updated,
+            }
+        });
+    }
     match shell_verdict(background_mode, tool_name, input) {
         None | Some(ShellPolicy::Run) => json!({}),
         Some(ShellPolicy::Rewritten { command, note }) => json!({
@@ -631,6 +665,9 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
     if tool_name.is_empty() {
         return deny_result("Malformed permission request: no tool_name.");
     }
+
+    // Before anything that can allow it, so every allow below carries it.
+    let input = recycled_powershell(tool_name, &input).unwrap_or(input);
 
     // Background mode first, and independent of the send gate (LAC-5007).
     // "Ask before Juno sends" is about what leaves the machine; this is about
@@ -1703,5 +1740,40 @@ mod tests {
         assert!(line.contains("#dev"), "{line}");
         assert!(line.contains("site is up"), "{line}");
         assert!(!line.contains("second line"), "{line}");
+    }
+
+    /// LAC-6321. On Windows the CLI's shell is its `PowerShell` tool, and a
+    /// `Remove-Item` there skipped the Recycle Bin: the task list's delete
+    /// left nothing to restore. Both envelopes now carry the Recycle Bin
+    /// definition in front of a delete.
+    #[test]
+    fn a_powershell_delete_reaches_the_cli_with_the_recycle_bin_in_front() {
+        let input = json!({
+            "command": "Remove-Item -LiteralPath C:\\Users\\me\\JunoTest -Recurse -Force",
+            "description": "Delete JunoTest",
+        });
+        for background_mode in [false, true] {
+            let answer = hook_answer_for(background_mode, POWERSHELL_TOOL, &input);
+            let output = &answer["hookSpecificOutput"];
+            assert_eq!(output["permissionDecision"], "allow");
+            let command = output["updatedInput"]["command"]
+                .as_str()
+                .unwrap_or_default();
+            assert!(command.starts_with(crate::trash::POWERSHELL_RECYCLE_PRELUDE));
+            assert_eq!(output["updatedInput"]["description"], "Delete JunoTest");
+        }
+        let updated = recycled_powershell(POWERSHELL_TOOL, &input).unwrap_or_default();
+        assert!(updated["command"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with("-Recurse -Force"));
+    }
+
+    #[test]
+    fn only_a_powershell_delete_is_rewritten() {
+        let listing = json!({ "command": "Get-ChildItem C:\\Users" });
+        assert_eq!(hook_answer_for(false, POWERSHELL_TOOL, &listing), json!({}));
+        let bash_rm = json!({ "command": "rm -rf ~/JunoTest" });
+        assert_eq!(recycled_powershell(BASH_TOOL, &bash_rm), None);
     }
 }
