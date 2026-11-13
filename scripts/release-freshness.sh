@@ -21,6 +21,11 @@ if [ -z "$feed" ]; then
 fi
 
 # Oldest unreleased merge: commits after the feed, minus the release bot's own.
+# per_page=100 and no pagination: past 100 unreleased commits the oldest one is
+# not in this page, so the age is understated (it still alarms, just late).
+# The `release:` prefix is shipx's version-bump commit; the same match lives in
+# .github/workflows/release-every-merge.yml (`release:*)` in the decide step).
+# If that commit format changes, update both or every bump reads as unreleased.
 oldest=$(gh api "repos/$REPO/commits?sha=main&since=$feed&per_page=100" \
   --jq '[.[]|select(.commit.message|startswith("release:")|not)|.commit.committer.date]|min // empty')
 
