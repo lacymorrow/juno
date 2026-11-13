@@ -3,8 +3,9 @@ name: Release freshness
 # The watchdog for "no release has shipped" (LAC-8052). It runs on ubuntu, so
 # it cannot starve in the macOS queue it is watching, and it reads the one
 # artifact that matters (the canary latest.json) instead of any run status.
-# A red run here is the alarm: GitHub emails the people who watch Actions
-# failures, and the run list shows it. It gates nothing.
+# A red run here is the alarm: it shows in the run list, and GitHub emails
+# the user who last edited the cron line above (scheduled-workflow failures go
+# to that one person, not to everyone watching Actions). It gates nothing.
 
 on:
   schedule:
