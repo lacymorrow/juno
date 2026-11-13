@@ -633,7 +633,35 @@ pub(super) fn remember_field(element: &WindowsUIElement) {
 fn remembered_field(root: HWND) -> Option<WindowsUIElement> {
     let field = FIELD.lock().ok()?;
     let field = field.as_ref()?;
-    (field.window == id_from_hwnd(root)).then(|| field.element.clone())
+    let field_root = hwnd_from_id(field.window);
+    (field_root == root || is_owned_by(field_root, root)).then(|| field.element.clone())
+}
+
+/// Whether `window` is a dialog `owner` opened, directly or through another.
+///
+/// UI Automation lists an owned dialog inside its owner, so the agent reads
+/// Save As by naming "Notepad" and gets the dialog's controls. The field it
+/// then types into lives in the dialog, a top-level window of its own, and
+/// typing that names "Notepad" has to reach it. When it didn't, the text was
+/// posted to Notepad's editor and the dialog saved under its default name
+/// (LAC-6321, task 4 of the Windows task list).
+fn is_owned_by(window: HWND, owner: HWND) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindow, GW_OWNER};
+    let mut current = window;
+    // Owner chains are short; the bound only guards against a cycle.
+    for _ in 0..8 {
+        // SAFETY: reads the window hierarchy; a stale handle returns an error.
+        match unsafe { GetWindow(current, GW_OWNER) } {
+            Ok(next) if !next.is_invalid() => {
+                if next == owner {
+                    return true;
+                }
+                current = next;
+            }
+            _ => return false,
+        }
+    }
+    false
 }
 
 /// The inner window of a remembered field, when it has its own (a Win32 edit).

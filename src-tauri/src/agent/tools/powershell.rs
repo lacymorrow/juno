@@ -627,6 +627,10 @@ pub async fn execute(app_handle: &tauri::AppHandle, input: Value) -> Result<Valu
         .flatten()
         .map(window_list::id_from_hwnd);
 
+    // A delete goes to the Recycle Bin, as the CLI's does (`crate::trash`).
+    let runs =
+        crate::trash::powershell_with_recycle(command).unwrap_or_else(|| command.to_string());
+
     let mut process = tokio::process::Command::new("powershell.exe");
     process
         .hide_console_window()
@@ -638,7 +642,7 @@ pub async fn execute(app_handle: &tauri::AppHandle, input: Value) -> Result<Valu
             "Bypass",
             "-EncodedCommand",
         ])
-        .arg(encoded_command(command))
+        .arg(encoded_command(&runs))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
