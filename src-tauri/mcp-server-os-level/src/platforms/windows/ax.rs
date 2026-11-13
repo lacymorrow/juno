@@ -730,14 +730,7 @@ const EDIT_SELECTION_TIMEOUT_MS: u32 = 500;
 /// processes. That packs each end into 16 bits, which is why a longer value is
 /// left to the append path.
 fn edit_selection(element: &uiautomation::UIElement, before: &str) -> Option<(usize, usize)> {
-    let handle = element.get_native_window_handle().ok()?;
-    if handle.is_invalid() {
-        return None;
-    }
-    let hwnd: HWND = handle.into();
-    if !super::window_list::class_name(hwnd).eq_ignore_ascii_case("Edit") {
-        return None;
-    }
+    let hwnd = classic_edit(element)?;
     let mut result = 0usize;
     // SAFETY: plain values in, and `result` outlives the call. The timeout
     // keeps a hung dialog from holding the agent.
@@ -756,6 +749,68 @@ fn edit_selection(element: &uiautomation::UIElement, before: &str) -> Option<(us
         return None;
     }
     selection_in_chars(before, result & 0xFFFF, (result >> 16) & 0xFFFF)
+}
+
+/// The window of a classic Win32 `Edit` control, or `None` for anything else.
+fn classic_edit(element: &uiautomation::UIElement) -> Option<HWND> {
+    let handle = element.get_native_window_handle().ok()?;
+    if handle.is_invalid() {
+        return None;
+    }
+    let hwnd: HWND = handle.into();
+    super::window_list::class_name(hwnd)
+        .eq_ignore_ascii_case("Edit")
+        .then_some(hwnd)
+}
+
+/// How long typed characters get to show up in a classic edit's value.
+const EDIT_TYPING_SETTLE: Duration = Duration::from_millis(1500);
+
+/// Type into a classic Win32 `Edit` by posting the characters to it, the way
+/// a person's keystrokes arrive, and read the value back.
+///
+/// Not `ValuePattern`: for this control that is `WM_SETTEXT`, and the common
+/// file dialog ignores text set that way. Measured on the Windows 11 VM: with
+/// the File name box set to `...\settext.txt` by `WM_SETTEXT`, Save wrote
+/// `Untitled.txt`; with the same path posted as `WM_CHAR`, it wrote the path
+/// typed. So a write that read back correctly still saved under the default
+/// name, and the model was told it had worked (LAC-6321, task 4).
+///
+/// Posted characters replace whatever the control has selected, as typing
+/// does, and need no focus or foreground. `None` when the control isn't a
+/// classic edit; otherwise whether the text read back.
+fn type_into_classic_edit(
+    element: &uiautomation::UIElement,
+    value: &UIValuePattern,
+    before: &str,
+    text: &str,
+) -> Option<bool> {
+    use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CHAR};
+    let hwnd = classic_edit(element)?;
+    for unit in text
+        .replace("\r\n", "\r")
+        .replace('\n', "\r")
+        .encode_utf16()
+    {
+        // SAFETY: posts a plain value to a window; a stale handle fails.
+        if unsafe { PostMessageW(Some(hwnd), WM_CHAR, WPARAM(usize::from(unit)), LPARAM(0)) }
+            .is_err()
+        {
+            return Some(false);
+        }
+    }
+    let deadline = Instant::now() + EDIT_TYPING_SETTLE;
+    loop {
+        if let Ok(after) = value.get_value() {
+            if insertion_verified(before, &after, text) {
+                return Some(true);
+            }
+        }
+        if Instant::now() >= deadline {
+            return Some(false);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 /// A selection given in UTF-16 units, as the offset and length in `char`s that
@@ -813,6 +868,21 @@ pub fn type_verified(target: &TypeTarget, text: &str) -> Result<AxTypeReport, Ax
     }
     let before = value.get_value().map_err(|_| AxTypeSkip::Unverifiable)?;
     let front = foreground_window();
+    // A classic edit takes typed characters, not a set value: see
+    // `type_into_classic_edit`. No fallback after it, since characters that
+    // were posted but didn't read back may still land, and a second write
+    // would type the text twice.
+    if let Some(typed) = type_into_classic_edit(element, &value, &before, text) {
+        hand_foreground_back(front);
+        if !typed {
+            return Err(AxTypeSkip::NotVerified);
+        }
+        return Ok(AxTypeReport {
+            pid: target.pid,
+            window_id: Some(id_from_hwnd(root)),
+            method: "WM_CHAR to the field",
+        });
+    }
     let selection = caret_offset(element, &before).or_else(|| edit_selection(element, &before));
     let written = match selection {
         Some((offset, selected)) => {
