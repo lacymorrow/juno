@@ -26,6 +26,15 @@
 //! internet did: [`HostStatus::Blocked`]. Neither answered, or the machine
 //! has no route at all: [`HostStatus::Offline`].
 //!
+//! The second probe is one endpoint, so a network that blocks both Hugging
+//! Face and `gstatic.com` while allowing the rest of the internet is told
+//! "No internet connection" when "Not available on this network" is nearer
+//! the truth. That is a known and deliberate limit. Both answers are calm,
+//! neither retries, and both leave the Mac's own voice working, so the bug
+//! this module exists to remove is gone either way; a second fallback
+//! endpoint buys a better sentence in a rarer case and another thing to
+//! keep alive. Revisit it if someone actually lands on it.
+//!
 //! ## Nothing is on a timer
 //!
 //! The status is probed when something actually wants a model and nothing is
@@ -251,16 +260,36 @@ pub fn on_network_change(up: bool) {
     });
 }
 
+/// Clears `PROBING` however the probe ends.
+///
+/// The flag is released on drop rather than after the `await` because the
+/// `await` is not guaranteed to be reached: `run_probes` can panic, and the
+/// future holding it can be dropped (a Tauri command whose webview goes
+/// away). Either would leave the flag set for the life of the process, and
+/// since `probe` returns early whenever it is set, that does not slow
+/// probing down — it ends it. Retry would go quiet with nothing in the log.
+struct ProbeInFlight;
+
+impl Drop for ProbeInFlight {
+    fn drop(&mut self) {
+        PROBING.store(false, Ordering::SeqCst);
+    }
+}
+
 async fn probe() -> HostStatus {
     if !crate::connectivity::network_up() {
         set(HostStatus::Offline);
         return HostStatus::Offline;
     }
     if PROBING.swap(true, Ordering::SeqCst) {
+        // Someone else is already asking. Take what is known rather than
+        // making a second request; when theirs lands it arrives as
+        // `model-host-changed`, so a surface that got `Unknown` here still
+        // redraws with the real answer.
         return status();
     }
+    let _in_flight = ProbeInFlight;
     let outcome = run_probes().await;
-    PROBING.store(false, Ordering::SeqCst);
     if let Some(outcome) = outcome {
         set(outcome);
         return outcome;
@@ -430,6 +459,35 @@ mod tests {
         assert_ne!(HostStatus::Offline.note(), HostStatus::Blocked.note());
         assert_eq!(HostStatus::Reachable.note(), None);
         assert_eq!(HostStatus::Unknown.note(), None);
+    }
+
+    #[test]
+    fn a_probe_that_panics_still_lets_the_next_one_run() {
+        // `PROBING` is a one-way door if it is ever left set: `probe` returns
+        // early while it is true, so a stuck flag does not make probing
+        // slower, it stops it, and Retry goes quiet for the life of the
+        // process with nothing in the log. Hence the guard rather than a
+        // store after the await.
+        assert!(!PROBING.load(Ordering::SeqCst), "a test left the flag set");
+
+        let panicked = std::panic::catch_unwind(|| {
+            let _in_flight = ProbeInFlight;
+            PROBING.store(true, Ordering::SeqCst);
+            panic!("the probe blew up mid-await");
+        });
+        assert!(panicked.is_err(), "the panic should have propagated");
+        assert!(
+            !PROBING.load(Ordering::SeqCst),
+            "a panicking probe left the flag set, so nothing probes again"
+        );
+
+        // Dropping the future has the same shape: the guard goes out of
+        // scope without the store after the await ever being reached.
+        {
+            let _in_flight = ProbeInFlight;
+            PROBING.store(true, Ordering::SeqCst);
+        }
+        assert!(!PROBING.load(Ordering::SeqCst));
     }
 
     #[test]

@@ -960,7 +960,10 @@ pub fn start_download(
         };
         let outcome = if !host.may_fetch() {
             info!("[SttModels] Not downloading {}: {:?}", model_id, host);
-            Err(FetchError::HostUnavailable)
+            // Which refusal this is matters to the person reading it: a
+            // machine with no route is not a machine behind a proxy. See
+            // `FetchError::for_host`.
+            Err(FetchError::for_host(host))
         } else {
             match run_download(&app, def, &state, &cancel, activate_when_done).await {
                 Ok(()) => Ok(()),
