@@ -275,7 +275,9 @@ jobs:
             scripts/release-failure-report.sh \
             scripts/__tests__/release-failure-report.test.sh \
             scripts/notarize-dmg.sh \
-            scripts/__tests__/notarize-dmg.test.sh
+            scripts/__tests__/notarize-dmg.test.sh \
+            scripts/update-homebrew-formula.sh \
+            scripts/__tests__/update-homebrew-formula.test.sh
 
       - name: Render the report against stubbed gh
         run: scripts/__tests__/release-failure-report.test.sh
@@ -285,3 +287,41 @@ jobs:
       # here against a stubbed notarytool, not on a tag.
       - name: Notarize the DMG against stubbed notarytool
         run: scripts/__tests__/notarize-dmg.test.sh
+
+      # The Homebrew formula rewrite. Same class as the two above: it runs once
+      # per release, against a file in a repo this one does not control, and its
+      # failure mode is SILENT - a pattern that matches nothing left the job
+      # green, the push assertion green, and `brew install juno-cua` on the
+      # previous version (LAC-7401). Exercised here against fixture formulas
+      # instead, including the reformattings that make each pattern miss.
+      - name: Rewrite the Homebrew formula against fixture formulas
+        run: scripts/__tests__/update-homebrew-formula.test.sh
+
+  # The same suite again, on the platform the RELEASE runs on. `release-report`
+  # above runs it on ubuntu-latest, but release-cua.yml's homebrew job is
+  # `runs-on: macos-latest`, and the bug class this suite exists for is "a
+  # pattern matched nothing" - which is exactly where BSD and GNU diverge: BRE
+  # escaping, `grep -c` output, `mktemp` with no template, awk's ENVIRON. An
+  # ubuntu-only test would leave the release's own toolchain the one thing never
+  # exercised, which is the shape of the original bug (LAC-7401): the only
+  # exercise the rewrite ever got was a real release. PR #976 review, round 3.
+  #
+  # Verified locally before this job existed: 18/18 under /bin/bash 3.2 and BSD
+  # sed/awk/grep on macOS 15 (arm64). The job is what keeps that true.
+  #
+  # Behaviour only, no shellcheck leg: shellcheck is preinstalled on
+  # ubuntu-latest and not on macos-latest, `release-report` already holds these
+  # scripts to exactly that standard, and installing a second copy here would
+  # make the gate stricter by accident while costing a brew install per run.
+  homebrew-formula-macos:
+    name: Homebrew formula rewrite (macOS, release toolchain)
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      # Named so a red check says which platform: the ubuntu leg of the same
+      # suite lives in `release-report`, and "both green" vs "ubuntu green,
+      # macOS red" is the whole reason this job is separate.
+      - name: Rewrite the Homebrew formula against fixture formulas (BSD tools)
+        run: scripts/__tests__/update-homebrew-formula.test.sh

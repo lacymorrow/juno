@@ -182,42 +182,57 @@ jobs:
     runs-on: macos-latest
     environment: release
     steps:
+      # The formula rewriter lives in the repo, so this job needs the tree.
+      #
+      # Checked out at the run's ref (main) rather than at
+      # needs.gate.outputs.sha, which the build job uses: the rewriter is
+      # release *tooling*, versioned with the workflow that calls it. Pinning it
+      # to the built tree would mean a release dispatched for an older cua-v*
+      # tag looks for a script that tree never had.
+      #
+      # persist-credentials: false because this job only reads a script out of
+      # the tree. The default leaves GITHUB_TOKEN in the workspace's
+      # .git/config, and the step below then clones a different repo with a
+      # different token - no reason to leave a second credential lying next to
+      # it.
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
       - name: Update Homebrew formula
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # Read from the environment by update-homebrew-formula.sh, rather than
+          # interpolated into the shell body below.
+          VERSION: ${{ needs.gate.outputs.version }}
+          ARM64_SHA: ${{ needs.build.outputs.arm64 }}
+          X64_SHA: ${{ needs.build.outputs.x64 }}
         run: |
           set -euo pipefail
-          VERSION="${{ needs.gate.outputs.version }}"
-          ARM64_SHA="${{ needs.build.outputs.arm64 }}"
-          X64_SHA="${{ needs.build.outputs.x64 }}"
 
-          # Clone the tap repo and update formula
+          # Clone the tap repo
           git clone "https://x-access-token:${GH_TOKEN}@github.com/lacymorrow/homebrew-tap.git" /tmp/tap
+
+          # Rewrite the formula AND prove the rewrite landed, before anything is
+          # committed. The rewrite is three pattern substitutions against a file
+          # in another repo (version, the cua-v* download urls, both
+          # checksums), and a pattern that matches nothing is the failure this
+          # guards: the formula stays on the previous version, nothing is
+          # committed, `git commit || echo "No changes"` says so and exits 0,
+          # and the ls-remote assertion below passes *vacuously* because local
+          # HEAD never moved. Green release, stale tap (LAC-7401).
+          #
+          # In a script so those branches are tested rather than discovered on a
+          # release: scripts/__tests__/update-homebrew-formula.test.sh.
+          "$GITHUB_WORKSPACE/scripts/update-homebrew-formula.sh" /tmp/tap/Formula/juno-cua.rb
+
           cd /tmp/tap
-
-          sed -i '' "s/version \".*\"/version \"${VERSION}\"/" Formula/juno-cua.rb
-          # CLI assets live on the cua-v* release (see tag_name above), not the app's v* release.
-          sed -i '' "s|releases/download/[^/]*/|releases/download/cua-v${VERSION}/|g" Formula/juno-cua.rb
-
-          # Update SHA256 for arm64 (first occurrence) and x64 (second occurrence)
-          python3 -c "
-          import re
-          with open('Formula/juno-cua.rb') as f:
-              content = f.read()
-          shas = ['${ARM64_SHA}', '${X64_SHA}']
-          idx = [0]
-          def replace_sha(m):
-              i = idx[0]
-              idx[0] += 1
-              return f'sha256 \"{shas[i]}\"' if i < len(shas) else m.group(0)
-          content = re.sub(r'sha256 \"[^\"]*\"', replace_sha, content)
-          with open('Formula/juno-cua.rb', 'w') as f:
-              f.write(content)
-          "
-
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/juno-cua.rb
+          # Safe to keep swallowing this now: the only way to reach it is a
+          # formula the step above already proved correct on disk, which is the
+          # legitimate case (re-running a release that is already published).
           git commit -m "Update juno-cua to ${VERSION}" || echo "No changes"
           # No `|| echo` on the push: a dead or under-scoped HOMEBREW_TAP_TOKEN
           # still clones (the tap is public) and must turn this job red, not
