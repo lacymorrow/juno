@@ -231,7 +231,7 @@ pub async fn recheck() -> HostStatus {
 /// and neither launch nor a settings pane may wait that long. When it lands
 /// it arrives as `model-host-changed` and the surface redraws.
 pub fn ensure_in_background() {
-    let _ = tauri::async_runtime::spawn(async {
+    tauri::async_runtime::spawn(async {
         ensure().await;
     });
 }
@@ -239,7 +239,7 @@ pub fn ensure_in_background() {
 /// Run `recheck` without waiting for it. For call sites that have just failed
 /// and have nothing to do with the answer except remember it.
 pub fn recheck_in_background() {
-    let _ = tauri::async_runtime::spawn(async {
+    tauri::async_runtime::spawn(async {
         recheck().await;
     });
 }
