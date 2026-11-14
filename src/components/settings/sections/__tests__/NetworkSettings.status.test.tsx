@@ -1,5 +1,5 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({
@@ -7,6 +7,8 @@ vi.mock("@tauri-apps/api/event", () => ({
   emit: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+
+import { toast } from "sonner";
 
 import NetworkSettings from "../NetworkSettings";
 import type { SettingsSectionProps } from "../../types";
@@ -47,13 +49,8 @@ const settingsWith = (
     mcpTools: tools,
   }) as unknown as SettingsSectionProps["settings"];
 
-/** The row for `name`, found via the server name the row renders. */
-const rowFor = (name: string): HTMLElement => {
-  const label = screen.getByText(name);
-  const row = label.closest("div.border.rounded-lg");
-  if (!row) throw new Error(`no server row rendered for '${name}'`);
-  return row as HTMLElement;
-};
+/** The row for a server id. Anchored on the row's test id, not its classes. */
+const rowFor = (id: string): HTMLElement => screen.getByTestId(`mcp-server-row-${id}`);
 
 /**
  * LAC-8221. The backend sends serde's externally tagged form of the Rust
@@ -69,6 +66,10 @@ const rowFor = (name: string): HTMLElement => {
  * bug and prove nothing.
  */
 describe("NetworkSettings: MCP server status badges", () => {
+  beforeEach(() => {
+    vi.mocked(toast.error).mockClear();
+  });
+
   it("renders Connected for a server the backend reports as connected", () => {
     render(
       <NetworkSettings
@@ -80,7 +81,7 @@ describe("NetworkSettings: MCP server status badges", () => {
       />,
     );
 
-    const row = rowFor("memory");
+    const row = rowFor("id-memory");
     expect(within(row).getByText("Connected")).toBeInTheDocument();
     expect(within(row).queryByText("Disconnected")).not.toBeInTheDocument();
     // The tools reached the UI; the badge has to agree with them.
@@ -94,7 +95,7 @@ describe("NetworkSettings: MCP server status badges", () => {
       />,
     );
 
-    expect(within(rowFor("alpha")).getByText("Connecting")).toBeInTheDocument();
+    expect(within(rowFor("id-a")).getByText("Connecting")).toBeInTheDocument();
   });
 
   it("renders Timeout when the server timed out", () => {
@@ -104,10 +105,10 @@ describe("NetworkSettings: MCP server status badges", () => {
       />,
     );
 
-    expect(within(rowFor("alpha")).getByText("Timeout")).toBeInTheDocument();
+    expect(within(rowFor("id-a")).getByText("Timeout")).toBeInTheDocument();
   });
 
-  it("renders Error, with the detail button, for the object-shaped error variant", () => {
+  it("renders Error, and surfaces the message the backend sent, for the object-shaped variant", () => {
     render(
       <NetworkSettings
         settings={settingsWith([server("id-a", "alpha")], {
@@ -116,10 +117,20 @@ describe("NetworkSettings: MCP server status badges", () => {
       />,
     );
 
-    const row = rowFor("alpha");
+    const row = rowFor("id-a");
     expect(within(row).getByText("Error")).toBeInTheDocument();
-    // The error path was the one shape that already worked; keep it working.
-    expect(within(row).getAllByRole("button").length).toBeGreaterThan(0);
+
+    // The error path was the one shape that already worked, so this is the
+    // regression guard on it: the detail button must still carry the message
+    // out of the status object, which is the read that was rewritten.
+    fireEvent.click(
+      within(row).getByRole("button", { name: /Show the error from alpha/i }),
+    );
+
+    expect(toast.error).toHaveBeenCalledWith(
+      "Server Error: npx: command not found",
+      expect.anything(),
+    );
   });
 
   it("renders Disconnected when the backend reports it, and when the key is absent", () => {
@@ -132,9 +143,9 @@ describe("NetworkSettings: MCP server status badges", () => {
       />,
     );
 
-    expect(within(rowFor("alpha")).getByText("Disconnected")).toBeInTheDocument();
+    expect(within(rowFor("id-a")).getByText("Disconnected")).toBeInTheDocument();
     // Negative control: a server with no status entry still reads Disconnected,
     // so the fix is not "everything is Connected now".
-    expect(within(rowFor("beta")).getByText("Disconnected")).toBeInTheDocument();
+    expect(within(rowFor("id-b")).getByText("Disconnected")).toBeInTheDocument();
   });
 });

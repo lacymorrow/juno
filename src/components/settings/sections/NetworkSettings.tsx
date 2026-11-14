@@ -273,6 +273,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                   return (
                     <div
                       key={server.id}
+                      data-testid={`mcp-server-row-${server.id}`}
                       className="flex items-center justify-between p-3 border rounded-lg"
                     >
                       <div className="flex items-center gap-3">
@@ -300,6 +301,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                           <Button
                             variant="ghost"
                             size="sm"
+                            aria-label={`Show the error from ${server.name}`}
                             onClick={() => {
                               toast.error(`Server Error: ${error}`, {
                                 duration: 5000,
