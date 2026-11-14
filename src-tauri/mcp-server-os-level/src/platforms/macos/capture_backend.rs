@@ -90,9 +90,9 @@ pub fn host_macos_major() -> Option<u32> {
 /// "unknown" rather than "ancient" and deferred to the Darwin major, which the
 /// shim does not rewrite.
 fn macos_major_from(product_version: Option<&str>, darwin_release: Option<&str>) -> Option<u32> {
-    // STUB (RED): no version is ever derived.
-    let _ = product_version;
-    let _ = darwin_release;
+    // STUB (RED): both readings are parsed and then thrown away.
+    let _ = product_version.and_then(parse_leading_u32);
+    let _ = darwin_release.and_then(parse_leading_u32);
     let _ = DARWIN_MAJOR_MACOS_14;
     None
 }
