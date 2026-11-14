@@ -79,13 +79,23 @@ export interface MCPServerConfig {
   max_retries: number;
 }
 
-export interface MCPServerStatus {
-  Disconnected?: null;
-  Connecting?: null;
-  Connected?: null;
-  Error?: string;
-  Timeout?: null;
-}
+/**
+ * What the backend's `MCPServerStatus` enum looks like on the wire.
+ *
+ * It is externally tagged (serde's default), so a unit variant arrives as a
+ * bare string and only `Error(String)` arrives as an object. This used to be
+ * declared as one object with five optional keys, which made
+ * `status.Connected` read `undefined` for every connected server and drew a
+ * "Disconnected" badge over a server that was up (LAC-8221). The Rust test
+ * `status_wire_shape_is_externally_tagged` pins the shape; keep the two in
+ * step.
+ */
+export type MCPServerStatus =
+  | "Disconnected"
+  | "Connecting"
+  | "Connected"
+  | "Timeout"
+  | { Error: string };
 
 export interface MCPToolInfo {
   server_id: string;
