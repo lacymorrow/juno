@@ -387,6 +387,19 @@ fn shortcut_row(triggers: &[crate::triggers::Trigger], target: TriggerTarget) ->
         .position(|t| t.target == target && t.gesture != Gesture::Say)
 }
 
+/// What Juno says when it is asked to rebind a shortcut and there is no key or
+/// mouse row to rebind. The pane is named from [`registry::Pane::name`] rather
+/// than typed out, because a typed-out label drifts: the sidebar has read
+/// "Shortcuts" since #870 while this message still sent people to "Triggers"
+/// (LAC-7989). `Pane::Triggers` is the variant; "Shortcuts" is what it shows.
+fn no_shortcut_row_message() -> String {
+    format!(
+        "There is no key or mouse trigger for that yet. \
+         Ask the person to add one in Settings > {}.",
+        registry::Pane::Triggers.name()
+    )
+}
+
 fn binding_value(binding: Option<&Binding>) -> Value {
     match binding {
         Some(Binding::Keyboard { shortcut }) => json!(shortcut),
@@ -678,10 +691,7 @@ async fn apply(app: &AppHandle, change: &AuthorizedChange) -> Result<(), String>
             let shortcut = want_text(change)?.to_string();
             let target = shortcut_target(key);
             let mut triggers = app_state(app)?.get_triggers()?;
-            let index = shortcut_row(&triggers, target).ok_or(
-                "There is no key or mouse trigger for that yet. Ask the person to add one in \
-                 Settings > Triggers.",
-            )?;
+            let index = shortcut_row(&triggers, target).ok_or_else(no_shortcut_row_message)?;
             if let Some(row) = triggers.get_mut(index) {
                 row.binding = Some(Binding::Keyboard { shortcut });
             }
@@ -816,6 +826,24 @@ async fn apply_mcp(app: &AppHandle, change: McpChange) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The message that sends someone to the pane must name the pane the way
+    /// the sidebar does. It said "Settings > Triggers" while the sidebar read
+    /// "Shortcuts" (LAC-7989, the same drift as the onboarding hint in #991).
+    #[test]
+    fn the_missing_shortcut_message_names_the_pane_as_the_sidebar_does() {
+        let msg = no_shortcut_row_message();
+        assert!(
+            msg.contains(registry::Pane::Triggers.name()),
+            "must name the pane as the sidebar shows it ({}): {msg}",
+            registry::Pane::Triggers.name()
+        );
+        assert!(
+            !msg.contains("Triggers"),
+            "\"Triggers\" is the enum variant and the store key, never a label \
+             shown to a person; the sidebar has read \"Shortcuts\" since #870: {msg}"
+        );
+    }
 
     #[test]
     fn the_definition_offers_every_action_and_names_the_tool() {
