@@ -833,10 +833,12 @@ mod tests {
     #[test]
     fn the_missing_shortcut_message_names_the_pane_as_the_sidebar_does() {
         let msg = no_shortcut_row_message();
+        // Pinned as one substring, so the pane has to be named in the place
+        // that actually routes the person, not merely mentioned somewhere.
+        let route = format!("Settings > {}", registry::Pane::Triggers.name());
         assert!(
-            msg.contains(registry::Pane::Triggers.name()),
-            "must name the pane as the sidebar shows it ({}): {msg}",
-            registry::Pane::Triggers.name()
+            msg.contains(&route),
+            "must route to the pane as the sidebar shows it (\"{route}\"): {msg}"
         );
         assert!(
             !msg.contains("Triggers"),
