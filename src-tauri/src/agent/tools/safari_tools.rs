@@ -31,6 +31,20 @@
 //! this file and fails if a send appears anywhere else, because the gate
 //! existed with zero callers for weeks and nothing noticed (LAC-7405).
 //!
+//! ### Two grants, and why they are not collapsed into one ask
+//!
+//! Most tools here ask twice on a machine that has granted neither:
+//! [`SafariTools::is_safari_active`] drives System Events, and the work that
+//! follows drives Safari. That is deliberate. macOS holds Automation consent
+//! **per target app**, so these are two separate grants and two separate
+//! system dialogs, and nothing Juno does changes that — the only choice is
+//! whether Juno explains them or macOS springs them.
+//!
+//! In particular, do not gate the System Events send against Safari's grant to
+//! save an ask. The consent that gets checked would be the wrong one, the send
+//! would go out ungated, and macOS would raise its own System Events dialog
+//! mid-task: the exact bug this module was changed to fix.
+//!
 //! ## Usage:
 //! Used by: Safari-specific automation, fast web interaction, DOM analysis
 //! Registration: Tool definitions returned by `get_safari_tool_definitions()`

@@ -298,6 +298,51 @@ pub async fn execute_safari_tool_for_agent(
 mod tests {
     use super::*;
 
+    /// This file minus its tests, so a scan reads shipping code only and does
+    /// not find its own needles.
+    fn shipping_code() -> String {
+        let source = include_str!("safari_tools.rs");
+        let shipping = source.split("#[cfg(test)]").next().unwrap_or(source);
+        shipping
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// One `fn` body, from its name to the next `fn`.
+    fn fn_block(code: &str, signature_start: &str) -> String {
+        code.split("fn ")
+            .find(|block| block.starts_with(signature_start))
+            .unwrap_or_else(|| panic!("{} is no longer a function here", signature_start))
+            .to_string()
+    }
+
+    /// A refusal is only a control if the caller consults it.
+    ///
+    /// Pulling `refuse_arbitrary_js` out of the command (so it could be tested
+    /// without a Tauri app) made it possible to drop the call from the command
+    /// and still pass every test. This is what closes that: the test that
+    /// asserts the refusal itself cannot see whether anyone asks for it.
+    #[test]
+    fn the_command_surface_consults_the_refusal() {
+        let code = shipping_code();
+
+        let command = fn_block(&code, "execute_safari_tool(");
+        assert!(
+            command.contains("refuse_arbitrary_js"),
+            "execute_safari_tool must consult refuse_arbitrary_js — it is the control \
+             for arbitrary Safari JS at the webview surface (audit 2026-02-08, #15/#20)"
+        );
+
+        let dispatcher = fn_block(&code, "execute_safari_tool_for_agent(");
+        assert!(
+            dispatcher.contains("unknown_tool_error"),
+            "execute_safari_tool_for_agent must answer an unknown tool name through \
+             unknown_tool_error"
+        );
+    }
+
     #[tokio::test]
     async fn direct_safari_execute_javascript_command_is_blocked() {
         // The webview-invokable command must refuse arbitrary JS regardless
