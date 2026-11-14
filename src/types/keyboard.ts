@@ -1,6 +1,6 @@
 // Types for keyboard shortcuts configuration
 
-// Read-only. Bindings are configured on the Triggers screen; these two are
+// Read-only. Bindings are configured on the Shortcuts screen; these two are
 // fixed constants in Rust and are exposed only so screens can display them.
 export interface KeyboardShortcuts {
     agent_mode: string;        // Derived from the agent trigger

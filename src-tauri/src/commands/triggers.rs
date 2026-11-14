@@ -1,9 +1,10 @@
 //! # Trigger commands
 //!
-//! The frontend Triggers screen reads and writes the unified activation model
-//! through these two commands. `triggers` is the source of truth; the legacy
-//! shortcut / trigger-mode / wake-word fields are derived from it so existing
-//! runtime consumers keep working (see [`crate::triggers::derive_legacy`]).
+//! The frontend Shortcuts screen (`TriggersSettings.tsx`) reads and writes the
+//! unified activation model through these two commands. `triggers` is the
+//! source of truth; the legacy shortcut / trigger-mode / wake-word fields are
+//! derived from it so existing runtime consumers keep working (see
+//! [`crate::triggers::derive_legacy`]).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
