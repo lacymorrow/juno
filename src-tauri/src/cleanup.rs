@@ -98,6 +98,15 @@ pub fn run_exit_cleanup(app_handle: &tauri::AppHandle) {
 /// work happens on a worker thread rather than on the thread AppKit is waiting
 /// on. Threads left behind do not keep the process alive: the event loop exits
 /// it once this returns.
+///
+/// There is deliberately no cancellation signal: on a timeout `work` keeps
+/// running while the process exits around it. That is safe here because this is
+/// only ever called from `RunEvent::Exit`, where everything after it either
+/// exits the process or (in the updater's case) touches nothing cleanup holds,
+/// and because the alternative — a cancellation `work` has to poll — is the
+/// same dependence on cooperative yielding that caused LAC-8220. The cost is
+/// that a timed-out stage may leave what it was about to tidy up; the process
+/// is ending, so the kernel gets it instead.
 pub(crate) fn run_bounded<F>(what: &str, budget: Duration, work: F) -> CleanupOutcome
 where
     F: Future<Output = ()> + Send + 'static,
@@ -174,27 +183,38 @@ pub async fn cleanup_application(app_handle: &tauri::AppHandle) {
         // first poll stops early if the connection map's lock is held by a tool
         // call, which is why the log below does not claim the signal went out.
         //
-        // Said in two log lines rather than one, because the lock here is the
-        // manager's and an agent turn can be holding it. A quit that stalls
-        // between these two lines stalled on the lock, not on a server.
+        // The deadline starts before the manager's lock, not after, because an
+        // agent turn can be holding that lock and waiting for it is the stall
+        // most likely to swallow the whole stage. Timing out here gives the
+        // steps after this one their turn instead of spending the outer budget
+        // on a lock that is not coming.
         info!("Stopping MCP servers...");
-        let manager = app_state.get_mcp_manager().await;
-        let manager = manager.lock().await;
         let stage_ends_at = tokio::time::Instant::now() + MCP_STAGE_BUDGET;
-        for config in manager.get_server_configs().await {
-            let left = stage_ends_at.saturating_duration_since(tokio::time::Instant::now());
-            match tokio::time::timeout(left, manager.stop_server(&config.id)).await {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => warn!("Failed to stop MCP server '{}': {}", config.name, e),
-                Err(_) => warn!(
-                    "MCP server '{}' did not finish stopping inside the {}s stop budget shared by \
-                     all servers; leaving it to the process exit",
-                    config.name,
-                    MCP_STAGE_BUDGET.as_secs()
-                ),
+        let manager = app_state.get_mcp_manager().await;
+        match tokio::time::timeout(MCP_STAGE_BUDGET, manager.lock()).await {
+            Ok(manager) => {
+                for config in manager.get_server_configs().await {
+                    let left = stage_ends_at.saturating_duration_since(tokio::time::Instant::now());
+                    match tokio::time::timeout(left, manager.stop_server(&config.id)).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            warn!("Failed to stop MCP server '{}': {}", config.name, e)
+                        }
+                        Err(_) => warn!(
+                            "MCP server '{}' did not finish stopping inside the {}s stop budget \
+                             shared by all servers; leaving it to the process exit",
+                            config.name,
+                            MCP_STAGE_BUDGET.as_secs()
+                        ),
+                    }
+                }
+                info!("MCP servers stopped");
             }
+            Err(_) => warn!(
+                "MCP manager is busy after {}s; leaving its servers to the process exit",
+                MCP_STAGE_BUDGET.as_secs()
+            ),
         }
-        info!("MCP servers stopped");
 
         // Note: the CDP browser connection is cleaned up when AppState is dropped
         // TTS provider is part of AudioSettings and doesn't need explicit cleanup
@@ -277,8 +297,10 @@ mod tests {
     /// reason — the wait is a blocking receive and must not sit on a worker.
     #[test]
     fn cleanup_that_never_yields_does_not_hold_up_quitting() {
-        let blocked_for = Duration::from_secs(2);
-        let budget = Duration::from_millis(200);
+        // Long enough to dwarf the budget, short enough that the worker it
+        // blocks is back before anything else in the binary wants it.
+        let blocked_for = Duration::from_millis(900);
+        let budget = Duration::from_millis(100);
 
         let started = std::time::Instant::now();
         let outcome = run_bounded("test cleanup", budget, async move {

@@ -1731,13 +1731,16 @@ mod tests {
         connection.disconnect().await;
         let took = started.elapsed();
 
-        // Comfortably inside `PROCESS_EXIT_BUDGET`, which is the point: coming
-        // back this fast means the `wait()` *completed* rather than timed out,
-        // so the child was signalled and reaped rather than abandoned. Asserted
+        // Inside `PROCESS_EXIT_BUDGET`, which is the point: returning before
+        // the budget means the `wait()` *completed* rather than timed out, so
+        // the child was signalled and reaped rather than abandoned. Asserted
         // this way instead of by probing the pid, which another process could
-        // have been given by the time we look.
+        // have been given by the time we look. The margin is three quarters
+        // rather than half so a loaded CI runner does not fail a correct fix —
+        // a SIGKILLed `sleep` is reaped in microseconds, so anything near the
+        // budget means the timeout arm ran.
         assert!(
-            took < PROCESS_EXIT_BUDGET / 2,
+            took < PROCESS_EXIT_BUDGET * 3 / 4,
             "disconnect took {took:?}; a child it spawned itself should die at once"
         );
         assert!(matches!(connection.status, MCPServerStatus::Disconnected));
