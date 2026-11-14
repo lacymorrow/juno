@@ -1,3 +1,5 @@
+#[cfg(feature = "screencapturekit-backend")]
+use super::capture_backend::{capture_backend, CaptureBackend};
 use super::element::MacOSUIElement; // Added for the new function
 use crate::element::UIElementImpl; // Import the trait providing .attributes()
 use crate::AutomationError;
@@ -701,8 +703,31 @@ pub type WindowCapture = (ImageBuffer<Rgba<u8>, Vec<u8>>, (f64, f64, f64, f64));
 /// display, so a window that is behind others still comes out whole. That is
 /// what lets an agent work in a window the person is not looking at. A
 /// minimized window is not on screen and cannot be captured.
-#[cfg(feature = "screencapturekit-backend")]
 pub fn capture_window_buffer(window_id: u32) -> Result<WindowCapture, AutomationError> {
+    #[cfg(feature = "screencapturekit-backend")]
+    {
+        if capture_backend() == CaptureBackend::ScreenCaptureKit {
+            match capture_window_via_screencapturekit(window_id) {
+                Ok(capture) => return Ok(capture),
+                Err(e) => warn!(
+                    "ScreenCaptureKit window capture failed, falling back to CoreGraphics: {}",
+                    e
+                ),
+            }
+        } else {
+            debug!("ScreenCaptureKit window capture needs macOS 14; using CoreGraphics");
+        }
+    }
+
+    capture_window_via_coregraphics(window_id)
+}
+
+/// One window, captured by ScreenCaptureKit.
+///
+/// Only callable on macOS 14+ — see `capture_backend` for why the check
+/// cannot live inside the call.
+#[cfg(feature = "screencapturekit-backend")]
+fn capture_window_via_screencapturekit(window_id: u32) -> Result<WindowCapture, AutomationError> {
     use screencapturekit::screenshot_manager::SCScreenshotManager;
     use screencapturekit::shareable_content::SCShareableContent;
     use screencapturekit::stream::configuration::SCStreamConfiguration;
@@ -753,14 +778,6 @@ pub fn capture_window_buffer(window_id: u32) -> Result<WindowCapture, Automation
     Ok((buffer, (frame.x, frame.y, frame.width, frame.height)))
 }
 
-#[cfg(not(feature = "screencapturekit-backend"))]
-pub fn capture_window_buffer(window_id: u32) -> Result<WindowCapture, AutomationError> {
-    Err(AutomationError::PlatformError(format!(
-        "Capturing window {} on its own needs ScreenCaptureKit",
-        window_id
-    )))
-}
-
 /// One window, captured with `CGWindowListCreateImage` at one pixel per point.
 ///
 /// The ScreenCaptureKit path above is better where it is available: it renders
@@ -771,34 +788,85 @@ pub fn capture_window_buffer(window_id: u32) -> Result<WindowCapture, Automation
 /// deliberately still here: the deprecation does not reach back to the hosts
 /// that have nothing else.
 pub fn capture_window_via_coregraphics(window_id: u32) -> Result<WindowCapture, AutomationError> {
-    // STUB (RED): no CoreGraphics window capture exists yet.
-    Err(AutomationError::PlatformError(format!(
-        "Capturing window {} on its own needs ScreenCaptureKit",
-        window_id
-    )))
+    use core_graphics::display::CGRectNull;
+    use core_graphics::window::{
+        create_image, kCGWindowImageBoundsIgnoreFraming, kCGWindowImageNominalResolution,
+        kCGWindowListOptionIncludingWindow,
+    };
+
+    // The frame comes from the same window list the rest of the targeting code
+    // reads, so a window this path cannot capture reports the same way it does
+    // on the ScreenCaptureKit path: not on screen.
+    let frame = super::display::list_window_records()
+        .into_iter()
+        .find(|record| record.id == window_id)
+        .map(|record| record.bounds)
+        .ok_or_else(|| {
+            AutomationError::PlatformError(format!(
+                "Window {} is not on screen (it may be minimized or closed)",
+                window_id
+            ))
+        })?;
+
+    let (_, _, width, height) = frame;
+    if width < 1.0 || height < 1.0 {
+        return Err(AutomationError::PlatformError(format!(
+            "Window {} has no area to capture",
+            window_id
+        )));
+    }
+
+    // `CGRectNull` is the documented way to say "the bounds of the windows in
+    // the list" rather than a screen crop, and nominal resolution gives one
+    // pixel per point — the same scale the ScreenCaptureKit path produces with
+    // `with_scales_to_fit`, so callers see one contract either way.
+    let cg_image = create_image(
+        unsafe { CGRectNull },
+        kCGWindowListOptionIncludingWindow,
+        window_id,
+        kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution,
+    )
+    .ok_or_else(|| {
+        AutomationError::PlatformError(format!(
+            "CoreGraphics returned no image for window {} \
+             (Screen Recording permission may be missing, or the window just closed)",
+            window_id
+        ))
+    })?;
+
+    let buffer = cgimage_to_imagebuffer(cg_image)?;
+    Ok((buffer, frame))
 }
 
 /// Captures a screenshot of the specified display and returns it as an ImageBuffer.
 ///
-/// Uses ScreenCaptureKit (macOS 14.0+) when available for better performance,
-/// falling back to the legacy CGDisplay::screenshot() path on older macOS versions.
+/// Uses ScreenCaptureKit on macOS 14.0+ for the performance, and
+/// `CGDisplay::screenshot()` below that. Which one runs is decided by
+/// `capture_backend()` *before* the call: the error arm below is only for a
+/// ScreenCaptureKit failure on a host that has it, never for an old host.
 fn capture_display_buffer(
     display_id: Option<CGDirectDisplayID>,
 ) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, AutomationError> {
-    // Try ScreenCaptureKit first (macOS 14.0+, 8x faster, 50% less CPU)
+    // Try ScreenCaptureKit first (macOS 14.0+, 8x faster, 50% less CPU).
+    // The version check is not an optimisation: below macOS 14 the call does
+    // not fail, it never returns. See `capture_backend`.
     #[cfg(feature = "screencapturekit-backend")]
     {
-        match capture_via_screencapturekit(display_id) {
-            Ok(buffer) => {
-                debug!("Screenshot captured via ScreenCaptureKit");
-                return Ok(buffer);
+        if capture_backend() == CaptureBackend::ScreenCaptureKit {
+            match capture_via_screencapturekit(display_id) {
+                Ok(buffer) => {
+                    debug!("Screenshot captured via ScreenCaptureKit");
+                    return Ok(buffer);
+                }
+                Err(e) => {
+                    warn!(
+                        "ScreenCaptureKit capture failed, falling back to CoreGraphics: {}",
+                        e
+                    );
+                }
             }
-            Err(e) => {
-                warn!(
-                    "ScreenCaptureKit capture failed, falling back to CoreGraphics: {}",
-                    e
-                );
-            }
+        } else {
+            debug!("ScreenCaptureKit screenshots need macOS 14; using CoreGraphics");
         }
     }
 

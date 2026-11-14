@@ -20,6 +20,7 @@
 //! host there is no error, only a hang. The version has to be checked *before*
 //! the call, which is what this module is for.
 
+use std::ffi::CString;
 use std::sync::OnceLock;
 use tracing::{debug, warn};
 
@@ -49,10 +50,10 @@ const DARWIN_MAJOR_MACOS_14: u32 = 23;
 /// CoreGraphics works on every supported host, while guessing the other way
 /// hangs the capture thread for good.
 pub fn capture_backend_for(macos_major: Option<u32>) -> CaptureBackend {
-    // STUB (RED): today's behaviour — the host version is never consulted.
-    let _ = macos_major;
-    let _ = SCREENSHOT_MANAGER_MIN_MAJOR;
-    CaptureBackend::ScreenCaptureKit
+    match macos_major {
+        Some(major) if major >= SCREENSHOT_MANAGER_MIN_MAJOR => CaptureBackend::ScreenCaptureKit,
+        _ => CaptureBackend::CoreGraphics,
+    }
 }
 
 /// Which backend to use on this host. Cached: the answer cannot change while
@@ -62,6 +63,12 @@ pub fn capture_backend() -> CaptureBackend {
 }
 
 /// The host's macOS major version, read once and cached.
+///
+/// On every host this binary can actually run on, this is the real major
+/// version. The one exception is a host whose `kern.osproductversion` is
+/// shimmed to "10.16", where the answer is derived from the Darwin major and
+/// is only accurate either side of macOS 14 — see `macos_major_from`. Use it
+/// to decide about ScreenCaptureKit, not to display a version.
 pub fn host_macos_major() -> Option<u32> {
     static MAJOR: OnceLock<Option<u32>> = OnceLock::new();
     *MAJOR.get_or_init(|| {
@@ -90,18 +97,71 @@ pub fn host_macos_major() -> Option<u32> {
 /// "unknown" rather than "ancient" and deferred to the Darwin major, which the
 /// shim does not rewrite.
 fn macos_major_from(product_version: Option<&str>, darwin_release: Option<&str>) -> Option<u32> {
-    // STUB (RED): both readings are parsed and then thrown away.
-    let _ = product_version.and_then(parse_leading_u32);
-    let _ = darwin_release.and_then(parse_leading_u32);
-    let _ = DARWIN_MAJOR_MACOS_14;
-    None
+    if let Some(major) = product_version.and_then(parse_leading_u32) {
+        // 11 or newer is the host answering for itself. 10.x is either a
+        // genuinely ancient Mac or the shim, and both are handled correctly by
+        // deferring to the Darwin major below.
+        if major >= 11 {
+            return Some(major);
+        }
+    }
+
+    // Only reached when the product version is missing or shimmed. The number
+    // returned here is the gate boundary, **not** a release: it says "at least
+    // 14" or "below 14" and nothing finer, because the +9 offset that turns
+    // Darwin 23 into macOS 14 stops holding at macOS 26 (Darwin 25).
+    let darwin_major = parse_leading_u32(darwin_release?)?;
+    if darwin_major >= DARWIN_MAJOR_MACOS_14 {
+        Some(SCREENSHOT_MANAGER_MIN_MAJOR)
+    } else {
+        Some(SCREENSHOT_MANAGER_MIN_MAJOR - 1)
+    }
 }
 
 /// Read a `sysctl` whose value is a NUL-terminated string.
+///
+/// `sysctl` rather than `NSProcessInfo`: this crate has no Objective-C
+/// Foundation binding, and a `sysctl` read is a plain syscall with no
+/// main-thread requirement, so it is safe from any worker.
 fn sysctl_string(name: &str) -> Option<String> {
-    // STUB (RED): nothing is read from the host.
-    let _ = name;
-    None
+    let c_name = CString::new(name).ok()?;
+
+    // A null `oldp` asks only how many bytes the value needs.
+    let mut size: libc::size_t = 0;
+    let sized = unsafe {
+        libc::sysctlbyname(
+            c_name.as_ptr(),
+            std::ptr::null_mut(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if sized != 0 || size == 0 {
+        return None;
+    }
+
+    let mut buf = vec![0u8; size];
+    let read = unsafe {
+        libc::sysctlbyname(
+            c_name.as_ptr(),
+            buf.as_mut_ptr().cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if read != 0 {
+        return None;
+    }
+
+    // `size` is now the byte count written, and the value is a C string, so
+    // stop at the terminator rather than carrying a trailing NUL into the
+    // parse.
+    buf.truncate(size);
+    let end = buf.iter().position(|&byte| byte == 0).unwrap_or(buf.len());
+    buf.truncate(end);
+    String::from_utf8(buf).ok()
 }
 
 /// The leading run of ASCII digits in `value`, as a number.
