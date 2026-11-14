@@ -693,9 +693,30 @@ pub async fn require_automation(
             );
             Ok(())
         }
-        // Refused, undecided, or the target is not up yet. All three are
-        // Juno's moment to explain rather than the system's moment to
-        // interrupt.
+        // A target that is simply closed is not a consent problem, and the
+        // card is a dead end for it: `allow_automation` only launches a
+        // faceless target, so for an app like Safari the Allow button asks
+        // macOS about something that is not there, learns nothing, and
+        // leaves the person having pressed a button that did nothing. That
+        // is the failure this module exists to stop, so say what is actually
+        // wrong instead of showing a permission card about it.
+        AutomationConsent::TargetNotRunning if !target.launches_on_demand() => {
+            tracing::debug!(
+                "{} is not running, so '{}' cannot run yet",
+                target.display_name(),
+                action
+            );
+            Err(format!(
+                "'{}' needs {} to be open, and it is not running. Open {} and try \
+                 again, or carry on with anything that does not need it.",
+                action,
+                target.display_name(),
+                target.display_name()
+            ))
+        }
+        // Refused, undecided, or a faceless target that is not up yet. All
+        // of these are Juno's moment to explain rather than the system's
+        // moment to interrupt.
         _ => {
             ask(app_handle, capability, action);
             Err(capability.agent_message(action))
@@ -994,6 +1015,27 @@ mod tests {
     ///
     /// The retry itself is bounded separately by `ASK_AGAIN_AFTER` in
     /// `may_ask_in`, so a model that ignores this still cannot nag.
+    /// A closed app must not be reported as a permission problem.
+    ///
+    /// `allow_automation` only starts a target that launches on demand, so for
+    /// Safari the card's Allow button would query macOS about an app that is
+    /// not running, learn nothing, and return false. The person would press
+    /// Allow and watch nothing happen. Before this gate had callers the branch
+    /// was unreachable, so nothing noticed.
+    #[test]
+    fn only_a_faceless_target_may_be_asked_about_while_it_is_closed() {
+        // Safari is the case that breaks: it cannot be started this way, so a
+        // consent card about it while it is closed has no working button.
+        assert!(
+            !AutomationTarget::Safari.launches_on_demand(),
+            "Safari now launches on demand; the closed-app branch in \
+             require_automation needs revisiting"
+        );
+        // System Events is faceless and is started for the prompt, so the
+        // card is still the right answer there.
+        assert!(AutomationTarget::SystemEvents.launches_on_demand());
+    }
+
     #[test]
     fn the_denied_automation_path_reads_as_waiting_not_as_a_crash() {
         for target in [AutomationTarget::SystemEvents, AutomationTarget::Safari] {
