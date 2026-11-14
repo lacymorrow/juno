@@ -15,6 +15,12 @@ use uuid::Uuid;
 use crate::agent::core::{AgentError, ToolCall, ToolDefinition, ToolResult};
 use crate::constants::agent;
 
+/// How long [`MCPServerConnection::disconnect`] waits for a killed server to
+/// actually become a corpse before it leaves it to the kernel. It has already
+/// been sent SIGKILL by then, so this only runs long when the child is wedged
+/// in the kernel, and waiting longer would not help.
+const PROCESS_EXIT_BUDGET: Duration = Duration::from_secs(2);
+
 /// Configuration for an external MCP server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MCPServerConfig {
@@ -868,53 +874,38 @@ impl MCPServerConnection {
             .map_err(|e| format!("Failed to parse HTTP JSON-RPC response: {} - {}", e, text))
     }
 
-    /// Disconnect from the MCP server
+    /// Disconnect from the MCP server.
+    ///
+    /// Every step here is either synchronous or bounded, because this runs on
+    /// the way out of the app: an await that is never woken here hangs quitting
+    /// outright (LAC-8220).
     pub async fn disconnect(&mut self) {
         info!("🔌 Disconnecting from MCP server: {}", self.config.name);
 
-        // Try graceful termination first, then force kill if needed
+        // Drop our ends of the pipes first. The child sees EOF on stdin, and
+        // nothing is left holding a full pipe that the child is blocked
+        // writing into.
+        self.stdin_writer = None;
+        self.stdout_reader = None;
+        self.stderr_reader = None;
+
         if let Some(mut process) = self.process.take() {
-            // First attempt: try to terminate gracefully
-            match process.kill().await {
-                Ok(_) => {
-                    info!("✅ MCP server '{}' terminated gracefully", self.config.name);
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to terminate MCP server '{}' gracefully: {}",
-                        self.config.name, e
-                    );
-
-                    // Second attempt: Force kill with timeout
-                    let kill_future = async { process.kill().await };
-
-                    match tokio::time::timeout(Duration::from_secs(5), kill_future).await {
-                        Ok(Ok(_)) => {
-                            warn!(
-                                "✅ MCP server '{}' force-killed successfully",
-                                self.config.name
-                            );
-                        }
-                        Ok(Err(e)) => {
-                            error!(
-                                "❌ Failed to force-kill MCP server '{}': {}",
-                                self.config.name, e
-                            );
-                        }
-                        Err(_) => {
-                            error!(
-                                "❌ Timeout while force-killing MCP server '{}'",
-                                self.config.name
-                            );
-                        }
-                    }
-                }
+            // `Child::kill()` is `start_kill()` followed by an *unbounded*
+            // `wait()`, and that wait is where quitting used to stop dead with
+            // a stdio server attached: the log ended one line above this and
+            // the process had to be SIGKILLed by hand. `start_kill` is the
+            // signal alone — a `libc::kill`, no await — so the signal always
+            // goes out, and waiting for the corpse is a separate step that is
+            // allowed to give up.
+            if let Err(e) = process.start_kill() {
+                // Already reaped is the common case here, not a failure.
+                warn!(
+                    "Could not signal MCP server '{}' (it may have already exited): {}",
+                    self.config.name, e
+                );
             }
 
-            // Wait for process to actually exit (with timeout)
-            let wait_future = async { process.wait().await };
-
-            match tokio::time::timeout(Duration::from_secs(3), wait_future).await {
+            match tokio::time::timeout(PROCESS_EXIT_BUDGET, process.wait()).await {
                 Ok(Ok(exit_status)) => {
                     info!(
                         "MCP server '{}' exited with status: {}",
@@ -929,17 +920,14 @@ impl MCPServerConnection {
                 }
                 Err(_) => {
                     warn!(
-                        "Timeout waiting for MCP server '{}' to exit",
-                        self.config.name
+                        "Timeout waiting for MCP server '{}' to exit after {}s; leaving it",
+                        self.config.name,
+                        PROCESS_EXIT_BUDGET.as_secs()
                     );
                 }
             }
         }
 
-        // Clean up all resources
-        self.stdin_writer = None;
-        self.stdout_reader = None;
-        self.stderr_reader = None;
         self.status = MCPServerStatus::Disconnected;
 
         info!(

@@ -3,7 +3,9 @@
 
 use crate::state::AppState;
 use crate::utils::resource_manager::ResourceManager;
+use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 use tauri::Manager;
 use tracing::{error, info, warn};
@@ -15,6 +17,11 @@ const EXIT_CLEANUP_BUDGET: Duration = Duration::from_secs(5);
 /// How long to wait for the browser controller's lock before leaving it. A
 /// browser tool call holds it while it works.
 const BROWSER_LOCK_WAIT: Duration = Duration::from_secs(1);
+
+/// The most one MCP server may take to stop before cleanup moves to the next
+/// one. A stdio server is a separate process; one that will not go is not
+/// allowed to eat the budget the rest of cleanup is sharing.
+const MCP_STOP_BUDGET: Duration = Duration::from_secs(3);
 
 /// Set once cleanup has run, so every way out does the work once between them.
 static EXIT_CLEANUP_DONE: AtomicBool = AtomicBool::new(false);
@@ -42,23 +49,78 @@ pub fn init_cleanup_handlers(app_handle: tauri::AppHandle) {
     }
 }
 
+/// What the exit path saw when it stopped waiting for cleanup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CleanupOutcome {
+    /// Cleanup ran to the end.
+    Finished,
+    /// The budget ran out first. Cleanup may still be running; quitting is not
+    /// waiting for it.
+    TimedOut,
+    /// The cleanup task ended without reporting (a panic, or a runtime that is
+    /// no longer running tasks).
+    TaskGone,
+}
+
 /// Clean up on the way out. Called from `RunEvent::Exit`, once, bounded by
 /// [`EXIT_CLEANUP_BUDGET`].
 pub fn run_exit_cleanup(app_handle: &tauri::AppHandle) {
     if !claim_exit_cleanup(&EXIT_CLEANUP_DONE) {
         return;
     }
-    tauri::async_runtime::block_on(async {
-        if tokio::time::timeout(EXIT_CLEANUP_BUDGET, cleanup_application(app_handle))
-            .await
-            .is_err()
-        {
-            warn!(
-                "Application cleanup did not finish within {}s; exiting anyway",
-                EXIT_CLEANUP_BUDGET.as_secs()
-            );
-        }
+    let handle = app_handle.clone();
+    run_bounded("Application cleanup", EXIT_CLEANUP_BUDGET, async move {
+        cleanup_application(&handle).await;
     });
+}
+
+/// Run `work` on the async runtime and wait for it, for no longer than
+/// `budget`, then carry on either way.
+///
+/// The wait is a blocking channel receive on the calling thread, deliberately,
+/// and swapping it back for `tokio::time::timeout` reopens LAC-8220.
+/// `tokio::time::timeout` polls its inner future on its own task, so it bounds
+/// the future's *awaits*, not the wall clock: anything that blocks the task
+/// between await points — a `block_on`, a blocking syscall, an await that is
+/// never woken on a runtime that has stopped driving timers — takes the timer
+/// branch down with it and the timeout never fires.
+///
+/// That was fatal here rather than merely slow, because `RunEvent::Exit` runs
+/// on the main thread inside AppKit's `applicationWillTerminate`. A cleanup
+/// that outlived its budget parked the main thread forever inside
+/// `-[NSApplication terminate:]`: Juno never exited, stopped answering Apple
+/// Events, and the next `open -a Juno` just re-activated the stuck process.
+///
+/// `Receiver::recv_timeout` is a condvar with an OS deadline. It is not the
+/// runtime's to miss, nothing `work` does can hold it past `budget`, and the
+/// work happens on a worker thread rather than on the thread AppKit is waiting
+/// on. Threads left behind do not keep the process alive: the event loop exits
+/// it once this returns.
+pub(crate) fn run_bounded<F>(what: &str, budget: Duration, work: F) -> CleanupOutcome
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    let (done_tx, done_rx) = mpsc::channel::<()>();
+    tauri::async_runtime::spawn(async move {
+        work.await;
+        // The receiver is gone once the budget has run out. Nothing to report.
+        let _ = done_tx.send(());
+    });
+
+    match done_rx.recv_timeout(budget) {
+        Ok(()) => CleanupOutcome::Finished,
+        Err(RecvTimeoutError::Timeout) => {
+            warn!(
+                "{what} did not finish within {}s; exiting anyway",
+                budget.as_secs()
+            );
+            CleanupOutcome::TimedOut
+        }
+        Err(RecvTimeoutError::Disconnected) => {
+            warn!("{what} ended without reporting; exiting anyway");
+            CleanupOutcome::TaskGone
+        }
+    }
 }
 
 /// Perform full application cleanup
@@ -99,14 +161,23 @@ pub async fn cleanup_application(app_handle: &tauri::AppHandle) {
         }
 
         // MCP server children: stdio servers are separate processes that the
-        // exit would otherwise leave to notice their stdin closing.
+        // exit would otherwise leave to notice their stdin closing. Each one is
+        // bounded on its own so a server that will not stop costs its own
+        // budget and not everybody else's.
         let manager = app_state.get_mcp_manager().await;
         let manager = manager.lock().await;
         for config in manager.get_server_configs().await {
-            if let Err(e) = manager.stop_server(&config.id).await {
-                warn!("Failed to stop MCP server '{}': {}", config.name, e);
+            match tokio::time::timeout(MCP_STOP_BUDGET, manager.stop_server(&config.id)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => warn!("Failed to stop MCP server '{}': {}", config.name, e),
+                Err(_) => warn!(
+                    "MCP server '{}' did not stop within {}s; leaving it to the process exit",
+                    config.name,
+                    MCP_STOP_BUDGET.as_secs()
+                ),
             }
         }
+        info!("MCP servers stopped");
 
         // Note: the CDP browser connection is cleaned up when AppState is dropped
         // TTS provider is part of AudioSettings and doesn't need explicit cleanup
@@ -159,6 +230,48 @@ mod tests {
         let done = AtomicBool::new(false);
         assert!(claim_exit_cleanup(&done));
         assert!(!claim_exit_cleanup(&done));
+    }
+
+    /// Cleanup that finishes is waited for, not cut off.
+    #[test]
+    fn a_cleanup_that_finishes_reports_finished() {
+        assert_eq!(
+            run_bounded("test cleanup", Duration::from_secs(5), async {}),
+            CleanupOutcome::Finished
+        );
+    }
+
+    /// LAC-8220: quitting hung forever with a stdio MCP server connected.
+    ///
+    /// The budget was a `tokio::time::timeout` wrapped around the cleanup
+    /// future and awaited on the main thread. That bounds the future's awaits,
+    /// not the clock: cleanup that stops yielding takes the timer branch down
+    /// with it, so the "timeout" never fires and the main thread never comes
+    /// back out of `-[NSApplication terminate:]`.
+    ///
+    /// The future below models exactly that — it blocks its own task and never
+    /// reaches an await point. Under the old implementation this returns
+    /// `Finished`, a whole sleep late. The budget has to hold anyway.
+    #[test]
+    fn cleanup_that_never_yields_does_not_hold_up_quitting() {
+        let blocked_for = Duration::from_secs(2);
+        let budget = Duration::from_millis(200);
+
+        let started = std::time::Instant::now();
+        let outcome = run_bounded("test cleanup", budget, async move {
+            std::thread::sleep(blocked_for);
+        });
+        let waited = started.elapsed();
+
+        assert_eq!(
+            outcome,
+            CleanupOutcome::TimedOut,
+            "a cleanup that blocks its own task must hit the budget"
+        );
+        assert!(
+            waited < blocked_for / 2,
+            "quitting waited {waited:?}, which is the stuck cleanup's time, not the {budget:?} budget"
+        );
     }
 
     /// Cleanup used to be registered on `tauri://destroyed` through the app
