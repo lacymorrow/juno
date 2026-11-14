@@ -18,10 +18,12 @@ const EXIT_CLEANUP_BUDGET: Duration = Duration::from_secs(5);
 /// browser tool call holds it while it works.
 const BROWSER_LOCK_WAIT: Duration = Duration::from_secs(1);
 
-/// The most one MCP server may take to stop before cleanup moves to the next
-/// one. A stdio server is a separate process; one that will not go is not
-/// allowed to eat the budget the rest of cleanup is sharing.
-const MCP_STOP_BUDGET: Duration = Duration::from_secs(3);
+/// The most *all* MCP servers together may take to stop. Shared rather than
+/// per-server on purpose: servers are stopped one at a time (`stop_server`
+/// takes the connection map's write lock), so a per-server budget large enough
+/// to be useful means two wedged servers can spend the whole of
+/// [`EXIT_CLEANUP_BUDGET`] between them and the third is never reached.
+const MCP_STAGE_BUDGET: Duration = Duration::from_secs(3);
 
 /// Set once cleanup has run, so every way out does the work once between them.
 static EXIT_CLEANUP_DONE: AtomicBool = AtomicBool::new(false);
@@ -161,19 +163,32 @@ pub async fn cleanup_application(app_handle: &tauri::AppHandle) {
         }
 
         // MCP server children: stdio servers are separate processes that the
-        // exit would otherwise leave to notice their stdin closing. Each one is
-        // bounded on its own so a server that will not stop costs its own
-        // budget and not everybody else's.
+        // exit would otherwise leave to notice their stdin closing.
+        //
+        // The whole stage shares one deadline ([`MCP_STAGE_BUDGET`]) and each
+        // server gets whatever is left of it, so every server is reached even
+        // when an earlier one will not die. A server reached with nothing left
+        // is still signalled: `timeout` polls its inner future once before it
+        // checks the deadline, and `disconnect` runs synchronously through
+        // `start_kill()` before its first await.
+        //
+        // Said in two log lines rather than one, because the lock here is the
+        // manager's and an agent turn can be holding it. A quit that stalls
+        // between these two lines stalled on the lock, not on a server.
+        info!("Stopping MCP servers...");
         let manager = app_state.get_mcp_manager().await;
         let manager = manager.lock().await;
+        let stage_ends_at = tokio::time::Instant::now() + MCP_STAGE_BUDGET;
         for config in manager.get_server_configs().await {
-            match tokio::time::timeout(MCP_STOP_BUDGET, manager.stop_server(&config.id)).await {
+            let left = stage_ends_at.saturating_duration_since(tokio::time::Instant::now());
+            match tokio::time::timeout(left, manager.stop_server(&config.id)).await {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => warn!("Failed to stop MCP server '{}': {}", config.name, e),
                 Err(_) => warn!(
-                    "MCP server '{}' did not stop within {}s; leaving it to the process exit",
+                    "MCP server '{}' was signalled but had not exited inside the {}s stop budget; \
+                     leaving it to the process exit",
                     config.name,
-                    MCP_STOP_BUDGET.as_secs()
+                    MCP_STAGE_BUDGET.as_secs()
                 ),
             }
         }
@@ -252,6 +267,12 @@ mod tests {
     /// The future below models exactly that — it blocks its own task and never
     /// reaches an await point. Under the old implementation this returns
     /// `Finished`, a whole sleep late. The budget has to hold anyway.
+    ///
+    /// It needs a worker thread to spare while that one is blocked, which it
+    /// has: Tauri's global runtime is a multi-threaded tokio runtime
+    /// (`async_runtime::default_runtime`), and nothing else in this test binary
+    /// occupies it. A `#[test]` rather than a `#[tokio::test]` for the same
+    /// reason — the wait is a blocking receive and must not sit on a worker.
     #[test]
     fn cleanup_that_never_yields_does_not_hold_up_quitting() {
         let blocked_for = Duration::from_secs(2);

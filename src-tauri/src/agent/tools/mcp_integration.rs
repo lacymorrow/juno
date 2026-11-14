@@ -1702,6 +1702,48 @@ mod tests {
 
     use super::*;
 
+    /// LAC-8220: `disconnect` runs on the way out of the app, from the
+    /// `RunEvent::Exit` handler, so it has to come back. It used to call
+    /// `Child::kill().await`, which is `start_kill()` plus an *unbounded*
+    /// `wait()`, and quitting with a stdio server attached stopped dead on
+    /// that line.
+    ///
+    /// A long-lived child that would never exit on its own: `disconnect` must
+    /// kill it and return, well inside its own budget.
+    #[tokio::test]
+    async fn disconnect_kills_a_live_child_and_returns() {
+        let mut connection = MCPServerConnection::new(MCPServerConfig::new(
+            "sleeper".to_string(),
+            "sleep".to_string(),
+            vec!["3600".to_string()],
+        ));
+        let child = Command::new("sleep")
+            .arg("3600")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn sleep");
+        connection.process = Some(child);
+        connection.status = MCPServerStatus::Connected;
+
+        let started = std::time::Instant::now();
+        connection.disconnect().await;
+        let took = started.elapsed();
+
+        // Comfortably inside `PROCESS_EXIT_BUDGET`, which is the point: coming
+        // back this fast means the `wait()` *completed* rather than timed out,
+        // so the child was signalled and reaped rather than abandoned. Asserted
+        // this way instead of by probing the pid, which another process could
+        // have been given by the time we look.
+        assert!(
+            took < PROCESS_EXIT_BUDGET / 2,
+            "disconnect took {took:?}; a child it spawned itself should die at once"
+        );
+        assert!(matches!(connection.status, MCPServerStatus::Disconnected));
+        assert!(connection.process.is_none());
+    }
+
     fn server() -> MCPServerConfig {
         let mut config = MCPServerConfig::new("files".to_string(), "npx".to_string(), vec![]);
         config.auto_start = false;
