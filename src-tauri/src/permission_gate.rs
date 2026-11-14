@@ -25,6 +25,16 @@
 //! same way as the rest: Juno finds out that macOS would ask, says why in its
 //! own words, and lets the system ask once on a button the person pressed.
 //!
+//! **The Automation gate is best-effort, and it fails open on purpose.**
+//! Reading consent can itself fail — `AECreateDesc` can refuse to address the
+//! target, which is [`AutomationConsent::Unknown`]. On that one answer
+//! [`require_automation`] logs a warning and lets the send through, so macOS
+//! may still raise its own dialog. Failing closed would be worse: an
+//! unreadable consent state would disable every Safari tool outright, where
+//! failing open costs at most the one interruption this module exists to
+//! avoid, in a case that is already an error. So the promise here is "Juno
+//! asks first whenever it can tell", not "macOS never asks".
+//!
 //! ## The ask outlives the event that announced it
 //!
 //! `permission-needed` is one Tauri event, delivered to whatever happens to be
