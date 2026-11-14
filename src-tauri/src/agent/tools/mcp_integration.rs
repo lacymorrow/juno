@@ -1813,4 +1813,32 @@ mod tests {
             &MCPServerStatus::Disconnected
         ));
     }
+
+    /// LAC-8221: the shape `MCPServerStatus` takes on the wire is a contract
+    /// with the Settings UI, which reads it to draw each server's badge.
+    ///
+    /// The enum is externally tagged (serde's default), so a unit variant
+    /// crosses as a bare JSON **string** and only `Error(String)` crosses as
+    /// an object. `NetworkSettings.tsx` had been reading `status.Connected`,
+    /// which is always `undefined` on a string, so every live server rendered
+    /// "Disconnected" and only the error state worked.
+    ///
+    /// This test is the tripwire: adding a `#[serde(tag = ...)]`, a
+    /// `rename_all`, or a field to a variant changes the payload the
+    /// frontend parses, and that change has to be made on both sides at once.
+    #[test]
+    fn status_wire_shape_is_externally_tagged() {
+        let wire = |status: &MCPServerStatus| -> Value {
+            serde_json::to_value(status).expect("MCPServerStatus serializes")
+        };
+
+        assert_eq!(wire(&MCPServerStatus::Disconnected), json!("Disconnected"));
+        assert_eq!(wire(&MCPServerStatus::Connecting), json!("Connecting"));
+        assert_eq!(wire(&MCPServerStatus::Connected), json!("Connected"));
+        assert_eq!(wire(&MCPServerStatus::Timeout), json!("Timeout"));
+        assert_eq!(
+            wire(&MCPServerStatus::Error("spawn failed".to_string())),
+            json!({ "Error": "spawn failed" })
+        );
+    }
 }
