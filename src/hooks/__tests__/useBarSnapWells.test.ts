@@ -77,7 +77,10 @@ import { getDockIntent, getDockSlot, resetDockSlots, setDockSlot } from "@/lib/b
 // assigns it in its own `beforeEach`, which runs after this one, and no block
 // has to remember to put it back.
 beforeEach(() => {
-  monitors = ONE_DISPLAY;
+  // A copy, not the constant itself: a test that mutated the array in place
+  // would otherwise corrupt `ONE_DISPLAY` for every test after it, which is
+  // the same class of leak this reset exists to absorb.
+  monitors = [...ONE_DISPLAY];
   listeners.clear();
 });
 
