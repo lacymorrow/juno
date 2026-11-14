@@ -143,14 +143,15 @@ impl Capability {
             // it is called.
             Self::Automation(AutomationTarget::SystemEvents) => {
                 "macOS will ask whether Juno may control System Events, the part of your Mac \
-                 that presses keys and opens menus. It asks once, and you can turn it back \
-                 off in System Settings whenever you like."
+                 that presses keys and opens menus. It asks once for each app, so you may \
+                 see this again for a different one. You can turn it back off in System \
+                 Settings whenever you like."
                     .to_string()
             }
             Self::Automation(AutomationTarget::Safari) => {
                 "macOS will ask whether Juno may control Safari, so Juno can read the page in \
-                 front of you. It asks once, and you can turn it back off in System Settings \
-                 whenever you like."
+                 front of you. It asks once for each app, so you may see this again for a \
+                 different one. You can turn it back off in System Settings whenever you like."
                     .to_string()
             }
         }
@@ -1012,6 +1013,10 @@ mod tests {
             let detail = Capability::Automation(target).detail();
             assert!(detail.contains("asks once"), "{}", detail);
             assert!(!detail.contains("one switch"), "{}", detail);
+            // Safari tools drive two apps, so a fresh machine meets this card
+            // twice. "Asks once" on its own reads as a broken promise the
+            // second time, which is the system interrupting by another route.
+            assert!(detail.contains("for each app"), "{}", detail);
         }
     }
 

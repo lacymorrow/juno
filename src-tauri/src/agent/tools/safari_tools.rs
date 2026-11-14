@@ -1261,6 +1261,40 @@ mod applescript_gate_contract {
             .collect()
     }
 
+    /// The scan reads everything above the first `#[cfg(test)]`, so a test-only
+    /// item placed above shipping code would shrink that window and hide any
+    /// send below it. Nothing that ships may live in the discarded tail.
+    #[test]
+    fn the_scan_window_covers_every_shipping_item() {
+        let source = include_str!("safari_tools.rs");
+        let tail = source
+            .split_once("#[cfg(test)]")
+            .map(|(_, tail)| tail)
+            .unwrap_or("");
+
+        // Tripwire: an empty tail means the marker this scan cuts on no longer
+        // appears, so `shipping_code` is reading the test modules back in.
+        assert!(
+            !tail.is_empty(),
+            "no #[cfg(test)] in safari_tools.rs — the gate scan is reading its own needles"
+        );
+
+        // Built in pieces, like `send_needle`, because this test is itself in
+        // the tail it searches and would otherwise find its own literals.
+        let shipping_item = [format!("pub {}", "fn "), format!("pub async {}", "fn ")];
+        let escapees: Vec<String> = shipping_item
+            .into_iter()
+            .filter(|needle| tail.contains(needle.as_str()))
+            .collect();
+
+        assert!(
+            escapees.is_empty(),
+            "safari_tools.rs defines {:?} below its first #[cfg(test)], so the gate scan \
+             stops short of it and cannot see an AppleScript send it may contain",
+            escapees
+        );
+    }
+
     #[test]
     fn every_applescript_send_is_gated() {
         let needle = send_needle();
