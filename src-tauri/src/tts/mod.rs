@@ -2186,16 +2186,23 @@ pub async fn set_supertonic_settings_command(
 mod tests {
     use super::*;
 
-    /// Kokoro is the default, and when it cannot speak the Mac does, while
-    /// the Mac's voice is Siri.
+    /// LAC-7987. On a Mac the default engine *is* the Mac's own voice, so the
+    /// default chain is the Mac alone and nothing has to be downloaded or
+    /// fetched before Juno speaks. Off macOS there is no `say`, so the default
+    /// is Kokoro and the Mac still ends its chain.
     #[test]
-    fn the_default_engine_falls_back_to_the_mac() {
+    fn the_default_engine_speaks_with_nothing_downloaded() {
         let default = crate::constants::settings::defaults::TTS_PROVIDER;
-        assert_eq!(default, "kokoro");
-        assert_eq!(
-            fallback_chain(default, true, false),
-            vec!["kokoro", "system"]
-        );
+        if cfg!(target_os = "macos") {
+            assert_eq!(default, "system");
+            assert_eq!(fallback_chain(default, true, false), vec!["system"]);
+        } else {
+            assert_eq!(default, "kokoro");
+            assert_eq!(
+                fallback_chain(default, true, false),
+                vec!["kokoro", "system"]
+            );
+        }
     }
 
     /// While the Mac's voice is Siri (or unread), every chain ends in it.
