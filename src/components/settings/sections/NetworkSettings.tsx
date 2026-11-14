@@ -20,6 +20,46 @@ import { Textarea } from "@/components/ui/textarea";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
 import { COMMANDS } from "@/lib/constants.generated";
+import type { MCPServerStatus } from "@/types/settings";
+
+/** The five states a server row can draw, `Error` standing in for its detail. */
+type McpStatusKind =
+  | "Disconnected"
+  | "Connecting"
+  | "Connected"
+  | "Timeout"
+  | "Error";
+
+/**
+ * The error message, when the backend reported one.
+ *
+ * `MCPServerStatus` is externally tagged, so `Error(String)` is the one
+ * variant that arrives as an object; the rest are bare strings.
+ */
+const mcpStatusError = (status?: MCPServerStatus): string | undefined =>
+  typeof status === "object" && status !== null && typeof status.Error === "string"
+    ? status.Error
+    : undefined;
+
+/**
+ * The status as a single name to switch on. Anything unrecognised, a missing
+ * entry included, reads as Disconnected: that is what the UI said before a
+ * server reported in, and it stays the honest answer when the backend says
+ * something this build does not know about.
+ */
+const mcpStatusKind = (status?: MCPServerStatus): McpStatusKind => {
+  if (mcpStatusError(status) !== undefined) {
+    return "Error";
+  }
+  switch (status) {
+    case "Connected":
+    case "Connecting":
+    case "Timeout":
+      return status;
+    default:
+      return "Disconnected";
+  }
+};
 
 export default function NetworkSettings({ settings }: SettingsSectionProps) {
   const [newServerJson, setNewServerJson] = useState("");
@@ -84,41 +124,36 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
     }
   };
 
-  const getMcpServerStatusBadge = (status: any) => {
-    if (!status) {
-      return <Badge variant="outline">Disconnected</Badge>;
-    }
-
-    if (status.Connected !== undefined) {
-      return (
-        <Badge variant="default" className="bg-green-500">
-          Connected
-        </Badge>
-      );
-    } else if (status.Connecting !== undefined) {
-      return <Badge variant="secondary">Connecting</Badge>;
-    } else if (status.Error !== undefined) {
-      return <Badge variant="destructive">Error</Badge>;
-    } else if (status.Timeout !== undefined) {
-      return <Badge variant="destructive">Timeout</Badge>;
-    } else {
-      return <Badge variant="outline">Disconnected</Badge>;
+  const getMcpServerStatusBadge = (status?: MCPServerStatus) => {
+    switch (mcpStatusKind(status)) {
+      case "Connected":
+        return (
+          <Badge variant="default" className="bg-green-500">
+            Connected
+          </Badge>
+        );
+      case "Connecting":
+        return <Badge variant="secondary">Connecting</Badge>;
+      case "Error":
+        return <Badge variant="destructive">Error</Badge>;
+      case "Timeout":
+        return <Badge variant="destructive">Timeout</Badge>;
+      default:
+        return <Badge variant="outline">Disconnected</Badge>;
     }
   };
 
-  const getMcpServerStatusIcon = (status: any) => {
-    if (!status) {
-      return <Square className="h-4 w-4 text-muted-foreground" />;
-    }
-
-    if (status.Connected !== undefined) {
-      return <CheckCircle className="h-4 w-4 text-green-500" />;
-    } else if (status.Connecting !== undefined) {
-      return <RefreshCw className="h-4 w-4 text-blue-500 animate-spin" />;
-    } else if (status.Error !== undefined || status.Timeout !== undefined) {
-      return <AlertCircle className="h-4 w-4 text-red-500" />;
-    } else {
-      return <Square className="h-4 w-4 text-muted-foreground" />;
+  const getMcpServerStatusIcon = (status?: MCPServerStatus) => {
+    switch (mcpStatusKind(status)) {
+      case "Connected":
+        return <CheckCircle className="h-4 w-4 text-green-500" />;
+      case "Connecting":
+        return <RefreshCw className="h-4 w-4 text-blue-500 animate-spin" />;
+      case "Error":
+      case "Timeout":
+        return <AlertCircle className="h-4 w-4 text-red-500" />;
+      default:
+        return <Square className="h-4 w-4 text-muted-foreground" />;
     }
   };
 
@@ -229,10 +264,8 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
             ) : settings.mcpServers.length > 0 ? (
               <div className="space-y-2">
                 {settings.mcpServers.map((server) => {
-                  const status = settings.mcpServerStatuses[server.id] || {
-                    Disconnected: null,
-                  };
-                  const hasError = status.Error !== undefined;
+                  const status = settings.mcpServerStatuses[server.id];
+                  const error = mcpStatusError(status);
                   const serverTools = settings.mcpTools.filter(
                     (tool) => tool.server_id === server.id
                   );
@@ -263,12 +296,12 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                       </div>
                       <div className="flex items-center gap-2">
                         {getMcpServerStatusBadge(status)}
-                        {hasError && (
+                        {error !== undefined && (
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => {
-                              toast.error(`Server Error: ${status.Error}`, {
+                              toast.error(`Server Error: ${error}`, {
                                 duration: 5000,
                               });
                             }}
