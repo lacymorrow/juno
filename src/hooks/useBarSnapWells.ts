@@ -26,7 +26,7 @@
  */
 
 
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import {
@@ -49,12 +49,10 @@ import {
 import { nearestNotchWell, notchWells } from "@/lib/notchWells";
 import {
   getDockIntent,
-  getDockSlot,
   monitorIndexAt,
   predictedWindowOrigin,
   setDockProjection,
   setDockSlot,
-  subscribeDockSlot,
 } from "@/lib/barDock";
 import {
   cursorInPoints,
@@ -658,21 +656,6 @@ export function barSnapBusy(): boolean {
 }
 
 // ── Hooks ─────────────────────────────────────────────────────────────────
-
-/**
- * The well this window is docked in. Every look reads it to lay itself out
- * against the docked edges, and `useWindowSize` reads it to anchor resizes on
- * the same edges, so the two cannot disagree.
- */
-export function useDockSlot(): WellSlot | null {
-  const label = useMemo(() => currentWindowLabel(), []);
-  const subscribe = useCallback(
-    (fn: () => void) => subscribeDockSlot(label, fn),
-    [label],
-  );
-  const snapshot = useCallback(() => getDockSlot(label), [label]);
-  return useSyncExternalStore(subscribe, snapshot, snapshot);
-}
 
 /**
  * Where the bar re-homes when the cursor moves to another display, or null

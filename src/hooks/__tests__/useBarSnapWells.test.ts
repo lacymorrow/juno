@@ -71,6 +71,19 @@ vi.mock("@tauri-apps/api/event", () => ({
 import { armBarSnap, resetBarSnapState, settleBarSnap } from "../useBarSnapWells";
 import { getDockIntent, getDockSlot, resetDockSlots, setDockSlot } from "@/lib/barDock";
 
+// `monitors` and the recorded Tauri listeners are module globals, so a block
+// that changes either one would otherwise leak into every block that runs
+// after it. Reset both before every test: a block that wants a second display
+// assigns it in its own `beforeEach`, which runs after this one, and no block
+// has to remember to put it back.
+beforeEach(() => {
+  // A copy, not the constant itself: a test that mutated the array in place
+  // would otherwise corrupt `ONE_DISPLAY` for every test after it, which is
+  // the same class of leak this reset exists to absorb.
+  monitors = [...ONE_DISPLAY];
+  listeners.clear();
+});
+
 describe("settleBarSnap", () => {
   beforeEach(() => {
     resetBarSnapState();
@@ -734,16 +747,10 @@ describe("useBarDisplayFollow keeps the chosen well across a hop", () => {
     resetBarSnapState();
     resetSteady();
     resetDockSlots();
-    listeners.clear();
     monitors = [BIG, SMALL];
     vi.mocked(invoke).mockReset();
     vi.mocked(invoke).mockImplementation(async () => {});
     registerSteady(label, SPEC);
-  });
-
-  afterEach(() => {
-    monitors = ONE_DISPLAY;
-    listeners.clear();
   });
 
   it("hops to the nearest well there and home to the one it was dragged to", async () => {
@@ -845,7 +852,6 @@ describe("the hop keeps the chosen well on the non-steady path too", () => {
     // the second branch.
     resetSteady();
     resetDockSlots();
-    listeners.clear();
     monitors = [BIG, SMALL];
     // The window starts on the 5K, so the hop has somewhere to come home to.
     win.position = { x: 700, y: 400 };
@@ -861,8 +867,6 @@ describe("the hop keeps the chosen well on the non-steady path too", () => {
   });
 
   afterEach(() => {
-    monitors = ONE_DISPLAY;
-    listeners.clear();
     win.setPosition.mockImplementation(async () => {});
   });
 
