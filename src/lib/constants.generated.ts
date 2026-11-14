@@ -1152,7 +1152,7 @@ export const KEYBOARD_SHORTCUTS = {
 // Everything else settings::defaults holds, with Rust's types kept: a Rust
 // bool arrives as a boolean, not the string 'true'.
 export const SETTING_DEFAULTS = {
-  TTS_PROVIDER: 'kokoro',
+  TTS_PROVIDER: isMac ? 'system' : 'kokoro',
   SOUND_ENABLED: true,
   CLI_PERSISTENT_SESSION_ENABLED: true,
   COST_LOGGING_ENABLED: false,
