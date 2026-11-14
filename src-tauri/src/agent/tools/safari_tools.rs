@@ -17,16 +17,47 @@
 //! - Thread-safe implementation with element caching
 //! - Based on Opus Safari DOM injection patterns
 //!
+//! ## Every send is gated on Automation consent
+//!
+//! Driving Safari or System Events with AppleScript needs the Automation
+//! permission, and macOS asks for it with a dialog of its own the first time
+//! Juno sends an event to each app. That dialog arrives with no Juno around
+//! it, interrupting whatever the person actually asked for. So every send in
+//! this module goes through [`send_applescript`], which calls
+//! [`crate::permission_gate::require_automation`] first: Juno says why in its
+//! own words, and the system asks once, on a button the person pressed.
+//!
+//! One funnel is what makes that checkable. `applescript_gate_contract` reads
+//! this file and fails if a send appears anywhere else, because the gate
+//! existed with zero callers for weeks and nothing noticed (LAC-7405).
+//!
+//! ### Two grants, and why they are not collapsed into one ask
+//!
+//! Most tools here ask twice on a machine that has granted neither:
+//! [`SafariTools::is_safari_active`] drives System Events, and the work that
+//! follows drives Safari. That is deliberate. macOS holds Automation consent
+//! **per target app**, so these are two separate grants and two separate
+//! system dialogs, and nothing Juno does changes that — the only choice is
+//! whether Juno explains them or macOS springs them.
+//!
+//! In particular, do not gate the System Events send against Safari's grant to
+//! save an ask. The consent that gets checked would be the wrong one, the send
+//! would go out ungated, and macOS would raise its own System Events dialog
+//! mid-task: the exact bug this module was changed to fix.
+//!
 //! ## Usage:
 //! Used by: Safari-specific automation, fast web interaction, DOM analysis
 //! Registration: Tool definitions returned by `get_safari_tool_definitions()`
 
 use crate::agent::core::{AgentError, ToolDefinition};
+use crate::permission_gate;
+use crate::platform::automation::AutomationTarget;
 use crate::utils::current_timestamp_secs;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use tauri::AppHandle;
 
 /// Escapes a string for safe inclusion in AppleScript string literals
 ///
@@ -208,6 +239,55 @@ pub fn validate_navigation_url(raw_url: &str) -> Result<String, AgentError> {
     }
 }
 
+/// Asks System Events which application is in front.
+///
+/// Named rather than inlined because it is the only script here that talks to
+/// System Events, and so the only one behind the other Automation grant.
+const FRONTMOST_APP_SCRIPT: &str = r#"tell application "System Events" to get name of first application process whose frontmost is true"#;
+
+/// The one place an AppleScript event leaves this module.
+///
+/// Gated before it is sent, never after: `require_automation` either confirms
+/// Juno is already allowed to drive `target`, or puts Juno's own card on
+/// screen and returns the message the agent should carry on with. Either way
+/// macOS never gets to raise its Automation dialog mid-task, which is the
+/// whole point of the gate.
+///
+/// `action` is written for a person, because it is what the card says Juno is
+/// trying to do. It is reused in the failure messages so the agent and the
+/// person are told the same thing.
+///
+/// Returns the script's trimmed stdout. Runs on a blocking worker: spawning
+/// `osascript` and waiting for it is blocking work, and this is an async fn.
+async fn send_applescript(
+    app_handle: &AppHandle,
+    target: AutomationTarget,
+    action: &str,
+    script: String,
+) -> Result<String, AgentError> {
+    permission_gate::require_automation(app_handle, target, action)
+        .await
+        .map_err(AgentError::ToolError)?;
+
+    let output = tokio::task::spawn_blocking(move || {
+        Command::new("osascript").arg("-e").arg(&script).output()
+    })
+    .await
+    .map_err(|e| AgentError::ToolError(format!("Could not {}: {}", action, e)))?
+    .map_err(|e| AgentError::ToolError(format!("Could not {}: {}", action, e)))?;
+
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr);
+        return Err(AgentError::ToolError(format!(
+            "Could not {}: {}",
+            action,
+            error.trim()
+        )));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 /// Safari Tools - Provides Safari-specific JavaScript injection and DOM automation
 #[derive(Debug)]
 pub struct SafariTools {
@@ -244,25 +324,37 @@ impl SafariTools {
         }
     }
 
+    /// One cached element, copied out rather than borrowed.
+    ///
+    /// The callers go on to await a send, and a `std::sync` guard may not be
+    /// held across an await: it is not `Send`, and the task can resume on
+    /// another thread. So the guard lives and dies inside this function and
+    /// the caller gets an owned clone.
+    fn cached_element(&self, element_id: u32) -> Result<SafariElement, AgentError> {
+        let cache = self.element_cache.lock().map_err(|e| {
+            AgentError::ToolError(format!("Failed to acquire element cache lock: {}", e))
+        })?;
+
+        cache.get(&element_id).cloned().ok_or_else(|| {
+            AgentError::ToolError(format!("Element with ID {} not found in cache", element_id))
+        })
+    }
+
     /// Checks if Safari is the currently active application
-    pub fn is_safari_active(&self) -> Result<bool, AgentError> {
+    ///
+    /// Asks System Events rather than Safari, so this is the one send in the
+    /// module that needs the other of the two Automation grants macOS holds.
+    pub async fn is_safari_active(&self, app_handle: &AppHandle) -> Result<bool, AgentError> {
         log::debug!("Checking if Safari is the active application");
 
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg("tell application \"System Events\" to get name of first application process whose frontmost is true")
-            .output()
-            .map_err(|e| AgentError::ToolError(format!("Failed to check active application: {}", e)))?;
+        let active_app = send_applescript(
+            app_handle,
+            AutomationTarget::SystemEvents,
+            "see which app is in front",
+            FRONTMOST_APP_SCRIPT.to_string(),
+        )
+        .await?;
 
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolError(format!(
-                "Failed to get active application: {}",
-                error
-            )));
-        }
-
-        let active_app = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let is_safari = active_app == "Safari";
 
         log::debug!(
@@ -274,10 +366,10 @@ impl SafariTools {
     }
 
     /// Extracts structured DOM from the current Safari tab (based on Opus implementation)
-    pub fn extract_dom(&self) -> Result<Value, AgentError> {
+    pub async fn extract_dom(&self, app_handle: &AppHandle) -> Result<Value, AgentError> {
         log::info!("Extracting Safari DOM structure");
 
-        if !self.is_safari_active()? {
+        if !self.is_safari_active(app_handle).await? {
             return Err(AgentError::ToolError(
                 "Safari is not the active application".to_string(),
             ));
@@ -359,23 +451,14 @@ JSON.stringify(serializeDOMWithIds(document.body));
         );
 
         log::debug!("Executing Safari DOM extraction JavaScript");
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(&applescript)
-            .output()
-            .map_err(|e| {
-                AgentError::ToolError(format!("Failed to execute Safari JavaScript: {}", e))
-            })?;
+        let dom_json = send_applescript(
+            app_handle,
+            AutomationTarget::Safari,
+            "read the page you are looking at in Safari",
+            applescript,
+        )
+        .await?;
 
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolError(format!(
-                "Safari JavaScript execution failed: {}",
-                error
-            )));
-        }
-
-        let dom_json = String::from_utf8_lossy(&output.stdout);
         log::debug!(
             "Safari DOM extraction completed, JSON length: {}",
             dom_json.len()
@@ -465,22 +548,20 @@ JSON.stringify(serializeDOMWithIds(document.body));
     }
 
     /// Clicks an element by its cached ID using Safari JavaScript injection
-    pub fn click_element(&self, element_id: u32) -> Result<Value, AgentError> {
+    pub async fn click_element(
+        &self,
+        app_handle: &AppHandle,
+        element_id: u32,
+    ) -> Result<Value, AgentError> {
         log::info!("Clicking Safari element ID: {}", element_id);
 
-        if !self.is_safari_active()? {
+        if !self.is_safari_active(app_handle).await? {
             return Err(AgentError::ToolError(
                 "Safari is not the active application".to_string(),
             ));
         }
 
-        let cache = self.element_cache.lock().map_err(|e| {
-            AgentError::ToolError(format!("Failed to acquire element cache lock: {}", e))
-        })?;
-
-        let element = cache.get(&element_id).ok_or_else(|| {
-            AgentError::ToolError(format!("Element with ID {} not found in cache", element_id))
-        })?;
+        let element = self.cached_element(element_id)?;
 
         if !element.clickable {
             return Err(AgentError::ToolError(format!(
@@ -514,23 +595,14 @@ if (element) {{
             "Executing Safari click JavaScript for element {}",
             element_id
         );
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(&applescript)
-            .output()
-            .map_err(|e| {
-                AgentError::ToolError(format!("Failed to execute click JavaScript: {}", e))
-            })?;
+        let result = send_applescript(
+            app_handle,
+            AutomationTarget::Safari,
+            "click on the page in Safari",
+            applescript,
+        )
+        .await?;
 
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolError(format!(
-                "Click execution failed: {}",
-                error
-            )));
-        }
-
-        let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
         log::debug!("Safari click result: {}", result);
 
         if result.contains("SUCCESS") {
@@ -552,22 +624,21 @@ if (element) {{
     }
 
     /// Types text into an element by its cached ID
-    pub fn type_text(&self, element_id: u32, text: &str) -> Result<Value, AgentError> {
+    pub async fn type_text(
+        &self,
+        app_handle: &AppHandle,
+        element_id: u32,
+        text: &str,
+    ) -> Result<Value, AgentError> {
         log::info!("Typing text into Safari element ID: {}", element_id);
 
-        if !self.is_safari_active()? {
+        if !self.is_safari_active(app_handle).await? {
             return Err(AgentError::ToolError(
                 "Safari is not the active application".to_string(),
             ));
         }
 
-        let cache = self.element_cache.lock().map_err(|e| {
-            AgentError::ToolError(format!("Failed to acquire element cache lock: {}", e))
-        })?;
-
-        let element = cache.get(&element_id).ok_or_else(|| {
-            AgentError::ToolError(format!("Element with ID {} not found in cache", element_id))
-        })?;
+        let element = self.cached_element(element_id)?;
 
         // Generate JavaScript to type in the element
         // Escape text for JavaScript string literals (single quotes used in JS)
@@ -610,23 +681,14 @@ if (element) {{
             "Executing Safari type JavaScript for element {}",
             element_id
         );
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(&applescript)
-            .output()
-            .map_err(|e| {
-                AgentError::ToolError(format!("Failed to execute type JavaScript: {}", e))
-            })?;
+        let result = send_applescript(
+            app_handle,
+            AutomationTarget::Safari,
+            "type into the page in Safari",
+            applescript,
+        )
+        .await?;
 
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolError(format!(
-                "Type execution failed: {}",
-                error
-            )));
-        }
-
-        let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
         log::debug!("Safari type result: {}", result);
 
         if result.contains("SUCCESS") {
@@ -648,26 +710,20 @@ if (element) {{
     }
 
     /// Gets the current Safari tab URL
-    pub fn get_current_url(&self) -> Result<Value, AgentError> {
+    pub async fn get_current_url(&self, app_handle: &AppHandle) -> Result<Value, AgentError> {
         log::debug!("Getting current Safari tab URL");
 
-        let applescript = r#"tell application "Safari" to get URL of current tab of first window"#;
+        let applescript =
+            r#"tell application "Safari" to get URL of current tab of first window"#.to_string();
 
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(applescript)
-            .output()
-            .map_err(|e| AgentError::ToolError(format!("Failed to get Safari URL: {}", e)))?;
+        let url = send_applescript(
+            app_handle,
+            AutomationTarget::Safari,
+            "read the address of the page in Safari",
+            applescript,
+        )
+        .await?;
 
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolError(format!(
-                "URL retrieval failed: {}",
-                error
-            )));
-        }
-
-        let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
         log::debug!("Current Safari URL: {}", url);
 
         Ok(json!({
@@ -680,7 +736,11 @@ if (element) {{
     ///
     /// Only http/https URLs are accepted; `javascript:`, `file:`, and `data:`
     /// URLs are rejected before any AppleScript runs (audit item #16).
-    pub fn navigate_to_url(&self, url: &str) -> Result<Value, AgentError> {
+    pub async fn navigate_to_url(
+        &self,
+        app_handle: &AppHandle,
+        url: &str,
+    ) -> Result<Value, AgentError> {
         let url = validate_navigation_url(url)?;
         log::info!("Navigating Safari to URL: {}", url);
 
@@ -690,22 +750,17 @@ if (element) {{
             escaped_url
         );
 
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(&applescript)
-            .output()
-            .map_err(|e| AgentError::ToolError(format!("Failed to navigate Safari: {}", e)))?;
+        send_applescript(
+            app_handle,
+            AutomationTarget::Safari,
+            "open a page in Safari",
+            applescript,
+        )
+        .await?;
 
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolError(format!(
-                "Navigation failed: {}",
-                error
-            )));
-        }
-
-        // Wait for navigation to complete
-        std::thread::sleep(std::time::Duration::from_millis(2000));
+        // Wait for navigation to complete. An async sleep, because blocking
+        // the executor for two seconds stalls every other task on it.
+        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
 
         Ok(json!({
             "navigated_to": url,
@@ -749,10 +804,14 @@ if (element) {{
     }
 
     /// Executes custom JavaScript in the current Safari tab
-    pub fn execute_javascript(&self, javascript: &str) -> Result<Value, AgentError> {
+    pub async fn execute_javascript(
+        &self,
+        app_handle: &AppHandle,
+        javascript: &str,
+    ) -> Result<Value, AgentError> {
         log::info!("Executing custom JavaScript in Safari");
 
-        if !self.is_safari_active()? {
+        if !self.is_safari_active(app_handle).await? {
             return Err(AgentError::ToolError(
                 "Safari is not the active application".to_string(),
             ));
@@ -768,21 +827,14 @@ if (element) {{
         );
 
         log::debug!("Executing custom Safari JavaScript");
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(&applescript)
-            .output()
-            .map_err(|e| AgentError::ToolError(format!("Failed to execute JavaScript: {}", e)))?;
+        let result = send_applescript(
+            app_handle,
+            AutomationTarget::Safari,
+            "run JavaScript in Safari",
+            applescript,
+        )
+        .await?;
 
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolError(format!(
-                "JavaScript execution failed: {}",
-                error
-            )));
-        }
-
-        let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
         log::debug!("Safari JavaScript result: {}", result);
 
         Ok(json!({
@@ -1150,6 +1202,235 @@ mod tests {
         for tool in &definitions {
             assert!(!tool.description.is_empty());
             assert!(tool.input_schema.is_object());
+        }
+    }
+}
+
+/// Both directions of the contract: every AppleScript send in this module is
+/// gated on Automation consent, and the gate runs before the send.
+///
+/// A source scan for the same reason `path_gate`'s is one — the real target is
+/// the eighth send someone adds later, and there is no runtime registry of
+/// AppleScript calls to check instead. `permission_gate::require_automation`
+/// was written for exactly this module and then sat in the tree with **zero**
+/// callers (LAC-7405). Nothing failed, because nothing was looking.
+#[cfg(test)]
+mod applescript_gate_contract {
+    /// What ships, with the test modules and the comments removed, so the scan
+    /// reads code only and does not read its own needles back out.
+    fn shipping_code() -> String {
+        let source = include_str!("safari_tools.rs");
+        let shipping = source.split("#[cfg(test)]").next().unwrap_or(source);
+        shipping
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Built in pieces so the literal never appears whole in this file, which
+    /// would make the scan find itself.
+    fn send_needle() -> String {
+        format!("Command::new({}osascript{})", '"', '"')
+    }
+
+    const GATE_CALL: &str = "require_automation";
+
+    /// Every `fn` body, paired with its name. A block runs to the next `fn`,
+    /// so a gate call counts only for the function it sits in.
+    fn fn_blocks(code: &str) -> Vec<(String, String)> {
+        code.split("fn ")
+            .skip(1)
+            .map(|block| {
+                let name = block
+                    .split('(')
+                    .next()
+                    .unwrap_or("<unnamed>")
+                    .trim()
+                    .to_string();
+                (name, block.to_string())
+            })
+            .collect()
+    }
+
+    fn sending_fns() -> Vec<(String, String)> {
+        let needle = send_needle();
+        fn_blocks(&shipping_code())
+            .into_iter()
+            .filter(|(_, block)| block.contains(&needle))
+            .collect()
+    }
+
+    /// The scan reads everything above the first `#[cfg(test)]`, so a test-only
+    /// item placed above shipping code would shrink that window and hide any
+    /// send below it. Nothing that ships may live in the discarded tail.
+    #[test]
+    fn the_scan_window_covers_every_shipping_item() {
+        let source = include_str!("safari_tools.rs");
+        let tail = source
+            .split_once("#[cfg(test)]")
+            .map(|(_, tail)| tail)
+            .unwrap_or("");
+
+        // Tripwire: an empty tail means the marker this scan cuts on no longer
+        // appears, so `shipping_code` is reading the test modules back in.
+        assert!(
+            !tail.is_empty(),
+            "no #[cfg(test)] in safari_tools.rs — the gate scan is reading its own needles"
+        );
+
+        // Built in pieces, like `send_needle`, because this test is itself in
+        // the tail it searches and would otherwise find its own literals.
+        // A definition at column zero is module-level code. Inside the test
+        // modules every item is indented, so anything flush left down here
+        // escaped the scan window. Checking indentation rather than `pub`
+        // catches a *private* fn too, which a visibility-only check misses —
+        // and a private ungated send is just as able to reach osascript.
+        let item = format!("{}fn ", "");
+        let mut escapees: Vec<String> = tail
+            .lines()
+            .filter(|line| !line.starts_with(' ') && !line.starts_with('\t'))
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .filter(|line| line.contains(item.as_str()))
+            .map(|line| line.trim_end().to_string())
+            .collect();
+
+        // Kept alongside the indentation check: it names the escapee in the
+        // words someone would grep for.
+        for needle in [format!("pub {}", "fn "), format!("pub async {}", "fn ")] {
+            if tail.contains(needle.as_str()) {
+                escapees.push(needle);
+            }
+        }
+
+        assert!(
+            escapees.is_empty(),
+            "safari_tools.rs defines {:?} below its first #[cfg(test)], so the gate scan \
+             stops short of it and cannot see an AppleScript send it may contain",
+            escapees
+        );
+    }
+
+    #[test]
+    fn every_applescript_send_is_gated() {
+        let needle = send_needle();
+        let senders = sending_fns();
+
+        // The tripwire. Everything below passes vacuously on an empty list, so
+        // a renamed spawn would read as "all sends gated" rather than as a
+        // broken scan.
+        assert!(
+            !senders.is_empty(),
+            "found no AppleScript send at all — the scan is looking for '{}', \
+             which no longer matches how this module spawns osascript",
+            needle
+        );
+
+        let mut offenders = Vec::new();
+        for (name, block) in &senders {
+            match (block.find(GATE_CALL), block.find(&needle)) {
+                (None, _) => offenders.push(format!(
+                    "{} sends AppleScript without calling {}",
+                    name, GATE_CALL
+                )),
+                (Some(gate), Some(send)) if gate > send => offenders.push(format!(
+                    "{} calls {} after the send, so macOS asks first",
+                    name, GATE_CALL
+                )),
+                _ => {}
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "ungated AppleScript sends in safari_tools.rs:\n  {}\n\nEvery send goes \
+             through send_applescript, which gates it. Adding one anywhere else lets \
+             macOS raise its own Automation dialog mid-task.",
+            offenders.join("\n  ")
+        );
+    }
+
+    /// Wider needles than the exact spawn, because the exact one is evadable.
+    ///
+    /// `sending_fns` looks for `Command::new("osascript")` verbatim so it can
+    /// count sends. A `tokio::process::Command`, an aliased import, or a
+    /// constant holding the path would each still reach `osascript` while
+    /// slipping past that literal — and the funnel would keep the tripwire
+    /// satisfied the whole time, so the scan would read green. These catch the
+    /// binary by name and the spawn by shape, whichever way it is written.
+    ///
+    /// Built in pieces, so this module never matches itself.
+    fn reach_needles() -> Vec<String> {
+        vec![
+            format!("osa{}", "script"),
+            format!("Command{}new(", "::"),
+            format!("process{}Command", "::"),
+        ]
+    }
+
+    #[test]
+    fn nothing_but_the_funnel_can_reach_osascript() {
+        let code = shipping_code();
+        let needles = reach_needles();
+
+        // Tripwire: a needle that matches nothing at all has gone stale (the
+        // API was renamed), and a stale needle silently stops guarding.
+        for needle in &needles {
+            assert!(
+                code.contains(needle.as_str()),
+                "'{}' no longer appears anywhere in safari_tools.rs — this needle \
+                 has gone stale and is guarding nothing",
+                needle
+            );
+        }
+
+        let mut offenders = Vec::new();
+        for (name, block) in fn_blocks(&code) {
+            if name == "send_applescript" {
+                continue;
+            }
+            for needle in &needles {
+                if block.contains(needle.as_str()) {
+                    offenders.push(format!("{} reaches osascript via '{}'", name, needle));
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "only send_applescript may reach osascript, because only it gates first:\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn the_only_applescript_send_is_the_funnel() {
+        let senders: Vec<String> = sending_fns().into_iter().map(|(name, _)| name).collect();
+
+        assert_eq!(
+            senders,
+            vec!["send_applescript".to_string()],
+            "AppleScript leaves this module from exactly one function, so the gate \
+             cannot be forgotten at a new call site. Found: {:?}",
+            senders
+        );
+    }
+
+    #[test]
+    fn both_automation_targets_are_still_named() {
+        let code = shipping_code();
+
+        // macOS holds Automation consent per target app, so these are two
+        // separate grants and two separate dialogs. Collapsing the System
+        // Events send onto the Safari target would gate it against the wrong
+        // one and let the real dialog through.
+        for target in ["AutomationTarget::SystemEvents", "AutomationTarget::Safari"] {
+            assert!(
+                code.contains(target),
+                "{} is no longer named in safari_tools.rs; a send is being gated \
+                 against the wrong app's grant",
+                target
+            );
         }
     }
 }
