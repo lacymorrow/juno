@@ -780,13 +780,24 @@ fn capture_window_via_screencapturekit(window_id: u32) -> Result<WindowCapture, 
 
 /// One window, captured with `CGWindowListCreateImage` at one pixel per point.
 ///
-/// The ScreenCaptureKit path above is better where it is available: it renders
-/// the window itself, so a window sitting behind others still comes out whole.
-/// CoreGraphics composites from the window's backing store instead, which is
-/// equivalent for a window that is not occluded and is the only option at all
-/// below macOS 14 (see `capture_backend`). Deprecated in macOS 15.0, and
-/// deliberately still here: the deprecation does not reach back to the hosts
-/// that have nothing else.
+/// `kCGWindowListOptionIncludingWindow` composites this window alone, so the
+/// result is not a crop of the screen and does not contain whatever is in
+/// front. What it cannot promise is freshness: it draws from the window
+/// server's backing store, which an occluded or fully off-screen window is not
+/// guaranteed to keep current, whereas ScreenCaptureKit re-renders the window
+/// on demand. So the ScreenCaptureKit path above stays preferred wherever it
+/// exists, and this one is the answer below macOS 14 (see `capture_backend`),
+/// where nothing else exists at all.
+///
+/// Deprecated in macOS 15.0, and deliberately still here: a deprecation on 15
+/// does not reach back to the hosts that have no alternative.
+///
+/// The frame is returned in points alongside the pixels. Callers derive the
+/// scale from the two (`ax_targeting::capture_window` divides frame width by
+/// image width) rather than assuming they are equal, so
+/// `kCGWindowImageNominalResolution` keeps the payload small and matches the
+/// ScreenCaptureKit path's one-pixel-per-point output without being load
+/// bearing for coordinates.
 pub fn capture_window_via_coregraphics(window_id: u32) -> Result<WindowCapture, AutomationError> {
     use core_graphics::display::CGRectNull;
     use core_graphics::window::{
@@ -820,8 +831,13 @@ pub fn capture_window_via_coregraphics(window_id: u32) -> Result<WindowCapture, 
     // the list" rather than a screen crop, and nominal resolution gives one
     // pixel per point — the same scale the ScreenCaptureKit path produces with
     // `with_scales_to_fit`, so callers see one contract either way.
+    // SAFETY: `CGRectNull` is an immutable `extern static CGRect` exported by
+    // CoreGraphics, which is linked unconditionally. Reading it copies a
+    // plain `#[repr(C)]` value and touches no pointer.
+    let null_rect = unsafe { CGRectNull };
+
     let cg_image = create_image(
-        unsafe { CGRectNull },
+        null_rect,
         kCGWindowListOptionIncludingWindow,
         window_id,
         kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution,
