@@ -31,10 +31,18 @@ const settingsStub = {
   loadAllSettings: vi.fn(),
 } as unknown as SettingsSectionProps["settings"];
 
+/**
+ * Beta features defaults to on here: smart routing is a beta row, so the rest
+ * of its behaviour is only reachable with the switch on. The gate itself is
+ * covered by passing `beta: false`.
+ */
 function mockBackend(
-  overrides: { smartRouting?: boolean; setFails?: boolean } = {},
+  overrides: { smartRouting?: boolean; setFails?: boolean; beta?: boolean } = {},
 ) {
   invokeMock.mockImplementation(async (command: string) => {
+    if (command === COMMANDS.SETTINGS_GET_BETA_FEATURES) {
+      return overrides.beta ?? true;
+    }
     if (command === COMMANDS.SETTINGS_GET_AGENT_SETTINGS) {
       return { background_mode: true, mouse_control: "ask", dock_icon_visible: true };
     }
@@ -49,14 +57,22 @@ function mockBackend(
 }
 
 const toggle = () => screen.getByLabelText(/Smart routing/);
+const queryToggle = () => screen.queryByLabelText(/Smart routing/);
+const betaSwitch = () => screen.findByRole("switch", { name: /beta features/i });
+const rowOf = (el: HTMLElement) =>
+  el.closest('[id^="settings-row-"]') as HTMLElement;
 
-async function mount() {
+function renderSection() {
   render(
     <AdvancedSettingsProvider>
       <AdvancedSettings settings={settingsStub} />
     </AdvancedSettingsProvider>,
   );
-  // Disabled until the mount-time GET resolves; wait for enabled.
+}
+
+async function mount() {
+  renderSection();
+  // The row arrives with the beta answer, then enables with the flag's GET.
   await waitFor(() => expect(toggle()).toBeEnabled());
 }
 
@@ -75,12 +91,62 @@ beforeEach(() => {
 });
 
 async function openInfo(el: HTMLElement, text: RegExp) {
-  const row = el.closest('[id^="settings-row-"]') as HTMLElement;
+  const row = rowOf(el);
   await act(async () => {
     within(row).getByRole("button", { name: "More info" }).focus();
   });
   return (await screen.findAllByText(text))[0];
 }
+
+describe("Smart routing is behind the Beta features switch", () => {
+  it("stays hidden while Beta features is off", async () => {
+    mockBackend({ beta: false });
+    renderSection();
+    // The master switch is the group's only row until beta is on.
+    await betaSwitch();
+    expect(queryToggle()).not.toBeInTheDocument();
+  });
+
+  it("stays hidden with Beta features off even when the flag is saved on", async () => {
+    mockBackend({ beta: false, smartRouting: true });
+    renderSection();
+    await betaSwitch();
+    expect(queryToggle()).not.toBeInTheDocument();
+  });
+
+  it("is shown once Beta features is on", async () => {
+    mockBackend({ beta: true });
+    renderSection();
+    expect(await screen.findByLabelText(/Smart routing/)).toBeInTheDocument();
+  });
+
+  it("appears as soon as the Beta features switch is turned on", async () => {
+    mockBackend({ beta: false });
+    renderSection();
+    const master = await betaSwitch();
+    expect(queryToggle()).not.toBeInTheDocument();
+    await click(master);
+    await waitFor(() => expect(toggle()).toBeInTheDocument());
+  });
+
+  it("carries the Beta badge, so the switch says what it turned on", async () => {
+    await mount();
+    expect(within(rowOf(toggle())).getByText("Beta")).toBeInTheDocument();
+  });
+
+  it("sits in the Beta group, beside the switch that unlocks it", async () => {
+    await mount();
+    const group = rowOf(toggle()).closest("section");
+    expect(group).not.toBeNull();
+    // The group heading, not the row's badge: both read "Beta".
+    expect(
+      within(group as HTMLElement).getByRole("heading", { name: "Beta" }),
+    ).toBeInTheDocument();
+    expect(
+      within(group as HTMLElement).getByRole("switch", { name: /beta features/i }),
+    ).toBeInTheDocument();
+  });
+});
 
 describe("Smart routing (beta) toggle", () => {
   it("is off unless the backend says otherwise", async () => {
@@ -94,12 +160,11 @@ describe("Smart routing (beta) toggle", () => {
     await waitFor(() => expect(toggle()).toBeChecked());
   });
 
-  it("sits in the Beta group and says what it does in one plain line", async () => {
+  it("says what it does in one plain line", async () => {
     await mount();
-    expect(screen.getByText("Beta")).toBeInTheDocument();
     const description = await openInfo(toggle(), /picks a model for each request/i);
     expect(description).toHaveTextContent(/use your computer/i);
-    expect(description.textContent ?? "").not.toMatch(/\u2014/);
+    expect(description.textContent ?? "").not.toMatch(/—/);
   });
 
   it("saves the flag through the backend", async () => {
