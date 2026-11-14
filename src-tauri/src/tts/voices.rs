@@ -1979,7 +1979,11 @@ mod tests {
     fn silence_is_a_switch_and_the_rows_stay_the_engines() {
         let list = list_for(OFF_PROVIDER, &kokoro_mac(), None).with_rate(1.0);
         assert!(list.silent);
-        assert_eq!(list.engine, "kokoro");
+        assert_eq!(
+            list.engine,
+            crate::constants::settings::defaults::TTS_PROVIDER,
+            "with nothing remembered, the rows are the default engine's"
+        );
         assert!(list.options.iter().all(|o| o.kind != "silent"));
         assert!(list.speed.is_none(), "no speed row while silent");
         assert!(!list_for("kokoro", &kokoro_mac(), None).silent);
