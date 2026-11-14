@@ -810,7 +810,7 @@ impl BrainFactory {
             let tool_name_clone = tool_name.clone();
 
             let executor = move |input: serde_json::Value| {
-                let _app = app_handle_clone.clone();
+                let app = app_handle_clone.clone();
                 let name = tool_name_clone.clone();
 
                 async move {
@@ -819,8 +819,12 @@ impl BrainFactory {
                     // (safari_execute_javascript is High risk) and obtained user
                     // approval where required. The webview-invokable command
                     // surface refuses arbitrary JS (audit #15/#20).
+                    //
+                    // The handle is what carries the Automation gate: every
+                    // Safari tool that sends AppleScript asks through it before
+                    // macOS gets the chance to ask for itself (LAC-7405).
                     use crate::commands::safari_tools::execute_safari_tool_for_agent;
-                    match execute_safari_tool_for_agent(name, input).await {
+                    match execute_safari_tool_for_agent(&app, name, input).await {
                         Ok(tool_result) => Ok(tool_result.output),
                         Err(e) => Err(e),
                     }

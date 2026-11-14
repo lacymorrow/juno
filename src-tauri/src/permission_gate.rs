@@ -25,6 +25,16 @@
 //! same way as the rest: Juno finds out that macOS would ask, says why in its
 //! own words, and lets the system ask once on a button the person pressed.
 //!
+//! **The Automation gate is best-effort, and it fails open on purpose.**
+//! Reading consent can itself fail — `AECreateDesc` can refuse to address the
+//! target, which is [`AutomationConsent::Unknown`]. On that one answer
+//! [`require_automation`] logs a warning and lets the send through, so macOS
+//! may still raise its own dialog. Failing closed would be worse: an
+//! unreadable consent state would disable every Safari tool outright, where
+//! failing open costs at most the one interruption this module exists to
+//! avoid, in a case that is already an error. So the promise here is "Juno
+//! asks first whenever it can tell", not "macOS never asks".
+//!
 //! ## The ask outlives the event that announced it
 //!
 //! `permission-needed` is one Tauri event, delivered to whatever happens to be
@@ -143,14 +153,15 @@ impl Capability {
             // it is called.
             Self::Automation(AutomationTarget::SystemEvents) => {
                 "macOS will ask whether Juno may control System Events, the part of your Mac \
-                 that presses keys and opens menus. It asks once, and you can turn it back \
-                 off in System Settings whenever you like."
+                 that presses keys and opens menus. It asks once for each app, so you may \
+                 see this again for a different one. You can turn it back off in System \
+                 Settings whenever you like."
                     .to_string()
             }
             Self::Automation(AutomationTarget::Safari) => {
                 "macOS will ask whether Juno may control Safari, so Juno can read the page in \
-                 front of you. It asks once, and you can turn it back off in System Settings \
-                 whenever you like."
+                 front of you. It asks once for each app, so you may see this again for a \
+                 different one. You can turn it back off in System Settings whenever you like."
                     .to_string()
             }
         }
@@ -682,9 +693,30 @@ pub async fn require_automation(
             );
             Ok(())
         }
-        // Refused, undecided, or the target is not up yet. All three are
-        // Juno's moment to explain rather than the system's moment to
-        // interrupt.
+        // A target that is simply closed is not a consent problem, and the
+        // card is a dead end for it: `allow_automation` only launches a
+        // faceless target, so for an app like Safari the Allow button asks
+        // macOS about something that is not there, learns nothing, and
+        // leaves the person having pressed a button that did nothing. That
+        // is the failure this module exists to stop, so say what is actually
+        // wrong instead of showing a permission card about it.
+        AutomationConsent::TargetNotRunning if !target.launches_on_demand() => {
+            tracing::debug!(
+                "{} is not running, so '{}' cannot run yet",
+                target.display_name(),
+                action
+            );
+            Err(format!(
+                "'{}' needs {} to be open, and it is not running. Open {} and try \
+                 again, or carry on with anything that does not need it.",
+                action,
+                target.display_name(),
+                target.display_name()
+            ))
+        }
+        // Refused, undecided, or a faceless target that is not up yet. All
+        // of these are Juno's moment to explain rather than the system's
+        // moment to interrupt.
         _ => {
             ask(app_handle, capability, action);
             Err(capability.agent_message(action))
@@ -974,6 +1006,59 @@ mod tests {
         assert!(message.contains("Carry on"));
     }
 
+    /// What the model is handed when `require_automation` refuses.
+    ///
+    /// This is the live path now that the Automation gate has callers, and the
+    /// failure mode it guards against is a tool loop: a message that reads as a
+    /// hard error invites the model to retry, and each retry is another card.
+    /// It has to read as "the person has been asked", not as "this broke".
+    ///
+    /// The retry itself is bounded separately by `ASK_AGAIN_AFTER` in
+    /// `may_ask_in`, so a model that ignores this still cannot nag.
+    /// A closed app must not be reported as a permission problem.
+    ///
+    /// `allow_automation` only starts a target that launches on demand, so for
+    /// Safari the card's Allow button would query macOS about an app that is
+    /// not running, learn nothing, and return false. The person would press
+    /// Allow and watch nothing happen. Before this gate had callers the branch
+    /// was unreachable, so nothing noticed.
+    #[test]
+    fn only_a_faceless_target_may_be_asked_about_while_it_is_closed() {
+        // Safari is the case that breaks: it cannot be started this way, so a
+        // consent card about it while it is closed has no working button.
+        assert!(
+            !AutomationTarget::Safari.launches_on_demand(),
+            "Safari now launches on demand; the closed-app branch in \
+             require_automation needs revisiting"
+        );
+        // System Events is faceless and is started for the prompt, so the
+        // card is still the right answer there.
+        assert!(AutomationTarget::SystemEvents.launches_on_demand());
+    }
+
+    #[test]
+    fn the_denied_automation_path_reads_as_waiting_not_as_a_crash() {
+        for target in [AutomationTarget::SystemEvents, AutomationTarget::Safari] {
+            let message = Capability::Automation(target).agent_message("read the page");
+
+            assert!(message.contains("read the page"), "{}", message);
+            assert!(message.contains("Juno has asked the user"), "{}", message);
+            assert!(message.contains("do not repeat the request"), "{}", message);
+            assert!(message.contains("Carry on"), "{}", message);
+
+            // Nothing here may read as a crash, or the model treats a pending
+            // consent prompt as a bug to work around.
+            for panicky in ["failed", "Failed", "error", "Error"] {
+                assert!(
+                    !message.contains(panicky),
+                    "'{}' makes a pending prompt read as a failure: {}",
+                    panicky,
+                    message
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_copy_offers_something_rather_than_demanding_it() {
         for capability in ALL {
@@ -1012,6 +1097,10 @@ mod tests {
             let detail = Capability::Automation(target).detail();
             assert!(detail.contains("asks once"), "{}", detail);
             assert!(!detail.contains("one switch"), "{}", detail);
+            // Safari tools drive two apps, so a fresh machine meets this card
+            // twice. "Asks once" on its own reads as a broken promise the
+            // second time, which is the system interrupting by another route.
+            assert!(detail.contains("for each app"), "{}", detail);
         }
     }
 
