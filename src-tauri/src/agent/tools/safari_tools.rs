@@ -1334,6 +1334,59 @@ mod applescript_gate_contract {
         );
     }
 
+    /// Wider needles than the exact spawn, because the exact one is evadable.
+    ///
+    /// `sending_fns` looks for `Command::new("osascript")` verbatim so it can
+    /// count sends. A `tokio::process::Command`, an aliased import, or a
+    /// constant holding the path would each still reach `osascript` while
+    /// slipping past that literal — and the funnel would keep the tripwire
+    /// satisfied the whole time, so the scan would read green. These catch the
+    /// binary by name and the spawn by shape, whichever way it is written.
+    ///
+    /// Built in pieces, so this module never matches itself.
+    fn reach_needles() -> Vec<String> {
+        vec![
+            format!("osa{}", "script"),
+            format!("Command{}new(", "::"),
+            format!("process{}Command", "::"),
+        ]
+    }
+
+    #[test]
+    fn nothing_but_the_funnel_can_reach_osascript() {
+        let code = shipping_code();
+        let needles = reach_needles();
+
+        // Tripwire: a needle that matches nothing at all has gone stale (the
+        // API was renamed), and a stale needle silently stops guarding.
+        for needle in &needles {
+            assert!(
+                code.contains(needle.as_str()),
+                "'{}' no longer appears anywhere in safari_tools.rs — this needle \
+                 has gone stale and is guarding nothing",
+                needle
+            );
+        }
+
+        let mut offenders = Vec::new();
+        for (name, block) in fn_blocks(&code) {
+            if name == "send_applescript" {
+                continue;
+            }
+            for needle in &needles {
+                if block.contains(needle.as_str()) {
+                    offenders.push(format!("{} reaches osascript via '{}'", name, needle));
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "only send_applescript may reach osascript, because only it gates first:\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+
     #[test]
     fn the_only_applescript_send_is_the_funnel() {
         let senders: Vec<String> = sending_fns().into_iter().map(|(name, _)| name).collect();

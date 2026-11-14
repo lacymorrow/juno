@@ -975,6 +975,38 @@ mod tests {
         assert!(message.contains("Carry on"));
     }
 
+    /// What the model is handed when `require_automation` refuses.
+    ///
+    /// This is the live path now that the Automation gate has callers, and the
+    /// failure mode it guards against is a tool loop: a message that reads as a
+    /// hard error invites the model to retry, and each retry is another card.
+    /// It has to read as "the person has been asked", not as "this broke".
+    ///
+    /// The retry itself is bounded separately by `ASK_AGAIN_AFTER` in
+    /// `may_ask_in`, so a model that ignores this still cannot nag.
+    #[test]
+    fn the_denied_automation_path_reads_as_waiting_not_as_a_crash() {
+        for target in [AutomationTarget::SystemEvents, AutomationTarget::Safari] {
+            let message = Capability::Automation(target).agent_message("read the page");
+
+            assert!(message.contains("read the page"), "{}", message);
+            assert!(message.contains("Juno has asked the user"), "{}", message);
+            assert!(message.contains("do not repeat the request"), "{}", message);
+            assert!(message.contains("Carry on"), "{}", message);
+
+            // Nothing here may read as a crash, or the model treats a pending
+            // consent prompt as a bug to work around.
+            for panicky in ["failed", "Failed", "error", "Error"] {
+                assert!(
+                    !message.contains(panicky),
+                    "'{}' makes a pending prompt read as a failure: {}",
+                    panicky,
+                    message
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_copy_offers_something_rather_than_demanding_it() {
         for capability in ALL {
