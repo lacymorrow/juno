@@ -894,9 +894,9 @@ impl MCPServerConnection {
             // `wait()`, and that wait is where quitting used to stop dead with
             // a stdio server attached: the log ended one line above this and
             // the process had to be SIGKILLed by hand. `start_kill` is the
-            // signal alone — a `libc::kill`, no await — so the signal always
-            // goes out, and waiting for the corpse is a separate step that is
-            // allowed to give up.
+            // signal alone — a `libc::kill`, no await — so it either signals or
+            // says the child was already gone, and waiting for the corpse
+            // becomes a separate step that is allowed to give up.
             if let Err(e) = process.start_kill() {
                 // Already reaped is the common case here, not a failure.
                 warn!(

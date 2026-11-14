@@ -168,9 +168,11 @@ pub async fn cleanup_application(app_handle: &tauri::AppHandle) {
         // The whole stage shares one deadline ([`MCP_STAGE_BUDGET`]) and each
         // server gets whatever is left of it, so every server is reached even
         // when an earlier one will not die. A server reached with nothing left
-        // is still signalled: `timeout` polls its inner future once before it
-        // checks the deadline, and `disconnect` runs synchronously through
-        // `start_kill()` before its first await.
+        // still usually gets its signal: `timeout` polls its inner future once
+        // before it checks the deadline, and `disconnect` runs synchronously
+        // through `start_kill()` before its first await. "Usually" because that
+        // first poll stops early if the connection map's lock is held by a tool
+        // call, which is why the log below does not claim the signal went out.
         //
         // Said in two log lines rather than one, because the lock here is the
         // manager's and an agent turn can be holding it. A quit that stalls
@@ -185,8 +187,8 @@ pub async fn cleanup_application(app_handle: &tauri::AppHandle) {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => warn!("Failed to stop MCP server '{}': {}", config.name, e),
                 Err(_) => warn!(
-                    "MCP server '{}' was signalled but had not exited inside the {}s stop budget; \
-                     leaving it to the process exit",
+                    "MCP server '{}' did not finish stopping inside the {}s stop budget shared by \
+                     all servers; leaving it to the process exit",
                     config.name,
                     MCP_STAGE_BUDGET.as_secs()
                 ),
