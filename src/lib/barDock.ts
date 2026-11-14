@@ -106,11 +106,6 @@ export function predictedWindowOrigin(
 
 // ── The dock slot store ───────────────────────────────────────────────────
 //
-// One slot per window label. A plain box rather than React state because two
-// unrelated readers need it: whichever bar look is mounted (to lay itself out
-// against the docked edges) and `useWindowSize` (to anchor every resize on
-// them), and the second is not a component.
-//
 // Two slots per label, not one, and the difference is the whole of LAC-4831.
 // The **dock slot** is where the bar is drawn right now, which is what every
 // layout reader wants. The **intent** is the well someone put it in, which is
@@ -126,6 +121,18 @@ export function predictedWindowOrigin(
 // stay that way, because the bar has to be drawn somewhere. What must not be
 // lossy is the record of what was asked for. So the hop projects and leaves
 // the intent alone, and the round trip comes back exact.
+//
+// A plain box rather than React state because neither reader is a component
+// reading at render: `withDockDefaults` in `useWindowSize` pulls the drawn
+// slot when it resizes a window, to anchor the resize on the docked edges, and
+// `useBarDisplayFollow` pulls the intent when the cursor changes display.
+//
+// A bar look used to be a reader too, laying itself out against the docked
+// edges, and that is what the subscribe path below was built for. `steadyFrame`
+// took that over: `steadyLayout` derives the slot from the `Well` it is handed
+// and calls `dockAnchorX` and `dockGrowsUp` (above) on that, and the looks
+// subscribe to `subscribeSteady` for the result. So the looks still use this
+// file, but no longer this store, and nothing in the app subscribes here today.
 
 const slotByLabel = new Map<string, WellSlot | null>();
 const intentByLabel = new Map<string, WellSlot | null>();
@@ -168,8 +175,10 @@ export function setDockProjection(label: string, slot: WellSlot | null): void {
 }
 
 /**
- * Move the drawn slot and wake its readers. A no-op when the slot is
- * unchanged, so a re-settle into the same well cannot wake every subscriber.
+ * Move the drawn slot and wake anything subscribed to it. Nothing in the app
+ * is, today: both live readers pull instead, and the comment above says when.
+ * A no-op when the slot is unchanged, so a re-settle into the same well cannot
+ * wake a subscriber that does turn up.
  */
 function writeDockSlot(label: string, slot: WellSlot | null): void {
   const prev = slotByLabel.get(label) ?? null;
