@@ -191,7 +191,13 @@ pub async fn cleanup_application(app_handle: &tauri::AppHandle) {
         info!("Stopping MCP servers...");
         let stage_ends_at = tokio::time::Instant::now() + MCP_STAGE_BUDGET;
         let manager = app_state.get_mcp_manager().await;
-        match tokio::time::timeout(MCP_STAGE_BUDGET, manager.lock()).await {
+        // Bound to a local rather than matched inline. Matched inline, this is the
+        // tail expression of the enclosing block, so the
+        // `Result<MutexGuard<'_, MCPManager>, Elapsed>` temporary lives to the end
+        // of the block and outlives the `Arc` it borrows from: E0597. A local
+        // declared after `manager` is dropped before it.
+        let locked = tokio::time::timeout(MCP_STAGE_BUDGET, manager.lock()).await;
+        match locked {
             Ok(manager) => {
                 for config in manager.get_server_configs().await {
                     let left = stage_ends_at.saturating_duration_since(tokio::time::Instant::now());
