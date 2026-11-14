@@ -57,7 +57,7 @@ function mockBackend(
 }
 
 const toggle = () => screen.getByLabelText(/Smart routing/);
-const findToggle = () => screen.queryByLabelText(/Smart routing/);
+const queryToggle = () => screen.queryByLabelText(/Smart routing/);
 const betaSwitch = () => screen.findByRole("switch", { name: /beta features/i });
 const rowOf = (el: HTMLElement) =>
   el.closest('[id^="settings-row-"]') as HTMLElement;
@@ -104,14 +104,14 @@ describe("Smart routing is behind the Beta features switch", () => {
     renderSection();
     // The master switch is the group's only row until beta is on.
     await betaSwitch();
-    expect(findToggle()).not.toBeInTheDocument();
+    expect(queryToggle()).not.toBeInTheDocument();
   });
 
   it("stays hidden with Beta features off even when the flag is saved on", async () => {
     mockBackend({ beta: false, smartRouting: true });
     renderSection();
     await betaSwitch();
-    expect(findToggle()).not.toBeInTheDocument();
+    expect(queryToggle()).not.toBeInTheDocument();
   });
 
   it("is shown once Beta features is on", async () => {
@@ -124,7 +124,7 @@ describe("Smart routing is behind the Beta features switch", () => {
     mockBackend({ beta: false });
     renderSection();
     const master = await betaSwitch();
-    expect(findToggle()).not.toBeInTheDocument();
+    expect(queryToggle()).not.toBeInTheDocument();
     await click(master);
     await waitFor(() => expect(toggle()).toBeInTheDocument());
   });
