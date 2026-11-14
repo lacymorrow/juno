@@ -175,9 +175,32 @@ pub mod validation {
 
 /// Default values for settings
 pub mod defaults {
-    /// Kokoro speaks unless somebody picks otherwise. Its chain ends in the
-    /// Mac's own voice (`tts::fallback_chain`), so a model that has not
-    /// downloaded, or will not load, still speaks.
+    /// The Mac's own voice speaks unless somebody picks otherwise. It is the
+    /// one engine that needs nothing at all: no download, no account key, no
+    /// network, no server (`tts::voices::engine_needs`), so a fresh install
+    /// says its first sentence immediately.
+    ///
+    /// Kokoro held this default from #783 until LAC-7987. It sounds better,
+    /// and it stays one tap away in Settings, but as the default it charged
+    /// every new install an 82 MB first download before Juno could speak, and
+    /// a measured 2557 ms median from first text to first audio against 58 ms
+    /// for the Mac (LAC-5009, n=29 and n=37 in Lacy's own logs). The
+    /// Siri-parity target for first audio is 1500 ms, which Kokoro's
+    /// synthesis floor misses on its own.
+    ///
+    /// Nobody who has chosen an engine is moved. `AudioSettings::tts_provider`
+    /// is a plain `String` with no serde default, so it is always present in a
+    /// stored settings file; this constant is only read for a fresh install, a
+    /// Reset, and the in-memory `AudioSettings::default`.
+    ///
+    /// Off macOS there is no `say`: `tts::system::speak_with_say` returns an
+    /// error on every other platform, so Kokoro remains the default there.
+    /// The cfg pair is deliberate. It is the only platform form
+    /// `scripts/generate-ts-constants.js` understands, and it emits
+    /// `isMac ? 'system' : 'kokoro'` for the frontend.
+    #[cfg(target_os = "macos")]
+    pub const TTS_PROVIDER: &str = "system";
+    #[cfg(not(target_os = "macos"))]
     pub const TTS_PROVIDER: &str = "kokoro";
     pub const SOUND_ENABLED: bool = true;
     /// The persistent Claude CLI session is on for anyone who has not turned it

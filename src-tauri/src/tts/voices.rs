@@ -2049,17 +2049,25 @@ mod tests {
 
     // -- the default engine ------------------------------------------------
 
-    /// The default is Kokoro: local, no key, no network once it is on disk.
-    /// The one thing it needs is the first download. See `tts::fallback_chain`
-    /// for what speaks until it lands.
+    /// LAC-7987. On a Mac the default is the Mac's own voice, which needs
+    /// nothing at all, so a fresh install speaks its first sentence with no
+    /// download and no account. Off macOS there is no `say`, so the default is
+    /// Kokoro and its one need is the first download. See
+    /// `tts::fallback_chain` for what speaks until that lands.
     #[test]
-    fn the_default_engine_is_kokoro_and_needs_only_a_download() {
+    fn the_default_engine_needs_nothing_on_a_mac() {
         let default = crate::constants::settings::defaults::TTS_PROVIDER;
-        assert_eq!(engine_in_force(default, None), "kokoro");
         assert!(ENGINES.contains(&default));
+        assert_eq!(engine_in_force(default, None), default);
         let needs = engine_needs(default);
-        assert!(needs.download);
-        assert!(!needs.account_key && !needs.network && !needs.server);
+        if cfg!(target_os = "macos") {
+            assert_eq!(default, "system");
+            assert!(needs.nothing());
+        } else {
+            assert_eq!(default, "kokoro");
+            assert!(needs.download);
+            assert!(!needs.account_key && !needs.network && !needs.server);
+        }
     }
 
     /// The Mac's voice is the one engine that needs nothing at all. Every
@@ -2075,12 +2083,15 @@ mod tests {
         }
     }
 
-    /// The same default on an Intel Mac. Nothing about it is gated by
-    /// architecture, and this pins that it stays so on the x86_64 build.
-    #[cfg(target_arch = "x86_64")]
+    /// The same default on an Intel Mac. The choice is gated by platform and
+    /// by nothing else, so this pins that it stays the Mac's voice on the
+    /// x86_64 Mac build too. The `target_os` arm matters: since LAC-7987 the
+    /// default differs by platform, and x86_64 alone would also match a
+    /// non-Mac build, where the answer is Kokoro.
+    #[cfg(all(target_arch = "x86_64", target_os = "macos"))]
     #[test]
     fn an_intel_mac_gets_the_same_default_engine() {
-        assert_eq!(crate::constants::settings::defaults::TTS_PROVIDER, "kokoro");
+        assert_eq!(crate::constants::settings::defaults::TTS_PROVIDER, "system");
     }
 
     // -- each engine lists its own voices ----------------------------------
