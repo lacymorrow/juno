@@ -149,6 +149,14 @@ pub fn classify(route_up: bool, host_ok: bool, internet_ok: bool) -> HostStatus 
 /// download's own retry policy is the right handler for that. The probe URL
 /// is a public file, so a `401`, `403`, `407` or `451` on it is never Hugging
 /// Face enforcing its own access rules.
+///
+/// A `404` therefore counts as answered, which matters because
+/// `HOST_PROBE_URL` names a file in somebody else's repository and that file
+/// can be renamed or removed. That is the safe direction on purpose: a
+/// vanished probe file reads as "reachable", so Juno goes on to try the real
+/// download and the download's own error handling decides. The unsafe
+/// direction would be reading it as `Blocked` and refusing to fetch anything
+/// on a network that was never blocking anything.
 pub fn host_answered(status: u16, content_type: Option<&str>) -> bool {
     if looks_like_a_web_page(content_type) {
         return false;
@@ -319,6 +327,27 @@ async fn run_probes() -> Option<HostStatus> {
     Some(classify(true, false, internet_ok))
 }
 
+/// How a probe failed, in one word, for the log.
+///
+/// Both halves of a classification can fail with text that reads the same to
+/// someone reading a support report ("error sending request"). A proxy that
+/// wants credentials, a MITM certificate the Mac will not accept and a route
+/// that is simply gone are different problems with different fixes, and the
+/// kind is what separates them.
+fn failure_kind(e: &reqwest::Error) -> &'static str {
+    if e.is_timeout() {
+        "timeout"
+    } else if e.is_connect() {
+        "connect"
+    } else if e.is_redirect() {
+        "redirect"
+    } else if e.is_body() || e.is_decode() {
+        "body"
+    } else {
+        "other"
+    }
+}
+
 async fn probe_host(client: &reqwest::Client) -> bool {
     // One byte. Enough to prove the path, small enough to cost nothing.
     let request = client
@@ -342,7 +371,11 @@ async fn probe_host(client: &reqwest::Client) -> bool {
             answered
         }
         Err(e) => {
-            info!("[ModelHost] huggingface.co did not answer: {}", e);
+            info!(
+                "[ModelHost] huggingface.co did not answer ({}): {}",
+                failure_kind(&e),
+                e
+            );
             false
         }
     }
@@ -352,7 +385,11 @@ async fn probe_internet(client: &reqwest::Client) -> bool {
     match client.get(INTERNET_PROBE_URL).send().await {
         Ok(response) => internet_answered(response.status().as_u16()),
         Err(e) => {
-            info!("[ModelHost] The internet probe did not answer: {}", e);
+            info!(
+                "[ModelHost] The internet probe did not answer ({}): {}",
+                failure_kind(&e),
+                e
+            );
             false
         }
     }
@@ -424,6 +461,28 @@ mod tests {
         assert!(host_answered(500, Some("application/json")));
         assert!(host_answered(503, None));
         assert!(host_answered(429, None));
+    }
+
+    #[test]
+    fn a_missing_probe_file_reads_as_reachable_not_blocked() {
+        // HOST_PROBE_URL names a file in somebody else's repository, so it can
+        // be renamed or removed. When that happens the probe must fail towards
+        // "try the download anyway", never towards refusing to fetch on a
+        // network that was never blocking anything.
+        assert!(host_answered(404, None));
+        assert!(host_answered(410, None));
+    }
+
+    #[test]
+    fn the_probe_asks_the_real_download_path() {
+        // The point of this URL is that it goes through the same redirect to
+        // the same CDN a real download does. A probe against the www root
+        // would pass on a network that allows huggingface.co and blocks the
+        // file host, which is the case this module exists to catch.
+        assert!(HOST_PROBE_URL.starts_with("https://huggingface.co/"));
+        assert!(HOST_PROBE_URL.contains("/resolve/"));
+        assert!(HOST_PROBE_URL.ends_with(".bin"));
+        assert_eq!(INTERNET_PROBE_URL, "https://www.gstatic.com/generate_204");
     }
 
     #[test]
