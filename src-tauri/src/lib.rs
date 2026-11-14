@@ -283,6 +283,12 @@ pub fn install_crypto_provider() {
     }
 }
 
+/// The most quitting will wait for the Claude CLI's persistent sessions to be
+/// killed. `kill()` is a signal and returns at once; the only thing that can
+/// take time here is the session map's lock, and a turn still holding it is
+/// not a reason to refuse to quit.
+const CLI_SHUTDOWN_BUDGET: std::time::Duration = std::time::Duration::from_secs(3);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     startup_timing::begin();
@@ -1335,7 +1341,15 @@ pub fn run() {
                     // being torn down around the children (their conversations
                     // survive via their session ids on disk).
                     tauri::RunEvent::Exit => {
-                        tauri::async_runtime::block_on(
+                        // Bounded, like the cleanup below it and for the same
+                        // reason: this runs on the main thread inside AppKit's
+                        // terminate, so an await here that is never woken (the
+                        // session map's lock, held by a turn that is still
+                        // going) is a Juno that never quits. See
+                        // `cleanup::run_bounded`.
+                        cleanup::run_bounded(
+                            "Claude CLI session shutdown",
+                            CLI_SHUTDOWN_BUDGET,
                             agent::providers::claude_cli_session::shutdown_all(),
                         );
                         agent::providers::codex_session::shutdown();
