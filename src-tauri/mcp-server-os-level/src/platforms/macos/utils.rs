@@ -761,6 +761,23 @@ pub fn capture_window_buffer(window_id: u32) -> Result<WindowCapture, Automation
     )))
 }
 
+/// One window, captured with `CGWindowListCreateImage` at one pixel per point.
+///
+/// The ScreenCaptureKit path above is better where it is available: it renders
+/// the window itself, so a window sitting behind others still comes out whole.
+/// CoreGraphics composites from the window's backing store instead, which is
+/// equivalent for a window that is not occluded and is the only option at all
+/// below macOS 14 (see `capture_backend`). Deprecated in macOS 15.0, and
+/// deliberately still here: the deprecation does not reach back to the hosts
+/// that have nothing else.
+pub fn capture_window_via_coregraphics(window_id: u32) -> Result<WindowCapture, AutomationError> {
+    // STUB (RED): no CoreGraphics window capture exists yet.
+    Err(AutomationError::PlatformError(format!(
+        "Capturing window {} on its own needs ScreenCaptureKit",
+        window_id
+    )))
+}
+
 /// Captures a screenshot of the specified display and returns it as an ImageBuffer.
 ///
 /// Uses ScreenCaptureKit (macOS 14.0+) when available for better performance,
