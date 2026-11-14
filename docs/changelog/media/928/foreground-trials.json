@@ -1,0 +1,388 @@
+﻿{
+    "select_hwnd":  131868,
+    "copy_field_found":  true,
+    "summary":  [
+                    {
+                        "case":  "xaml_uia_invoke",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  10,
+                        "restore":  [
+                                        "=10"
+                                    ]
+                    },
+                    {
+                        "case":  "win32_uia_invoke",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  10,
+                        "took_foreground":  10,
+                        "restore":  [
+                                        "=10"
+                                    ]
+                    },
+                    {
+                        "case":  "win32_bm_click",
+                        "valid":  10,
+                        "of":  10,
+                        "worked":  9,
+                        "took_foreground":  0,
+                        "restore":  [
+
+                                    ]
+                    }
+                ],
+    "trials":  [
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  514,
+                       "foreground_after":  "Calculator",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  733,
+                       "foreground_after":  "Calculator",
+                       "restore":  "alt_key"
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  503,
+                       "foreground_after":  "Calculator",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  503,
+                       "foreground_after":  "Calculator",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  508,
+                       "foreground_after":  "Calculator",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  504,
+                       "foreground_after":  "Calculator",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  516,
+                       "foreground_after":  "Calculator",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  503,
+                       "foreground_after":  "Calculator",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  510,
+                       "foreground_after":  "Calculator",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "xaml_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  504,
+                       "foreground_after":  "Calculator",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "win32_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  517,
+                       "foreground_after":  "Character Map",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "win32_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  509,
+                       "foreground_after":  "Character Map",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "win32_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  513,
+                       "foreground_after":  "Character Map",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "win32_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  505,
+                       "foreground_after":  "Character Map",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "win32_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  509,
+                       "foreground_after":  "Character Map",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "win32_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  511,
+                       "foreground_after":  "Character Map",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "win32_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  503,
+                       "foreground_after":  "Character Map",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "win32_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  519,
+                       "foreground_after":  "Character Map",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "win32_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  505,
+                       "foreground_after":  "Character Map",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "win32_uia_invoke",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  true,
+                       "took_after_ms":  502,
+                       "foreground_after":  "Character Map",
+                       "restore":  "plain"
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  false,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   },
+                   {
+                       "case":  "win32_bm_click",
+                       "valid":  true,
+                       "before":  "Untitled - Notepad",
+                       "exit":  0,
+                       "worked":  true,
+                       "took_foreground":  false,
+                       "took_after_ms":  {
+
+                                         },
+                       "foreground_after":  "Untitled - Notepad",
+                       "restore":  null
+                   }
+               ]
+}
