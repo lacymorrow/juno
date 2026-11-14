@@ -1281,11 +1281,27 @@ mod applescript_gate_contract {
 
         // Built in pieces, like `send_needle`, because this test is itself in
         // the tail it searches and would otherwise find its own literals.
-        let shipping_item = [format!("pub {}", "fn "), format!("pub async {}", "fn ")];
-        let escapees: Vec<String> = shipping_item
-            .into_iter()
-            .filter(|needle| tail.contains(needle.as_str()))
+        // A definition at column zero is module-level code. Inside the test
+        // modules every item is indented, so anything flush left down here
+        // escaped the scan window. Checking indentation rather than `pub`
+        // catches a *private* fn too, which a visibility-only check misses —
+        // and a private ungated send is just as able to reach osascript.
+        let item = format!("{}fn ", "");
+        let mut escapees: Vec<String> = tail
+            .lines()
+            .filter(|line| !line.starts_with(' ') && !line.starts_with('\t'))
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .filter(|line| line.contains(item.as_str()))
+            .map(|line| line.trim_end().to_string())
             .collect();
+
+        // Kept alongside the indentation check: it names the escapee in the
+        // words someone would grep for.
+        for needle in [format!("pub {}", "fn "), format!("pub async {}", "fn ")] {
+            if tail.contains(needle.as_str()) {
+                escapees.push(needle);
+            }
+        }
 
         assert!(
             escapees.is_empty(),
