@@ -329,6 +329,18 @@ mod tests {
         assert!(secrets_in_section(Some("agent")).is_empty());
     }
 
+    /// LAC-7987. A reset writes `AppSettings::default()` wholesale, so the
+    /// engine it lands on is the shared constant and nothing else: on a Mac
+    /// configured for Kokoro, Reset moves the person to the Mac's own voice.
+    /// That claim rested on reading `apply_reset` and had no test of its own.
+    #[test]
+    fn a_reset_lands_on_the_shared_default_voice_engine() {
+        assert_eq!(
+            AppSettings::default().audio.tts_provider,
+            crate::constants::settings::defaults::TTS_PROVIDER
+        );
+    }
+
     #[test]
     fn defaults_leave_the_provider_choice_unmade() {
         // A reset un-makes every choice the person made, so the rule is
