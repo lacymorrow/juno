@@ -274,7 +274,7 @@ async fn send_applescript(
     })
     .await
     .map_err(|e| AgentError::ToolError(format!("Could not {}: {}", action, e)))?
-    .map_err(|e| AgentError::ToolError(format!("Failed to {}: {}", action, e)))?;
+    .map_err(|e| AgentError::ToolError(format!("Could not {}: {}", action, e)))?;
 
     if !output.status.success() {
         let error = String::from_utf8_lossy(&output.stderr);
