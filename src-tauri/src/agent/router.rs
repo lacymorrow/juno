@@ -321,8 +321,14 @@ pub async fn plan_route(app_handle: &tauri::AppHandle, query: &str) -> Option<Ro
 
 // --- Setting ---
 
-/// Whether smart routing is on. Off unless the person turned it on.
-pub fn is_enabled(app: &tauri::AppHandle) -> bool {
+/// The saved flag on its own, which is what the switch in Settings shows.
+/// Unreadable settings count as the default (off).
+///
+/// **Not the answer to "should the router run".** That is [`is_enabled`], which
+/// also honours Beta features. The name carries the warning because the pure
+/// [`enabled_from`] test cannot catch a caller reading the wrong one, and a
+/// source-scanning test for it would fail open (a parse miss reads as a pass).
+fn saved_flag_ignoring_beta(app: &tauri::AppHandle) -> bool {
     use tauri_plugin_store::StoreExt;
     app.store(SETTINGS_STORE_FILE)
         .ok()
@@ -331,10 +337,31 @@ pub fn is_enabled(app: &tauri::AppHandle) -> bool {
         .unwrap_or(false)
 }
 
-/// Read the smart-routing beta flag.
+/// Whether smart routing should run, from the saved flag and whether Beta
+/// features are on. Pure, so the rule is testable: nothing in the backend can
+/// build an `AppHandle` under `cargo test`.
+fn enabled_from(saved: bool, beta_on: bool) -> bool {
+    saved && beta_on
+}
+
+/// Whether smart routing is on: the saved flag, honoured only while Beta
+/// features is on. Smart routing is a beta feature and its row is hidden
+/// otherwise, so the saved flag must not keep classifying every query behind a
+/// switch nobody can see. The row used to show with Beta features off, so an
+/// install can hold `true` here with beta off (LAC-7988).
+pub fn is_enabled(app: &tauri::AppHandle) -> bool {
+    enabled_from(
+        saved_flag_ignoring_beta(app),
+        crate::settings::beta_features_active(app),
+    )
+}
+
+/// Read the smart-routing beta flag. The saved value, not the effective one:
+/// the switch has to mirror what is stored, or turning Beta features on would
+/// show it off while the router runs.
 #[tauri::command]
 pub async fn get_smart_routing_enabled(app_handle: tauri::AppHandle) -> Result<bool, String> {
-    Ok(is_enabled(&app_handle))
+    Ok(saved_flag_ignoring_beta(&app_handle))
 }
 
 /// Turn the smart-routing beta on or off. Applies from the next query.
@@ -373,6 +400,27 @@ mod tests {
             }],
             "stop_reason": "tool_use"
         })
+    }
+
+    /// The row sat outside the Beta features gate until LAC-7988, so an
+    /// install can hold the flag on with beta off. Hiding the row there must
+    /// also stop the router, or it classifies every query behind a switch the
+    /// person cannot reach.
+    ///
+    /// This covers the rule, not the wiring: it cannot catch `plan_route`
+    /// reading `saved_flag_ignoring_beta` instead of `is_enabled`, which would
+    /// drop the gate silently. That one is held by the name of the function and
+    /// its doc comment, deliberately rather than by a source scan, which reads
+    /// as a pass whenever its own parse misses.
+    #[test]
+    fn smart_routing_needs_its_own_flag_and_beta_features() {
+        assert!(enabled_from(true, true), "both on means on");
+        assert!(
+            !enabled_from(true, false),
+            "beta features off must stop a saved flag"
+        );
+        assert!(!enabled_from(false, true), "beta on does not turn it on");
+        assert!(!enabled_from(false, false));
     }
 
     #[test]

@@ -365,19 +365,22 @@ export default function AdvancedSettings({
             onCheckedChange={(checked) => void setBetaFeatures(checked)}
           />
         </SettingsRow>
-        <SettingsRow
-          htmlFor="smart-routing"
-          label="Smart routing"
-          description="Picks the model for each request."
-          info="Picks a model for each request and decides whether Juno needs to use your computer. Applies to the Anthropic API provider, from your next message."
-        >
-          <Switch
-            id="smart-routing"
-            checked={smartRouting}
-            onCheckedChange={handleSmartRoutingChange}
-            disabled={smartRoutingLoading}
-          />
-        </SettingsRow>
+        {betaFeatures && (
+          <SettingsRow
+            htmlFor="smart-routing"
+            label="Smart routing"
+            beta
+            description="Picks the model for each request."
+            info="Picks a model for each request and decides whether Juno needs to use your computer. Applies to the Anthropic API provider, from your next message."
+          >
+            <Switch
+              id="smart-routing"
+              checked={smartRouting}
+              onCheckedChange={handleSmartRoutingChange}
+              disabled={smartRoutingLoading}
+            />
+          </SettingsRow>
+        )}
       </SettingsGroup>
 
       <AgentModeGroup settings={settings} />
