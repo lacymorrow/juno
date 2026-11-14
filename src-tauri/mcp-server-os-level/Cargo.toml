@@ -41,8 +41,13 @@ image = { version = "0.25.1", features = ["png", "jpeg"] }
 libc = "0.2"
 objc = "0.2.7"
 once_cell = "1.19"
-# macos_14_0 only adds API (ignoresShadowsSingleWindow is used for window
-# capture); SCScreenshotManager already needs macOS 14 at runtime.
+# macos_14_0 only adds API (ignoresShadowsSingleWindow, used for window
+# capture). It does NOT make any of it safe to call below macOS 14, and the
+# comment here used to imply that was already handled. SCScreenshotManager's
+# Objective-C class is weak-imported, so on an older host the classref is NULL
+# and the crate's Swift bridge waits forever on a completion handler that
+# never fires. Juno's minimumSystemVersion is 12.3, so every call site checks
+# platforms::macos::capture_backend first.
 screencapturekit = { version = "1.5.4", optional = true, features = ["macos_14_0"] }
 
 # Clipboard functionality now implemented using arboard (cross-platform, modern)
