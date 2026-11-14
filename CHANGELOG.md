@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.287] - 2026-11-14
+
+### Fixed
+
+- **permissions:** gate every Safari AppleScript send on Automation consent (LAC-7405) (#1007) (72f940b0)
+
 ## [0.8.286] - 2026-11-13
 
 ### Fixed
@@ -1865,7 +1871,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.286...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.287...HEAD
+[0.8.287]: https://github.com/lacymorrow/juno/compare/cua-v0.8.286...v0.8.287
 [0.8.286]: https://github.com/lacymorrow/juno/compare/cua-v0.8.285...v0.8.286
 [0.8.285]: https://github.com/lacymorrow/juno/compare/cua-v0.8.284...v0.8.285
 [0.8.282]: https://github.com/lacymorrow/juno/compare/cua-v0.8.281...v0.8.282
