@@ -329,7 +329,17 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                 if let Some(text_value) = payload_json.get("text") {
                     if let Some(text) = text_value.as_str() {
                         let app_handle_clone = app_handle_for_listener.clone();
-                        let partial_text = text.to_string();
+                        // Whisper writes `[BLANK_AUDIO]` / `(music)` for a window
+                        // with no speech. Same filter the final text goes through
+                        // (LAC-8264, juno#1014). Nothing left means nothing heard
+                        // yet: skip, so the bar keeps showing "Listening".
+                        let partial_text =
+                            tauri_plugin_voice_transcription::utils::filter_transcription_text(
+                                text,
+                            );
+                        if partial_text.trim().is_empty() {
+                            return;
+                        }
                         // Live streaming partials carry `provisional: true` so the
                         // bar can render them dimmed/italic. Absent = coarse (solid).
                         let provisional = payload_json
