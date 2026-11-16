@@ -515,8 +515,15 @@ mod tests {
         assert!(provider.knows_model(chat));
         // Verified against the table, not memory. Chat moved from Sonnet 5 to
         // Sonnet 5.5 when Sonnet 5 went legacy (the role requires a current
-        // model) — 2026-10-05 weekly model check, LAC-4142.
-        assert_eq!(classifier, model_ids::CLAUDE_HAIKU_4_5);
+        // model) — 2026-10-05 weekly model check, LAC-4142. Classifier moved
+        // from Haiku 4.5 to Haiku 5.5 when Haiku 4.5 went legacy — 2026-11-16
+        // weekly model check, LAC-8375.
+        //
+        // Haiku 5.5 can hold the role because it still accepts the forced
+        // `tool_choice` that `build_classifier_request` sends; the Opus 5.5,
+        // Sonnet 5.5 and Fable 5.2 rows all reject it with a 400, so the role
+        // cannot move to any of those however cheap they get.
+        assert_eq!(classifier, model_ids::CLAUDE_HAIKU_5_5);
         assert_eq!(chat, model_ids::CLAUDE_SONNET_5_5);
     }
 
