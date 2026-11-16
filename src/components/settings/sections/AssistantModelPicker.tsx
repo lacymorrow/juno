@@ -22,7 +22,6 @@ import {
 import { Check } from "lucide-react";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
-import { useAdvancedSettings } from "../AdvancedSettingsContext";
 import { useCallback, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { COMMANDS } from "@/lib/constants.generated";
@@ -50,50 +49,37 @@ export default function AssistantModelPicker({
     (p) => p.id === settings.activeProvider
   );
 
-  const { advanced: showAdvanced } = useAdvancedSettings();
-
   const currentModelId =
     settings.formData.model || settings.providerSettings?.model || "";
 
-  // Build sorted provider list: active provider first, then others with models.
-  // A provider whose models are all hidden drops out rather than rendering an
-  // empty group.
+  // Every model a provider reports is listed here, deliberately, and this
+  // picker does no filtering of its own.
+  //
+  // It is wrapped in a `SettingsGroup advanced`, and its only call site passes
+  // `advanced` (AIProviderSettings.tsx), so it is mounted only while the
+  // advanced-settings toggle is on — and someone who turned that on is asking
+  // to see everything.
+  //
+  // It used to filter on `is_legacy` / `requires_computer_toolset`, under a
+  // comment claiming Juno "offers the current generation and nothing else, the
+  // way an Apple product does". That filter read the SAME toggle that gates the
+  // group, so it short-circuited on `showAdvanced` every time it ran and hid
+  // nothing, in every build that ever shipped (LAC-8407). Do not re-add it
+  // here: a filter keyed on the toggle that decides whether this component
+  // exists at all can never fire. The surface where that rule would bite is the
+  // chat input's model selector (components/chat/ChatInput.tsx), which every
+  // person sees and which filters nothing today.
+  //
+  // A provider that reports no models drops out rather than rendering an empty
+  // group.
   const sortedProviders = useMemo(() => {
     const withModels = settings.providers.filter(
-      (p) =>
-        p.model_info &&
-        p.model_info.some(
-          (m) =>
-            showAdvanced ||
-            (!m.is_legacy && !m.requires_computer_toolset) ||
-            m.id === currentModelId
-        )
+      (p) => p.model_info && p.model_info.length > 0
     );
     const active = withModels.filter((p) => p.id === settings.activeProvider);
     const rest = withModels.filter((p) => p.id !== settings.activeProvider);
     return [...active, ...rest];
-  }, [
-    settings.providers,
-    settings.activeProvider,
-    showAdvanced,
-    currentModelId,
-  ]);
-
-  // Juno offers the current generation and nothing else, the way an Apple
-  // product does. Models that only drive the computer through an older tool
-  // version stay out of the list unless you ask for them — with one exception:
-  // whatever is selected right now is always shown, so the list can never hide
-  // what Juno is actually running, and you can always switch off it.
-  const visibleModels = useCallback(
-    (models: typeof settings.providers[number]["model_info"]) =>
-      models.filter(
-        (model) =>
-          showAdvanced ||
-          (!model.is_legacy && !model.requires_computer_toolset) ||
-          model.id === currentModelId
-      ),
-    [showAdvanced, currentModelId]
-  );
+  }, [settings.providers, settings.activeProvider]);
 
   const selectedModel = useMemo(() => {
     for (const provider of settings.providers) {
@@ -237,7 +223,7 @@ export default function AssistantModelPicker({
                       }
                       className={!provider.is_available ? "opacity-50" : undefined}
                     >
-                      {visibleModels(provider.model_info).map((model) => {
+                      {provider.model_info.map((model) => {
                         const isActive =
                           model.id === currentModelId &&
                           provider.id === settings.activeProvider;
