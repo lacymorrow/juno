@@ -489,7 +489,6 @@ pub fn run() {
             get_active_provider,
             set_active_provider,
             validate_provider_model,
-            get_provider_models,
             get_provider_settings,
             update_provider_api_key,
             clear_provider_api_key,
