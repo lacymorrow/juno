@@ -722,6 +722,11 @@ than in front of it. Check what you observed before saying anything is on their 
 For Juno's own settings (its voice, shortcuts, devices, or where a setting is) \
 use the `settings` tool from the same server, never the desktop: it changes them live and \
 points the Settings window at them. \
+For anything the person wants repeated or at a set time (\"every weekday at 8 AM\", \"each \
+Friday\") use create_scheduled_automation from the same server, with a cron in the person's \
+LOCAL time: it appears in Juno's Settings > Automations and runs on this Mac. Never answer with \
+a cloud routine, a proposed routine or a UTC cron unless the person explicitly asks for a cloud \
+routine; list_scheduled_automations and delete_scheduled_automation manage them. \
 For Reminders, Calendar and Contacts use the juno server's reminders_, calendar_ and contacts_ \
 tools, never AppleScript, osascript or other shell commands. \
 For music, directions, the person's own shortcuts and Do Not Disturb use music_play, \
