@@ -94,6 +94,7 @@ jobs:
       # Count what claude[bot] left on the PR since this job started and fail
       # when it is nothing.
       - name: Fail when the review posted nothing
+        id: tripwire
         if: env.HAS_CLAUDE_OAUTH_TOKEN == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -110,4 +111,34 @@ jobs:
           if [ "$((top + inline))" -eq 0 ]; then
             echo "::error title=No review posted::Claude ran but left no comment on this pull request."
             exit 1
+          fi
+
+      # Say on the PR when the review step failed or posted nothing (the tripwire
+      # above), so a reader merging
+      # does not mistake a red advisory check for flake (LAC-8377). The body is
+      # static prose plus the run URL, PR number and commit SHA. Nothing from
+      # the action's output or stderr goes in: this job holds the OAuth token
+      # on a public repo. Fork and Dependabot PRs are excluded (no secrets by
+      # design), and the missing-token step already fails loudly on its own.
+      # One comment per PR, edited in place on later pushes, found by a marker.
+      - name: Say on the PR that no review ran
+        if: failure() && (steps.claude-review.outcome == 'failure' || steps.tripwire.outcome == 'failure') && env.HAS_CLAUDE_OAUTH_TOKEN == 'true' && env.NO_SECRETS_BY_DESIGN != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          marker='<!-- claude-review-did-not-run -->'
+          body="$marker
+          **No automated review ran on this commit** (\`${SHA:0:7}\`). The Claude review failed or posted nothing, so nobody has read this diff automatically. A human review is needed. Details: $RUN_URL"
+          # --paginate runs --jq once per page, so a match on page 1 and another
+          # on page 2 would print two ids: keep the first line only.
+          ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments?per_page=100" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id")
+          id=${ids%%$'\n'*}
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$body" >/dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$body" >/dev/null
           fi
