@@ -572,7 +572,21 @@ async fn turn_environment(
     // permission prompts route into Juno's approval sheet instead of
     // being skipped. Read per run, so flipping the setting needs no
     // restart. Without an app handle there is no sheet to route to.
-    let ask_before_send = app_handle.is_some_and(cli_approval::is_enabled);
+    //
+    // "Ask me first" (LAC-8366) counts as asking too, whatever the send
+    // setting says: it is the stronger promise, and the spawn has to route
+    // permission prompts to `approve` for it to be kept. Folding it in here
+    // also moves the persistent-session fingerprint, so a conversation already
+    // running under skip-permissions is replaced when the person switches the
+    // mode instead of carrying on unasked.
+    let ask_first = match app_handle {
+        Some(handle) => {
+            super::juno_mcp::permission_mode(handle).await
+                == crate::agent::tools::permission_policy::PermissionMode::AskFirst
+        }
+        None => false,
+    };
+    let ask_before_send = ask_first || app_handle.is_some_and(cli_approval::is_enabled);
 
     // Fail closed. Every branch above that could not write a file answered
     // with `None`, and `None` here used to mean a spawn with nothing reading

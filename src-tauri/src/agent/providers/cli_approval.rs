@@ -29,6 +29,7 @@ use tauri::{Emitter, Manager};
 use tracing::{info, warn};
 
 use crate::agent::background_shell::{policy_for, ShellPolicy};
+use crate::agent::tools::permission_policy::{self, PermissionMode};
 use crate::constants::events;
 use crate::constants::settings::{store_keys, SETTINGS_STORE_FILE};
 use crate::state::{AppState, RiskLevel, ToolApprovalRequest};
@@ -57,7 +58,15 @@ pub const APPROVE_TOOL_NAME: &str = "approve";
 /// alone, `verdict_for` allows it on the spot. Deciding per call rather than
 /// per spawn is also what makes toggling background mode take effect in the
 /// conversation already running, instead of at the next cold start.
-pub const ALLOWED_TOOLS: &str = "Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,NotebookEdit,\
+///
+/// **`Edit`, `Write` and `NotebookEdit` are not here either** (LAC-8366). They
+/// were, which meant "Ask me first" in Security and Privacy did nothing on this
+/// provider: a file changed with no card. They now reach `approve` like `Bash`,
+/// and [`ask_first_risk`] decides there, per call, against the mode read fresh
+/// from settings. In every other mode `verdict_for` allows them on the spot, so
+/// the only cost to a person who did not choose "Ask me first" is one loopback
+/// round trip per edit.
+pub const ALLOWED_TOOLS: &str = "Read,Glob,Grep,WebFetch,WebSearch,\
      TodoWrite,Task,mcp__juno__computer,mcp__juno__settings";
 
 /// The CLI's own shell tool, as the permission prompt names it, and as the
@@ -338,6 +347,84 @@ pub async fn background_shell_hook_answer(app: &tauri::AppHandle, payload: &Valu
         .cloned()
         .unwrap_or_else(|| json!({}));
     hook_answer_for(background_mode, tool_name, &input)
+}
+
+/// The risk of one CLI built-in under "Ask me first", or `None` when the tool is
+/// not one the CLI changes the Mac with (reads, search, planning, connectors).
+///
+/// The CLI's `Edit`, `Write`, `NotebookEdit` and `Bash` are Juno's `edit_file`,
+/// `write_file` and `bash` under other names, so they are judged by the same
+/// classifier the in-process runner uses rather than by a second list that
+/// could drift from it. A path with `..` or under a system directory is
+/// Critical there, and Critical asks in every mode.
+pub fn ask_first_risk(tool_name: &str, input: &Value) -> Option<(&'static str, Value, RiskLevel)> {
+    let (mapped, mapped_input): (&'static str, Value) = match tool_name {
+        "Write" => ("write_file", input.clone()),
+        "Edit" | "MultiEdit" => ("edit_file", input.clone()),
+        "NotebookEdit" => {
+            // The classifier reads `path` or `file_path`; a notebook names its
+            // file `notebook_path`, and an unread path is a Medium that should
+            // have been Critical.
+            let mut notebook = input.clone();
+            if let (Some(map), Some(path)) = (
+                notebook.as_object_mut(),
+                input.get("notebook_path").cloned(),
+            ) {
+                map.entry("path").or_insert(path);
+            }
+            ("edit_file", notebook)
+        }
+        BASH_TOOL => ("bash", input.clone()),
+        _ => return None,
+    };
+    let risk = crate::agent::tools::risk_classifier::classify_risk(mapped, &mapped_input);
+    Some((mapped, mapped_input, risk))
+}
+
+/// Ask the person about one CLI built-in under "Ask me first".
+///
+/// `None` means this call is not gated by the mode (a read, or a tool this
+/// module does not own) and the ordinary path continues. `Some` is the answer
+/// to hand the CLI: allow when the policy lets it through, otherwise the
+/// person's decision. A tool that reaches here and cannot be shown to the
+/// person is denied, never allowed.
+async fn ask_first_answer(app: &tauri::AppHandle, tool_name: &str, input: &Value) -> Option<Value> {
+    let (mapped, mapped_input, risk) = ask_first_risk(tool_name, input)?;
+    if !permission_policy::requires_approval_for(mapped, PermissionMode::AskFirst, &risk, false) {
+        return Some(allow_result(input));
+    }
+    let description = permission_policy::describe_action(mapped, &mapped_input);
+    let request = ToolApprovalRequest::new(
+        uuid::Uuid::new_v4().to_string(),
+        tool_name.to_string(),
+        input.clone(),
+        description.clone(),
+    )
+    .with_risk(risk)
+    .with_timeout(APPROVAL_TIMEOUT_SECS);
+
+    Some(match ask_person(app, request).await {
+        Some(true) => {
+            info!("[CliApproval] Ask me first, approved: {description}");
+            allow_result(input)
+        }
+        Some(false) => {
+            info!("[CliApproval] Ask me first, declined: {description}");
+            deny_result(
+                "The person chose to be asked first and declined, so Juno did not do this. \
+                 Tell them it was not done; they can ask again if they change their mind.",
+            )
+        }
+        None => {
+            info!(
+                "[CliApproval] Ask me first, no answer in {APPROVAL_TIMEOUT_SECS}s: {description}"
+            );
+            deny_result(
+                "No answer within 60 seconds, so Juno did not do this. Tell the person \
+                 their approval was needed and no answer arrived; they can ask again.",
+            )
+        }
+    })
 }
 
 /// What `approve` decides before any sheet is shown.
@@ -689,8 +776,20 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
         return answer;
     }
 
-    // Off means off: the old behaviour, everything runs.
-    if !is_enabled(app) {
+    // "Ask me first" is a separate promise from "Ask before Juno sends", and
+    // it is the stronger one: the person chose to be asked before anything
+    // changes the Mac. It is read fresh per call, so a change in Settings
+    // applies to the conversation already running (LAC-8366).
+    let mode = super::juno_mcp::permission_mode(app).await;
+    if mode == PermissionMode::AskFirst {
+        if let Some(answer) = ask_first_answer(app, tool_name, &input).await {
+            return answer;
+        }
+    }
+
+    // Off means off: the old behaviour, everything runs. Not in "Ask me
+    // first", which asked above and falls through to the send gate here.
+    if mode != PermissionMode::AskFirst && !is_enabled(app) {
         return allow_result(&input);
     }
 
@@ -1519,6 +1618,57 @@ mod tests {
             );
         }
         assert_eq!(verdict_for("SomeBuiltIn"), Verdict::Allow);
+    }
+
+    /// LAC-8366: the file tools are not pre-approved, so they reach `approve`.
+    #[test]
+    fn file_writing_builtins_are_not_pre_approved() {
+        for tool in ["Edit", "Write", "NotebookEdit", "MultiEdit", BASH_TOOL] {
+            assert!(
+                !ALLOWED_TOOLS.split(',').any(|t| t == tool),
+                "{tool} must reach approve or Ask me first cannot see it"
+            );
+        }
+    }
+
+    /// LAC-8366: what "Ask me first" stops and what it lets through.
+    #[test]
+    fn ask_first_asks_for_every_change_and_waves_reads_through() {
+        let asks = |tool: &str, input: Value| {
+            ask_first_risk(tool, &input).is_some_and(|(name, _, risk)| {
+                permission_policy::requires_approval_for(
+                    name,
+                    PermissionMode::AskFirst,
+                    &risk,
+                    false,
+                )
+            })
+        };
+        assert!(asks(
+            "Write",
+            json!({"file_path": "/Users/a/notes.md", "content": "x"})
+        ));
+        assert!(asks("Edit", json!({"file_path": "/Users/a/notes.md"})));
+        assert!(asks("MultiEdit", json!({"file_path": "/Users/a/notes.md"})));
+        assert!(asks(
+            "NotebookEdit",
+            json!({"notebook_path": "/Users/a/n.ipynb"})
+        ));
+        assert!(asks("Bash", json!({"command": "rm old.txt"})));
+        // Reads, and an inert command, do not stop the person.
+        assert!(!asks("Bash", json!({"command": "ls -la"})));
+        for tool in ["Read", "Glob", "Grep", "WebSearch", "TodoWrite", "Task"] {
+            assert!(ask_first_risk(tool, &json!({})).is_none(), "{tool}");
+        }
+    }
+
+    /// A notebook's path must reach the classifier, or a system path is Medium.
+    #[test]
+    fn ask_first_reads_a_notebooks_path_for_the_critical_floor() {
+        let (_, _, risk) =
+            ask_first_risk("NotebookEdit", &json!({"notebook_path": "/etc/x.ipynb"}))
+                .expect("a notebook edit is gated");
+        assert_eq!(risk, RiskLevel::Critical);
     }
 
     #[test]

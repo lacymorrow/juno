@@ -452,7 +452,7 @@ fn is_mac_app_tool(name: &str) -> bool {
 /// The person's permission mode, read fresh so a change in Settings applies to
 /// the next call. Unreadable settings fall back to the default, which asks more
 /// than "do not ask", never less.
-async fn permission_mode(app: &tauri::AppHandle) -> PermissionMode {
+pub(crate) async fn permission_mode(app: &tauri::AppHandle) -> PermissionMode {
     use tauri::Manager;
     let Some(manager) = app.try_state::<crate::settings::manager::SettingsManager>() else {
         return PermissionMode::default();
