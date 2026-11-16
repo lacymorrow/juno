@@ -834,6 +834,15 @@ mod tests {
     /// every turn independently and flags >1% disagreement, which only means
     /// something if both sides are keyed the same way and sourced from the
     /// same live docs.
+    ///
+    /// Long-context rates are compared in three cells, not two, because the
+    /// two sides can represent one more state than each other. Juno has a
+    /// tier (threshold and four rates must match); Juno has none and the
+    /// analyzer publishes none (agreed); Juno has none and the analyzer knows
+    /// only a threshold (gpt-5.5, left rateless on purpose so the analyzer
+    /// raises instead of guessing). The fourth combination — the analyzer
+    /// carries full rates Juno does not — is the silent underprice this
+    /// refuses.
     #[test]
     fn the_rust_price_table_agrees_with_the_analyzer_price_table() {
         let path =
@@ -878,6 +887,64 @@ mod tests {
                                 "{key} {name}: Juno says {ours}, prices.json says {theirs}. \
                                  Re-read the LIVE pricing page and fix whichever is wrong."
                             );
+                        }
+                        // The long-context tier is a second, independent set of
+                        // rates, and comparing only the four above is how a
+                        // swapped `long_input`/`long_output` pair passes
+                        // (LAC-8403). Every turn under the threshold prices
+                        // identically on both sides, so the tables agree right
+                        // up to the first long prompt in production.
+                        match &rates.long_context {
+                            Some(long) => {
+                                let threshold = long.threshold_tokens;
+                                assert_eq!(
+                                    entry.get("long_context_threshold").and_then(|v| v.as_u64()),
+                                    Some(threshold),
+                                    "{key}: Juno switches to long-context rates above \
+                                     {threshold} prompt tokens and prices.json does not \
+                                     agree, so the same turn is priced from two different \
+                                     tiers."
+                                );
+                                for (name, ours) in [
+                                    ("long_input", long.input),
+                                    ("long_output", long.output),
+                                    ("long_cache_read", long.cache_read),
+                                    ("long_cache_write", long.cache_write),
+                                ] {
+                                    let theirs = rate(entry, name);
+                                    assert!(
+                                        (ours - theirs).abs() < 1e-9,
+                                        "{key} {name}: Juno says {ours}, prices.json says \
+                                         {theirs}. Re-read the LIVE pricing page and fix \
+                                         whichever is wrong."
+                                    );
+                                }
+                            }
+                            // A bare `long_context_threshold` with no rates is
+                            // deliberate on the analyzer's side (gpt-5.5): it
+                            // raises rather than guess a rate nobody published,
+                            // and Juno's `LongContext` cannot express a tier
+                            // whose rates are unknown. Published `long_*` rates
+                            // Juno does not carry are the dangerous shape, so
+                            // only those are refused: Juno would bill every
+                            // prompt past the threshold at the short rate and
+                            // the cross-check would never disagree with itself.
+                            None => {
+                                for name in [
+                                    "long_input",
+                                    "long_output",
+                                    "long_cache_read",
+                                    "long_cache_write",
+                                ] {
+                                    assert!(
+                                        entry.get(name).is_none(),
+                                        "{key}: prices.json publishes {name} but Juno has no \
+                                         long-context tier for it, so Juno underprices every \
+                                         prompt past the threshold. Declare the tier with \
+                                         `Price::per_mtok_tiered`."
+                                    );
+                                }
+                            }
                         }
                     }
                     Price::Subscription => {
