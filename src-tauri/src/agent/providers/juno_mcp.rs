@@ -719,7 +719,11 @@ mod tests {
     #[test]
     fn the_computer_settings_and_approve_tools_are_offered() {
         let tools = tool_list();
-        assert_eq!(tools.len(), 3 + mac_apps::tool_definitions().len());
+        // computer, settings, approve, and the three schedule tools (LAC-8365).
+        assert_eq!(
+            tools.len(),
+            3 + schedule_tools::definitions().len() + mac_apps::tool_definitions().len()
+        );
         assert_eq!(tools[0]["name"], "computer");
         assert!(
             tools[0]["inputSchema"]["properties"]["action"].is_object(),
