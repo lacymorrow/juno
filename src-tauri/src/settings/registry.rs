@@ -107,7 +107,7 @@ impl Pane {
     pub fn advanced(self) -> bool {
         matches!(
             self,
-            Pane::Tools | Pane::Automations | Pane::Network | Pane::Advanced
+            Pane::Providers | Pane::Tools | Pane::Automations | Pane::Network | Pane::Advanced
         )
     }
 
