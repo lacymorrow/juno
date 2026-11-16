@@ -9,7 +9,7 @@ per-turn cost telemetry that produces the input, is LAC-4127.
 
 | File | What it is |
 |---|---|
-| `prices.json` | USD per MTok per model, verified against live provider docs 2026-10-16 |
+| `prices.json` | USD per MTok per model, verified against live provider docs. Its `_verified` field carries the dates, per provider; this table does not restate them |
 | `analyze-cost-log.py` | Cost log → the $/task table, the sizing answers, and a cross-check |
 | `fixtures/` | Invented data for the self-test. Never quote it as a measurement. |
 
