@@ -3306,11 +3306,33 @@ mod tests {
             .expect("the shell screen is passed when the send gate is off");
         assert_eq!(args[at + 1], screen.display().to_string());
 
-        // With the gate on, the screen rides `approve` and no settings file
-        // is passed, even though one was written.
+        // With the gate on, the screen rides `approve`, and the hook file it
+        // was written to is deliberately NOT passed even though one exists: a
+        // `PreToolUse` hook answering `permissionDecision: "allow"` pre-empts
+        // `--permission-prompt-tool` entirely, so the screen's own settings
+        // must never travel on the asking path (measured on claude 2.1.325,
+        // LAC-8384). `--settings` is still here, carrying the inline
+        // permission pin instead, which is what stops the person's own
+        // `~/.claude/settings.json` from switching the gate off. This assert
+        // used to read `!asking.contains("--settings")` and the pin made it
+        // stale; the pair below is what it was reaching for.
         let asking = brain.build_args("open mail", None, Some(&config), Some(&screen), true);
-        assert!(!asking.contains(&"--settings".to_string()));
         assert!(asking.contains(&"--permission-prompt-tool".to_string()));
+        let pinned_at = asking
+            .iter()
+            .position(|a| a == "--settings")
+            .expect("the asking path carries the permission pin");
+        let pinned = &asking[pinned_at + 1];
+        assert!(
+            pinned.starts_with('{'),
+            "the pin is inline JSON, not a path: {pinned}"
+        );
+        assert_ne!(
+            pinned,
+            &screen.display().to_string(),
+            "the shell screen's hook settings must not ride the asking path: a hook \
+             answering allow pre-empts the permission prompt and nothing reaches approve"
+        );
     }
 
     #[test]
