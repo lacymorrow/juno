@@ -105,8 +105,9 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
         </SettingsGroup>
       )}
 
-      {/* The one place the agent's provider+model is chosen. Settings > Models
-          is the dictation catalog; #578 removed this picker from it as a
+      {/* Where the agent's provider+model is chosen in Settings. The chat input
+          has its own model menu that writes the same pair. Settings > Models is
+          the dictation catalog; #578 removed this picker from it as a
           duplicate. */}
       <AssistantModelPicker settings={settings} advanced />
 

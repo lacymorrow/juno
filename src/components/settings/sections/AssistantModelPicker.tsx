@@ -38,8 +38,13 @@ interface AssistantModelPickerProps {
  * AIProviderSettings purely to keep that file readable; AIProviderSettings is
  * its only call site. A pick validates the model against the provider before
  * persisting it (PROVIDERS_VALIDATE_PROVIDER_MODEL, then
- * PROVIDERS_UPDATE_PROVIDER_MODEL), so the active provider+model is written
- * here and nowhere else.
+ * PROVIDERS_UPDATE_PROVIDER_MODEL).
+ *
+ * It is not the only writer of that pair, so do not read it as the single
+ * source of truth: chat/ChatInput.tsx carries a near-identical
+ * handleModelSelect for the chat model menu, and useSettings writes
+ * update_provider_model on save when formData.model changed. Rust owns the
+ * invariant, not this component.
  *
  * It did have a second home once: #573 mounted it in a "unified Models pane"
  * next to the dictation tiers, and #578 removed it from there as a duplicate
