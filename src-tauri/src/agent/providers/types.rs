@@ -2070,7 +2070,8 @@ mod tests {
         assert_eq!(
             tiered,
             vec![model_ids::CLAUDE_HAIKU_5_5],
-            "only Haiku 5.5 is priced by prompt length; every other current              model includes the full 1M window at standard pricing"
+            "only Haiku 5.5 is priced by prompt length; every other current model \
+             includes the full 1M window at standard pricing"
         );
 
         let def = Provider::Anthropic
