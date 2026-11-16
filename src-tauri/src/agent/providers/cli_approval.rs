@@ -78,6 +78,7 @@ pub const APPROVE_TOOL_NAME: &str = "approve";
 /// from settings. In every other mode `verdict_for` allows them on the spot, so
 /// the only cost to a person who did not choose "Ask me first" is one loopback
 /// round trip per edit.
+///
 /// **`Task` is here deliberately, and it was measured rather than assumed**
 /// (LAC-8384). The open question was whether a subagent's `Edit` and `Write`
 /// calls come back through the parent's permission prompt or run unseen inside
@@ -459,6 +460,11 @@ pub async fn background_shell_hook_answer(app: &tauri::AppHandle, payload: &Valu
 pub fn ask_first_risk(tool_name: &str, input: &Value) -> Option<(&'static str, Value, RiskLevel)> {
     let (mapped, mapped_input): (&'static str, Value) = match tool_name {
         "Write" => ("write_file", input.clone()),
+        // `MultiEdit` is mapped although `claude` 2.1.325 has no such tool
+        // (the pin's `ask` list leaves it out for exactly that reason, since a
+        // rule naming no known tool prints a warning into the person's chat).
+        // Mapping costs nothing and an older build that still emits it is
+        // gated rather than waved through.
         "Edit" | "MultiEdit" => ("edit_file", input.clone()),
         "NotebookEdit" => {
             // The classifier reads `path` or `file_path`; a notebook names its
@@ -526,11 +532,18 @@ async fn ask_first_answer(
     let key = denial_key(tool_name, input);
     if recently_denied(&key, Instant::now()) {
         return Some(deny_result(
-            "This was declined moments ago and was not done. Do not retry; tell the person \
-             it was not done, and that they can ask again if they change their mind.",
+            "Juno asked about this moments ago and it was not done: the person declined, \
+             or did not answer. Do not retry; tell them it was not done, and that they can \
+             ask again if they change their mind.",
         ));
     }
 
+    // The card describes what the model asked for, not `approved`. Under
+    // background mode those differ by the rewrite (`open` against `open -g`),
+    // and the person recognises the command they caused. The rewrite is
+    // background mode keeping its own promise about the screen, which is not a
+    // second thing to agree to, and it is taught to the model once in
+    // `MCP_TOOL_GUIDANCE`. Deliberate: do not "fix" the mismatch.
     let description = permission_policy::describe_action(mapped, &mapped_input);
     let request = ToolApprovalRequest::new(
         uuid::Uuid::new_v4().to_string(),
@@ -686,6 +699,13 @@ fn names_a_gated_act(tool: &str) -> bool {
 /// owns the tool, the gate belongs on the call's parameters instead. The known
 /// gap is a spend whose verb Juno does not carry, such as `place_order`; the
 /// fix for that is a structural spend signal, not a longer verb list.
+///
+/// `WebFetch` and `WebSearch` are the same gap wearing the CLI's own names, and
+/// they are in `ALLOWED_TOOLS` as well, so they do not even reach here: a URL
+/// can carry data out of the machine in its query string and nothing above
+/// reads it as a send. That is not an oversight to be patched with another
+/// list. It is the reason the direction of travel is to gate by consequence
+/// where the parameters are known, which is `docs/plans/permissions-by-consequence.md`.
 pub fn verdict_for(tool_name: &str) -> Verdict {
     // Juno's own server: the computer tool is in `--allowedTools`, but a
     // call that lands here anyway is Juno driving its own desktop. The Mac app
@@ -733,7 +753,14 @@ fn recently_denied(tool_name: &str, now: Instant) -> bool {
 
 fn record_denial(tool_name: &str) {
     if let Ok(mut denials) = RECENT_DENIALS.lock() {
-        denials.insert(tool_name.to_string(), Instant::now());
+        let now = Instant::now();
+        // Swept here rather than on read, because the keys stopped being a
+        // closed set: `denial_key` carries the path or the command, so a long
+        // session declining many calls would otherwise hold every one of them
+        // for as long as the app runs. An entry past its cooldown answers
+        // nothing, so dropping it changes no decision (LAC-8384).
+        denials.retain(|_, at| now.duration_since(*at) < DENY_COOLDOWN);
+        denials.insert(tool_name.to_string(), now);
     }
 }
 
@@ -897,6 +924,35 @@ pub async fn ask_person(app: &tauri::AppHandle, request: ToolApprovalRequest) ->
     decision
 }
 
+/// What [`handle_approve`] may do with background mode's verdict.
+///
+/// The type is the point, and it is doing more work than the test beside it. A
+/// refusal is an answer and carries the sentence the model reads. A rewrite is
+/// not an answer, and there is no variant in which it could be one: it is only
+/// ever a replacement for the input, handed on to the gates below. The
+/// LAC-8384 bug was one `return` on the rewrite path, so it is worth making
+/// unexpressible rather than only asserted. A `return` is cheap to write.
+#[derive(Debug, PartialEq, Eq)]
+enum BackgroundRead {
+    /// Do not run it, whatever anyone says. Nobody is asked.
+    Refuse(String),
+    /// Nothing is answered yet. `Some` replaces the input if, and only if, a
+    /// gate below allows the call.
+    Pending(Option<String>),
+}
+
+/// Read background mode's verdict the way [`handle_approve`] reads it.
+///
+/// Pure, so the one thing that must never happen is asserted with no app in
+/// the loop: see `a_background_rewrite_is_never_an_answer`.
+fn read_background(policy: Option<ShellPolicy>) -> BackgroundRead {
+    match policy {
+        Some(ShellPolicy::Refused(reason)) => BackgroundRead::Refuse(reason),
+        Some(ShellPolicy::Rewritten { command, .. }) => BackgroundRead::Pending(Some(command)),
+        None | Some(ShellPolicy::Run) => BackgroundRead::Pending(None),
+    }
+}
+
 /// Handle a `tools/call` for `approve`: decide, maybe show the sheet, wait,
 /// and answer in the CLI's permission-prompt shape.
 pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value {
@@ -925,8 +981,8 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
     // at all. Background mode is on by default, which made that the default
     // configuration (LAC-8384). The rewrite is now carried past the gates
     // below and applied only once something has allowed the call.
-    let rewrite = match background_shell_policy(app, tool_name, &input).await {
-        Some(ShellPolicy::Refused(reason)) => {
+    let rewrite = match read_background(background_shell_policy(app, tool_name, &input).await) {
+        BackgroundRead::Refuse(reason) => {
             let command = input
                 .get("command")
                 .and_then(Value::as_str)
@@ -934,11 +990,12 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
             info!("[CliApproval] Background mode refused `{command}`");
             return deny_result(&reason);
         }
-        Some(ShellPolicy::Rewritten { command, .. }) => {
-            info!("[CliApproval] Background mode: running `{command}` instead");
-            Some(command)
+        BackgroundRead::Pending(rewrite) => {
+            if let Some(command) = &rewrite {
+                info!("[CliApproval] Background mode: running `{command}` instead");
+            }
+            rewrite
         }
-        None | Some(ShellPolicy::Run) => None,
     };
 
     // What runs if this call is allowed. Every allow below answers with this
@@ -1981,6 +2038,37 @@ mod tests {
         );
     }
 
+    /// LAC-8384 item 1, half 1b: a rewrite is never an answer.
+    ///
+    /// This is the shape of the bug, as a value. A refusal answers the call; a
+    /// rewrite is `Pending`, which is the type saying "nothing is settled, and
+    /// here is what runs if something below settles it yes".
+    #[test]
+    fn a_background_rewrite_is_never_an_answer() {
+        let rewritten = ShellPolicy::Rewritten {
+            command: "open -g https://example.com".to_string(),
+            note: "opened behind your work".to_string(),
+        };
+        assert_eq!(
+            read_background(Some(rewritten)),
+            BackgroundRead::Pending(Some("open -g https://example.com".to_string())),
+            "a rewrite changes what runs, it does not decide that it may"
+        );
+
+        // A refusal is the one verdict that answers on its own.
+        assert_eq!(
+            read_background(Some(ShellPolicy::Refused("no".to_string()))),
+            BackgroundRead::Refuse("no".to_string())
+        );
+
+        // Nothing to say, in both of the ways there are to say nothing.
+        assert_eq!(read_background(None), BackgroundRead::Pending(None));
+        assert_eq!(
+            read_background(Some(ShellPolicy::Run)),
+            BackgroundRead::Pending(None)
+        );
+    }
+
     /// LAC-8384 item 1, half 2: the order itself.
     ///
     /// Pinned by reading the source, which is the only way statement order in
@@ -1993,7 +2081,15 @@ mod tests {
     /// other test in this file stayed green.
     #[test]
     fn nothing_answers_allow_between_background_mode_and_the_ask_me_first_card() {
-        let source = include_str!("cli_approval.rs");
+        // Comments are stripped first. Both review passes said the same thing
+        // about the first version of this test, and they were right: a comment
+        // in that window mentioning `allow_result` would have failed it with
+        // nothing wrong, which is how a tripwire gets deleted (LAC-8384).
+        let source: String = include_str!("cli_approval.rs")
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let body = source
             .split_once("pub async fn handle_approve")
             .expect("handle_approve is declared in this file")
@@ -2051,10 +2147,11 @@ mod tests {
         );
     }
 
-    /// The bot's review asked whether the sheet reads sensibly for
-    /// `NotebookEdit`, whose risk is judged under the name `edit_file`. It
-    /// does, because the mapped input carries the path the sentence is built
-    /// from.
+    /// The sheet must name the notebook, which is not free: `NotebookEdit` is
+    /// judged and described under the name `edit_file`, and the sentence is
+    /// built from the mapped input rather than the original. Drop the
+    /// `notebook_path` copy in `ask_first_risk` and the person is asked to
+    /// approve "Change a file" (LAC-8384).
     #[test]
     fn the_sheet_names_the_notebook_it_is_about_to_change() {
         let (mapped, mapped_input, _) = ask_first_risk(
