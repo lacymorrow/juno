@@ -799,7 +799,15 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::OPENAI_SOL_5_6,
                         name: "GPT-5.6 Sol",
-                        price: Price::per_mtok(4.0, 20.0, 0.40, 0.0),
+                        // Verified 2026-11-16 against developers.openai.com/api/docs/models/gpt-5.6-sol:
+                        // above 272K input tokens the whole request bills at 2x input
+                        // and 1.5x output; cache writes are 1.25x the input rate.
+                        // $4/$20 is promotional through 2026-11-30 (LAC-8411).
+                        price: Price::per_mtok_tiered(
+                            4.0, 20.0, 0.40, 5.0,     // short context
+                            272_000, // threshold, prompt tokens
+                            8.0, 30.0, 0.80, 10.0, // long context
+                        ),
                         computer_use: ComputerUse::FunctionTools,
                         availability: Availability::Current,
                         toolset_ga: false,
@@ -829,7 +837,15 @@ impl Provider {
                 const MODELS: &[ModelDefinition] = &[ModelDefinition {
                     id: model_ids::OPENAI_SOL_5_6,
                     name: "GPT-5.6 Sol via Rig",
-                    price: Price::per_mtok(4.0, 20.0, 0.40, 0.0),
+                    // Verified 2026-11-16 against developers.openai.com/api/docs/models/gpt-5.6-sol:
+                    // above 272K input tokens the whole request bills at 2x input
+                    // and 1.5x output; cache writes are 1.25x the input rate.
+                    // $4/$20 is promotional through 2026-11-30 (LAC-8411).
+                    price: Price::per_mtok_tiered(
+                        4.0, 20.0, 0.40, 5.0,     // short context
+                        272_000, // threshold, prompt tokens
+                        8.0, 30.0, 0.80, 10.0, // long context
+                    ),
                     computer_use: ComputerUse::FunctionTools,
                     availability: Availability::Current,
                     toolset_ga: false,
