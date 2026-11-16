@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { invoke } from "@tauri-apps/api/core";
 import { describe, expect, it, vi } from "vitest";
 import AssistantModelPicker from "../AssistantModelPicker";
 
@@ -160,5 +161,47 @@ describe("AssistantModelPicker model list", () => {
     const list = openModelList();
     expect(within(list).getByText(LEGACY.name)).toBeInTheDocument();
     expect(within(list).getAllByRole("option")).toHaveLength(2);
+  });
+});
+
+describe("AssistantModelPicker model persistence", () => {
+  const pick = (settings: ReturnType<typeof settingsWith>) => {
+    advanced.on = false;
+    render(<AssistantModelPicker settings={settings} />);
+    fireEvent.click(
+      within(openModelList()).getByText(TOOLSET.name)
+    );
+  };
+
+  it("does not show a model that failed to save", async () => {
+    const settings = settingsWith([CAPABLE, TOOLSET], CAPABLE.id);
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd.includes("validate")) return true;
+      throw new Error("persist failed");
+    });
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    pick(settings);
+
+    await waitFor(() => expect(err).toHaveBeenCalled());
+    expect(
+      (settings as unknown as { setFormData: ReturnType<typeof vi.fn> })
+        .setFormData
+    ).not.toHaveBeenCalled();
+    err.mockRestore();
+  });
+
+  it("shows the model once it saved", async () => {
+    const settings = settingsWith([CAPABLE, TOOLSET], CAPABLE.id);
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockResolvedValue(true as never);
+
+    pick(settings);
+
+    const setFormData = (
+      settings as unknown as { setFormData: ReturnType<typeof vi.fn> }
+    ).setFormData;
+    await waitFor(() => expect(setFormData).toHaveBeenCalledTimes(1));
   });
 });
