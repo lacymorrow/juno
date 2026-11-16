@@ -3266,16 +3266,40 @@ mod thinking_block_binding_tests {
             model_ids::CLAUDE_FABLE_5_1,
             model_ids::CLAUDE_OPUS_5_5,
             model_ids::CLAUDE_SONNET_5_5,
-            // Haiku 5.5 joined this list by gaining adaptive thinking: its
-            // migration guide's "Keep earlier turns unchanged" section puts it
-            // under the same prefix check, and Juno's screenshot pruner
-            // rewrites earlier turns on every long run.
+            // Haiku 5.5 joined this list by gaining adaptive thinking, and for
+            // it `drop_block` is not insurance but a requirement: the
+            // computer-use-tool page says client-side pruning on Haiku 5.5
+            // "invalidates every later thinking block already in the history",
+            // and Juno's screenshot pruner rewrites earlier turns on every long
+            // run.
+            //
+            // One condition, and it is a live trap. That page: "If you must
+            // prune on Claude Sonnet 5.5 or Claude Haiku 5.5:
+            // `prefix_mismatch_behavior` works only with
+            // `thinking: {"type": "adaptive"}`." Juno sends exactly that, so
+            // this holds — but Sonnet 5.5 also accepts
+            // `thinking: {"type": "between_tools"}`, and switching either model
+            // to it would silently void the field while leaving this test
+            // green, because the test reads the `block_binding` object and not
+            // the `type` beside it.
             model_ids::CLAUDE_HAIKU_5_5,
         ] {
             assert_eq!(
                 binding(model),
                 Some(serde_json::json!({ "prefix_mismatch_behavior": "drop_block" })),
                 "{model} would 400 mid-conversation on a replayed thinking block"
+            );
+            // The field is only honoured alongside `thinking.type: "adaptive"`,
+            // so asserting the object alone would stay green while the setting
+            // it depends on was swapped out from under it.
+            assert_eq!(
+                brain(model)
+                    .thinking_param()
+                    .as_ref()
+                    .and_then(|t| t.get("type"))
+                    .and_then(|t| t.as_str()),
+                Some("adaptive"),
+                "{model} sends block_binding, which needs thinking.type=adaptive"
             );
         }
     }
