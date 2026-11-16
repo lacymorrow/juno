@@ -788,6 +788,19 @@ impl AnthropicBrain {
         std::time::Duration::from_millis(2500),
     ];
 
+    /// True when the error body is Anthropic's `invalid_request_error` about
+    /// data retention.
+    fn is_data_retention_refusal(error_body: &str) -> bool {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(error_body) else {
+            return false;
+        };
+        value.pointer("/error/type").and_then(|v| v.as_str()) == Some("invalid_request_error")
+            && value
+                .pointer("/error/message")
+                .and_then(|v| v.as_str())
+                .is_some_and(|m| m.to_lowercase().contains("data retention"))
+    }
+
     fn format_anthropic_http_error_for_user(
         status: reqwest::StatusCode,
         error_body: &str,
@@ -809,6 +822,20 @@ impl AnthropicBrain {
         }
 
         let trimmed = error_body.trim();
+
+        // A Covered Model (Fable 5.x) refuses an org or workspace without
+        // 30-day data retention with a 400 `invalid_request_error`. Key off the
+        // provider's own message, not a model ID, so a future Covered Model
+        // needs no change here. The message is Anthropic's documented text.
+        if status == reqwest::StatusCode::BAD_REQUEST
+            && Self::is_data_retention_refusal(trimmed)
+        {
+            return "This model needs 30-day data retention, and your Anthropic organization or \
+                    workspace doesn't have it (zero data retention accounts can't use it). \
+                    Pick another model, or turn on standard retention for a workspace: \
+                    https://platform.claude.com/docs/en/manage-claude/api-and-data-retention#model-specific-data-retention-requirements"
+                .to_string();
+        }
 
         // Prefer extracting a clean, user-facing message from Anthropic's structured error JSON.
         // Example shape:
@@ -3451,6 +3478,32 @@ mod thinking_block_binding_tests {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn data_retention_400_names_the_account_setting() {
+        let body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"In order to access this model, your organization or workspace must have data retention enabled."}}"#;
+        let msg = AnthropicBrain::format_anthropic_http_error_for_user(
+            reqwest::StatusCode::BAD_REQUEST,
+            body,
+            false,
+            "Anthropic",
+        );
+        assert!(msg.contains("30-day data retention"));
+        assert!(msg.contains("#model-specific-data-retention-requirements"));
+    }
+
+    #[test]
+    fn unrelated_400_keeps_the_provider_message() {
+        let body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens too large"}}"#;
+        let msg = AnthropicBrain::format_anthropic_http_error_for_user(
+            reqwest::StatusCode::BAD_REQUEST,
+            body,
+            false,
+            "Anthropic",
+        );
+        assert!(msg.contains("max_tokens too large"));
+        assert!(!msg.contains("retention"));
+    }
+
     use super::*;
 
     // --- Fixtures --------------------------------------------------------------------------
