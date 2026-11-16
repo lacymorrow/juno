@@ -2290,6 +2290,149 @@ mod tests {
             .expect("model must be in the catalog")
     }
 
+    /// Fable 5.2 replaced Fable 5.1 in the current lineup, and the request
+    /// shape moved with it: one field changed and four deliberately did not.
+    /// A version bump that copied the old row forward would keep sending
+    /// `computer_20251124`, which Fable 5.2 answers with a 400.
+    ///
+    /// Ported from PR #963 (LAC-7413, the 2026-11-09 weekly check) via
+    /// LAC-8416. Two independent readings of the same live docs produced the
+    /// same row, which is stronger evidence than either reading alone.
+    /// Negative controls recorded on #963, not re-run here: mutating Fable
+    /// 5.2's `CU_TOOLSET` to `CU_20251124` reds this test (M1).
+    #[test]
+    fn fable_5_2_is_not_a_point_upgrade_of_fable_5_1() {
+        let new = anthropic_model(model_ids::CLAUDE_FABLE_5_2);
+        let old = anthropic_model(model_ids::CLAUDE_FABLE_5_1);
+
+        assert_eq!(new.availability, Availability::Current);
+        assert_eq!(old.availability, Availability::Legacy);
+
+        // The one field that moved. Fable 5.1 accepts computer use BOTH ways
+        // and Juno sends it the cheaper legacy tool; Fable 5.2 accepts only
+        // the toolset.
+        assert_eq!(
+            new.computer_use,
+            ComputerUse::AnthropicTool(ApiVersion::ComputerToolset20260801)
+        );
+        assert_eq!(
+            old.computer_use,
+            ComputerUse::AnthropicTool(ApiVersion::Computer20251124)
+        );
+        assert_eq!(
+            Provider::Anthropic.resolve_tool_type(
+                "computer",
+                "computer_20251124",
+                model_ids::CLAUDE_FABLE_5_2
+            ),
+            "computer_toolset_20260801",
+            "the tool version a generation test would pick is exactly what Fable 5.2 400s on"
+        );
+        // GA, so no beta header — where Fable 5.1 still needs one.
+        assert_eq!(
+            Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_FABLE_5_2),
+            None
+        );
+        assert_eq!(
+            Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_FABLE_5_1),
+            Some("computer-use-2025-11-24")
+        );
+        assert_eq!(
+            Provider::Anthropic.computer_toolset_name(model_ids::CLAUDE_FABLE_5_2),
+            Some("computer")
+        );
+
+        // The four that did NOT move. Checked, not inherited.
+        assert!(new.toolset_ga && old.toolset_ga);
+        assert_eq!(new.image_tier, ImageTier::HighResolution);
+        assert_eq!(old.image_tier, ImageTier::HighResolution);
+        assert!(new.adaptive_thinking && old.adaptive_thinking);
+        assert!(new.server_side_fallback && old.server_side_fallback);
+
+        // Opus 5.5 stays the recommended default: the overview still says
+        // "start with Claude Opus 5.5", and Fable 5.2 is the escalation for
+        // demanding reasoning, at 2x the input price.
+        assert!(!new.is_recommended);
+        assert_eq!(
+            Provider::Anthropic.default_model(),
+            model_ids::CLAUDE_OPUS_5_5
+        );
+    }
+
+    /// Haiku 5.5 crossed four axes at once, not just the version number. A
+    /// find-and-replace of the model ID would have shipped the legacy tool
+    /// version, the wrong screenshot resolution, `budget_tokens` on an
+    /// adaptive-thinking model, and `fallbacks` on the one current model that
+    /// returns a 400 for it.
+    ///
+    /// Ported from PR #963 (LAC-7413) via LAC-8416. Negative controls recorded
+    /// on #963, not re-run here: flipping `toolset_ga` true -> false reds this
+    /// test (M2), and moving `long_output` 2.50 -> 2.60 reds the price parity
+    /// test (M3).
+    #[test]
+    fn haiku_5_5_is_not_a_point_upgrade_of_haiku_4_5() {
+        let new = anthropic_model(model_ids::CLAUDE_HAIKU_5_5);
+        let old = anthropic_model(model_ids::CLAUDE_HAIKU_4_5);
+
+        assert_eq!(new.availability, Availability::Current);
+        assert_eq!(old.availability, Availability::Legacy);
+
+        // 1. Computer use: toolset-only, where Haiku 4.5 is on the oldest tool
+        //    version Juno sends. Sending `computer_20250124` here is a 400.
+        assert_eq!(
+            new.computer_use,
+            ComputerUse::AnthropicTool(ApiVersion::ComputerToolset20260801)
+        );
+        assert_eq!(
+            old.computer_use,
+            ComputerUse::AnthropicTool(ApiVersion::Computer20250124)
+        );
+        assert!(new.toolset_ga);
+        assert_eq!(
+            Provider::Anthropic.resolve_tool_type(
+                "computer",
+                "computer_20250124",
+                model_ids::CLAUDE_HAIKU_5_5
+            ),
+            "computer_toolset_20260801",
+            "the legacy type it would otherwise inherit is exactly what it 400s on"
+        );
+        // GA means no beta flag, where Haiku 4.5 still needs its own.
+        assert_eq!(
+            Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_HAIKU_5_5),
+            None
+        );
+        assert_eq!(
+            Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_HAIKU_4_5),
+            Some("computer-use-2025-01-24")
+        );
+        assert_eq!(
+            Provider::Anthropic.computer_toolset_name(model_ids::CLAUDE_HAIKU_5_5),
+            Some("computer")
+        );
+
+        // 2. Image tier: high-resolution, so screenshots capture at 2576 px.
+        assert_eq!(new.image_tier, ImageTier::HighResolution);
+        assert_eq!(old.image_tier, ImageTier::Standard);
+
+        // 3. Adaptive thinking: on, where Haiku 4.5 takes `budget_tokens`.
+        assert!(new.adaptive_thinking);
+        assert!(!old.adaptive_thinking);
+
+        // 4. Classifiers without server-side fallback. Sending `fallbacks` to
+        //    this model returns a 400, so this must stay false even though the
+        //    refusals page lists it among the models that can decline.
+        assert!(!new.server_side_fallback);
+
+        // It is not the recommended default — Opus 5.5 is, and a cheap routing
+        // model becoming the default is the #580 shape in reverse.
+        assert!(!new.is_recommended);
+        assert_eq!(
+            Provider::Anthropic.default_model(),
+            model_ids::CLAUDE_OPUS_5_5
+        );
+    }
+
     /// `availability` does not follow from `toolset_ga`: two toolset-GA models
     /// sit on opposite sides of the lifecycle line. This direction has live
     /// instances in both cells and is proven outright.
