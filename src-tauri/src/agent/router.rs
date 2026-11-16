@@ -186,9 +186,25 @@ pub fn plan_from_classification(
 /// classifier call. A router should not pay to think. Raising the token
 /// ceiling instead would buy the same answer for more money (LAC-8408).
 ///
-/// `{"type": "disabled"}` is accepted on Haiku 5.5 at effort `high` or below.
-/// The request sends no `output_config`, so the model's own default effort
-/// applies, which is below that ceiling.
+/// `{"type": "disabled"}` is accepted on Haiku 5.5 at effort `high` or below;
+/// at `xhigh` or `max` the same pair is a 400. The request sends no
+/// `output_config`, so the model's own default effort applies, which is below
+/// that ceiling. Keep it absent: while thinking is off, a per-message
+/// `output_config.effort` differing from the level in effect is itself a 400.
+///
+/// Verified against the live per-model configuration table on the Thinking
+/// page (`platform.claude.com/docs/en/build-with-claude/thinking`, read
+/// 2026-11-16, LAC-8375). Haiku 5.5 reads "Thinking off at high effort or
+/// below" in the `"disabled"` column, and its "No thinking field" cell reads
+/// "Adaptive thinking", which is the premise this whole comment rests on.
+/// Re-read that table before moving this role; do not take it from here.
+///
+/// One live caveat deliberately not relied on: with thinking off the model
+/// "can skip a tool call it needs when you also request JSON output". This
+/// request forces the call with `tool_choice` instead of asking for JSON
+/// output, so the schema-checked answer does not depend on the model electing
+/// to call the tool. Switching the classifier to structured JSON output would
+/// give that protection away.
 pub fn build_classifier_request(model: &str, query: &str) -> Value {
     let query: String = query.chars().take(MAX_QUERY_CHARS).collect();
     json!({
@@ -553,10 +569,15 @@ mod tests {
         // cannot move to any of those however cheap they get.
         //
         // Two constraints gate the role now, and they are not the same set.
-        // The request also sends `thinking: {"type": "disabled"}`, which the
-        // whole Fable line rejects with a 400, and `claude-fable-5` accepts
-        // forced `tool_choice`, so it clears the first gate and fails the
-        // second. A future move of this role has to check both (LAC-8408).
+        // The request also sends `thinking: {"type": "disabled"}`. Per the
+        // live Thinking page configuration table (read 2026-11-16, LAC-8375),
+        // Opus 5.5, Sonnet 5.5 and the whole Fable and Mythos line all answer
+        // that with a 400 — Sonnet 5.5's lowest setting is `"between_tools"`
+        // instead. So the second gate excludes more than the first does, and
+        // `claude-fable-5` is the row that proves they differ: it accepts
+        // forced `tool_choice`, clearing gate one, and rejects `"disabled"`,
+        // failing gate two. A future move of this role has to check both,
+        // against that table rather than against this comment (LAC-8408).
         assert_eq!(classifier, model_ids::CLAUDE_HAIKU_5_5);
         assert_eq!(chat, model_ids::CLAUDE_SONNET_5_5);
     }
