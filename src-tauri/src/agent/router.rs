@@ -176,11 +176,25 @@ pub fn plan_from_classification(
 
 /// The request body for one classification. The route comes back as a forced
 /// call to a strict tool, so the answer is schema-checked JSON, not prose.
+///
+/// Thinking is turned off deliberately, and leaving the key out is not the
+/// same thing: the classifier model runs adaptive thinking by default, so an
+/// omitted `thinking` spends `CLASSIFIER_MAX_TOKENS` on reasoning, ends the
+/// response at `max_tokens` with no `tool_use` block, and reads back as
+/// `RouterError::NoRouteCall`. `plan_from_classification` maps that to `None`,
+/// so routing would be silently dead on every query while still paying for a
+/// classifier call. A router should not pay to think. Raising the token
+/// ceiling instead would buy the same answer for more money (LAC-8408).
+///
+/// `{"type": "disabled"}` is accepted on Haiku 5.5 at effort `high` or below.
+/// The request sends no `output_config`, so the model's own default effort
+/// applies, which is below that ceiling.
 pub fn build_classifier_request(model: &str, query: &str) -> Value {
     let query: String = query.chars().take(MAX_QUERY_CHARS).collect();
     json!({
         "model": model,
         "max_tokens": CLASSIFIER_MAX_TOKENS,
+        "thinking": { "type": "disabled" },
         "system": CLASSIFIER_SYSTEM_PROMPT,
         "tools": [{
             "name": ROUTE_TOOL_NAME,
@@ -499,6 +513,20 @@ mod tests {
     }
 
     #[test]
+    fn the_request_turns_thinking_off() {
+        let request = build_classifier_request("m", "what is the capital of France");
+        // Not cosmetic, and not a default we can lean on. The classifier model
+        // runs adaptive thinking unless told otherwise, which spends the whole
+        // CLASSIFIER_MAX_TOKENS budget before the forced tool call is written:
+        // the response ends at `max_tokens` carrying no `tool_use` block,
+        // `parse_classifier_response` returns `NoRouteCall`, and
+        // `plan_from_classification` turns every error into `None`. Routing
+        // would be dead on every query, and silently so, because `None` is
+        // also what "routing is switched off" looks like (LAC-8408).
+        assert_eq!(request["thinking"]["type"], "disabled");
+    }
+
+    #[test]
     fn a_huge_query_is_shortened_before_it_is_sent() {
         let query = "ü".repeat(MAX_QUERY_CHARS * 3);
         let request = build_classifier_request("m", &query);
@@ -523,6 +551,12 @@ mod tests {
         // `tool_choice` that `build_classifier_request` sends; the Opus 5.5,
         // Sonnet 5.5 and Fable 5.2 rows all reject it with a 400, so the role
         // cannot move to any of those however cheap they get.
+        //
+        // Two constraints gate the role now, and they are not the same set.
+        // The request also sends `thinking: {"type": "disabled"}`, which the
+        // whole Fable line rejects with a 400, and `claude-fable-5` accepts
+        // forced `tool_choice`, so it clears the first gate and fails the
+        // second. A future move of this role has to check both (LAC-8408).
         assert_eq!(classifier, model_ids::CLAUDE_HAIKU_5_5);
         assert_eq!(chat, model_ids::CLAUDE_SONNET_5_5);
     }
