@@ -2101,15 +2101,14 @@ mod tests {
         );
     }
 
-    /// Lifecycle and toolset GA are separate axes, and #580 conflated them.
-    /// Opus 4.8 is toolset-GA yet legacy, and Haiku 4.5 is neither — its two
-    /// axes happened to move together when Haiku 5.5 launched.
-    ///
-    /// Read the gap honestly: as of 2026-11-16 the catalog holds NO
-    /// current-but-not-toolset-GA model, because all four current models are
-    /// toolset-GA. That direction is representable in the types but has no live
-    /// example left, so this test proves independence in one direction only.
-    /// Do not re-derive either field from the other on the strength of that.
+    /// Which computer-use shape each model gets, asserted per model, because
+    /// #580 derived it from a lifecycle label and made a legacy model the
+    /// default. This test owns the tool-version axis only; the independence of
+    /// `availability` and `toolset_ga` is asserted by the three tests below
+    /// (`lifecycle_is_not_inferred_from_toolset_ga`,
+    /// `toolset_ga_is_not_inferred_from_a_legacy_lifecycle` and the
+    /// `every_current_model_is_toolset_ga_today` census), which is also where
+    /// the one empty cell of that 2x2 is recorded.
     #[test]
     fn the_toolset_path_is_selected_per_model_and_leaves_the_rest_alone() {
         for (model, expected_type, expected_flag) in [
@@ -2273,28 +2272,70 @@ mod tests {
         );
     }
 
+    fn anthropic_model(id: &str) -> &'static ModelDefinition {
+        Provider::Anthropic
+            .model_definitions()
+            .iter()
+            .find(|def| def.id == id)
+            .expect("model must be in the catalog")
+    }
+
+    /// `availability` does not follow from `toolset_ga`: two toolset-GA models
+    /// sit on opposite sides of the lifecycle line. This direction has live
+    /// instances in both cells and is proven outright.
     #[test]
     fn lifecycle_is_not_inferred_from_toolset_ga() {
-        let by_id = |id: &str| {
-            Provider::Anthropic
-                .model_definitions()
-                .iter()
-                .find(|def| def.id == id)
-                .expect("model must be in the catalog")
-        };
-
-        let opus_4_8 = by_id(model_ids::CLAUDE_OPUS_4_8);
+        let opus_4_8 = anthropic_model(model_ids::CLAUDE_OPUS_4_8);
         assert!(opus_4_8.toolset_ga);
         assert_eq!(opus_4_8.availability, Availability::Legacy);
 
-        let haiku_4_5 = by_id(model_ids::CLAUDE_HAIKU_4_5);
-        assert!(!haiku_4_5.toolset_ga);
-        assert_eq!(haiku_4_5.availability, Availability::Legacy);
-
-        // Current and toolset-GA, which is every current row today.
-        let haiku_5_5 = by_id(model_ids::CLAUDE_HAIKU_5_5);
+        let haiku_5_5 = anthropic_model(model_ids::CLAUDE_HAIKU_5_5);
         assert!(haiku_5_5.toolset_ga);
         assert_eq!(haiku_5_5.availability, Availability::Current);
+    }
+
+    /// The converse, and it is deliberately named for the half that has
+    /// instances. Two *legacy* models disagree on `toolset_ga`, so the flag
+    /// cannot be derived from a legacy label. Among *current* models the
+    /// catalog holds no counter-example today — see
+    /// `every_current_model_is_toolset_ga_today`, which records that gap as
+    /// a measurement rather than leaving this test's name to imply it.
+    #[test]
+    fn toolset_ga_is_not_inferred_from_a_legacy_lifecycle() {
+        let opus_4_8 = anthropic_model(model_ids::CLAUDE_OPUS_4_8);
+        assert_eq!(opus_4_8.availability, Availability::Legacy);
+        assert!(opus_4_8.toolset_ga);
+
+        let haiku_4_5 = anthropic_model(model_ids::CLAUDE_HAIKU_4_5);
+        assert_eq!(haiku_4_5.availability, Availability::Legacy);
+        assert!(!haiku_4_5.toolset_ga);
+    }
+
+    /// The empty cell of that 2x2, asserted so it cannot rot into a comment.
+    ///
+    /// As of 2026-11-16 every current Anthropic model is toolset-GA — Haiku
+    /// 4.5 was the last current row that was not, and it went legacy when
+    /// Haiku 5.5 launched. Nothing in the types forbids the combination, so
+    /// this is a census, not a rule: when it fails, Anthropic has shipped a
+    /// current model that declines the toolset. That is the live instance
+    /// `toolset_ga_is_not_inferred_from_a_legacy_lifecycle` is missing, so
+    /// add it there, widen this test's name, and fix the paragraph in
+    /// `CLAUDE.md` that still says the gap exists. Do not "fix" it by
+    /// deriving either field from the other.
+    #[test]
+    fn every_current_model_is_toolset_ga_today() {
+        let current_without_toolset: Vec<_> = Provider::Anthropic
+            .model_definitions()
+            .iter()
+            .filter(|def| def.availability == Availability::Current && !def.toolset_ga)
+            .map(|def| def.id)
+            .collect();
+        assert!(
+            current_without_toolset.is_empty(),
+            "{current_without_toolset:?} are current but not toolset-GA. The \
+             current-and-not-GA cell has an instance again: give it a real \
+             assertion instead of this census."
+        );
     }
 
     /// Image tier and tool version are separate axes. Opus 4.6 shares Opus
