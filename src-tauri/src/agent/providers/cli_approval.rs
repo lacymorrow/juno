@@ -289,11 +289,21 @@ const SETTINGS_FLAG: &str = "--settings";
 ///   runs: hook alone, `approve` not consulted and `echo hi` ran; the same
 ///   hook plus this `ask` list, `approve` consulted and the denial held.
 ///
-///   That bypass is reachable from outside Juno. Hooks load from the person's
-///   own `~/.claude/settings.json` **and** from a project-level
-///   `.claude/settings.json` in whatever directory the CLI spawns in, and
-///   `-p` skips the workspace trust dialog, so Juno never gets asked about
-///   the directory. A project hook was measured firing from the spawn's cwd.
+///   Hooks load from the person's own `~/.claude/settings.json` **and** from
+///   a project-level `.claude/settings.json` in the directory the CLI spawns
+///   in, and `-p` skips the workspace trust dialog, so Juno never gets asked
+///   about the directory. A project hook was measured firing from the spawn's
+///   cwd.
+///
+///   That cwd is **always** the home directory, never a repo Juno happens to
+///   be looking at: [`super::claude_cli::claude_command`] sets it on every
+///   spawn, asserted by `claude_spawns_from_the_home_directory`. So both
+///   halves of the bypass are the person's own `~/.claude` config rather than
+///   third-party content, and at cwd `$HOME` the project path and the user
+///   path are the same file. Juno reading an untrusted repo cannot plant a
+///   hook on this path. What is left is a local process writing that file
+///   between spawns, and the CLI's own `Bash` is one such process: see
+///   LAC-8382 for the boundary call on that, which this PR does not make.
 ///   `--bare` would skip hooks and is unusable here: it also skips the
 ///   keychain reads this provider authenticates with.
 ///
@@ -518,7 +528,15 @@ fn denial_key(tool_name: &str, input: &Value) -> String {
         .iter()
         .find_map(|key| input.get(*key).and_then(Value::as_str));
     match target {
-        Some(target) => format!("{tool_name}:{target}"),
+        // Bounded: a `Bash` heredoc can be arbitrarily long and this is held
+        // for the cooldown. 120 chars still tells two files or two commands
+        // apart, which is all the key is for, and `chars` keeps it off a
+        // UTF-8 boundary panic. Two commands sharing a 120-char prefix share
+        // a cooldown, which costs one extra card after a decline (LAC-8384).
+        Some(target) => {
+            let target: String = target.chars().take(120).collect();
+            format!("{tool_name}:{target}")
+        }
         None => tool_name.to_string(),
     }
 }
@@ -2109,9 +2127,23 @@ mod tests {
         // about the first version of this test, and they were right: a comment
         // in that window mentioning `allow_result` would have failed it with
         // nothing wrong, which is how a tripwire gets deleted (LAC-8384).
+        //
+        // Trailing comments go too, not just whole-line ones. Dropping a line
+        // at its first `//` would truncate real code when that `//` is inside
+        // a string literal (a URL), and a truncation is the dangerous
+        // direction: it makes the tripwire blind rather than noisy. So the cut
+        // only happens when nothing quoted precedes the `//`.
+        //
+        // The two marker names below are load-bearing. If you rename
+        // `background_shell_policy` or `ask_first_answer`, update them here:
+        // both are `expect`ed, so a rename fails this test loudly instead of
+        // passing it over a window that is not there.
         let source: String = include_str!("cli_approval.rs")
             .lines()
-            .filter(|line| !line.trim_start().starts_with("//"))
+            .map(|line| match line.split_once("//") {
+                Some((before, _)) if !before.contains('"') => before,
+                _ => line,
+            })
             .collect::<Vec<_>>()
             .join("\n");
         let body = source
