@@ -177,34 +177,49 @@ pub fn plan_from_classification(
 /// The request body for one classification. The route comes back as a forced
 /// call to a strict tool, so the answer is schema-checked JSON, not prose.
 ///
-/// Thinking is turned off deliberately, and leaving the key out is not the
-/// same thing: the classifier model runs adaptive thinking by default, so an
-/// omitted `thinking` spends `CLASSIFIER_MAX_TOKENS` on reasoning, ends the
-/// response at `max_tokens` with no `tool_use` block, and reads back as
-/// `RouterError::NoRouteCall`. `plan_from_classification` maps that to `None`,
-/// so routing would be silently dead on every query while still paying for a
-/// classifier call. A router should not pay to think. Raising the token
-/// ceiling instead would buy the same answer for more money (LAC-8408).
+/// Thinking is sent explicitly disabled. The honest reason is narrower than
+/// the one this comment first carried, so read this before trusting either.
+///
+/// What protects `CLASSIFIER_MAX_TOKENS` is the **forced `tool_choice`**, not
+/// this key. Where forced tool use is accepted, "the response starts with the
+/// tool call and has no thinking block", so no thinking tokens are emitted and
+/// a 200-token ceiling is never spent on reasoning. LAC-8408 justified this
+/// key by arguing that an omitted `thinking` would spend that whole budget,
+/// end the response at `max_tokens` with no `tool_use` block and read back as
+/// `RouterError::NoRouteCall`. On a forced call that does not happen; the
+/// claim was checked against the live docs and withdrawn (LAC-8375).
+///
+/// The key stays for two reasons that survive the correction. It states the
+/// intent in the request instead of leaving it implicit in a `tool_choice` two
+/// fields below, and it is what would keep the budget safe if `tool_choice`
+/// ever became `"auto"` — at which point `CLASSIFIER_MAX_TOKENS` must rise
+/// too, because `auto` does let the model think before it calls the tool.
+///
+/// It is not free, which is the part worth knowing before copying this
+/// pattern: it narrows who may hold the Classifier role. Forced tool use is
+/// rejected by Opus 5.5, Sonnet 5.5, Fable 5.2, Mythos 5.2, Fable 5.1 and
+/// Mythos 5.1. `{"type": "disabled"}` is rejected by all of those **and** by
+/// Fable 5, Mythos 5 and Mythos Preview. So the second gate is strictly
+/// tighter than the first, `claude-fable-5` is the row that proves they
+/// differ, and
+/// `the_classifier_role_only_goes_to_a_model_that_accepts_disabled_thinking`
+/// is what enforces it rather than this paragraph.
 ///
 /// `{"type": "disabled"}` is accepted on Haiku 5.5 at effort `high` or below;
-/// at `xhigh` or `max` the same pair is a 400. The request sends no
+/// at `xhigh` or `max` the pair is a 400. The request sends no
 /// `output_config`, so the model's own default effort applies, which is below
 /// that ceiling. Keep it absent: while thinking is off, a per-message
 /// `output_config.effort` differing from the level in effect is itself a 400.
 ///
-/// Verified against the live per-model configuration table on the Thinking
-/// page (`platform.claude.com/docs/en/build-with-claude/thinking`, read
-/// 2026-11-16, LAC-8375). Haiku 5.5 reads "Thinking off at high effort or
-/// below" in the `"disabled"` column, and its "No thinking field" cell reads
-/// "Adaptive thinking", which is the premise this whole comment rests on.
-/// Re-read that table before moving this role; do not take it from here.
+/// Every claim above is off the live Thinking page
+/// (`platform.claude.com/docs/en/build-with-claude/thinking`, read
+/// 2026-11-16, LAC-8375). Re-read it before moving this role; do not take it
+/// from here.
 ///
-/// One live caveat deliberately not relied on: with thinking off the model
-/// "can skip a tool call it needs when you also request JSON output". This
-/// request forces the call with `tool_choice` instead of asking for JSON
-/// output, so the schema-checked answer does not depend on the model electing
-/// to call the tool. Switching the classifier to structured JSON output would
-/// give that protection away.
+/// One caveat deliberately not relied on: with thinking off the model "can
+/// skip a tool call it needs when you also request JSON output". Not a risk
+/// here, because the call is forced rather than requested as JSON output —
+/// which is a further reason not to move this to structured outputs.
 pub fn build_classifier_request(model: &str, query: &str) -> Value {
     let query: String = query.chars().take(MAX_QUERY_CHARS).collect();
     json!({
@@ -531,14 +546,16 @@ mod tests {
     #[test]
     fn the_request_turns_thinking_off() {
         let request = build_classifier_request("m", "what is the capital of France");
-        // Not cosmetic, and not a default we can lean on. The classifier model
-        // runs adaptive thinking unless told otherwise, which spends the whole
-        // CLASSIFIER_MAX_TOKENS budget before the forced tool call is written:
-        // the response ends at `max_tokens` carrying no `tool_use` block,
-        // `parse_classifier_response` returns `NoRouteCall`, and
-        // `plan_from_classification` turns every error into `None`. Routing
-        // would be dead on every query, and silently so, because `None` is
-        // also what "routing is switched off" looks like (LAC-8408).
+        // Explicit rather than cosmetic, but narrower than it looks: the
+        // forced `tool_choice` is what actually keeps CLASSIFIER_MAX_TOKENS
+        // safe, because where forced tool use is accepted the response starts
+        // with the tool call and carries no thinking block. This asserts the
+        // request still says so out loud, so that a later switch to
+        // `tool_choice: "auto"` cannot quietly start spending a 200-token
+        // budget on reasoning and read back as `NoRouteCall` — which
+        // `plan_from_classification` would turn into `None`, the same thing
+        // "routing is switched off" looks like (LAC-8408, mechanism corrected
+        // on LAC-8375).
         assert_eq!(request["thinking"]["type"], "disabled");
     }
 
