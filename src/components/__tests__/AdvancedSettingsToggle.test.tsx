@@ -107,10 +107,9 @@ function mockBackend(advancedPersisted: boolean) {
 const BASIC_SECTIONS = [
   "General",
   "Audio",
-  "Providers",
   "Security & Privacy",
 ];
-const ADVANCED_SECTIONS = ["Tools", "Automations", "Network", "Advanced"];
+const ADVANCED_SECTIONS = ["Providers", "Tools", "Automations", "Network", "Advanced"];
 
 const sidebarButton = (name: string) =>
   screen.queryByRole("button", { name: new RegExp(`^${name}\\b`) });
@@ -137,7 +136,6 @@ describe("visibleCategories", () => {
       // deliberately part of basic mode, not gated behind the advanced toggle.
       "triggers",
       "voice",
-      "ai",
       // Models is where the dictation model lives (Fast / Balanced / Most
       // accurate); everyone gets to choose, so it is not advanced-gated.
       "models",

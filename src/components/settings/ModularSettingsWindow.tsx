@@ -110,6 +110,9 @@ export const settingsCategories: MacCategory[] = [
     icon: <Cpu className="h-3.5 w-3.5" />,
     tile: "bg-[#64D2FF]",
     description: "Which services Juno uses",
+    // Every group in this pane is advanced-only, so with the toggle off the
+    // pane would open empty. Providers sit behind Advanced (LAC-7682).
+    advanced: true,
     keywords:
       "model anthropic openai gemini api key provider claude llm tts text to speech voice engine elevenlabs kokoro supertonic chatterbox",
   },
