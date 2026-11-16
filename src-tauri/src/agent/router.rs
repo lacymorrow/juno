@@ -528,6 +528,28 @@ mod tests {
         assert_eq!(chat, model_ids::CLAUDE_SONNET_5_5);
     }
 
+    /// Both router roles must be held by a model Anthropic still lists as
+    /// current. `chat_model` enforces this at runtime; `classifier_model`
+    /// deliberately does not, because a runtime filter there would silently
+    /// disable routing rather than fail loudly. This test is that gate: it
+    /// turns the next lineup change into a red CI run, which is where the
+    /// weekly model check wants to find out.
+    #[test]
+    fn both_router_roles_are_held_by_current_models() {
+        let provider = Provider::Anthropic;
+        for role in [RouterRole::Classifier, RouterRole::Chat] {
+            let def = provider
+                .router_model(role)
+                .unwrap_or_else(|| panic!("no model holds {role:?}"));
+            assert_eq!(
+                def.availability,
+                Availability::Current,
+                "{} holds {role:?} but is legacy",
+                def.name
+            );
+        }
+    }
+
     #[test]
     fn each_role_is_held_by_at_most_one_model() {
         for provider in [
