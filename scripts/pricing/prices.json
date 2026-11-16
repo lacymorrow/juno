@@ -1,9 +1,10 @@
 {
   "_comment": "Price table for LAC-4124 pricing measurement. USD per million tokens.",
-  "_verified": "Anthropic rows re-verified 2026-11-16 against the live pricing page: all 15 metered Claude rows match, claude-fable-5-2 added (LAC-8375). OpenAI 2026-10-16. Gemini rows re-verified 2026-10-27 (all 3 match; 3.7-flash and 3.5-flash confirmed still unpublished). Fetched from live provider docs, not from a cached model catalog (LAC-3106).",
+  "_verified": "Anthropic rows re-verified 2026-11-16 against the live pricing page: all 15 metered Claude rows match, claude-fable-5-2 added (LAC-8375). OpenAI 2026-10-16. Gemini rows re-verified 2026-11-16 against the live page, now with its URL recorded below (all 3 match on the Standard tier; 3.7-flash, 3.5-flash and 2.5-computer-use-preview confirmed still unpublished) (LAC-8412). Fetched from live provider docs, not from a cached model catalog (LAC-3106).",
   "_sources": {
     "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
-    "openai": "https://developers.openai.com/api/docs/pricing"
+    "openai": "https://developers.openai.com/api/docs/pricing",
+    "gemini": "https://aistudio.google.com/docs/pricing"
   },
   "_schema": {
     "input": "base input tokens, per MTok",
@@ -283,6 +284,10 @@
     "Keys are BILLING keys, matching what Juno's cost log writes as model_id (cost_log::billing_model_id). Metered API models use the wire model id; subscription paths are prefixed with the provider, so claude-cli:opus is never averaged in with metered Anthropic traffic at $0.00.",
     "Every model in Juno's catalog is keyed here EXCEPT gemini-3.7-flash, gemini-3.5-flash and gemini-2.5-computer-use-preview-10-2025, which Google publishes no rate for. They are left out deliberately so this script raises on them rather than scoring them as free; Juno logs those turns at cost_usd 0.0 and warns.",
     "Gemini and OpenAI report prompt tokens INCLUSIVE of cached tokens, unlike Anthropic. Juno subtracts the cached part before writing input_tokens, so the four token fields in a record never double-count on any provider.",
+    "cache_write 0.0 on the Gemini rows is not a gap. Google charges no per-token cache WRITE; it charges cache STORAGE by the hour ($0.50 / 1M tokens / hour on gemini-3.8-flash promotional, rising to $1.00 on 2027-01-01; $1.00 on the other two), and that applies to EXPLICIT caches a caller creates and keeps alive. Juno creates none -- gemini.rs only reads cachedContentTokenCount off usageMetadata and never POSTs a cachedContents resource -- so its Gemini caching is implicit and bills at the cache_read rate only. Adding an explicit-cache path would make this row wrong (verified 2026-11-16, LAC-8412).",
+    "The Gemini source URL redirects: https://ai.google.dev/gemini-api/docs/pricing served a 200 from https://aistudio.google.com/docs/pricing, which is also the page's own rel=canonical. _sources records the destination, which is what was fetched 2026-11-16 (LAC-8412).",
+    "Google publishes FOUR service tiers per Gemini model (Standard, Batch, Flex, Priority) in tabs on one page. Every Gemini row here is the STANDARD tier, because Juno sends ordinary synchronous generateContent requests. Batch and Flex are half the Standard rate and Priority is 1.8x, so reading the wrong tab under-or-over-prices by up to 2x with no tripwire -- the same shape as the long-context tier that LAC-8405 refuses. Check the tab name before copying a figure.",
+    "Gemini prices some input modalities differently and this file has one input rate per model. gemini-3-flash-preview charges audio input at $1.00 and audio cache_read at $0.10, double its $0.50 / $0.05 text-image-video rates; the rates here are the text-image-video ones, which is what Juno sends (text plus screenshots). gemini-3.8-flash and gemini-3.5-flash-lite publish a single input rate across modalities. An audio turn on gemini-3-flash-preview would be under-priced by 2x on input; Juno has no audio path to the Gemini provider, so nothing can hit it today (verified 2026-11-16, LAC-8412).",
     "Gemini 3.8 Flash is on PROMOTIONAL pricing that ends 2026-12-31: input 0.75 -> 1.50, output 3.75 -> 7.50, cache_read 0.075 -> 0.15 on 2027-01-01, i.e. every rate doubles. The figures here are the promotional ones, verified 2026-10-27. A trial credit or Pro allowance sized on them is wrong from January onward if Gemini 3.8 Flash is in the mix. Re-verify before quoting a price with a lifetime past 2026-12-31.",
     "Google's output price is stated as INCLUDING thinking tokens, which is the pricing-page confirmation of the cost_log rule that output = candidatesTokenCount + thoughtsTokenCount (LAC-5822). candidatesTokenCount alone under-counts a thinking turn."
   ]
