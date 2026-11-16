@@ -2457,6 +2457,30 @@ mod tests {
         }
     }
 
+    /// The Claude CLI aliases resolve to whatever Anthropic ships as latest, so
+    /// a release moves what a row describes with no model ID to grep for. That
+    /// is how `haiku` sat on the standard tier after Haiku 5.5 shipped on the
+    /// high-resolution one, downscaling every screenshot for it to 1568 px.
+    ///
+    /// All three track the current generation, and the current generation is
+    /// entirely high-resolution, so pin that rather than wait to notice again.
+    #[test]
+    fn the_cli_aliases_track_the_current_generation_image_tier() {
+        for alias in ["opus", "sonnet", "haiku"] {
+            let def = Provider::ClaudeCli
+                .model_definitions()
+                .iter()
+                .find(|def| def.id == alias)
+                .unwrap_or_else(|| panic!("{alias} must be in the Claude CLI catalog"));
+            assert_eq!(
+                def.image_tier,
+                ImageTier::HighResolution,
+                "the CLI `{alias}` alias resolves to the latest model in its line, \
+                 and every current model is on the high-resolution tier"
+            );
+        }
+    }
+
     /// The screenshot resolution tier reads the per-model declaration rather
     /// than keeping a second list of model IDs.
     #[test]
