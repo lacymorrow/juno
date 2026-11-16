@@ -35,6 +35,14 @@ use crate::constants::timeouts::{SMART_ROUTER_CONNECT_TIMEOUT_MS, SMART_ROUTER_T
 const ANTHROPIC_API_URL: &str = crate::constants::api::endpoints::ANTHROPIC_API_URL;
 const ROUTE_TOOL_NAME: &str = "route_request";
 /// The classifier answers with one short tool call; this is plenty.
+///
+/// It stays plenty on an adaptive-thinking classifier only because the request
+/// forces `tool_choice`: "Claude Haiku 5.5 accepts a forced `tool_choice`
+/// (`any` or a named tool), but the response starts with the tool call and has
+/// no `thinking` block." Thinking tokens count toward `max_tokens`, so moving
+/// to `tool_choice: auto` would spend this budget on reasoning and stop with
+/// `max_tokens` before the route ever arrives. Raise this first if that
+/// changes.
 const CLASSIFIER_MAX_TOKENS: u32 = 200;
 /// Long pasted text says nothing more about the route than its opening does.
 const MAX_QUERY_CHARS: usize = 2000;
