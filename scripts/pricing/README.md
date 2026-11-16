@@ -98,6 +98,10 @@ right.
 
 ## Refreshing prices
 
-Re-fetch the two `_sources` URLs in `prices.json` and update `_verified`.
+Re-fetch every `_sources` URL in `prices.json` and update `_verified`.
 Do not take rates from a model catalog bundled with a tool — that is how a
 2x error on the Sonnet cache-read rate got close to shipping (LAC-3106).
+
+Google's page puts four service tiers (Standard, Batch, Flex, Priority) in
+tabs on the same model heading, and they differ by up to 2x. Every Gemini row
+here is **Standard**. Read the tab name, not just the heading (LAC-8412).
