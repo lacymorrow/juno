@@ -586,7 +586,14 @@ async fn turn_environment(
         }
         None => false,
     };
-    let ask_before_send = ask_first || app_handle.is_some_and(cli_approval::is_enabled);
+    // The `||` lives in `cli_approval` as a pure function, where it is asserted
+    // against both settings in all four combinations. Written inline here it
+    // was wiring no test could reach: flipped to `&&`, "Ask me first" stops
+    // working for anyone with the send gate off and nothing reddens (LAC-8384).
+    let ask_before_send = cli_approval::routes_permission_prompts(
+        ask_first,
+        app_handle.is_some_and(cli_approval::is_enabled),
+    );
 
     // Fail closed. Every branch above that could not write a file answered
     // with `None`, and `None` here used to mean a spawn with nothing reading

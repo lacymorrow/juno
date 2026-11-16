@@ -17,7 +17,19 @@
 //!   person "not sent, you declined" instead of failing silently.
 //!
 //! The "Ask before Juno sends" setting (default on) gates the whole path;
-//! off restores the old skip-permissions behaviour for testing.
+//! off restores the old skip-permissions behaviour for testing. With one
+//! exception, added by LAC-8366 and written down here by LAC-8384: **"Ask me
+//! first" in Security and Privacy forces the asking path on whatever the send
+//! setting says.** It is the stronger promise — the person asked to be told
+//! before anything changes their Mac — and keeping it needs the same
+//! `approve` route, so a person who chose it is asked about sends too.
+//! [`routes_permission_prompts`] is that decision, and
+//! [`skips_the_send_gate`] is its other half.
+//!
+//! Neither of those is the last word, because the CLI merges the person's own
+//! `~/.claude/settings.json` into every spawn Juno makes and a `defaultMode`
+//! there can switch the gate off before Juno is asked anything.
+//! [`PERMISSION_PIN`] is what stops that.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -51,7 +63,7 @@ pub const APPROVE_TOOL_NAME: &str = "approve";
 /// shell runs outside Juno's tool layer, so `open -a Mail` inside it took the
 /// person's screen while they were typing, with every one of background
 /// mode's guards looking the other way. Routing it through `approve` is what
-/// lets [`background_shell_answer`] read a command before it runs.
+/// lets [`background_shell_policy`] read a command before it runs.
 ///
 /// It costs one loopback round trip per shell call and asks the person
 /// nothing: with background mode off, or on a command that leaves the front
@@ -66,6 +78,16 @@ pub const APPROVE_TOOL_NAME: &str = "approve";
 /// from settings. In every other mode `verdict_for` allows them on the spot, so
 /// the only cost to a person who did not choose "Ask me first" is one loopback
 /// round trip per edit.
+/// **`Task` is here deliberately, and it was measured rather than assumed**
+/// (LAC-8384). The open question was whether a subagent's `Edit` and `Write`
+/// calls come back through the parent's permission prompt or run unseen inside
+/// the subagent, which would make a pre-approved `Task` a way around every
+/// gate in this module. Measured against `claude` 2.1.325 with a stub MCP
+/// server standing in for Juno's: a `Task` subagent's `Write` arrived at
+/// `approve` as `tool_name: "Write"` carrying its own `file_path`, the denial
+/// stopped it, and the subagent reported the refusal back verbatim. A
+/// subagent's tool calls are gated per call exactly like the parent's, so
+/// pre-approving the delegation itself gates nothing away.
 pub const ALLOWED_TOOLS: &str = "Read,Glob,Grep,WebFetch,WebSearch,\
      TodoWrite,Task,mcp__juno__computer,mcp__juno__settings";
 
@@ -126,6 +148,44 @@ pub async fn set_cli_ask_before_send_enabled(
     Ok(())
 }
 
+/// Whether a spawn routes the CLI's permission prompts to `approve` instead of
+/// skipping them.
+///
+/// Two settings, one answer. "Ask before Juno sends" asks about what leaves
+/// the machine; "Ask me first" asks about anything that changes the Mac.
+/// Either one needs the CLI to stop and ask, and there is one flag for that,
+/// so either one turns it on.
+///
+/// The second half is a behaviour change worth stating plainly: **"Ask me
+/// first" forces the asking path on even with "Ask before Juno sends" off.**
+/// The stronger promise wins, so a person who chose to be asked before
+/// anything changes their Mac is asked before a send too, whatever the send
+/// setting says. Nobody can choose "ask me about everything" and "do not ask
+/// me about sends" at once, and of the two readings this is the safe one.
+///
+/// Pure, because the `||` is the whole wiring: flipped to `&&`, "Ask me first"
+/// silently stops working for anyone with the send gate off, and nothing else
+/// in this module would notice (LAC-8384 item 2).
+pub fn routes_permission_prompts(ask_first: bool, send_gate_enabled: bool) -> bool {
+    ask_first || send_gate_enabled
+}
+
+/// Whether `approve` answers allow without reading the call at all.
+///
+/// "Ask before Juno sends" off means off: the old behaviour, everything runs.
+/// It does not mean off under "Ask me first", and the reason is not that the
+/// mode outranks the setting — it is that by the time this is asked,
+/// [`ask_first_answer`] has already answered every tool that mode owns. What
+/// reaches here is a name it has no opinion about, which in practice is an
+/// `mcp__*` connector call, and the send gate is the right reader for one.
+///
+/// Pure for the same reason as [`routes_permission_prompts`]: dropping the
+/// `mode != AskFirst` half hands "Ask me first" a silent exemption for every
+/// connector send, and nothing else would redden.
+pub fn skips_the_send_gate(mode: PermissionMode, send_gate_enabled: bool) -> bool {
+    mode != PermissionMode::AskFirst && !send_gate_enabled
+}
+
 /// The permission arguments for a CLI spawn.
 ///
 /// With the setting on and Juno's MCP server wired in, the CLI routes
@@ -156,6 +216,9 @@ pub async fn set_cli_ask_before_send_enabled(
 /// answer a hook, so that spawn still has no shell screen. It is the headless
 /// and test path, where there is no desktop to take, and the gap is named
 /// rather than papered over.
+///
+/// The asking path also carries [`PERMISSION_PIN`], without which the person's
+/// own `claude` settings can switch the whole gate off (LAC-8384).
 pub fn permission_args(
     ask_before_send: bool,
     has_mcp_server: bool,
@@ -167,6 +230,10 @@ pub fn permission_args(
             APPROVE_TOOL_CLI_NAME.to_string(),
             "--allowedTools".to_string(),
             ALLOWED_TOOLS.to_string(),
+            // Pinned last, so it overrides the person's own settings rather
+            // than being overridden by them.
+            SETTINGS_FLAG.to_string(),
+            PERMISSION_PIN.to_string(),
         ];
     }
 
@@ -183,6 +250,45 @@ const SKIP_PERMISSIONS: &str = "--dangerously-skip-permissions";
 
 /// The flag that carries background mode's shell screen into the spawn.
 const SETTINGS_FLAG: &str = "--settings";
+
+/// Juno's own `claude` settings for the asking path, as an inline JSON string
+/// (`--settings` takes "a settings JSON file or a JSON string", so this needs
+/// no file and no temporary path).
+///
+/// It exists because the gate above is not the last word on whether the CLI
+/// asks. The CLI merges the person's own `~/.claude/settings.json` into every
+/// spawn Juno makes, and a `permissions.defaultMode` there that accepts edits
+/// means `Write` and `Edit` never reach `approve` at all: no card, and "Ask me
+/// first" does nothing, which is the bug LAC-8366 set out to fix arriving by a
+/// second route. Measured on `claude` 2.1.325 (LAC-8384): with
+/// `defaultMode: "acceptEdits"` a `Write` ran and `approve` was never called;
+/// with this pinned the same `Write` reached `approve` and the denial held.
+/// Lacy's own settings carry `defaultMode: "auto"`, which behaves the same
+/// way, so without this the fix would have been inert on the machine it was
+/// reviewed on.
+///
+/// Two levers, because a gate this quiet should not rest on one spelling:
+///
+/// - `defaultMode` is pinned to `default`, the mode that asks. The CLI's own
+///   name for it is now `manual` (`--permission-mode` lists `manual`, not
+///   `default`), and both spellings were measured to work, so the legacy one
+///   is sent because older builds know only that.
+/// - `ask` names the four tools by hand, which beats `defaultMode` outright:
+///   measured with `defaultMode: "acceptEdits"` *and* this list, the `Write`
+///   still reached `approve`. So a future build that stops understanding
+///   `default` leaves the gate standing.
+///
+/// `MultiEdit` is deliberately absent even though [`ask_first_risk`] maps it:
+/// 2.1.325 prints "Permission ask rule "MultiEdit" matches no known tool" and
+/// the person reads that in their chat.
+///
+/// What this cannot pin is the opted-out path, which spawns with
+/// `--dangerously-skip-permissions` by the person's own choice and asks about
+/// nothing by design.
+const PERMISSION_PIN: &str = concat!(
+    r#"{"permissions":{"defaultMode":"default","#,
+    r#""ask":["Write","Edit","NotebookEdit","Bash"]}}"#
+);
 
 /// Why this spawn must not happen, when it would run the CLI's own shell with
 /// nothing reading it and background mode is on (LAC-7421).
@@ -228,10 +334,17 @@ pub fn unscreened_spawn_refusal(
     )
 }
 
-/// Read one `Bash` call against background mode, in the CLI's permission shape.
+/// Read one `Bash` call against background mode.
 ///
-/// `None` when this is not a shell call, or when background mode is off, so
-/// the caller falls through to the ordinary send gate.
+/// `None` when this is not a shell call, when background mode is off, or when
+/// the command leaves the front alone. `Some` is a refusal or a rewrite, and
+/// which of the two it is decides when the caller may act on it: see
+/// [`handle_approve`].
+///
+/// This used to answer in the CLI's permission shape and be the first word in
+/// `handle_approve`, which is how a rewrite came to run with no card under
+/// "Ask me first" (LAC-8384). A rewrite is not a decision, so it no longer
+/// gets to be one.
 ///
 /// A rewrite travels as `updatedInput`, which the CLI runs in place of what
 /// the model wrote. A denial travels as the reason text, which the model does
@@ -239,32 +352,18 @@ pub fn unscreened_spawn_refusal(
 /// channel back to the model, so what it should say about a window that opened
 /// behind the person's work is taught once in `MCP_TOOL_GUIDANCE` instead of
 /// smuggled through a field meant for something else.
-async fn background_shell_answer(
+async fn background_shell_policy(
     app: &tauri::AppHandle,
     tool_name: &str,
     input: &Value,
-) -> Option<Value> {
+) -> Option<ShellPolicy> {
     // The tool name first: it costs a string compare and answers most calls,
     // where reading the setting is an await.
     if tool_name != BASH_TOOL {
         return None;
     }
     let background_mode = crate::input_control::background_mode_enabled(app).await;
-    match shell_verdict(background_mode, tool_name, input)? {
-        ShellPolicy::Rewritten { command, .. } => {
-            info!("[CliApproval] Background mode: running `{command}` instead");
-            Some(allow_result(&with_command(input, &command)))
-        }
-        ShellPolicy::Refused(reason) => {
-            let command = input
-                .get("command")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            info!("[CliApproval] Background mode refused `{command}`");
-            Some(deny_result(&reason))
-        }
-        ShellPolicy::Run => None,
-    }
+    shell_verdict(background_mode, tool_name, input)
 }
 
 /// What background mode says about one tool call, or `None` when it has
@@ -300,7 +399,7 @@ fn with_command(input: &Value, command: &str) -> Value {
 /// Read one `Bash` call against background mode, in the PreToolUse hook's
 /// answer shape (LAC-5010).
 ///
-/// Same verdict as [`background_shell_answer`], different envelope. The
+/// Same verdict as [`background_shell_policy`], different envelope. The
 /// `approve` route only exists when the CLI spawns with
 /// `--permission-prompt-tool`; with "Ask before Juno sends" off it spawns with
 /// `--dangerously-skip-permissions` instead, and a hook is the one thing that
@@ -381,6 +480,25 @@ pub fn ask_first_risk(tool_name: &str, input: &Value) -> Option<(&'static str, V
     Some((mapped, mapped_input, risk))
 }
 
+/// The cooldown key for one call, so a retrying loop cannot nag.
+///
+/// The send gate keys on the tool name alone, and should: one connector tool
+/// asked about once is the same question on a retry, and a loop that varied
+/// the recipient would otherwise raise a fresh sheet per attempt. "Ask me
+/// first" asks per file, so its key carries the path or the command too —
+/// keyed on the name alone, declining one edit would auto-deny an edit to
+/// every other file for a minute, which is a wrong answer rather than a quiet
+/// one (LAC-8384 item 3).
+fn denial_key(tool_name: &str, input: &Value) -> String {
+    let target = ["file_path", "path", "notebook_path", "command"]
+        .iter()
+        .find_map(|key| input.get(*key).and_then(Value::as_str));
+    match target {
+        Some(target) => format!("{tool_name}:{target}"),
+        None => tool_name.to_string(),
+    }
+}
+
 /// Ask the person about one CLI built-in under "Ask me first".
 ///
 /// `None` means this call is not gated by the mode (a read, or a tool this
@@ -388,11 +506,31 @@ pub fn ask_first_risk(tool_name: &str, input: &Value) -> Option<(&'static str, V
 /// to hand the CLI: allow when the policy lets it through, otherwise the
 /// person's decision. A tool that reaches here and cannot be shown to the
 /// person is denied, never allowed.
-async fn ask_first_answer(app: &tauri::AppHandle, tool_name: &str, input: &Value) -> Option<Value> {
+///
+/// `approved` is what runs if the answer is yes, which is not always `input`:
+/// background mode may have rewritten the command, and that rewrite is applied
+/// after the person agrees rather than instead of asking them (LAC-8384).
+async fn ask_first_answer(
+    app: &tauri::AppHandle,
+    tool_name: &str,
+    input: &Value,
+    approved: &Value,
+) -> Option<Value> {
     let (mapped, mapped_input, risk) = ask_first_risk(tool_name, input)?;
     if !permission_policy::requires_approval_for(mapped, PermissionMode::AskFirst, &risk, false) {
-        return Some(allow_result(input));
+        return Some(allow_result(approved));
     }
+
+    // A loop retrying the same declined call gets the same answer without a
+    // fresh sheet 60 seconds in a row.
+    let key = denial_key(tool_name, input);
+    if recently_denied(&key, Instant::now()) {
+        return Some(deny_result(
+            "This was declined moments ago and was not done. Do not retry; tell the person \
+             it was not done, and that they can ask again if they change their mind.",
+        ));
+    }
+
     let description = permission_policy::describe_action(mapped, &mapped_input);
     let request = ToolApprovalRequest::new(
         uuid::Uuid::new_v4().to_string(),
@@ -405,10 +543,12 @@ async fn ask_first_answer(app: &tauri::AppHandle, tool_name: &str, input: &Value
 
     Some(match ask_person(app, request).await {
         Some(true) => {
+            clear_denial(&key);
             info!("[CliApproval] Ask me first, approved: {description}");
-            allow_result(input)
+            allow_result(approved)
         }
         Some(false) => {
+            record_denial(&key);
             info!("[CliApproval] Ask me first, declined: {description}");
             deny_result(
                 "The person chose to be asked first and declined, so Juno did not do this. \
@@ -416,6 +556,7 @@ async fn ask_first_answer(app: &tauri::AppHandle, tool_name: &str, input: &Value
             )
         }
         None => {
+            record_denial(&key);
             info!(
                 "[CliApproval] Ask me first, no answer in {APPROVAL_TIMEOUT_SECS}s: {description}"
             );
@@ -769,12 +910,45 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
         return deny_result("Malformed permission request: no tool_name.");
     }
 
-    // Background mode first, and independent of the send gate (LAC-5007).
-    // "Ask before Juno sends" is about what leaves the machine; this is about
-    // whose screen it is. Turning one off must not turn the other off.
-    if let Some(answer) = background_shell_answer(app, tool_name, &input).await {
-        return answer;
-    }
+    // Background mode reads the shell call first, and independent of the send
+    // gate (LAC-5007): "Ask before Juno sends" is about what leaves the
+    // machine, this is about whose screen it is, and turning one off must not
+    // turn the other off.
+    //
+    // Only a refusal is an answer on its own. Juno will not run that command
+    // whatever anyone says, so putting a card in front of it would be a
+    // question with one answer.
+    //
+    // A rewrite is not an answer. It changes *what* runs, not *whether* it may
+    // run, and it used to return allow from right here — so under "Ask me
+    // first" a `Bash` `open` was rewritten to `open -g` and ran with no card
+    // at all. Background mode is on by default, which made that the default
+    // configuration (LAC-8384). The rewrite is now carried past the gates
+    // below and applied only once something has allowed the call.
+    let rewrite = match background_shell_policy(app, tool_name, &input).await {
+        Some(ShellPolicy::Refused(reason)) => {
+            let command = input
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            info!("[CliApproval] Background mode refused `{command}`");
+            return deny_result(&reason);
+        }
+        Some(ShellPolicy::Rewritten { command, .. }) => {
+            info!("[CliApproval] Background mode: running `{command}` instead");
+            Some(command)
+        }
+        None | Some(ShellPolicy::Run) => None,
+    };
+
+    // What runs if this call is allowed. Every allow below answers with this
+    // rather than with the raw input, so no gate can drop the rewrite on the
+    // way out — including the one that turns the send gate off entirely, which
+    // is the configuration background mode has to keep working on.
+    let approved = match &rewrite {
+        Some(command) => with_command(&input, command),
+        None => input.clone(),
+    };
 
     // "Ask me first" is a separate promise from "Ask before Juno sends", and
     // it is the stronger one: the person chose to be asked before anything
@@ -782,19 +956,23 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
     // applies to the conversation already running (LAC-8366).
     let mode = super::juno_mcp::permission_mode(app).await;
     if mode == PermissionMode::AskFirst {
-        if let Some(answer) = ask_first_answer(app, tool_name, &input).await {
+        if let Some(answer) = ask_first_answer(app, tool_name, &input, &approved).await {
             return answer;
         }
     }
 
-    // Off means off: the old behaviour, everything runs. Not in "Ask me
-    // first", which asked above and falls through to the send gate here.
-    if mode != PermissionMode::AskFirst && !is_enabled(app) {
-        return allow_result(&input);
+    // Off means off: the old behaviour, everything runs. Not under "Ask me
+    // first", and the reason is not that the mode outranks the setting — it is
+    // that `ask_first_answer` has already answered every tool that mode owns,
+    // so what reaches here is a name it has no opinion about (an `mcp__*`
+    // connector call), and the send gate is the right reader for one. See
+    // [`skips_the_send_gate`], which is where that is written down and tested.
+    if skips_the_send_gate(mode, is_enabled(app)) {
+        return allow_result(&approved);
     }
 
     if verdict_for(tool_name) == Verdict::Allow {
-        return allow_result(&input);
+        return allow_result(&approved);
     }
 
     // A tool loop retrying a fresh denial gets the same answer without a
@@ -822,7 +1000,7 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
         Some(true) => {
             clear_denial(tool_name);
             info!("[CliApproval] Approved: {}", description);
-            allow_result(&input)
+            allow_result(&approved)
         }
         Some(false) => {
             record_denial(tool_name);
@@ -1187,6 +1365,11 @@ mod tests {
                 APPROVE_TOOL_CLI_NAME.to_string(),
                 "--allowedTools".to_string(),
                 ALLOWED_TOOLS.to_string(),
+                // The person's own settings cannot switch this gate off
+                // (LAC-8384). The shell screen is deliberately *not* here:
+                // see `the_shell_screen_never_rides_the_asking_path`.
+                "--settings".to_string(),
+                PERMISSION_PIN.to_string(),
             ]
         );
 
@@ -1669,6 +1852,277 @@ mod tests {
             ask_first_risk("NotebookEdit", &json!({"notebook_path": "/etc/x.ipynb"}))
                 .expect("a notebook edit is gated");
         assert_eq!(risk, RiskLevel::Critical);
+    }
+
+    /// LAC-8384 item 2: the first of the two wiring decisions, as a truth
+    /// table. Written inline in `turn_environment` it was unreachable by any
+    /// test, so flipping its `||` to `&&` reddened nothing.
+    #[test]
+    fn ask_me_first_routes_prompts_whatever_the_send_setting_says() {
+        assert!(routes_permission_prompts(true, true));
+        // The assert `&&` turns red, and the only one that does: the mode has
+        // to ask even though "Ask before Juno sends" is off.
+        assert!(
+            routes_permission_prompts(true, false),
+            "Ask me first must route prompts with the send gate off"
+        );
+        assert!(routes_permission_prompts(false, true));
+        // Neither promise: the old skip-permissions spawn.
+        assert!(!routes_permission_prompts(false, false));
+    }
+
+    /// LAC-8384 item 2: the second decision, which used to be an inline
+    /// `mode != AskFirst && !is_enabled(app)` no test could reach.
+    #[test]
+    fn only_an_off_send_gate_outside_ask_me_first_skips_reading_the_call() {
+        use PermissionMode::{AskFirst, AskWhenRisky, DontAsk};
+
+        // Off means off, in the modes that promise nothing more.
+        assert!(skips_the_send_gate(AskWhenRisky, false));
+        assert!(skips_the_send_gate(DontAsk, false));
+
+        // The assert that reddens when the `mode != AskFirst` half is dropped:
+        // "Ask me first" keeps reading connector calls with the gate off.
+        assert!(
+            !skips_the_send_gate(AskFirst, false),
+            "Ask me first must not inherit the send gate's off switch"
+        );
+
+        // With the gate on, nothing is skipped in any mode.
+        for mode in [AskFirst, AskWhenRisky, DontAsk] {
+            assert!(!skips_the_send_gate(mode, true), "{mode:?}");
+        }
+    }
+
+    /// LAC-8384: the gate above is not the last word on whether the CLI asks.
+    /// The person's own `~/.claude/settings.json` rides every spawn Juno
+    /// makes, and a `permissions.defaultMode` there that accepts edits means
+    /// `Write` never reaches `approve` at all. Measured on `claude` 2.1.325;
+    /// see [`PERMISSION_PIN`].
+    #[test]
+    fn the_asking_path_pins_the_permission_mode() {
+        let args = permission_args(true, true, None);
+        let at = args
+            .iter()
+            .position(|a| a == SETTINGS_FLAG)
+            .expect("the asking path pins the mode");
+        let pin: Value = serde_json::from_str(&args[at + 1]).expect("the pin is JSON");
+
+        assert_eq!(pin["permissions"]["defaultMode"], json!("default"));
+
+        // The second lever, which beats `defaultMode` outright.
+        let ask = pin["permissions"]["ask"]
+            .as_array()
+            .expect("the pin names the tools")
+            .clone();
+        for tool in ["Write", "Edit", "NotebookEdit", BASH_TOOL] {
+            assert!(ask.iter().any(|t| t == tool), "{tool} must be pinned");
+        }
+        // 2.1.325 prints "matches no known tool" into the person's chat for a
+        // rule naming one, so this stays out even though `ask_first_risk`
+        // maps it.
+        assert!(!ask.iter().any(|t| t == "MultiEdit"));
+    }
+
+    /// The shell screen must never ride the asking path, and this is a
+    /// security property rather than tidiness. Measured on `claude` 2.1.325
+    /// (LAC-8384): a `PreToolUse` hook answering `permissionDecision: "allow"`
+    /// pre-empts `--permission-prompt-tool` entirely — `approve` was never
+    /// called for the `Bash` the hook allowed. So carrying the screen here
+    /// would hand every shell call back to the hook and take "Ask me first"
+    /// out of the loop again, which is the bug this ticket exists for.
+    #[test]
+    fn the_shell_screen_never_rides_the_asking_path() {
+        let screen = Path::new("/tmp/juno-cli-hooks-1.json");
+        let args = permission_args(true, true, Some(screen));
+        assert!(
+            !args.iter().any(|a| a == &screen.display().to_string()),
+            "a hook allow pre-empts `approve`, so the screen cannot ride this path"
+        );
+
+        // And the opted-out path still carries it, where it is the only
+        // reader a `Bash` call gets.
+        let opted_out = permission_args(false, true, Some(screen));
+        let at = opted_out
+            .iter()
+            .position(|a| a == SETTINGS_FLAG)
+            .expect("the screen rides the opted-out path");
+        assert_eq!(opted_out[at + 1], screen.display().to_string());
+        assert!(!opted_out.iter().any(|a| a == PERMISSION_PIN));
+    }
+
+    /// LAC-8384 item 1, the blocking one, half 1: the premise.
+    ///
+    /// Background mode rewrites `open` so it does not take the front, and
+    /// "Ask me first" asks before anything changes the Mac. Both are true of
+    /// the same call, which is what made the order matter: the rewrite used to
+    /// answer first and the card was never raised. Background mode is on by
+    /// default, so that was the default configuration.
+    #[test]
+    fn a_rewritten_shell_command_is_still_one_ask_me_first_asks_about() {
+        let call = json!({"command": "open https://example.com"});
+
+        let policy =
+            shell_verdict(true, BASH_TOOL, &call).expect("background mode rewrites `open`");
+        assert!(
+            matches!(policy, ShellPolicy::Rewritten { .. }),
+            "{policy:?} — this test needs a command background mode rewrites"
+        );
+
+        let (mapped, _, risk) = ask_first_risk(BASH_TOOL, &call).expect("a shell call is gated");
+        assert!(
+            permission_policy::requires_approval_for(
+                mapped,
+                PermissionMode::AskFirst,
+                &risk,
+                false
+            ),
+            "`open` is not inert, so Ask me first asks about it"
+        );
+    }
+
+    /// LAC-8384 item 1, half 2: the order itself.
+    ///
+    /// Pinned by reading the source, which is the only way statement order in
+    /// an `AppHandle`-bound async function can be. `handle_approve` cannot be
+    /// called from a unit test: it wants a running app, a settings store, a
+    /// window to put the sheet in and a person to answer it. What can be
+    /// asserted is the shape of the window between reading background mode's
+    /// verdict and raising the card — nothing in it may answer the call with
+    /// an allow. The bug was exactly one `return` in that window, and every
+    /// other test in this file stayed green.
+    #[test]
+    fn nothing_answers_allow_between_background_mode_and_the_ask_me_first_card() {
+        let source = include_str!("cli_approval.rs");
+        let body = source
+            .split_once("pub async fn handle_approve")
+            .expect("handle_approve is declared in this file")
+            .1;
+
+        // Positive control: a rename must break this test loudly rather than
+        // make it pass over a window that is not there.
+        let read_at = body
+            .find("background_shell_policy(")
+            .expect("handle_approve reads background mode");
+        let ask_at = body
+            .find("ask_first_answer(")
+            .expect("handle_approve raises the Ask me first card");
+        assert!(
+            read_at < ask_at,
+            "background mode is read first, so the card knows what would run"
+        );
+
+        let window = &body[read_at..ask_at];
+        assert!(
+            !window.is_empty(),
+            "the window between the two is where the bug lived"
+        );
+        assert!(
+            !window.contains("allow_result"),
+            "a background rewrite must not answer allow before the card: {window}"
+        );
+    }
+
+    /// LAC-8384 item 4: the Critical floor is the security-relevant part of
+    /// the mapping, and only the notebook case was tested. A system path or a
+    /// traversal asks in every mode, so these are the calls that must not come
+    /// back Medium.
+    #[test]
+    fn a_system_path_or_a_traversal_is_critical_for_every_file_tool() {
+        let critical = |tool: &str, input: Value| {
+            let (_, _, risk) = ask_first_risk(tool, &input).expect("a file write is gated");
+            assert_eq!(risk, RiskLevel::Critical, "{tool} {input}");
+        };
+
+        critical(
+            "Write",
+            json!({"file_path": "/etc/sudoers", "content": "x"}),
+        );
+        critical("Edit", json!({"file_path": "/etc/hosts"}));
+        critical("MultiEdit", json!({"file_path": "/etc/hosts"}));
+        critical(
+            "Write",
+            json!({"file_path": "/tmp/../../etc/passwd", "content": "x"}),
+        );
+        critical("Edit", json!({"file_path": "/Users/a/../../etc/passwd"}));
+        critical(
+            "NotebookEdit",
+            json!({"notebook_path": "/tmp/../../etc/x.ipynb"}),
+        );
+    }
+
+    /// The bot's review asked whether the sheet reads sensibly for
+    /// `NotebookEdit`, whose risk is judged under the name `edit_file`. It
+    /// does, because the mapped input carries the path the sentence is built
+    /// from.
+    #[test]
+    fn the_sheet_names_the_notebook_it_is_about_to_change() {
+        let (mapped, mapped_input, _) = ask_first_risk(
+            "NotebookEdit",
+            &json!({"notebook_path": "/Users/a/analysis.ipynb"}),
+        )
+        .expect("a notebook edit is gated");
+        assert_eq!(
+            permission_policy::describe_action(mapped, &mapped_input),
+            "Change analysis.ipynb"
+        );
+    }
+
+    /// LAC-8384 item 3: the cooldown key.
+    ///
+    /// Two gates, two keys, on purpose. The send gate asks about a connector
+    /// tool, where a retry is the same question; "Ask me first" asks about a
+    /// file, where it is not.
+    #[test]
+    fn the_cooldown_key_tells_two_files_apart() {
+        assert_eq!(
+            denial_key("Edit", &json!({"file_path": "/Users/a/one.md"})),
+            "Edit:/Users/a/one.md"
+        );
+        assert_ne!(
+            denial_key("Edit", &json!({"file_path": "/Users/a/one.md"})),
+            denial_key("Edit", &json!({"file_path": "/Users/a/two.md"})),
+            "declining one edit must not auto-deny every other file"
+        );
+        assert_eq!(
+            denial_key(BASH_TOOL, &json!({"command": "rm old.txt"})),
+            "Bash:rm old.txt"
+        );
+        assert_eq!(
+            denial_key(
+                "NotebookEdit",
+                &json!({"notebook_path": "/Users/a/n.ipynb"})
+            ),
+            "NotebookEdit:/Users/a/n.ipynb"
+        );
+        // Nothing to key on: the tool name is the whole key, which is what
+        // the send gate uses anyway.
+        assert_eq!(denial_key("Write", &json!({})), "Write");
+    }
+
+    /// LAC-8384 item 6: `Task` stays pre-approved, and this is the measurement
+    /// that settles it rather than an assumption.
+    ///
+    /// The question was whether a subagent's `Edit` calls come back through
+    /// the parent's permission prompt, or run unseen inside the subagent.
+    /// Measured against `claude` 2.1.325 with a stub MCP server standing in
+    /// for Juno's: a `Task` subagent's `Write` arrived at `approve` as
+    /// `tool_name: "Write"` with its own `file_path`, and the denial stopped
+    /// it — the subagent reported the refusal back verbatim. So the subagent's
+    /// file edits are gated per call exactly like the parent's, and `Task`
+    /// being pre-approved gates nothing away.
+    #[test]
+    fn task_is_pre_approved_because_its_subagents_tools_are_gated_per_call() {
+        assert!(ALLOWED_TOOLS.split(',').any(|t| t == "Task"));
+        // Which is only safe because the tools a subagent reaches for are the
+        // same names this module gates.
+        for tool in ["Write", "Edit", BASH_TOOL] {
+            assert!(
+                ask_first_risk(tool, &json!({"file_path": "/Users/a/x", "command": "rm x"}))
+                    .is_some(),
+                "{tool} must be gated for a subagent as well as the parent"
+            );
+        }
     }
 
     #[test]
