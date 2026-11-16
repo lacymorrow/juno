@@ -268,16 +268,34 @@ const SETTINGS_FLAG: &str = "--settings";
 /// way, so without this the fix would have been inert on the machine it was
 /// reviewed on.
 ///
-/// Two levers, because a gate this quiet should not rest on one spelling:
+/// Two levers, and they are **not** redundant. Each closes a bypass the other
+/// leaves open, which is why neither line may be deleted as belt-and-braces:
 ///
 /// - `defaultMode` is pinned to `default`, the mode that asks. The CLI's own
 ///   name for it is now `manual` (`--permission-mode` lists `manual`, not
 ///   `default`), and both spellings were measured to work, so the legacy one
-///   is sent because older builds know only that.
-/// - `ask` names the four tools by hand, which beats `defaultMode` outright:
-///   measured with `defaultMode: "acceptEdits"` *and* this list, the `Write`
-///   still reached `approve`. So a future build that stops understanding
-///   `default` leaves the gate standing.
+///   is sent because older builds know only that. This is what closes the
+///   `acceptEdits` / `auto` bypass above.
+/// - `ask` names the tools by hand. It beats `defaultMode` (measured with
+///   `defaultMode: "acceptEdits"` *and* this list, the `Write` still reached
+///   `approve`), so it is also the backstop if a future build stops
+///   understanding the legacy spelling.
+///
+///   **And it is the only thing that closes the hook bypass**, which is a
+///   second, independent way to switch this gate off. A `PreToolUse` hook
+///   answering `permissionDecision: "allow"` pre-empts
+///   `--permission-prompt-tool` entirely: `approve` is never called and the
+///   tool runs. Measured on 2.1.325, one variable changed between the two
+///   runs: hook alone, `approve` not consulted and `echo hi` ran; the same
+///   hook plus this `ask` list, `approve` consulted and the denial held.
+///
+///   That bypass is reachable from outside Juno. Hooks load from the person's
+///   own `~/.claude/settings.json` **and** from a project-level
+///   `.claude/settings.json` in whatever directory the CLI spawns in, and
+///   `-p` skips the workspace trust dialog, so Juno never gets asked about
+///   the directory. A project hook was measured firing from the spawn's cwd.
+///   `--bare` would skip hooks and is unusable here: it also skips the
+///   keychain reads this provider authenticates with.
 ///
 /// `MultiEdit` is deliberately absent even though [`ask_first_risk`] maps it:
 /// 2.1.325 prints "Permission ask rule "MultiEdit" matches no known tool" and
@@ -1979,6 +1997,12 @@ mod tests {
         // rule naming one, so this stays out even though `ask_first_risk`
         // maps it.
         assert!(!ask.iter().any(|t| t == "MultiEdit"));
+
+        // Do not "simplify" this list away as a backstop for `defaultMode`.
+        // It is the only half of the pin that survives an allow-hook, and a
+        // hook can arrive from a project-level `.claude/settings.json` in the
+        // directory the CLI spawns in. Measured on 2.1.325: hook alone, the
+        // permission prompt was never consulted; hook plus this list, it was.
     }
 
     /// The shell screen must never ride the asking path, and this is a
