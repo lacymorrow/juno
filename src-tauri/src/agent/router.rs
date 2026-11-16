@@ -582,6 +582,58 @@ mod tests {
         assert_eq!(chat, model_ids::CLAUDE_SONNET_5_5);
     }
 
+    /// `build_classifier_request` sends `thinking: {"type": "disabled"}`
+    /// unconditionally, so the Classifier role may only be held by a model the
+    /// live docs document as accepting that value. Opus 5.5, Sonnet 5.5 and the
+    /// whole Fable and Mythos line answer it with a 400, and
+    /// `plan_from_classification` maps every error to `None`, which is
+    /// indistinguishable from "routing is switched off" — so getting this wrong
+    /// kills routing silently on every query while still paying for the call.
+    ///
+    /// Asked for by the claude-review bot on PR #1021, which pointed out that
+    /// this rule existed only as a comment, and a comment cannot fail CI
+    /// (LAC-8408).
+    ///
+    /// The list below is a transcription of the live per-model configuration
+    /// table on the Thinking page (read 2026-11-16, LAC-8375). It is the same
+    /// pattern `anthropic_catalog_matches_the_documented_tables` uses, and it is
+    /// deliberately **not** the `&[&str]` model list the catalog comment bans:
+    /// that ban is on production call sites deriving model behaviour from a
+    /// hand-kept list instead of from `model_definitions()`. Here the list is
+    /// the documentation, the catalog is what Juno sends, and the test asserts
+    /// the two agree.
+    ///
+    /// An allowlist on purpose. A model Anthropic ships later that is not named
+    /// here reds this test rather than silently inheriting permission to hold
+    /// the role, which is the correct failure for a weekly model check.
+    #[test]
+    fn the_classifier_role_only_goes_to_a_model_that_accepts_disabled_thinking() {
+        // Haiku 5.5 and Opus 5 accept `disabled` at effort `high` or below;
+        // Sonnet 5 accepts it outright. Sonnet 5.5's floor is `"between_tools"`
+        // instead, so it is absent even though it holds the Chat role.
+        const ACCEPTS_DISABLED: &[&str] = &[
+            model_ids::CLAUDE_HAIKU_5_5,
+            model_ids::CLAUDE_OPUS_5,
+            model_ids::CLAUDE_SONNET_5,
+        ];
+
+        let classifier = classifier_model(&Provider::Anthropic).expect("a classifier model");
+        assert!(
+            ACCEPTS_DISABLED.contains(&classifier),
+            "the Classifier role is held by {classifier}, which is not documented to accept \
+             thinking: {{\"type\": \"disabled\"}}. build_classifier_request sends that \
+             unconditionally, so this model would answer every classification with a 400 and \
+             routing would be silently dead. Re-read the per-model configuration table on the \
+             Thinking page before moving this role."
+        );
+
+        // Tie the assertion to the value it is about, so the two cannot drift.
+        assert_eq!(
+            build_classifier_request(classifier, "q")["thinking"]["type"],
+            "disabled"
+        );
+    }
+
     #[test]
     fn each_role_is_held_by_at_most_one_model() {
         for provider in [
