@@ -43,6 +43,14 @@ const ROUTE_TOOL_NAME: &str = "route_request";
 /// to `tool_choice: auto` would spend this budget on reasoning and stop with
 /// `max_tokens` before the route ever arrives. Raise this first if that
 /// changes.
+///
+/// The quoted sentence is from the Haiku 5.5 docs as read on 2026-11-10
+/// (LAC-7413, PR #963); it has not been re-verified since, and CLAUDE.md says
+/// to check capabilities against the live docs rather than from memory. Re-read
+/// it before relying on it. Nothing rests on it today: the classifier is
+/// Haiku 4.5, which declares `adaptive_thinking: false`, so this is a warning
+/// for when the role moves to an adaptive-thinking model, not a live
+/// constraint.
 const CLASSIFIER_MAX_TOKENS: u32 = 200;
 /// Long pasted text says nothing more about the route than its opening does.
 const MAX_QUERY_CHARS: usize = 2000;
