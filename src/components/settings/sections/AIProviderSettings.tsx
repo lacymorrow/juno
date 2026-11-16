@@ -105,7 +105,9 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
         </SettingsGroup>
       )}
 
-      {/* Shared with the Models pane — one source of truth for the agent model. */}
+      {/* The one place the agent's provider+model is chosen. Settings > Models
+          is the dictation catalog; #578 removed this picker from it as a
+          duplicate. */}
       <AssistantModelPicker settings={settings} advanced />
 
       {settings.activeProvider && settings.providerSettings && (
