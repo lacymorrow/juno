@@ -20,8 +20,8 @@
 //! off restores the old skip-permissions behaviour for testing. With one
 //! exception, added by LAC-8366 and written down here by LAC-8384: **"Ask me
 //! first" in Security and Privacy forces the asking path on whatever the send
-//! setting says.** It is the stronger promise — the person asked to be told
-//! before anything changes their Mac — and keeping it needs the same
+//! setting says.** It is the stronger promise, since the person asked to be
+//! told before anything changes their Mac, and keeping it needs the same
 //! `approve` route, so a person who chose it is asked about sends too.
 //! [`routes_permission_prompts`] is that decision, and
 //! [`skips_the_send_gate`] is its other half.
@@ -174,7 +174,7 @@ pub fn routes_permission_prompts(ask_first: bool, send_gate_enabled: bool) -> bo
 ///
 /// "Ask before Juno sends" off means off: the old behaviour, everything runs.
 /// It does not mean off under "Ask me first", and the reason is not that the
-/// mode outranks the setting — it is that by the time this is asked,
+/// mode outranks the setting. It is that by the time this is asked,
 /// [`ask_first_answer`] has already answered every tool that mode owns. What
 /// reaches here is a name it has no opinion about, which in practice is an
 /// `mcp__*` connector call, and the send gate is the right reader for one.
@@ -485,8 +485,8 @@ pub fn ask_first_risk(tool_name: &str, input: &Value) -> Option<(&'static str, V
 /// The send gate keys on the tool name alone, and should: one connector tool
 /// asked about once is the same question on a retry, and a loop that varied
 /// the recipient would otherwise raise a fresh sheet per attempt. "Ask me
-/// first" asks per file, so its key carries the path or the command too —
-/// keyed on the name alone, declining one edit would auto-deny an edit to
+/// first" asks per file, so its key carries the path or the command too.
+/// Keyed on the name alone, declining one edit would auto-deny an edit to
 /// every other file for a minute, which is a wrong answer rather than a quiet
 /// one (LAC-8384 item 3).
 fn denial_key(tool_name: &str, input: &Value) -> String {
@@ -920,7 +920,7 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
     // question with one answer.
     //
     // A rewrite is not an answer. It changes *what* runs, not *whether* it may
-    // run, and it used to return allow from right here — so under "Ask me
+    // run, and it used to return allow from right here, so under "Ask me
     // first" a `Bash` `open` was rewritten to `open -g` and ran with no card
     // at all. Background mode is on by default, which made that the default
     // configuration (LAC-8384). The rewrite is now carried past the gates
@@ -943,7 +943,7 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
 
     // What runs if this call is allowed. Every allow below answers with this
     // rather than with the raw input, so no gate can drop the rewrite on the
-    // way out — including the one that turns the send gate off entirely, which
+    // way out, including the one that turns the send gate off entirely, which
     // is the configuration background mode has to keep working on.
     let approved = match &rewrite {
         Some(command) => with_command(&input, command),
@@ -962,7 +962,7 @@ pub async fn handle_approve(app: &tauri::AppHandle, arguments: &Value) -> Value 
     }
 
     // Off means off: the old behaviour, everything runs. Not under "Ask me
-    // first", and the reason is not that the mode outranks the setting — it is
+    // first", and the reason is not that the mode outranks the setting. It is
     // that `ask_first_answer` has already answered every tool that mode owns,
     // so what reaches here is a name it has no opinion about (an `mcp__*`
     // connector call), and the send gate is the right reader for one. See
@@ -1927,7 +1927,7 @@ mod tests {
     /// The shell screen must never ride the asking path, and this is a
     /// security property rather than tidiness. Measured on `claude` 2.1.325
     /// (LAC-8384): a `PreToolUse` hook answering `permissionDecision: "allow"`
-    /// pre-empts `--permission-prompt-tool` entirely — `approve` was never
+    /// pre-empts `--permission-prompt-tool` entirely, and `approve` was never
     /// called for the `Bash` the hook allowed. So carrying the screen here
     /// would hand every shell call back to the hook and take "Ask me first"
     /// out of the loop again, which is the bug this ticket exists for.
@@ -1966,7 +1966,7 @@ mod tests {
             shell_verdict(true, BASH_TOOL, &call).expect("background mode rewrites `open`");
         assert!(
             matches!(policy, ShellPolicy::Rewritten { .. }),
-            "{policy:?} — this test needs a command background mode rewrites"
+            "{policy:?}: this test needs a command background mode rewrites"
         );
 
         let (mapped, _, risk) = ask_first_risk(BASH_TOOL, &call).expect("a shell call is gated");
@@ -1988,7 +1988,7 @@ mod tests {
     /// called from a unit test: it wants a running app, a settings store, a
     /// window to put the sheet in and a person to answer it. What can be
     /// asserted is the shape of the window between reading background mode's
-    /// verdict and raising the card — nothing in it may answer the call with
+    /// verdict and raising the card: nothing in it may answer the call with
     /// an allow. The bug was exactly one `return` in that window, and every
     /// other test in this file stayed green.
     #[test]
@@ -2108,7 +2108,7 @@ mod tests {
     /// Measured against `claude` 2.1.325 with a stub MCP server standing in
     /// for Juno's: a `Task` subagent's `Write` arrived at `approve` as
     /// `tool_name: "Write"` with its own `file_path`, and the denial stopped
-    /// it — the subagent reported the refusal back verbatim. So the subagent's
+    /// it, and the subagent reported the refusal back verbatim. So the subagent's
     /// file edits are gated per call exactly like the parent's, and `Task`
     /// being pre-approved gates nothing away.
     #[test]
