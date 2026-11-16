@@ -22,22 +22,31 @@ type Model = {
   supports_computer_use: boolean;
   is_recommended: boolean;
   is_legacy: boolean;
+  requires_computer_toolset: boolean;
 };
 
+/** The recommended default, and like the rest of the current lineup it drives
+ * the computer through `computer_toolset_20260801`. The fixtures used to leave
+ * `requires_computer_toolset` off the type altogether, so it read as
+ * `undefined` and the filter that reads it was never exercised. */
 const CAPABLE: Model = {
-  id: "claude-fable-5-1",
-  name: "Claude Fable 5.1",
+  id: "claude-opus-5-5",
+  name: "Claude Opus 5.5",
   supports_computer_use: true,
   is_recommended: true,
   is_legacy: false,
+  requires_computer_toolset: true,
 };
 
+/** Legacy since Haiku 5.5 launched, and on the oldest tool version Juno sends
+ * — so it is the one fixture that is legacy *and* not a toolset model. */
 const LEGACY: Model = {
   id: "claude-haiku-4-5-20251001",
   name: "Claude Haiku 4.5",
   supports_computer_use: true,
   is_recommended: false,
   is_legacy: true,
+  requires_computer_toolset: false,
 };
 
 const CHAT_ONLY: Model = {
@@ -46,16 +55,18 @@ const CHAT_ONLY: Model = {
   supports_computer_use: false,
   is_recommended: false,
   is_legacy: false,
+  requires_computer_toolset: false,
 };
 
-/** Drives the computer through `computer_toolset_20260801`. Juno now sends
- * that toolset, so this is an ordinary capable model with no special mark. */
+/** A second current model on the toolset, so the lineup case has something to
+ * switch *to* rather than only the active row. */
 const TOOLSET: Model = {
-  id: "claude-opus-5-5",
-  name: "Claude Opus 5.5",
+  id: "claude-haiku-5-5",
+  name: "Claude Haiku 5.5",
   supports_computer_use: true,
   is_recommended: false,
   is_legacy: false,
+  requires_computer_toolset: true,
 };
 
 const settingsWith = (models: Model[], selectedId = models[0].id) =>
@@ -149,6 +160,25 @@ describe("AssistantModelPicker legacy gating", () => {
     );
 
     expect(within(openModelList()).getByText(LEGACY.name)).toBeInTheDocument();
+  });
+
+  it("lists the whole current lineup with advanced settings off", () => {
+    // The entire current lineup drives the computer through
+    // `computer_toolset_20260801`, so hiding toolset models would leave this
+    // list holding only the active row — nothing to switch to, which is the
+    // opposite of what the gating is for. Legacy is the only axis that hides a
+    // model here.
+    advanced.on = false;
+    render(
+      <AssistantModelPicker
+        settings={settingsWith([CAPABLE, TOOLSET, LEGACY])}
+      />
+    );
+
+    const list = openModelList();
+    expect(within(list).getByText(CAPABLE.name)).toBeInTheDocument();
+    expect(within(list).getByText(TOOLSET.name)).toBeInTheDocument();
+    expect(within(list).queryByText(LEGACY.name)).not.toBeInTheDocument();
   });
 
   it("always shows the model in use, even when it is an older one", () => {

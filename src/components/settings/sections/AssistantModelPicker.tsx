@@ -63,10 +63,7 @@ export default function AssistantModelPicker({
       (p) =>
         p.model_info &&
         p.model_info.some(
-          (m) =>
-            showAdvanced ||
-            (!m.is_legacy && !m.requires_computer_toolset) ||
-            m.id === currentModelId
+          (m) => showAdvanced || !m.is_legacy || m.id === currentModelId
         )
     );
     const active = withModels.filter((p) => p.id === settings.activeProvider);
@@ -80,17 +77,22 @@ export default function AssistantModelPicker({
   ]);
 
   // Juno offers the current generation and nothing else, the way an Apple
-  // product does. Models that only drive the computer through an older tool
-  // version stay out of the list unless you ask for them — with one exception:
-  // whatever is selected right now is always shown, so the list can never hide
-  // what Juno is actually running, and you can always switch off it.
+  // product does. Models the provider lists as legacy stay out of the list
+  // unless you ask for them — with one exception: whatever is selected right
+  // now is always shown, so the list can never hide what Juno is actually
+  // running, and you can always switch off it.
+  //
+  // `requires_computer_toolset` used to hide a model here too, back when the
+  // toolset was the exception and Juno drove `computer_20251124` by default.
+  // That premise is gone: the whole current lineup (Fable 5.2, Opus 5.5,
+  // Sonnet 5.5, Haiku 5.5) accepts nothing earlier, so gating on it emptied
+  // this list of everything except the active row — a picker with nothing to
+  // switch to. Legacy is the only axis that hides a model now (LAC-8375).
   const visibleModels = useCallback(
     (models: typeof settings.providers[number]["model_info"]) =>
       models.filter(
         (model) =>
-          showAdvanced ||
-          (!model.is_legacy && !model.requires_computer_toolset) ||
-          model.id === currentModelId
+          showAdvanced || !model.is_legacy || model.id === currentModelId
       ),
     [showAdvanced, currentModelId]
   );
