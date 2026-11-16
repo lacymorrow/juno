@@ -98,7 +98,16 @@ pub mod model_ids {
 /// turn — so `cache_read` is the load-bearing number here, not `input`.
 ///
 /// `long_context`, when present, replaces all four rates once a request's
-/// prompt tokens pass its threshold.
+/// prompt tokens pass its threshold. When it is absent every prompt is billed
+/// at the four rates above, however long it gets, so a provider tier that is
+/// not declared here is a silent underprice and not an error.
+///
+/// There is deliberately no "threshold known, rates unknown" state: no
+/// catalog model needs one, and a variant with no caller is machinery that
+/// the first real case would be designed around rather than into (LAC-8405).
+/// What guards the gap instead is the parity test in `cost_log`, which
+/// refuses any tier that `scripts/pricing/prices.json` documents and this
+/// table does not — a bare threshold included.
 #[derive(Debug, Clone)]
 pub struct Rates {
     pub input: f64,
