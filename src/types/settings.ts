@@ -10,13 +10,12 @@ export interface ProviderInfo {
     name: string;
     supports_computer_use: boolean;
     is_recommended: boolean;
-    /** The provider lists this model as legacy. Hidden unless advanced
-     * settings are on, or it is the model currently in use. */
+    /** The provider lists this model as legacy. Nothing hides it: every picker
+     * lists every model the backend reports (LAC-8407). */
     is_legacy: boolean;
-	/** Model drives the computer only through computer_toolset_20260801 (advanced). */
+	/** Model drives the computer only through computer_toolset_20260801, which Juno
+	 * does send: the default model is one of these. Not a visibility flag. */
 	requires_computer_toolset?: boolean;
-    /** Drives the computer, but only through a tool version Juno does not
-     * send yet. Not a chat-only model — say so accurately. */
   }[];
   is_available: boolean;
   is_default: boolean;

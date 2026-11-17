@@ -237,9 +237,13 @@ impl ComputerUse {
 /// `Legacy` (Fable 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6, Opus 4.5,
 /// Sonnet 5, Sonnet 4.6).
 ///
-/// `Legacy` models stay callable and stay selectable, but the picker hides
-/// them unless advanced settings are on — except for the active model, which
-/// is always shown so a saved choice never disappears.
+/// `Legacy` models stay callable and stay **visible**: nothing filters on this
+/// field. The Settings picker had a filter that read the same advanced toggle
+/// that gated the group it lived in, so its first clause was always true and it
+/// hid nothing; it is deleted (LAC-8407). The chat picker (`ChatInput`) never
+/// had one, so every model the backend reports is offered to everyone. Whether
+/// it should filter is an open product question (LAC-8418). Treat this field as
+/// the provider's label and a badge input, not as a visibility rule.
 ///
 /// Toolset GA is a *separate* axis: see `ModelDefinition::toolset_ga`. #580
 /// conflated the two, which is how a model Anthropic had already moved to
@@ -368,13 +372,14 @@ pub struct ModelInfo {
     pub category: ModelCategory,
     pub supports_computer_use: bool,
     pub is_recommended: bool,
-    /// True when the provider lists the model as legacy. The picker hides
-    /// these unless advanced settings are on, or the model is the active one.
+    /// True when the provider lists the model as legacy. Nothing hides these:
+    /// both pickers list every model the backend reports. See `Availability`.
     pub is_legacy: bool,
     /// True when the model can only do computer use through
-    /// `computer_toolset_20260801`. Hidden like a legacy model: the toolset is
-    /// newer, costs roughly 2x the input-token overhead per request, and is not
-    /// what Juno drives by default, so opting into it is an advanced choice.
+    /// `computer_toolset_20260801`, which costs roughly 2x the input-token
+    /// overhead per request. Not a visibility rule, and not an advanced opt-in:
+    /// Juno's default model (Opus 5.5) is one of these, so filtering on this
+    /// field would hide the default and the only `is_recommended` Anthropic row.
     pub requires_computer_toolset: bool,
 }
 
