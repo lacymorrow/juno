@@ -267,7 +267,7 @@ jobs:
     # secret, APPLE_TEAM_ID (the one value this comment says stays behind),
     # while the updater
     # signing key (TAURI_SIGNING_PRIVATE_KEY,
-    # TAURI_SIGNING_PRIVATE_KEY_PASSWORD), APPLE_ID and APPLE_PASSWORD are all
+    # TAURI_SIGNING_PRIVATE_KEY_PASSWORD) is
     # still repository-scoped and readable by any workflow on any branch. An
     # Environment ADDS a resolution scope, it does not SUBTRACT the repository
     # one, so this job resolves all of them from repo scope, the build behaves
@@ -722,8 +722,8 @@ jobs:
       - name: Notarize and staple the DMG
         if: ${{ env.APPLE_SIGNING_IDENTITY != '' }}
         # The notarization credentials are already in the job environment: the
-        # signing step above wrote exactly one of the two sets to $GITHUB_ENV,
-        # along with APPLE_NOTARY_MODE saying which.
+        # signing step above wrote the App Store Connect API key set to
+        # $GITHUB_ENV, along with APPLE_NOTARY_MODE=api_key.
         #
         # The body is scripts/notarize-dmg.sh rather than an inline block so
         # the verdict and re-poll logic can be tested against a stubbed

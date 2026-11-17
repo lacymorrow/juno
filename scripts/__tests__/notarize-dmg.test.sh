@@ -176,14 +176,6 @@ api_key_env() {
   unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID 2>/dev/null || true
 }
 
-password_env() {
-  export APPLE_NOTARY_MODE=password
-  export APPLE_ID=someone@example.com
-  export APPLE_PASSWORD=abcd-efgh-ijkl-mnop
-  export APPLE_TEAM_ID=TEAMID1234
-  unset APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH 2>/dev/null || true
-}
-
 one_dmg() { : >"$work/dmg/Juno_0.9.9_universal.dmg"; }
 
 # --- cases ----------------------------------------------------------------
@@ -206,12 +198,18 @@ rc=$(STUB_SUBMIT=accepted run)
 check "api_key mode passes --key/--key-id/--issuer and no --apple-id" $?
 teardown
 
-# 3. Password mode still passes the old flags.
-setup; password_env; one_dmg
+# 3. The removed password mode is refused, not silently defaulted to.
+setup; api_key_env; one_dmg
+export APPLE_NOTARY_MODE=password
 rc=$(STUB_SUBMIT=accepted run)
-[ "$rc" = 0 ] && called "--apple-id someone@example.com" && called "--team-id TEAMID1234" \
-  && not_called "--issuer"
-check "password mode passes --apple-id/--password/--team-id" $?
+[ "$rc" != 0 ] && not_called "notarytool submit"
+check "APPLE_NOTARY_MODE=password fails loudly and never submits" $?
+teardown
+setup; api_key_env; one_dmg
+unset APPLE_NOTARY_MODE
+rc=$(STUB_SUBMIT=accepted run)
+[ "$rc" != 0 ] && not_called "notarytool submit"
+check "unset APPLE_NOTARY_MODE fails loudly and never submits" $?
 teardown
 
 # 4. THE REGRESSION: upload succeeded, poll died, verdict recovered by re-poll.

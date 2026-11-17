@@ -81,7 +81,7 @@ failed=$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID/jobs" \
 # as if it were the first one. #926 collected 13 of them over six days
 # while the advice below stayed frozen at the advice for a FIRST
 # failure: twelve consecutive reds in, it was still saying "re-dispatch
-# the tag first" and "replace APPLE_PASSWORD only when red on two runs
+# the tag first" and "replace the Apple credential only when red on two runs
 # in a row", a condition met on day one. A reader who followed it
 # burned a macOS runner to re-learn the same 401 (LAC-7193).
 #
@@ -209,7 +209,8 @@ if [ -n "${last_at:-}" ] && [ "$last_at" != "${last:-}" ]; then
 fi
 
 # The paragraph below used to read "Notarization failures (HTTP 401)
-# mean the APPLE_PASSWORD app-specific password needs replacing". It
+# mean the APPLE_PASSWORD app-specific password needs replacing" (that
+# path is gone, LAC-8494). It
 # asserted a cause this cannot observe, and it was wrong: that
 # sentence opened #926, a password was rotated on the strength of it,
 # and the next build 401'd on the new one (LAC-6331). State the
@@ -240,9 +241,9 @@ EOF
 # (a 401 really can be reachability) and wrong every time after.
 if [ "$streak" -le 1 ]; then
   advice=$(cat <<EOF
-A notarization "HTTP status code: 401" does not on its own mean APPLE_PASSWORD is wrong. The endpoint behind it, notary/v2/asp, IS the app-specific-password token exchange, so a runner that cannot reach Apple gets a 401 rather than a network error, and the same unchanged credential has succeeded within hours of a 401.
+A notarization "HTTP status code: 401" does not on its own mean the App Store Connect API key is wrong. A runner that cannot reach Apple can answer with a 401 rather than a network error, and the same unchanged credential has succeeded within hours of a 401.
 
-But if the signing step warned that APPLE_PASSWORD does not match the app-specific-password shape, the 401 is already explained and re-dispatching will not clear it. Replace the secret.
+But if the signing step failed on APPLE_API_KEY_P8_B64 (could not be decoded, or did not decode to a private key), the failure is already explained and re-dispatching will not clear it. Re-encode and replace the secret.
 
 Otherwise re-dispatch the tag once:
 
@@ -255,9 +256,7 @@ else
   advice=$(cat <<EOF
 This is failure $streak_text in a row, so re-dispatching is no longer a reasonable first move. Do not dispatch this tag again expecting a different result. Change a credential or the code first. Those dispatches may have carried different tags and failed for different reasons, so read the earlier comments here before settling on one cause.
 
-On a 401 from "Check the notary service", read APPLE_PASSWORD_SHAPE in the "Configure Apple code signing" log. "bad" means the stored value is not an app-specific password - those are always exactly 19 characters, xxxx-xxxx-xxxx-xxxx - and nothing but replacing it will clear this.
-
-The durable fix is the App Store Connect API key path (APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_P8_B64): it signs a JWT on the runner and never calls notary/v2/asp at all. Those three are read from the \`release\` environment, so set them there, not at repo scope.
+On a 401 from "Check the notary service", check the three App Store Connect API key secrets (APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_P8_B64) in the \`release\` environment: the key may be revoked, the issuer or key id may be mistyped, or the P8 may be encoded wrongly. The "Configure Apple code signing" log says which of the three is missing or malformed. Set them in the \`release\` environment, not at repo scope.
 EOF
 )
 fi
