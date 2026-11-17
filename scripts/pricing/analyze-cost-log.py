@@ -434,6 +434,23 @@ def self_test():
     assert abs(short - 0.0001) < 1e-12, short
     assert abs(long - 0.1) < 1e-12, long  # 200k * $0.50/MTok, not $0.10
 
+    # gpt-5.6-sol (the OpenAI default, LAC-8411): the whole request bills at the
+    # long tier past 272K prompt tokens. 1M output tokens isolates the output rate.
+    def sol(prompt, out):
+        return turn_cost(
+            {
+                "model_id": "gpt-5.6-sol",
+                "input_tokens": prompt,
+                "output_tokens": out,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+            },
+            prices,
+        )
+
+    assert abs(sol(272_000, 1_000_000) - (272_000 * 4.0 / 1e6 + 20.0)) < 1e-9
+    assert abs(sol(272_001, 1_000_000) - (272_001 * 8.0 / 1e6 + 30.0)) < 1e-9
+
     # gpt-5.5 past 272K has no published long rates: refuse, don't guess.
     try:
         turn_cost(

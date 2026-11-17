@@ -1,6 +1,6 @@
 {
   "_comment": "Price table for LAC-4124 pricing measurement. USD per million tokens.",
-  "_verified": "Anthropic rows re-verified 2026-11-16 against the live pricing page: all 15 metered Claude rows match, claude-fable-5-2 added (LAC-8375). OpenAI 2026-10-16. Gemini rows re-verified 2026-11-16 against the live page, now with its URL recorded below (all 3 match on the Standard tier; 3.7-flash, 3.5-flash and 2.5-computer-use-preview confirmed still unpublished) (LAC-8412). Fetched from live provider docs, not from a cached model catalog (LAC-3106).",
+  "_verified": "Anthropic rows re-verified 2026-11-16 against the live pricing page: all 15 metered Claude rows match, claude-fable-5-2 added (LAC-8375). OpenAI gpt-5.6-sol and gpt-5.3-codex re-verified 2026-11-16 against developers.openai.com/api/docs/models/<id> and /api/docs/pricing (gpt-5.6-sol gained a long-context tier and a cache-write rate; gpt-5.3-codex publishes no long tier); other OpenAI rows 2026-10-16. Gemini rows re-verified 2026-11-16 against the live page, now with its URL recorded below (all 3 match on the Standard tier; 3.7-flash, 3.5-flash and 2.5-computer-use-preview confirmed still unpublished) (LAC-8412). Fetched from live provider docs, not from a cached model catalog (LAC-3106).",
   "_sources": {
     "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
     "openai": "https://developers.openai.com/api/docs/pricing",
@@ -159,7 +159,12 @@
       "input": 4.0,
       "output": 20.0,
       "cache_read": 0.4,
-      "cache_write": 0.0
+      "cache_write": 5.0,
+      "long_context_threshold": 272000,
+      "long_input": 8.0,
+      "long_output": 30.0,
+      "long_cache_read": 0.8,
+      "long_cache_write": 10.0
     },
     "gpt-5.3-codex": {
       "billing": "metered",
@@ -276,9 +281,9 @@
   },
   "_notes": [
     "Anthropic usage reports input_tokens EXCLUDING cache_read_input_tokens and cache_creation_input_tokens, so summing all four categories does not double-count.",
-    "OpenAI reports no separate cache-write charge; cache_write is 0 and cached_tokens bill at the cache_read rate.",
+    "Older OpenAI rows: no separate cache-write charge, cache_write is 0 and cached_tokens bill at the cache_read rate. NOT true of gpt-5.6-sol, whose model page says cache writes bill at 1.25x the uncached input rate (5.0 short, 10.0 long); the other OpenAI rows were last read 2026-10-16 and not re-checked for this.",
     "gpt-5, gpt-5.1, gpt-5.2 and gpt-5.5 are REFERENCE rows, not live ones. Juno has never carried any of them in its catalog -- its OpenAI rows were already gpt-5.6-sol and gpt-5.3-codex when this file was written (LAC-4127) -- so no cost-log row can name them and nothing here reads them: the Rust parity test loops over Juno's catalog, and this script only looks a key up when a row names it. gpt-5.5's long_context_threshold with no long_* rates records what the 2026-10-16 OpenAI check found, that a >272K-token request moves to a tier whose rates were not in the short-context table. It arms no tripwire. The same shape on a model Juno CAN select would be a silent underprice on Juno's side, and the Rust parity test refuses it (LAC-8405).",
-    "Juno's two LIVE OpenAI rows, gpt-5.6-sol and gpt-5.3-codex, carry no long-context tier here or in Juno. OpenAI appears to price a >272K-token request on a higher tier; that is UNVERIFIED as of 2026-11-16 and is tracked by LAC-8411. Until it is read off the live page and declared on both sides, a long-prompt turn on those models is priced at the short rate by both tables and nothing raises, because the two tables agree with each other. Do not quote a cost measured over long prompts on those models until LAC-8411 closes.",
+    "gpt-5.6-sol is promotional at 4.0/20.0 through 2026-11-30; the standard rate afterward is 5.0/30.0 (gpt-5.5 list), re-verify then.",
     "Claude CLI models are billed as a Claude Max/Pro seat, not per token. Marginal cost to Juno is zero; the analyzer reports them separately instead of as $0.00 alongside metered models.",
     "Opus 5.5 computer use requires computer_toolset_20260801, which roughly doubles per-request input overhead (4,530 vs 2,152 tokens, measured 2026-09-22). That overhead is already inside the reported input_tokens; do not add it again.",
     "Keys are BILLING keys, matching what Juno's cost log writes as model_id (cost_log::billing_model_id). Metered API models use the wire model id; subscription paths are prefixed with the provider, so claude-cli:opus is never averaged in with metered Anthropic traffic at $0.00.",
