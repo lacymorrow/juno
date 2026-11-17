@@ -2363,11 +2363,3 @@ mod shell_timeout_tests {
         assert_eq!(result["timed_out"], false);
     }
 }
-
-// PLANTED (LAC-8449 negative control): must turn CI red, then be reverted.
-#[allow(dead_code)]
-fn planted_violation() -> u8 {
-    let a: Option<u8> = None;
-    let b: std::result::Result<u8, ()> = Ok(1);
-    a.unwrap() + b.expect("planted")
-}
