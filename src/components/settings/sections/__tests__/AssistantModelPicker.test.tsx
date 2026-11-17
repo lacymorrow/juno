@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { describe, expect, it, vi } from "vitest";
+import { COMMANDS } from "@/lib/constants.generated";
 import AssistantModelPicker from "../AssistantModelPicker";
 
 // cmdk calls scrollIntoView, which jsdom does not implement.
@@ -166,7 +167,6 @@ describe("AssistantModelPicker model list", () => {
 
 describe("AssistantModelPicker model persistence", () => {
   const pick = (settings: ReturnType<typeof settingsWith>) => {
-    advanced.on = false;
     render(<AssistantModelPicker settings={settings} />);
     fireEvent.click(
       within(openModelList()).getByText(TOOLSET.name)
@@ -177,14 +177,19 @@ describe("AssistantModelPicker model persistence", () => {
     const settings = settingsWith([CAPABLE, TOOLSET], CAPABLE.id);
     vi.mocked(invoke).mockReset();
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd.includes("validate")) return true;
+      if (cmd === COMMANDS.PROVIDERS_VALIDATE_PROVIDER_MODEL) return true;
       throw new Error("persist failed");
     });
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
 
     pick(settings);
 
-    await waitFor(() => expect(err).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(err).toHaveBeenCalledWith(
+        "AssistantModelPicker: Failed to change model:",
+        expect.any(Error)
+      )
+    );
     expect(
       (settings as unknown as { setFormData: ReturnType<typeof vi.fn> })
         .setFormData
