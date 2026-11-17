@@ -25,15 +25,6 @@ pub fn format_error(template: &str, context: &str, error: impl std::fmt::Display
         .replacen("{}", &error.to_string(), 1)
 }
 
-// NEGATIVE CONTROL (LAC-8446): planted violations, reverted in the next commit.
-pub fn negative_control_unwrap(v: Option<u32>) -> u32 {
-    v.unwrap()
-}
-
-pub fn negative_control_expect(v: Option<u32>) -> u32 {
-    v.expect("planted")
-}
-
 // macOS specific imports
 // macOS-specific imports moved to platform::macos module
 
