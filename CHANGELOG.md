@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.293] - 2026-11-17
+
+### Fixed
+
+- **settings:** show the picked model only after it saved (LAC-8423) (#1031) (9a1e8638)
+
 ## [0.8.291] - 2026-11-17
 
 ### Changed
@@ -1899,7 +1905,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.291...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.293...HEAD
+[0.8.293]: https://github.com/lacymorrow/juno/compare/cua-v0.8.292...v0.8.293
 [0.8.291]: https://github.com/lacymorrow/juno/compare/cua-v0.8.290...v0.8.291
 [0.8.289]: https://github.com/lacymorrow/juno/compare/cua-v0.8.288...v0.8.289
 [0.8.288]: https://github.com/lacymorrow/juno/compare/cua-v0.8.287...v0.8.288
