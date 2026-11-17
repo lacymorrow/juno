@@ -368,19 +368,21 @@ jobs:
       #   APPLE_SIGNING_IDENTITY       e.g. "Developer ID Application: Name (TEAMID)"
       #   APPLE_TEAM_ID                10-character team ID
       #
-      # Notarization then takes ONE of two credential sets. Prefer the first:
+      # Notarization then takes the App Store Connect API key, and only that:
       #   APPLE_API_ISSUER             App Store Connect issuer UUID
       #   APPLE_API_KEY                the 10-character Key ID
       #   APPLE_API_KEY_P8_B64         base64 of the AuthKey_<KeyID>.p8 itself
-      # or, the legacy path:
-      #   APPLE_ID                     Apple ID email for notarization
-      #   APPLE_PASSWORD               app-specific password for that Apple ID
       #
-      # The API key is preferred because it is signed into a JWT on the runner
-      # and never calls appstoreconnect.apple.com/notary/v2/asp. That endpoint
-      # IS the app-specific-password token exchange, so it answers "401
-      # Invalid credentials" for a runner that cannot reach it, which reads in
-      # the log exactly like a revoked password (LAC-6331, LAC-6333).
+      # The API key is signed into a JWT on the runner and never calls
+      # appstoreconnect.apple.com/notary/v2/asp. That endpoint IS the
+      # app-specific-password token exchange, so it answers "401 Invalid
+      # credentials" for a runner that cannot reach it, which reads in the log
+      # exactly like a revoked password (LAC-6331, LAC-6333).
+      #
+      # The Apple ID + app-specific password path was removed in LAC-8494.
+      # APPLE_PASSWORD existed at no scope (deleted in LAC-7723), so that path
+      # ran with an empty password and 401'd on every build. A missing API key
+      # now fails this step by name instead of falling back to it.
       #
       # The Tauri CLI treats an APPLE_* env var that is set-but-empty as
       # configured and then fails the build, so only export the secrets that
@@ -391,8 +393,6 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -407,7 +407,7 @@ jobs:
           #
           # APPLE_CERTIFICATE is deliberately NOT in this list: it is a
           # multi-line base64 blob and its internal newlines are load-bearing.
-          for var in APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_API_ISSUER APPLE_API_KEY; do
+          for var in APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_TEAM_ID APPLE_API_ISSUER APPLE_API_KEY; do
             raw="${!var-}"
             [ -n "$raw" ] || continue
             clean="$(printf '%s' "$raw" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
@@ -417,16 +417,11 @@ jobs:
             printf -v "$var" '%s' "$clean" 2>/dev/null || eval "$var=\$clean"
           done
 
-          # Pick exactly ONE credential set and export only that one. Tauri's
-          # docs describe the API key as an "alternative" to APPLE_ID and say
-          # nothing about which wins when both are set
-          # (v2.tauri.app/reference/environment-variables/, read 2026-11-04),
-          # so leaving both in the environment would make notarization depend
-          # on undocumented precedence.
-          #
           # All three API-key secrets or none. A partial set is rejected here
-          # rather than silently falling back to the password, because a silent
-          # fallback is how the DMG step learned to name its missing secrets.
+          # by name. "None" is only legal for an unsigned build (no signing
+          # identity): a signed build with no API key would otherwise reach
+          # notarization with no credential at all, and the failure would
+          # arrive ~50 minutes into the compile.
           api_present=0
           for var in APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8_B64; do
             if [ -n "${!var-}" ]; then
@@ -436,8 +431,8 @@ jobs:
 
           if [ "$api_present" = 3 ]; then
             notary_mode=api_key
-          elif [ "$api_present" = 0 ]; then
-            notary_mode=password
+          elif [ "$api_present" = 0 ] && [ -z "${APPLE_SIGNING_IDENTITY-}" ]; then
+            notary_mode=none
           else
             missing=""
             for var in APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8_B64; do
@@ -445,8 +440,8 @@ jobs:
                 missing="$missing $var"
               fi
             done
-            echo "::error::App Store Connect API key notarization is half-configured; missing secret(s):$missing"
-            echo "Set all three of APPLE_API_ISSUER, APPLE_API_KEY and APPLE_API_KEY_P8_B64, or none of them." >&2
+            echo "::error::App Store Connect API key notarization is not fully configured; missing secret(s):$missing"
+            echo "Set all three of APPLE_API_ISSUER, APPLE_API_KEY and APPLE_API_KEY_P8_B64 (release environment)." >&2
             exit 1
           fi
 
@@ -476,35 +471,11 @@ jobs:
           fi
           echo "APPLE_NOTARY_MODE=$notary_mode" >> "$GITHUB_ENV"
 
-          # Say whether the stored APPLE_PASSWORD even has the shape of an
-          # app-specific password. Apple's are exactly xxxx-xxxx-xxxx-xxxx
-          # (19 lowercase-and-hyphen characters); a regular Apple ID password
-          # in this secret returns 401 forever and looks identical in the log
-          # to a transient fault. Only the length and a yes/no are printed,
-          # never any part of the value.
-          # The verdict is written to $GITHUB_ENV because the step that meets
-          # the 401 is the one that needs it: for four runs this warning was
-          # correct and invisible, since `gh run view --log-failed` shows only
-          # the failed step and this step passes.
-          if [ "$notary_mode" = password ] && [ -n "${APPLE_PASSWORD-}" ]; then
-            if printf '%s' "$APPLE_PASSWORD" | grep -Eq '^[a-z]{4}-[a-z]{4}-[a-z]{4}-[a-z]{4}$'; then
-              echo "APPLE_PASSWORD has the app-specific-password shape (xxxx-xxxx-xxxx-xxxx)."
-              echo "APPLE_PASSWORD_SHAPE=ok" >> "$GITHUB_ENV"
-            else
-              echo "::warning::APPLE_PASSWORD is ${#APPLE_PASSWORD} characters and does NOT match Apple's app-specific-password shape (xxxx-xxxx-xxxx-xxxx). If this is a regular Apple ID password, every notarization will return 401 no matter how many times the build is retried. Generate an app-specific password at appleid.apple.com."
-              echo "APPLE_PASSWORD_SHAPE=bad" >> "$GITHUB_ENV"
-            fi
-          fi
-
-          # APPLE_TEAM_ID is exported on both paths: the docs tie it to
-          # APPLE_ID ("if APPLE_ID is provided, APPLE_PASSWORD and
-          # APPLE_TEAM_ID must also be set") and say nothing against it on its
-          # own, and the DMG verify step reads it.
+          # APPLE_TEAM_ID is exported on both paths: the DMG verify step reads
+          # it.
           export_vars="APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_TEAM_ID"
           if [ "$notary_mode" = api_key ]; then
             export_vars="$export_vars APPLE_API_ISSUER APPLE_API_KEY"
-          else
-            export_vars="$export_vars APPLE_ID APPLE_PASSWORD"
           fi
 
           for var in $export_vars; do
@@ -552,16 +523,12 @@ jobs:
       # cannot catch an outage that starts after the build does, which is what
       # the retry on the build step is for.
       - name: Check the notary service
-        if: ${{ env.APPLE_SIGNING_IDENTITY != '' && (env.APPLE_NOTARY_MODE == 'api_key' || (env.APPLE_ID != '' && env.APPLE_PASSWORD != '' && env.APPLE_TEAM_ID != '')) }}
+        if: ${{ env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_NOTARY_MODE == 'api_key' }}
         run: |
           set -uo pipefail
           log="$RUNNER_TEMP/notary-preflight.log"
 
-          if [ "${APPLE_NOTARY_MODE:-password}" = api_key ]; then
-            creds=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
-          else
-            creds=(--apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID")
-          fi
+          creds=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
 
           for attempt in 1 2 3 4 5; do
             if xcrun notarytool history "${creds[@]}" >"$log" 2>&1; then
@@ -571,28 +538,13 @@ jobs:
             echo "Notary check attempt ${attempt} failed:"
             sed -e 's/^/  /' "$log" || true
             [ "$attempt" = 5 ] && break
-            # A password that is not shaped like an app-specific password will
-            # 401 on all five, so stop after one. Safe in the direction that
-            # matters: a success on attempt 1 has already exited above, so a
-            # wrong guess about Apple's format can never block a credential
-            # that actually works.
-            if [ "${APPLE_PASSWORD_SHAPE:-unknown}" = bad ]; then
-              echo "Not retrying: APPLE_PASSWORD is not shaped like an app-specific password."
-              break
-            fi
             sleep $((attempt * 20))
           done
 
           # Which of the two it is decides what a human should do next, and
           # the error text alone has already misled once, so say which.
           if grep -q 'status code: 401' "$log"; then
-            if [ "${APPLE_NOTARY_MODE:-password}" = api_key ]; then
-              echo "::error::Apple returned 401 for the App Store Connect API key. This path signs a JWT locally and never calls notary/v2/asp, so a reachability fault is not the explanation: check that APPLE_API_ISSUER is the issuer UUID shown above the keys table for the SAME key as APPLE_API_KEY, and that the key has not been revoked in App Store Connect."
-            elif [ "${APPLE_PASSWORD_SHAPE:-unknown}" = bad ]; then
-              echo "::error::APPLE_PASSWORD is not an app-specific password (see the warning from the signing step earlier in this job), so this 401 is already fully explained and re-dispatching the tag will not clear it. Replace APPLE_PASSWORD with one generated at appleid.apple.com -> Sign-In and Security -> App-Specific Passwords; they are always exactly xxxx-xxxx-xxxx-xxxx."
-            else
-              echo "::error::Apple returned 401 on 5 attempts over ~3 minutes with a correctly shaped app-specific password. That is either a revoked APPLE_PASSWORD or a degraded notary/v2/asp endpoint, and this step cannot tell them apart. Re-dispatch this tag once before touching the secret: a 401 that clears on a later run was the service."
-            fi
+            echo "::error::Apple returned 401 for the App Store Connect API key. This path signs a JWT locally and never calls notary/v2/asp, so a reachability fault is not the explanation: check that APPLE_API_ISSUER is the issuer UUID shown above the keys table for the SAME key as APPLE_API_KEY, and that the key has not been revoked in App Store Connect."
           else
             echo "::error::Apple's notary service was unreachable on 5 attempts over ~3 minutes; see the log above. Nothing was built. Re-dispatch this tag."
           fi
