@@ -449,24 +449,42 @@ fn is_mac_app_tool(name: &str) -> bool {
         .any(|tool| tool.name == name)
 }
 
+/// The person's permission mode, or `None` when it could not be read.
+///
+/// Two ways to get `None`: no [`crate::settings::manager::SettingsManager`] in
+/// state (the headless and test paths), or a settings file the store refuses
+/// to open. A missing or malformed *section* is not one of them, because
+/// `get_agent_settings` reads sections infallibly and degrades them to
+/// defaults, so `Err` here means the store itself.
+///
+/// Separate from [`permission_mode`] because one caller cannot use a default.
+/// A per-call gate that guesses [`PermissionMode::AskWhenRisky`] still asks
+/// about risky work and still asks about everything Critical, so the guess is
+/// safe there. The spawn-time read in `claude_cli::turn_environment` decides
+/// whether anything can be asked at all, so a guess there is not recoverable
+/// later in the turn, and it fails closed instead
+/// ([`super::cli_approval::asks_before_every_change`]).
+pub(crate) async fn permission_mode_known(app: &tauri::AppHandle) -> Option<PermissionMode> {
+    use tauri::Manager;
+    let manager = app.try_state::<crate::settings::manager::SettingsManager>()?;
+    match manager.get_agent_settings().await {
+        Ok(settings) => Some(PermissionMode::from_setting(&settings.permission_mode)),
+        Err(e) => {
+            warn!("[JunoMCP] Could not read the permission mode: {}", e);
+            None
+        }
+    }
+}
+
 /// The person's permission mode, read fresh so a change in Settings applies to
 /// the next call. Unreadable settings fall back to the default, which asks more
 /// than "do not ask", never less.
+///
+/// Only for per-call gates, which keep the Critical floor whatever this
+/// returns. The spawn-time decision reads [`permission_mode_known`] instead,
+/// because there the default is weaker than a choice the person may have made.
 pub(crate) async fn permission_mode(app: &tauri::AppHandle) -> PermissionMode {
-    use tauri::Manager;
-    let Some(manager) = app.try_state::<crate::settings::manager::SettingsManager>() else {
-        return PermissionMode::default();
-    };
-    match manager.get_agent_settings().await {
-        Ok(settings) => PermissionMode::from_setting(&settings.permission_mode),
-        Err(e) => {
-            warn!(
-                "[JunoMCP] Could not read the permission mode, using the default: {}",
-                e
-            );
-            PermissionMode::default()
-        }
-    }
+    permission_mode_known(app).await.unwrap_or_default()
 }
 
 /// Run one Mac app tool behind Juno's own permission gate.

@@ -165,6 +165,19 @@ pub(super) const VERBOSE_FLAG: &str = "--verbose";
 /// Rooting at home loads the same memory an interactive `claude` run from a
 /// home-directory terminal would. If home cannot be resolved the cwd is left
 /// inherited: a memory-less answer still beats no answer.
+///
+/// **This cwd is load-bearing for the approval gate, not only for memory.**
+/// A project-level `.claude/settings.json` under the cwd can carry a
+/// `PreToolUse` hook, and a hook answering `permissionDecision: "allow"`
+/// pre-empts `--permission-prompt-tool` entirely: `approve` is never called,
+/// so "Ask me first" is bypassed with no card. The reason no repository Juno
+/// reads can plant one is that the cwd is the person's home directory, which
+/// `claude_spawns_from_the_home_directory` asserts. Two things would reopen
+/// it: changing this cwd (a project-scoped agent, say), or reaching the
+/// `None` branch above, where the inherited cwd can be any directory the app
+/// was launched from. `cli_approval::PERMISSION_PIN` is the other half, and
+/// closes the user-level `~/.claude/settings.json` case; see its own comment
+/// for what each of its levers covers (LAC-8384).
 pub(crate) fn claude_command(binary: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new(binary);
     // `claude` is a `#!/usr/bin/env node` script: it needs the person's PATH.
@@ -579,11 +592,16 @@ async fn turn_environment(
     // also moves the persistent-session fingerprint, so a conversation already
     // running under skip-permissions is replaced when the person switches the
     // mode instead of carrying on unasked.
+    //
+    // Fail closed on an unreadable mode, because this read is the single point
+    // that decides whether the spawn can ask at all: with no
+    // `--permission-prompt-tool` wired in, `approve` is never called and the
+    // per-call read never happens. `None` is "could not read", not
+    // "AskWhenRisky" (LAC-8384, review item 1).
     let ask_first = match app_handle {
-        Some(handle) => {
-            super::juno_mcp::permission_mode(handle).await
-                == crate::agent::tools::permission_policy::PermissionMode::AskFirst
-        }
+        Some(handle) => cli_approval::asks_before_every_change(
+            super::juno_mcp::permission_mode_known(handle).await,
+        ),
         None => false,
     };
     // The `||` lives in `cli_approval` as a pure function, where it is asserted
