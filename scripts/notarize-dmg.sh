@@ -15,11 +15,13 @@
 # file explicitly, the same arrangement scripts/release-failure-report.sh has.
 #
 # Credentials come from the job environment. The signing step in
-# release-tauri.yml writes exactly one of the two sets to $GITHUB_ENV along
-# with APPLE_NOTARY_MODE saying which:
+# release-tauri.yml writes the App Store Connect API key set to $GITHUB_ENV
+# with APPLE_NOTARY_MODE=api_key:
 #
-#   api_key   APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_PATH
-#   password  APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+#   APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_PATH
+#
+# That is the only supported mode. The Apple ID + app-specific password path
+# was removed in LAC-8494; any other APPLE_NOTARY_MODE fails loudly.
 #
 # Also reads TAG and REPO (for the re-upload) and RUNNER_TEMP (for logs).
 # NOTARY_REPOLL_DELAY_BASE exists so the tests do not sleep.
@@ -37,16 +39,15 @@ delay_base="${NOTARY_REPOLL_DELAY_BASE:-20}"
 repoll_timeout="${NOTARY_REPOLL_TIMEOUT:-10m}"
 
 # The signing step exports only the secrets that exist, and the workflow step
-# is gated on APPLE_SIGNING_IDENTITY alone, so a half-configured set (a revoked
-# app-specific password, say) would otherwise surface as "APPLE_PASSWORD:
-# unbound variable" from set -u. Name what is missing instead.
-if [ "${APPLE_NOTARY_MODE:-password}" = api_key ]; then
-  required="APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH"
-  creds=(--key "${APPLE_API_KEY_PATH:-}" --key-id "${APPLE_API_KEY:-}" --issuer "${APPLE_API_ISSUER:-}")
-else
-  required="APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID"
-  creds=(--apple-id "${APPLE_ID:-}" --password "${APPLE_PASSWORD:-}" --team-id "${APPLE_TEAM_ID:-}")
+# is gated on APPLE_SIGNING_IDENTITY alone, so a half-configured set would
+# otherwise surface as "APPLE_API_KEY: unbound variable" from set -u. Name what
+# is missing instead.
+if [ "${APPLE_NOTARY_MODE:-}" != api_key ]; then
+  echo "::error::APPLE_NOTARY_MODE must be api_key (got '${APPLE_NOTARY_MODE:-}'); the Apple ID + app-specific password path was removed in LAC-8494"
+  exit 1
 fi
+required="APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH"
+creds=(--key "${APPLE_API_KEY_PATH:-}" --key-id "${APPLE_API_KEY:-}" --issuer "${APPLE_API_ISSUER:-}")
 
 missing=""
 for var in $required; do
