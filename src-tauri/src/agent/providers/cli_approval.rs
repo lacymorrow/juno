@@ -380,11 +380,19 @@ pub fn unaskable_spawn_refusal(ask_first: bool, has_mcp_server: bool) -> Option<
     }
     // Read by the person, in the chat, in place of the answer they asked for.
     // Their terms, not this module's: no tool server, no MCP, no argv.
+    //
+    // It deliberately does not tell them to turn "Ask me first" off, for two
+    // reasons. `ask_first` is true here when the mode could not be read at
+    // all (see `asks_before_every_change`), so naming it would blame a choice
+    // this person may never have made, and their Settings would disagree with
+    // the sentence. And advising someone to weaken a safety setting to work
+    // around a bug is bad advice even when they did choose it. Restarting is
+    // the fix in both cases, because both causes are a failed read at launch.
     Some(
-        "Juno could not set up the check it uses to ask you first, so it did \
-         not run that. Restarting Juno usually fixes it. You can also change \
-         \"Ask me first\" in Security and Privacy settings, which lets Juno \
-         work without stopping to ask."
+        "Juno could not set up the check it uses to ask you before it changes \
+         anything, so it did not run that. Restarting Juno usually fixes it. \
+         If it keeps happening, Security and Privacy settings has the choice \
+         about when Juno asks."
             .to_string(),
     )
 }
@@ -1643,12 +1651,20 @@ mod tests {
             .expect("Ask me first with no tool server is refused");
         let said = why.to_lowercase();
         assert!(said.contains("did not run"), "{why}");
-        assert!(said.contains("ask you first"), "{why}");
+        assert!(said.contains("restarting juno"), "{why}");
         // The person reads this instead of their answer, so it says what to
         // do, in their words.
         assert!(
             !said.contains("mcp") && !said.contains("tool server") && !said.contains("--settings"),
             "the refusal is read by a person, not by this module: {why}"
+        );
+        // And it must not blame "Ask me first". This guard fires when the
+        // mode could not be read at all, so a person who never chose that
+        // mode can reach it, and their Settings would contradict the
+        // sentence. The assert that reddens if the advice goes back in.
+        assert!(
+            !said.contains("ask me first"),
+            "the refusal must not name a mode this person may not have chosen: {why}"
         );
 
         // The asking path works: something is there to ask with.
@@ -2152,6 +2168,13 @@ mod tests {
 
         assert_eq!(pin["permissions"]["defaultMode"], json!("default"));
 
+        // This is where the pin's *contents* are asserted, parsed rather than
+        // pattern-matched. `claude_cli::tests` has a `starts_with('{')` on
+        // the same argv slot and it is not a weaker version of this: its job
+        // is to prove the value is inline JSON and not the shell screen's
+        // path, which is a different failure. Both are needed, and a review
+        // pass read that one for this one (LAC-8384).
+        //
         // The second lever, which beats `defaultMode` outright.
         let ask = pin["permissions"]["ask"]
             .as_array()

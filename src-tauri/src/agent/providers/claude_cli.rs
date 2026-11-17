@@ -3353,6 +3353,11 @@ mod tests {
             .position(|a| a == "--settings")
             .expect("the asking path carries the permission pin");
         let pinned = &asking[pinned_at + 1];
+        // Inline JSON, not a path: that is this assert's whole job. The
+        // pin's contents (`defaultMode`, the four tool names, no
+        // `MultiEdit`) are asserted by parsing it in
+        // `cli_approval::tests::the_asking_path_pins_the_permission_mode`,
+        // so do not read this as a weak version of that one (LAC-8384).
         assert!(
             pinned.starts_with('{'),
             "the pin is inline JSON, not a path: {pinned}"
