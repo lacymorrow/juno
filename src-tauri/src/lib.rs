@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// CI gating check (LAC-8428): comment-only change, closed unmerged.
 
 // Import necessary external crates and standard library items
 use tauri::{AppHandle, Listener, Manager};
