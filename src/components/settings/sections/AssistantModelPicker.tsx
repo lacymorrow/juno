@@ -35,10 +35,22 @@ interface AssistantModelPickerProps {
 
 /**
  * Provider + model picker for the assistant/computer-use agent. Extracted from
- * AIProviderSettings so the same control can appear in the unified Models pane
- * without duplicating its validate/persist behavior — both surfaces read and
- * write the single active provider+model through the shared settings context,
- * so they stay in sync.
+ * AIProviderSettings purely to keep that file readable; AIProviderSettings is
+ * its only call site. A pick validates the model against the provider before
+ * persisting it (PROVIDERS_VALIDATE_PROVIDER_MODEL, then
+ * PROVIDERS_UPDATE_PROVIDER_MODEL).
+ *
+ * It is not the only writer of that pair, so do not read it as the single
+ * source of truth: chat/ChatInput.tsx carries a near-identical
+ * handleModelSelect for the chat model menu, and useSettings writes
+ * update_provider_model on save when formData.model changed. Rust owns the
+ * invariant, not this component.
+ *
+ * It did have a second home once: #573 mounted it in a "unified Models pane"
+ * next to the dictation tiers, and #578 removed it from there as a duplicate
+ * when that pane became one dictation-model list. Settings > Models is
+ * ModelsSettings, the dictation catalog, and does not mount this picker.
+ * Wiring it back in would re-create the duplicate #578 deleted.
  */
 export default function AssistantModelPicker({
   settings,
