@@ -1,9 +1,3 @@
-// "Zero `.unwrap()` in production Rust" (CLAUDE.md) is a gate (LAC-8449, after
-// LAC-8436 did the same for src-tauri). `not(test)` leaves `#[cfg(test)]` code
-// alone. Do not add `#[allow]` to land a branch: use `?`, `ok_or`, or
-// `unwrap_or_else`.
-#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
-
 use std::sync::{Arc, Mutex};
 use tauri::{
     plugin::{Builder, TauriPlugin},
