@@ -22,7 +22,6 @@ import {
 import { Check } from "lucide-react";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
-import { useAdvancedSettings } from "../AdvancedSettingsContext";
 import { useCallback, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { COMMANDS } from "@/lib/constants.generated";
@@ -35,10 +34,22 @@ interface AssistantModelPickerProps {
 
 /**
  * Provider + model picker for the assistant/computer-use agent. Extracted from
- * AIProviderSettings so the same control can appear in the unified Models pane
- * without duplicating its validate/persist behavior — both surfaces read and
- * write the single active provider+model through the shared settings context,
- * so they stay in sync.
+ * AIProviderSettings purely to keep that file readable; AIProviderSettings is
+ * its only call site. A pick validates the model against the provider before
+ * persisting it (PROVIDERS_VALIDATE_PROVIDER_MODEL, then
+ * PROVIDERS_UPDATE_PROVIDER_MODEL).
+ *
+ * It is not the only writer of that pair, so do not read it as the single
+ * source of truth: chat/ChatInput.tsx carries a near-identical
+ * handleModelSelect for the chat model menu, and useSettings writes
+ * update_provider_model on save when formData.model changed. Rust owns the
+ * invariant, not this component.
+ *
+ * It did have a second home once: #573 mounted it in a "unified Models pane"
+ * next to the dictation tiers, and #578 removed it from there as a duplicate
+ * when that pane became one dictation-model list. Settings > Models is
+ * ModelsSettings, the dictation catalog, and does not mount this picker.
+ * Wiring it back in would re-create the duplicate #578 deleted.
  */
 export default function AssistantModelPicker({
   settings,
@@ -50,52 +61,37 @@ export default function AssistantModelPicker({
     (p) => p.id === settings.activeProvider
   );
 
-  const { advanced: showAdvanced } = useAdvancedSettings();
-
   const currentModelId =
     settings.formData.model || settings.providerSettings?.model || "";
 
-  // Build sorted provider list: active provider first, then others with models.
-  // A provider whose models are all hidden drops out rather than rendering an
-  // empty group.
+  // Every model a provider reports is listed here, deliberately, and this
+  // picker does no filtering of its own.
+  //
+  // It is wrapped in a `SettingsGroup advanced`, and its only call site passes
+  // `advanced` (AIProviderSettings.tsx), so it is mounted only while the
+  // advanced-settings toggle is on — and someone who turned that on is asking
+  // to see everything.
+  //
+  // It used to filter on `is_legacy` / `requires_computer_toolset`, under a
+  // comment claiming Juno "offers the current generation and nothing else, the
+  // way an Apple product does". That filter read the SAME toggle that gates the
+  // group, so it short-circuited on `showAdvanced` every time it ran and hid
+  // nothing, in every build that ever shipped (LAC-8407). Do not re-add it
+  // here: a filter keyed on the toggle that decides whether this component
+  // exists at all can never fire. The surface where that rule would bite is the
+  // chat input's model selector (components/chat/ChatInput.tsx), which every
+  // person sees and which filters nothing today.
+  //
+  // A provider that reports no models drops out rather than rendering an empty
+  // group.
   const sortedProviders = useMemo(() => {
     const withModels = settings.providers.filter(
-      (p) =>
-        p.model_info &&
-        p.model_info.some(
-          (m) => showAdvanced || !m.is_legacy || m.id === currentModelId
-        )
+      (p) => p.model_info && p.model_info.length > 0
     );
     const active = withModels.filter((p) => p.id === settings.activeProvider);
     const rest = withModels.filter((p) => p.id !== settings.activeProvider);
     return [...active, ...rest];
-  }, [
-    settings.providers,
-    settings.activeProvider,
-    showAdvanced,
-    currentModelId,
-  ]);
-
-  // Juno offers the current generation and nothing else, the way an Apple
-  // product does. Models the provider lists as legacy stay out of the list
-  // unless you ask for them — with one exception: whatever is selected right
-  // now is always shown, so the list can never hide what Juno is actually
-  // running, and you can always switch off it.
-  //
-  // `requires_computer_toolset` used to hide a model here too, back when the
-  // toolset was the exception and Juno drove `computer_20251124` by default.
-  // That premise is gone: the whole current lineup (Fable 5.2, Opus 5.5,
-  // Sonnet 5.5, Haiku 5.5) accepts nothing earlier, so gating on it emptied
-  // this list of everything except the active row — a picker with nothing to
-  // switch to. Legacy is the only axis that hides a model now (LAC-8375).
-  const visibleModels = useCallback(
-    (models: typeof settings.providers[number]["model_info"]) =>
-      models.filter(
-        (model) =>
-          showAdvanced || !model.is_legacy || model.id === currentModelId
-      ),
-    [showAdvanced, currentModelId]
-  );
+  }, [settings.providers, settings.activeProvider]);
 
   const selectedModel = useMemo(() => {
     for (const provider of settings.providers) {
@@ -239,7 +235,7 @@ export default function AssistantModelPicker({
                       }
                       className={!provider.is_available ? "opacity-50" : undefined}
                     >
-                      {visibleModels(provider.model_info).map((model) => {
+                      {provider.model_info.map((model) => {
                         const isActive =
                           model.id === currentModelId &&
                           provider.id === settings.activeProvider;

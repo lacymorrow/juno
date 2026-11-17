@@ -266,9 +266,13 @@ impl ComputerUse {
 /// Sonnet 4.6, Sonnet 4.5, Haiku 4.5). Note "All models" lists the current
 /// four as well, so it is not itself the legacy list.
 ///
-/// `Legacy` models stay callable and stay selectable, but the picker hides
-/// them unless advanced settings are on — except for the active model, which
-/// is always shown so a saved choice never disappears.
+/// `Legacy` models stay callable and stay **visible**: nothing filters on this
+/// field. The Settings picker had a filter that read the same advanced toggle
+/// that gated the group it lived in, so its first clause was always true and it
+/// hid nothing; it is deleted (LAC-8407). The chat picker (`ChatInput`) never
+/// had one, so every model the backend reports is offered to everyone. Whether
+/// it should filter is an open product question (LAC-8418). Treat this field as
+/// the provider's label and a badge input, not as a visibility rule.
 ///
 /// Toolset GA is a *separate* axis: see `ModelDefinition::toolset_ga`. #580
 /// conflated the two, which is how a model Anthropic had already moved to
@@ -397,19 +401,14 @@ pub struct ModelInfo {
     pub category: ModelCategory,
     pub supports_computer_use: bool,
     pub is_recommended: bool,
-    /// True when the provider lists the model as legacy. The picker hides
-    /// these unless advanced settings are on, or the model is the active one.
+    /// True when the provider lists the model as legacy. Nothing hides these:
+    /// both pickers list every model the backend reports. See `Availability`.
     pub is_legacy: bool,
     /// True when the model can only do computer use through
     /// `computer_toolset_20260801`, which costs roughly 2x the input-token
-    /// overhead per request.
-    ///
-    /// Reported for display and diagnosis, NOT as a visibility gate. It used to
-    /// hide a model in the picker like a legacy one, on the reasoning that the
-    /// toolset was newer than what Juno drove by default. That stopped being
-    /// true when the whole current lineup became toolset-only: gating on it left
-    /// the picker holding nothing but the active model (LAC-8375). `is_legacy`
-    /// is the only axis that hides a model.
+    /// overhead per request. Not a visibility rule, and not an advanced opt-in:
+    /// Juno's default model (Opus 5.5) is one of these, so filtering on this
+    /// field would hide the default and the only `is_recommended` Anthropic row.
     pub requires_computer_toolset: bool,
 }
 

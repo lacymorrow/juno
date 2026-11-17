@@ -11,10 +11,12 @@ vi.mock("@tauri-apps/api/event", () => ({
   emit: vi.fn(),
 }));
 
-const advanced = vi.hoisted(() => ({ on: false }));
-vi.mock("../../AdvancedSettingsContext", () => ({
-  useAdvancedSettings: () => ({ advanced: advanced.on }),
-}));
+// No `AdvancedSettingsContext` mock here on purpose. This component no longer
+// reads that flag at all: it is mounted only inside a `SettingsGroup advanced`,
+// so it lists everything (LAC-8407). Mocking the flag is what let this suite
+// assert on a state the app cannot produce. The flag's real effect on this
+// picker — whether it is mounted — is tested through the real provider in
+// AssistantModelPicker.composition.test.tsx.
 
 type Model = {
   id: string;
@@ -22,31 +24,22 @@ type Model = {
   supports_computer_use: boolean;
   is_recommended: boolean;
   is_legacy: boolean;
-  requires_computer_toolset: boolean;
 };
 
-/** The recommended default, and like the rest of the current lineup it drives
- * the computer through `computer_toolset_20260801`. The fixtures used to leave
- * `requires_computer_toolset` off the type altogether, so it read as
- * `undefined` and the filter that reads it was never exercised. */
 const CAPABLE: Model = {
-  id: "claude-opus-5-5",
-  name: "Claude Opus 5.5",
+  id: "claude-fable-5-1",
+  name: "Claude Fable 5.1",
   supports_computer_use: true,
   is_recommended: true,
   is_legacy: false,
-  requires_computer_toolset: true,
 };
 
-/** Legacy since Haiku 5.5 launched, and on the oldest tool version Juno sends
- * — so it is the one fixture that is legacy *and* not a toolset model. */
 const LEGACY: Model = {
   id: "claude-haiku-4-5-20251001",
   name: "Claude Haiku 4.5",
   supports_computer_use: true,
   is_recommended: false,
   is_legacy: true,
-  requires_computer_toolset: false,
 };
 
 const CHAT_ONLY: Model = {
@@ -55,18 +48,16 @@ const CHAT_ONLY: Model = {
   supports_computer_use: false,
   is_recommended: false,
   is_legacy: false,
-  requires_computer_toolset: false,
 };
 
-/** A second current model on the toolset, so the lineup case has something to
- * switch *to* rather than only the active row. */
+/** Drives the computer through `computer_toolset_20260801`. Juno now sends
+ * that toolset, so this is an ordinary capable model with no special mark. */
 const TOOLSET: Model = {
-  id: "claude-haiku-5-5",
-  name: "Claude Haiku 5.5",
+  id: "claude-opus-5-5",
+  name: "Claude Opus 5.5",
   supports_computer_use: true,
   is_recommended: false,
   is_legacy: false,
-  requires_computer_toolset: true,
 };
 
 const settingsWith = (models: Model[], selectedId = models[0].id) =>
@@ -94,7 +85,6 @@ const settingsWith = (models: Model[], selectedId = models[0].id) =>
 
 describe("AssistantModelPicker computer-use marking", () => {
   it("does not mark a model that can control the computer", () => {
-    advanced.on = false;
     render(<AssistantModelPicker settings={settingsWith([CAPABLE])} />);
 
     // Absence is the signal: computer use is the norm, so a capable model
@@ -104,14 +94,12 @@ describe("AssistantModelPicker computer-use marking", () => {
   });
 
   it("explains the limit when the selected model is chat only", () => {
-    advanced.on = false;
     render(<AssistantModelPicker settings={settingsWith([CHAT_ONLY])} />);
 
     expect(screen.getByText(/cannot\s+control the computer/i)).toBeInTheDocument();
   });
 
   it("treats a toolset model as an ordinary capable model", () => {
-    advanced.on = false;
     render(<AssistantModelPicker settings={settingsWith([TOOLSET])} />);
 
     // Juno sends the toolset now, so there is no "Juno cannot drive this"
@@ -124,7 +112,6 @@ describe("AssistantModelPicker computer-use marking", () => {
   });
 
   it("says nothing about the limit when the selected model is capable", () => {
-    advanced.on = false;
     render(<AssistantModelPicker settings={settingsWith([CAPABLE])} />);
 
     expect(
@@ -140,57 +127,38 @@ const openModelList = () => {
   return screen.getByRole("listbox");
 };
 
-describe("AssistantModelPicker legacy gating", () => {
-  it("hides older-tool-version models while advanced settings are off", () => {
-    advanced.on = false;
+describe("AssistantModelPicker model list", () => {
+  it("lists every model the provider reports, legacy included", () => {
+    // This picker filters nothing. It is advanced-only, and someone who turned
+    // advanced settings on is asking to see everything (LAC-8407).
     render(
       <AssistantModelPicker settings={settingsWith([CAPABLE, LEGACY])} />
     );
 
     const list = openModelList();
-    expect(within(list).queryByText(LEGACY.name)).not.toBeInTheDocument();
-    // the current-generation model is still listed
     expect(within(list).getByText(CAPABLE.name)).toBeInTheDocument();
+    expect(within(list).getByText(LEGACY.name)).toBeInTheDocument();
+    expect(within(list).getAllByRole("option")).toHaveLength(2);
   });
 
-  it("shows older models once advanced settings are on", () => {
-    advanced.on = true;
-    render(
-      <AssistantModelPicker settings={settingsWith([CAPABLE, LEGACY])} />
-    );
-
-    expect(within(openModelList()).getByText(LEGACY.name)).toBeInTheDocument();
-  });
-
-  it("lists the whole current lineup with advanced settings off", () => {
-    // The entire current lineup drives the computer through
-    // `computer_toolset_20260801`, so hiding toolset models would leave this
-    // list holding only the active row — nothing to switch to, which is the
-    // opposite of what the gating is for. Legacy is the only axis that hides a
-    // model here.
-    advanced.on = false;
-    render(
-      <AssistantModelPicker
-        settings={settingsWith([CAPABLE, TOOLSET, LEGACY])}
-      />
-    );
-
-    const list = openModelList();
-    expect(within(list).getByText(CAPABLE.name)).toBeInTheDocument();
-    expect(within(list).getByText(TOOLSET.name)).toBeInTheDocument();
-    expect(within(list).queryByText(LEGACY.name)).not.toBeInTheDocument();
-  });
-
-  it("always shows the model in use, even when it is an older one", () => {
+  it("lists the model in use even when it is a legacy one", () => {
     // Never hide what Juno is actually running: the person has to be able to
     // see it and switch off it.
-    advanced.on = false;
+    //
+    // Not redundant with the test above, and the difference is what it
+    // discriminates. The filter LAC-8407 removed carried an exception for the
+    // selected model. Re-add that filter WITHOUT the exception and both tests
+    // red; re-add it WITH the exception and only the test above reds, because
+    // this one's legacy model is the selected one. Keeping both says which
+    // variant came back.
     render(
       <AssistantModelPicker
         settings={settingsWith([CAPABLE, LEGACY], LEGACY.id)}
       />
     );
 
-    expect(within(openModelList()).getByText(LEGACY.name)).toBeInTheDocument();
+    const list = openModelList();
+    expect(within(list).getByText(LEGACY.name)).toBeInTheDocument();
+    expect(within(list).getAllByRole("option")).toHaveLength(2);
   });
 });
