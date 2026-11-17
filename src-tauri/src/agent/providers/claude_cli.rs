@@ -624,6 +624,18 @@ async fn turn_environment(
     //
     // Read per turn, like the approval setting beside it, so turning
     // background mode on needs no restart to be honoured here.
+    //
+    // The same reasoning, one promise over (LAC-8384 review item 5): "Ask me
+    // first" with no tool server spawns `--dangerously-skip-permissions` and
+    // asks about nothing, which is LAC-8366 arriving by another route for the
+    // person who went and turned asking on. Checked first of the two, because
+    // it is about what changes their Mac rather than what takes the front,
+    // and because background mode being off does not excuse it.
+    if let Some(why) = cli_approval::unaskable_spawn_refusal(ask_first, mcp_config.is_some()) {
+        warn!("{why}");
+        return Err(AgentError::ConfigurationError(why));
+    }
+
     if let Some(handle) = app_handle {
         let background_mode = crate::input_control::background_mode_enabled(handle).await;
         if let Some(why) = cli_approval::unscreened_spawn_refusal(
