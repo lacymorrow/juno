@@ -247,7 +247,11 @@ pub fn skips_the_send_gate(mode: PermissionMode, send_gate_enabled: bool) -> boo
 /// rather than papered over.
 ///
 /// The asking path also carries [`PERMISSION_PIN`], without which the person's
-/// own `claude` settings can switch the whole gate off (LAC-8384).
+/// own `claude` settings can switch the whole gate off (LAC-8384). Note which
+/// flag that is keyed on: `ask_before_send`, so the pin lands on the default
+/// configuration and not only on "Ask me first". That is deliberate; see
+/// [`PERMISSION_PIN`]'s scope note for why narrowing it would reopen the
+/// bypass for the send gate.
 pub fn permission_args(
     ask_before_send: bool,
     has_mcp_server: bool,
@@ -325,12 +329,22 @@ const SETTINGS_FLAG: &str = "--settings";
 ///
 ///   That cwd is the home directory, never a repo Juno happens to be looking
 ///   at: [`super::claude_cli::claude_command`] sets it on every spawn,
-///   asserted by `claude_spawns_from_the_home_directory`. One exception, and
-///   it is in that function rather than here: if `dirs::home_dir()` cannot
-///   resolve, the cwd is left inherited and could be any directory the app
-///   was launched from. On macOS that read does not fail in practice, and a
-///   Finder or launchd launch inherits `/`, which needs root to plant
-///   anything in. It is still a precondition and not a guarantee. So both
+///   asserted by `claude_spawns_from_the_home_directory`. There is no
+///   exception left: if `dirs::home_dir()` cannot resolve, the cwd is `/`,
+///   which needs root to plant anything in, rather than inherited from
+///   whatever directory the app was launched from
+///   (`super::claude_cli::spawn_cwd`, asserted by
+///   `an_unresolvable_home_roots_at_root_rather_than_inheriting`, LAC-8384
+///   review item 4). That read does not fail on macOS in practice, so this
+///   closes a precondition rather than a live hole, but the cwd itself is now
+///   a guarantee: `current_dir` is set unconditionally, to an absolute path,
+///   on the one constructor. What is still convention rather than a test is
+///   the "one constructor" half — today the only non-test
+///   `tokio::process::Command::new` on this provider's paths is the one
+///   inside `claude_command`, and nothing fails if a second appears. A
+///   source scan for that belongs with the pin tripwire, LAC-8393, not here;
+///   it has to exclude `#[cfg(test)]` modules, and a scan that silently stops
+///   covering code is worse than none. So both
 ///   halves of the bypass are the person's own `~/.claude` config rather than
 ///   third-party content, and at cwd `$HOME` the project path and the user
 ///   path are the same file. Juno reading an untrusted repo cannot plant a
@@ -343,6 +357,27 @@ const SETTINGS_FLAG: &str = "--settings";
 /// `MultiEdit` is deliberately absent even though [`ask_first_risk`] maps it:
 /// 2.1.325 prints "Permission ask rule "MultiEdit" matches no known tool" and
 /// the person reads that in their chat.
+///
+/// **Scope: the whole asking path, not only "Ask me first"** (LAC-8384
+/// review item 1). [`permission_args`] keys this on `ask_before_send`, which
+/// is on by default, so a person who never touched "Ask me first" gets
+/// `defaultMode: "default"` and the `ask` list too. Narrowing it to
+/// `ask_first` was raised in review and is the unsafe one of the two endings
+/// offered: `approve` is also what serves the send gate, so an `auto`,
+/// `acceptEdits` or `bypassPermissions` mode, or an allow-hook, in the
+/// person's own settings would pre-empt the cards for connector sends,
+/// spends, emptying the Trash and remote deletes. That is LAC-8366 again one
+/// setting over, on a gate that is on by default.
+///
+/// The round trip it is charged with is not new: `--permission-prompt-tool`
+/// and `--allowedTools` are already on `main` for
+/// `ask_before_send && has_mcp_server`. What the pin removes is an escape
+/// from that round trip which was simultaneously the bypass. So the one real
+/// change for a send-gate-only person whose own settings said `auto` or
+/// `acceptEdits` is cost, not behaviour: the same allow decisions
+/// ([`verdict_for`] answers `Write` and `Edit` on the spot there, no card),
+/// one loopback round trip per `Write`, `Edit`, `NotebookEdit` or `Bash`
+/// that they were previously skipping.
 ///
 /// What this cannot pin is the opted-out path, which spawns with
 /// `--dangerously-skip-permissions` by the person's own choice and asks about

@@ -163,8 +163,9 @@ pub(super) const VERBOSE_FLAG: &str = "--verbose";
 /// Code maps to the empty `~/.claude/projects/-/` — so an inherited cwd
 /// silently loses the user's memory with no error anywhere (LAC-4057).
 /// Rooting at home loads the same memory an interactive `claude` run from a
-/// home-directory terminal would. If home cannot be resolved the cwd is left
-/// inherited: a memory-less answer still beats no answer.
+/// home-directory terminal would. If home cannot be resolved the cwd is `/`,
+/// which is where a GUI launch already lands, rather than inherited; see
+/// [`spawn_cwd`] for why that is the safer of the two memory-less answers.
 ///
 /// **This cwd is load-bearing for the approval gate, not only for memory.**
 /// A project-level `.claude/settings.json` under the cwd can carry a
@@ -172,20 +173,42 @@ pub(super) const VERBOSE_FLAG: &str = "--verbose";
 /// pre-empts `--permission-prompt-tool` entirely: `approve` is never called,
 /// so "Ask me first" is bypassed with no card. The reason no repository Juno
 /// reads can plant one is that the cwd is the person's home directory, which
-/// `claude_spawns_from_the_home_directory` asserts. Two things would reopen
-/// it: changing this cwd (a project-scoped agent, say), or reaching the
-/// `None` branch above, where the inherited cwd can be any directory the app
-/// was launched from. `cli_approval::PERMISSION_PIN` is the other half, and
+/// `claude_spawns_from_the_home_directory` asserts. One thing would reopen
+/// it: changing this cwd (a project-scoped agent, say). The unresolvable-home
+/// branch no longer does, because [`spawn_cwd`] roots at `/` instead of
+/// inheriting, so this is a guarantee and not a precondition (LAC-8384,
+/// review item 4). `cli_approval::PERMISSION_PIN` is the other half, and
 /// closes the user-level `~/.claude/settings.json` case; see its own comment
 /// for what each of its levers covers (LAC-8384).
 pub(crate) fn claude_command(binary: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new(binary);
     // `claude` is a `#!/usr/bin/env node` script: it needs the person's PATH.
     cmd.env("PATH", crate::user_env::user_path_now());
-    if let Some(home) = dirs::home_dir() {
-        cmd.current_dir(home);
-    }
+    cmd.current_dir(spawn_cwd(dirs::home_dir()));
     cmd
+}
+
+/// Where a `claude` spawn roots itself, given what the home lookup returned.
+///
+/// Pure so that the unresolvable-home branch can be asserted at all:
+/// `dirs::home_dir()` cannot be forced to `None` from a test without
+/// `set_var`, which is banned here, and that branch is the one carrying the
+/// security claim.
+///
+/// It used to leave the cwd inherited, on the LAC-4057 reasoning that a
+/// memory-less answer beats no answer. That trade is wrong now the cwd also
+/// decides whether a project `.claude/settings.json` hook can pre-empt the
+/// approval gate (LAC-8384, review item 4), and it was never much of a trade:
+/// a GUI launch inherits `/` and maps to the empty `~/.claude/projects/-/`,
+/// so inheriting buys memory in exactly one case, a launch from a terminal
+/// sitting in a repository, which is also the one case where a hook is
+/// plausibly already on disk. `/` keeps that GUI behaviour byte for byte and
+/// needs root to plant anything in, so the cwd becomes a guarantee rather
+/// than a precondition and no new failure mode arrives with it: refusing the
+/// spawn outright, the other option the review raised, would trade a
+/// hypothetical for a real one on a read that does not fail in practice.
+fn spawn_cwd(home: Option<PathBuf>) -> PathBuf {
+    home.unwrap_or_else(|| PathBuf::from("/"))
 }
 
 /// Detect the Claude CLI binary on PATH.
@@ -3082,13 +3105,36 @@ mod tests {
         // installed.
         let cmd = claude_command("claude");
         assert_eq!(cmd.as_std().get_current_dir(), dirs::home_dir().as_deref());
-        // The home lookup failing means "leave the cwd inherited", but a CI
-        // runner always has a home — if it resolved to None here, the
-        // assertion above passed vacuously and this test would be asserting
-        // nothing. Fail loudly instead.
+        // A CI runner always has a home — if it resolved to None here, the
+        // assertion above compared `None` with `None`, so it would be
+        // asserting nothing. Fail loudly instead.
         assert!(
             dirs::home_dir().is_some(),
             "home directory unresolvable in test environment"
+        );
+    }
+
+    /// The arm the test above cannot reach, and the one carrying the security
+    /// claim: an unresolvable home must not leave the cwd inherited, because a
+    /// `.claude/settings.json` under whatever directory the app was launched
+    /// from can carry a `PreToolUse` hook that answers `allow` and pre-empts
+    /// the whole gate (LAC-8384, review item 4).
+    #[test]
+    fn an_unresolvable_home_roots_at_root_rather_than_inheriting() {
+        assert_eq!(
+            spawn_cwd(Some(PathBuf::from("/Users/someone"))),
+            PathBuf::from("/Users/someone"),
+            "a resolvable home is still used verbatim"
+        );
+        let fallback = spawn_cwd(None);
+        assert_eq!(
+            fallback,
+            PathBuf::from("/"),
+            "the fallback must be root, which needs root to plant a hook in"
+        );
+        assert!(
+            fallback.is_absolute(),
+            "a relative fallback is an inherited cwd by another name"
         );
     }
 
