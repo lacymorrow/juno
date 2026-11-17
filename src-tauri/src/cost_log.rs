@@ -612,6 +612,79 @@ mod tests {
         assert!((long - expected).abs() < 1e-9, "got ${long:.9}");
     }
 
+    /// LAC-8411: `gpt-5.6-sol` is the OpenAI default and bills the WHOLE request
+    /// at the long tier above 272K prompt tokens. Each assert guards one field,
+    /// so a mutant that drops the threshold, swaps input and output, or nudges
+    /// one rate turns exactly one line red.
+    #[test]
+    fn gpt_5_6_sol_bills_a_long_prompt_at_the_long_tier() {
+        use crate::agent::providers::types::model_ids::OPENAI_SOL_5_6;
+        let price =
+            catalog_price(&Provider::OpenAI, OPENAI_SOL_5_6).expect("Sol is in the catalog");
+        let Price::Metered(rates) = price else {
+            panic!("Sol is metered");
+        };
+        let long = rates
+            .long_context
+            .as_ref()
+            .expect("Sol must declare its long-context tier");
+        assert_eq!(long.threshold_tokens, 272_000, "threshold");
+        assert!((long.input - 8.0).abs() < 1e-9, "long input");
+        assert!((long.output - 30.0).abs() < 1e-9, "long output");
+        assert!((long.cache_read - 0.8).abs() < 1e-9, "long cache read");
+        assert!((long.cache_write - 10.0).abs() < 1e-9, "long cache write");
+        assert!((rates.cache_write - 5.0).abs() < 1e-9, "short cache write");
+
+        // Behaviour, not just declaration: 1M output tokens isolates the output
+        // rate on each side of the line.
+        let short = cost_usd(price, &usage(272_000, 1_000_000, 0, 0)).expect("metered");
+        assert!(
+            (short - (272_000.0 * 4.0 / 1e6 + 20.0)).abs() < 1e-9,
+            "short {short}"
+        );
+        let over = cost_usd(price, &usage(272_001, 1_000_000, 0, 0)).expect("metered");
+        assert!(
+            (over - (272_001.0 * 8.0 / 1e6 + 30.0)).abs() < 1e-9,
+            "long {over}"
+        );
+    }
+
+    /// `gpt-5.3-codex` was checked in the same pass: OpenAI publishes no
+    /// long-context tier for it, so declaring one would overbill.
+    #[test]
+    fn gpt_5_3_codex_has_no_long_context_tier() {
+        use crate::agent::providers::types::model_ids::OPENAI_CODEX_5_3;
+        let Some(Price::Metered(rates)) = catalog_price(&Provider::OpenAI, OPENAI_CODEX_5_3) else {
+            panic!("Codex 5.3 is metered");
+        };
+        assert!(rates.long_context.is_none());
+    }
+
+    /// Both tables must carry the same tier, not just the same short rates.
+    #[test]
+    fn the_analyzer_table_carries_sols_long_tier_too() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/pricing/prices.json");
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read prices.json"))
+                .expect("prices.json is JSON");
+        let e = &json["models"]["gpt-5.6-sol"];
+        assert_eq!(
+            e["long_context_threshold"].as_u64(),
+            Some(272_000),
+            "threshold"
+        );
+        for (k, v) in [
+            ("long_input", 8.0),
+            ("long_output", 30.0),
+            ("long_cache_read", 0.8),
+            ("long_cache_write", 10.0),
+            ("cache_write", 5.0),
+        ] {
+            assert_eq!(e[k].as_f64(), Some(v), "{k}");
+        }
+    }
+
     #[test]
     fn prompt_tokens_decide_the_tier_including_cached_ones() {
         // Cache reads are most of an agentic prompt. A tier chosen on fresh
