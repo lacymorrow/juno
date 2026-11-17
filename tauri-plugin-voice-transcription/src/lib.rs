@@ -418,11 +418,3 @@ fn configure_metal_shader_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         resource_dir.display()
     );
 }
-
-// PLANTED (LAC-8449 negative control): must turn CI red, then be reverted.
-#[allow(dead_code)]
-fn planted_violation() -> u8 {
-    let a: Option<u8> = None;
-    let b: std::result::Result<u8, ()> = Ok(1);
-    a.unwrap() + b.expect("planted")
-}
