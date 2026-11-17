@@ -163,16 +163,52 @@ pub(super) const VERBOSE_FLAG: &str = "--verbose";
 /// Code maps to the empty `~/.claude/projects/-/` — so an inherited cwd
 /// silently loses the user's memory with no error anywhere (LAC-4057).
 /// Rooting at home loads the same memory an interactive `claude` run from a
-/// home-directory terminal would. If home cannot be resolved the cwd is left
-/// inherited: a memory-less answer still beats no answer.
+/// home-directory terminal would. If home cannot be resolved the cwd is `/`,
+/// which is where a GUI launch already lands, rather than inherited; see
+/// [`spawn_cwd`] for why that is the safer of the two memory-less answers.
+///
+/// **This cwd is load-bearing for the approval gate, not only for memory.**
+/// A project-level `.claude/settings.json` under the cwd can carry a
+/// `PreToolUse` hook, and a hook answering `permissionDecision: "allow"`
+/// pre-empts `--permission-prompt-tool` entirely: `approve` is never called,
+/// so "Ask me first" is bypassed with no card. The reason no repository Juno
+/// reads can plant one is that the cwd is the person's home directory, which
+/// `claude_spawns_from_the_home_directory` asserts. One thing would reopen
+/// it: changing this cwd (a project-scoped agent, say). The unresolvable-home
+/// branch no longer does, because [`spawn_cwd`] roots at `/` instead of
+/// inheriting, so this is a guarantee and not a precondition (LAC-8384,
+/// review item 4). `cli_approval::PERMISSION_PIN` is the other half, and
+/// closes the user-level `~/.claude/settings.json` case; see its own comment
+/// for what each of its levers covers (LAC-8384).
 pub(crate) fn claude_command(binary: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new(binary);
     // `claude` is a `#!/usr/bin/env node` script: it needs the person's PATH.
     cmd.env("PATH", crate::user_env::user_path_now());
-    if let Some(home) = dirs::home_dir() {
-        cmd.current_dir(home);
-    }
+    cmd.current_dir(spawn_cwd(dirs::home_dir()));
     cmd
+}
+
+/// Where a `claude` spawn roots itself, given what the home lookup returned.
+///
+/// Pure so that the unresolvable-home branch can be asserted at all:
+/// `dirs::home_dir()` cannot be forced to `None` from a test without
+/// `set_var`, which is banned here, and that branch is the one carrying the
+/// security claim.
+///
+/// It used to leave the cwd inherited, on the LAC-4057 reasoning that a
+/// memory-less answer beats no answer. That trade is wrong now the cwd also
+/// decides whether a project `.claude/settings.json` hook can pre-empt the
+/// approval gate (LAC-8384, review item 4), and it was never much of a trade:
+/// a GUI launch inherits `/` and maps to the empty `~/.claude/projects/-/`,
+/// so inheriting buys memory in exactly one case, a launch from a terminal
+/// sitting in a repository, which is also the one case where a hook is
+/// plausibly already on disk. `/` keeps that GUI behaviour byte for byte and
+/// needs root to plant anything in, so the cwd becomes a guarantee rather
+/// than a precondition and no new failure mode arrives with it: refusing the
+/// spawn outright, the other option the review raised, would trade a
+/// hypothetical for a real one on a read that does not fail in practice.
+fn spawn_cwd(home: Option<PathBuf>) -> PathBuf {
+    home.unwrap_or_else(|| PathBuf::from("/"))
 }
 
 /// Detect the Claude CLI binary on PATH.
@@ -572,7 +608,33 @@ async fn turn_environment(
     // permission prompts route into Juno's approval sheet instead of
     // being skipped. Read per run, so flipping the setting needs no
     // restart. Without an app handle there is no sheet to route to.
-    let ask_before_send = app_handle.is_some_and(cli_approval::is_enabled);
+    //
+    // "Ask me first" (LAC-8366) counts as asking too, whatever the send
+    // setting says: it is the stronger promise, and the spawn has to route
+    // permission prompts to `approve` for it to be kept. Folding it in here
+    // also moves the persistent-session fingerprint, so a conversation already
+    // running under skip-permissions is replaced when the person switches the
+    // mode instead of carrying on unasked.
+    //
+    // Fail closed on an unreadable mode, because this read is the single point
+    // that decides whether the spawn can ask at all: with no
+    // `--permission-prompt-tool` wired in, `approve` is never called and the
+    // per-call read never happens. `None` is "could not read", not
+    // "AskWhenRisky" (LAC-8384, review item 1).
+    let ask_first = match app_handle {
+        Some(handle) => cli_approval::asks_before_every_change(
+            super::juno_mcp::permission_mode_known(handle).await,
+        ),
+        None => false,
+    };
+    // The `||` lives in `cli_approval` as a pure function, where it is asserted
+    // against both settings in all four combinations. Written inline here it
+    // was wiring no test could reach: flipped to `&&`, "Ask me first" stops
+    // working for anyone with the send gate off and nothing reddens (LAC-8384).
+    let ask_before_send = cli_approval::routes_permission_prompts(
+        ask_first,
+        app_handle.is_some_and(cli_approval::is_enabled),
+    );
 
     // Fail closed. Every branch above that could not write a file answered
     // with `None`, and `None` here used to mean a spawn with nothing reading
@@ -585,6 +647,18 @@ async fn turn_environment(
     //
     // Read per turn, like the approval setting beside it, so turning
     // background mode on needs no restart to be honoured here.
+    //
+    // The same reasoning, one promise over (LAC-8384 review item 5): "Ask me
+    // first" with no tool server spawns `--dangerously-skip-permissions` and
+    // asks about nothing, which is LAC-8366 arriving by another route for the
+    // person who went and turned asking on. Checked first of the two, because
+    // it is about what changes their Mac rather than what takes the front,
+    // and because background mode being off does not excuse it.
+    if let Some(why) = cli_approval::unaskable_spawn_refusal(ask_first, mcp_config.is_some()) {
+        warn!("{why}");
+        return Err(AgentError::ConfigurationError(why));
+    }
+
     if let Some(handle) = app_handle {
         let background_mode = crate::input_control::background_mode_enabled(handle).await;
         if let Some(why) = cli_approval::unscreened_spawn_refusal(
@@ -3031,13 +3105,36 @@ mod tests {
         // installed.
         let cmd = claude_command("claude");
         assert_eq!(cmd.as_std().get_current_dir(), dirs::home_dir().as_deref());
-        // The home lookup failing means "leave the cwd inherited", but a CI
-        // runner always has a home — if it resolved to None here, the
-        // assertion above passed vacuously and this test would be asserting
-        // nothing. Fail loudly instead.
+        // A CI runner always has a home — if it resolved to None here, the
+        // assertion above compared `None` with `None`, so it would be
+        // asserting nothing. Fail loudly instead.
         assert!(
             dirs::home_dir().is_some(),
             "home directory unresolvable in test environment"
+        );
+    }
+
+    /// The arm the test above cannot reach, and the one carrying the security
+    /// claim: an unresolvable home must not leave the cwd inherited, because a
+    /// `.claude/settings.json` under whatever directory the app was launched
+    /// from can carry a `PreToolUse` hook that answers `allow` and pre-empts
+    /// the whole gate (LAC-8384, review item 4).
+    #[test]
+    fn an_unresolvable_home_roots_at_root_rather_than_inheriting() {
+        assert_eq!(
+            spawn_cwd(Some(PathBuf::from("/Users/someone"))),
+            PathBuf::from("/Users/someone"),
+            "a resolvable home is still used verbatim"
+        );
+        let fallback = spawn_cwd(None);
+        assert_eq!(
+            fallback,
+            PathBuf::from("/"),
+            "the fallback must be root, which needs root to plant a hook in"
+        );
+        assert!(
+            fallback.is_absolute(),
+            "a relative fallback is an inherited cwd by another name"
         );
     }
 
@@ -3285,11 +3382,38 @@ mod tests {
             .expect("the shell screen is passed when the send gate is off");
         assert_eq!(args[at + 1], screen.display().to_string());
 
-        // With the gate on, the screen rides `approve` and no settings file
-        // is passed, even though one was written.
+        // With the gate on, the screen rides `approve`, and the hook file it
+        // was written to is deliberately NOT passed even though one exists: a
+        // `PreToolUse` hook answering `permissionDecision: "allow"` pre-empts
+        // `--permission-prompt-tool` entirely, so the screen's own settings
+        // must never travel on the asking path (measured on claude 2.1.325,
+        // LAC-8384). `--settings` is still here, carrying the inline
+        // permission pin instead, which is what stops the person's own
+        // `~/.claude/settings.json` from switching the gate off. This assert
+        // used to read `!asking.contains("--settings")` and the pin made it
+        // stale; the pair below is what it was reaching for.
         let asking = brain.build_args("open mail", None, Some(&config), Some(&screen), true);
-        assert!(!asking.contains(&"--settings".to_string()));
         assert!(asking.contains(&"--permission-prompt-tool".to_string()));
+        let pinned_at = asking
+            .iter()
+            .position(|a| a == "--settings")
+            .expect("the asking path carries the permission pin");
+        let pinned = &asking[pinned_at + 1];
+        // Inline JSON, not a path: that is this assert's whole job. The
+        // pin's contents (`defaultMode`, the four tool names, no
+        // `MultiEdit`) are asserted by parsing it in
+        // `cli_approval::tests::the_asking_path_pins_the_permission_mode`,
+        // so do not read this as a weak version of that one (LAC-8384).
+        assert!(
+            pinned.starts_with('{'),
+            "the pin is inline JSON, not a path: {pinned}"
+        );
+        assert_ne!(
+            pinned,
+            &screen.display().to_string(),
+            "the shell screen's hook settings must not ride the asking path: a hook \
+             answering allow pre-empts the permission prompt and nothing reaches approve"
+        );
     }
 
     #[test]
