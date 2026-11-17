@@ -352,6 +352,43 @@ const PERMISSION_PIN: &str = concat!(
     r#""ask":["Write","Edit","NotebookEdit","Bash"]}}"#
 );
 
+/// Why this spawn must not happen, when the person chose "Ask me first" and
+/// nothing would be able to ask them (LAC-8384, review item 5).
+///
+/// `ask_first` implies `ask_before_send` (see [`routes_permission_prompts`]),
+/// so [`permission_args`] falls back to `--dangerously-skip-permissions` here
+/// for exactly one reason: no tool server to serve the prompt. A turn on that
+/// argv asks about nothing, which is the whole of LAC-8366 arriving by a
+/// different route, silently, for the person who went and asked to be asked.
+///
+/// Separate from [`unscreened_spawn_refusal`] rather than another `bool` in
+/// it, because the two refusals are different promises with different advice
+/// for the person: one is about what changes their Mac, the other about what
+/// takes the front while they type. Both read off `permission_args`, so
+/// neither can drift from what the spawn carries.
+///
+/// Note what this does *not* cover: the opted-out path, where `ask_first` is
+/// false by the person's own choice, and the headless path, which has no
+/// `AppHandle`, therefore no sheet, therefore no mode to honour.
+pub fn unaskable_spawn_refusal(ask_first: bool, has_mcp_server: bool) -> Option<String> {
+    if !ask_first {
+        return None;
+    }
+    let args = permission_args(true, has_mcp_server, None);
+    if !args.iter().any(|a| a == SKIP_PERMISSIONS) {
+        return None;
+    }
+    // Read by the person, in the chat, in place of the answer they asked for.
+    // Their terms, not this module's: no tool server, no MCP, no argv.
+    Some(
+        "Juno could not set up the check it uses to ask you first, so it did \
+         not run that. Restarting Juno usually fixes it. You can also change \
+         \"Ask me first\" in Security and Privacy settings, which lets Juno \
+         work without stopping to ask."
+            .to_string(),
+    )
+}
+
 /// Why this spawn must not happen, when it would run the CLI's own shell with
 /// nothing reading it and background mode is on (LAC-7421).
 ///
@@ -561,14 +598,24 @@ fn denial_key(tool_name: &str, input: &Value) -> String {
         .iter()
         .find_map(|key| input.get(*key).and_then(Value::as_str));
     match target {
-        // Bounded: a `Bash` heredoc can be arbitrarily long and this is held
-        // for the cooldown. 120 chars still tells two files or two commands
-        // apart, which is all the key is for, and `chars` keeps it off a
-        // UTF-8 boundary panic. Two commands sharing a 120-char prefix share
-        // a cooldown, which costs one extra card after a decline (LAC-8384).
+        // Bounded and exact. A `Bash` heredoc can be arbitrarily long and
+        // this is held for the cooldown, so the key cannot be the whole
+        // target. Truncating alone was the wrong trade and the comment here
+        // described it backwards: two commands sharing the truncated prefix
+        // share a cooldown, so declining one auto-denies the other with no
+        // card and tells the model "the person declined" about a call they
+        // never saw. That is a missing card and a false statement, not an
+        // extra card. So: a readable head for the logs, plus a hash of the
+        // *whole* target to tell two long targets apart. `chars` keeps the
+        // head off a UTF-8 boundary panic. A 64-bit collision would bring the
+        // old behaviour back for one pair of targets, which is a trade worth
+        // making at that probability (LAC-8384 review item 1).
         Some(target) => {
-            let target: String = target.chars().take(120).collect();
-            format!("{tool_name}:{target}")
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            target.hash(&mut hasher);
+            let head: String = target.chars().take(60).collect();
+            format!("{tool_name}:{head}:{:016x}", hasher.finish())
         }
         None => tool_name.to_string(),
     }
@@ -1583,6 +1630,50 @@ mod tests {
         assert_eq!(unscreened_spawn_refusal(false, false, false, None), None);
     }
 
+    /// LAC-8384 review item 5: "Ask me first" with nothing able to ask.
+    ///
+    /// The fail-open the reviewer named. `permission_args` falls back to
+    /// `--dangerously-skip-permissions` when there is no tool server, and on
+    /// that argv the mode does nothing at all, for the one person who went
+    /// and asked to be asked. Background mode does not cover it: that guard
+    /// returns early when background mode is off.
+    #[test]
+    fn ask_me_first_with_nothing_to_ask_with_is_refused() {
+        let why = unaskable_spawn_refusal(true, false)
+            .expect("Ask me first with no tool server is refused");
+        let said = why.to_lowercase();
+        assert!(said.contains("did not run"), "{why}");
+        assert!(said.contains("ask you first"), "{why}");
+        // The person reads this instead of their answer, so it says what to
+        // do, in their words.
+        assert!(
+            !said.contains("mcp") && !said.contains("tool server") && !said.contains("--settings"),
+            "the refusal is read by a person, not by this module: {why}"
+        );
+
+        // The asking path works: something is there to ask with.
+        assert_eq!(unaskable_spawn_refusal(true, true), None);
+        // Opted out, by the person's own choice. Nothing was promised.
+        assert_eq!(unaskable_spawn_refusal(false, false), None);
+        assert_eq!(unaskable_spawn_refusal(false, true), None);
+    }
+
+    /// The two guards answer about different things, and neither covers the
+    /// other. Without this, folding one into the other looks harmless.
+    #[test]
+    fn the_two_spawn_refusals_do_not_cover_each_other() {
+        // Background mode off, so the shell guard says nothing, and the mode
+        // is still unkeepable. This is the case item 5 is about.
+        assert_eq!(unscreened_spawn_refusal(false, true, false, None), None);
+        assert!(unaskable_spawn_refusal(true, false).is_some());
+
+        // And the reverse: opted out with background mode on and no screen
+        // written. Nothing promised to ask, everything promised about the
+        // front.
+        assert!(unscreened_spawn_refusal(true, false, true, None).is_some());
+        assert_eq!(unaskable_spawn_refusal(false, true), None);
+    }
+
     #[test]
     fn the_clis_shell_is_never_pre_approved() {
         assert!(
@@ -2286,29 +2377,72 @@ mod tests {
     /// file, where it is not.
     #[test]
     fn the_cooldown_key_tells_two_files_apart() {
-        assert_eq!(
-            denial_key("Edit", &json!({"file_path": "/Users/a/one.md"})),
-            "Edit:/Users/a/one.md"
+        // The readable head is still there, for the logs. The hash follows it.
+        assert!(
+            denial_key("Edit", &json!({"file_path": "/Users/a/one.md"}))
+                .starts_with("Edit:/Users/a/one.md:"),
+            "the key keeps a readable head"
         );
         assert_ne!(
             denial_key("Edit", &json!({"file_path": "/Users/a/one.md"})),
             denial_key("Edit", &json!({"file_path": "/Users/a/two.md"})),
             "declining one edit must not auto-deny every other file"
         );
-        assert_eq!(
-            denial_key(BASH_TOOL, &json!({"command": "rm old.txt"})),
-            "Bash:rm old.txt"
-        );
-        assert_eq!(
-            denial_key(
-                "NotebookEdit",
-                &json!({"notebook_path": "/Users/a/n.ipynb"})
-            ),
-            "NotebookEdit:/Users/a/n.ipynb"
-        );
+        assert!(denial_key(BASH_TOOL, &json!({"command": "rm old.txt"}))
+            .starts_with("Bash:rm old.txt:"));
+        assert!(denial_key(
+            "NotebookEdit",
+            &json!({"notebook_path": "/Users/a/n.ipynb"})
+        )
+        .starts_with("NotebookEdit:/Users/a/n.ipynb:"));
         // Nothing to key on: the tool name is the whole key, which is what
         // the send gate uses anyway.
         assert_eq!(denial_key("Write", &json!({})), "Write");
+    }
+
+    /// A `Bash` call whose command is far longer than any truncation window.
+    fn long_command(tail: &str) -> Value {
+        json!({ "command": format!("{}{tail}", "echo ".repeat(60)) })
+    }
+
+    /// LAC-8384 review item 1: two long targets that share a prefix get
+    /// different keys.
+    ///
+    /// This is the assert that reddens if the key goes back to truncating the
+    /// target. Truncation is not a quieter answer, it is a wrong one: the
+    /// second command is auto-denied with no card, and the model is told the
+    /// person declined a call they were never shown. Both reviewers on #1019
+    /// flagged it, and the key is bounded either way.
+    #[test]
+    fn two_long_commands_sharing_a_prefix_do_not_share_a_cooldown() {
+        let one = long_command("&& rm -rf one");
+        let two = long_command("&& rm -rf two");
+        // The precondition: both are past any truncation window, and they are
+        // identical until well past it. Without this the test could pass for
+        // the wrong reason.
+        let shared: String = one["command"]
+            .as_str()
+            .expect("a command")
+            .chars()
+            .take(120)
+            .collect();
+        assert!(
+            two["command"]
+                .as_str()
+                .expect("a command")
+                .starts_with(&shared),
+            "the two commands must be identical through the old 120-char key"
+        );
+        assert_ne!(
+            denial_key(BASH_TOOL, &one),
+            denial_key(BASH_TOOL, &two),
+            "a shared prefix must not share a cooldown"
+        );
+        // And the key stays bounded, which is why truncation was there at all.
+        assert!(
+            denial_key(BASH_TOOL, &one).chars().count() < 120,
+            "the key must not grow with the target"
+        );
     }
 
     /// LAC-8384 item 6: `Task` stays pre-approved, and this is the measurement
