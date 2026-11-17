@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
-import { describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { COMMANDS } from "@/lib/constants.generated";
 import AssistantModelPicker from "../AssistantModelPicker";
 
@@ -165,36 +166,37 @@ describe("AssistantModelPicker model list", () => {
   });
 });
 
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+
+type Mocked = {
+  setFormData: ReturnType<typeof vi.fn>;
+  handleActiveProviderChange: ReturnType<typeof vi.fn>;
+};
+
 describe("AssistantModelPicker model persistence", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   const pick = (settings: ReturnType<typeof settingsWith>) => {
     render(<AssistantModelPicker settings={settings} />);
-    fireEvent.click(
-      within(openModelList()).getByText(TOOLSET.name)
-    );
+    fireEvent.click(within(openModelList()).getByText(TOOLSET.name));
+    return settings as unknown as Mocked;
   };
 
-  it("does not show a model that failed to save", async () => {
+  it("does not show a model that failed to save, and tells the person", async () => {
     const settings = settingsWith([CAPABLE, TOOLSET], CAPABLE.id);
     vi.mocked(invoke).mockReset();
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === COMMANDS.PROVIDERS_VALIDATE_PROVIDER_MODEL) return true;
       throw new Error("persist failed");
     });
-    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
 
-    pick(settings);
+    const mocked = pick(settings);
 
-    await waitFor(() =>
-      expect(err).toHaveBeenCalledWith(
-        "AssistantModelPicker: Failed to change model:",
-        expect.any(Error)
-      )
-    );
-    expect(
-      (settings as unknown as { setFormData: ReturnType<typeof vi.fn> })
-        .setFormData
-    ).not.toHaveBeenCalled();
-    err.mockRestore();
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(mocked.setFormData).not.toHaveBeenCalled();
+    // Same provider, so there is nothing to switch back.
+    expect(mocked.handleActiveProviderChange).not.toHaveBeenCalled();
   });
 
   it("shows the model once it saved", async () => {
@@ -202,11 +204,60 @@ describe("AssistantModelPicker model persistence", () => {
     vi.mocked(invoke).mockReset();
     vi.mocked(invoke).mockResolvedValue(true as never);
 
-    pick(settings);
+    const mocked = pick(settings);
 
-    const setFormData = (
-      settings as unknown as { setFormData: ReturnType<typeof vi.fn> }
-    ).setFormData;
-    await waitFor(() => expect(setFormData).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocked.setFormData).toHaveBeenCalledTimes(1));
+    const updater = mocked.setFormData.mock.calls[0][0] as (p: {
+      model: string;
+    }) => { model: string };
+    expect(updater({ model: "x" }).model).toBe(TOOLSET.id);
+    expect(invoke).toHaveBeenCalledWith(
+      COMMANDS.PROVIDERS_UPDATE_PROVIDER_MODEL,
+      { providerId: "anthropic", model: TOOLSET.id }
+    );
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("tells the person when the model is rejected", async () => {
+    const settings = settingsWith([CAPABLE, TOOLSET], CAPABLE.id);
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockResolvedValue(false as never);
+
+    const mocked = pick(settings);
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(mocked.setFormData).not.toHaveBeenCalled();
+  });
+
+  it("switches back to the old provider when the model fails to save", async () => {
+    const settings = settingsWith([CAPABLE], CAPABLE.id) as unknown as {
+      providers: unknown[];
+    };
+    settings.providers.push({
+      id: "openai",
+      name: "OpenAI",
+      description: "",
+      models: [TOOLSET.id],
+      default_model: TOOLSET.id,
+      model_info: [TOOLSET],
+      is_available: true,
+      is_default: false,
+      computer_use_supported: true,
+    });
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === COMMANDS.PROVIDERS_VALIDATE_PROVIDER_MODEL) return true;
+      throw new Error("persist failed");
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const mocked = pick(settings as never);
+
+    await waitFor(() =>
+      expect(mocked.handleActiveProviderChange).toHaveBeenCalledTimes(2)
+    );
+    expect(mocked.handleActiveProviderChange).toHaveBeenNthCalledWith(1, "openai");
+    expect(mocked.handleActiveProviderChange).toHaveBeenNthCalledWith(2, "anthropic");
+    expect(mocked.setFormData).not.toHaveBeenCalled();
   });
 });
