@@ -123,12 +123,14 @@ export default function AssistantModelPicker({
         );
         if (!isValid) return;
 
-        settings.setFormData((prev) => ({ ...prev, model: modelId }));
-
         await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_MODEL, {
           providerId,
           model: modelId,
         });
+
+        // Only show the new model once Rust has it. Setting it before the
+        // persist left the picker showing a model that failed to save (LAC-8423).
+        settings.setFormData((prev) => ({ ...prev, model: modelId }));
       } catch (error) {
         console.error("AssistantModelPicker: Failed to change model:", error);
       }
