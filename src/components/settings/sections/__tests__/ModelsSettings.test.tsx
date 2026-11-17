@@ -72,8 +72,15 @@ function status(models: SttModelInfo[], extra: Partial<SttModelsStatus> = {}): S
     download: null,
     offer_recommended: false,
     quality_notice: null,
+    network: "reachable",
+    network_note: null,
     ...extra,
   };
+}
+
+/** The work-laptop case: the internet is up, Hugging Face is not reachable. */
+function blockedStatus(models: SttModelInfo[]): SttModelsStatus {
+  return status(models, { network: "blocked", network_note: "Not available on this network." });
 }
 
 function mockBackend(current: () => SttModelsStatus, advanced = false) {
@@ -249,7 +256,7 @@ describe("Models pane: exactly one action per row state, exactly one Active", ()
     mockBackend(() => status(arm64Models()));
     invokeMock.mockImplementation(async (command: string) => {
       if (command === COMMANDS.STT_MODELS_GET_STATUS) return status(arm64Models());
-      if (command === COMMANDS.STT_MODELS_DOWNLOAD) throw new Error("Could not reach huggingface.co");
+      if (command === COMMANDS.STT_MODELS_DOWNLOAD) throw new Error("the host refused the request");
       return false;
     });
     await mount();
@@ -259,7 +266,64 @@ describe("Models pane: exactly one action per row state, exactly one Active", ()
     );
     // A plain line, never the backend's reason (which can carry a URL).
     expect(screen.getByRole("alert")).toHaveTextContent("The download didn't start. Try again.");
-    expect(screen.getByRole("alert")).not.toHaveTextContent(/huggingface/);
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/host refused/);
+  });
+
+  it("says one calm line when the network blocks the model host, and never names it", async () => {
+    mockBackend(() => blockedStatus(arm64Models()));
+    await mount();
+    const note = await screen.findByTestId("model-network-note");
+    expect(note).toHaveTextContent("Not available on this network.");
+    // Said once above the list, not repeated on each row it applies to.
+    expect(screen.getAllByTestId("model-network-note")).toHaveLength(1);
+    // Nothing names Hugging Face, and nothing is a dialog or an error.
+    expect(document.body.textContent).not.toMatch(/hugging\s*face/i);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // Downloaded models are untouched.
+    expect(screen.getByTestId("active-tiny-en")).toBeInTheDocument();
+  });
+
+  it("offers Try again on a blocked network, and it re-checks rather than re-downloading", async () => {
+    let network: SttModelsStatus["network"] = "blocked";
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === COMMANDS.STT_MODELS_GET_STATUS)
+        return network === "blocked"
+          ? blockedStatus(arm64Models())
+          : status(arm64Models());
+      if (command === COMMANDS.SETTINGS_GET_ADVANCED_SETTINGS_ENABLED) return false;
+      if (command === COMMANDS.MODEL_HOST_RECHECK) {
+        network = "reachable";
+        return network;
+      }
+      return undefined;
+    });
+    await mount();
+    const retry = await screen.findByRole("button", { name: "Try again: Balanced" });
+    // Enabled: pressing it is how someone says "try this network again".
+    expect(retry).toBeEnabled();
+    fireEvent.click(retry);
+    // It asks the network, not for the file: a download that cannot work is
+    // not started just to fail.
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith(COMMANDS.MODEL_HOST_RECHECK));
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      COMMANDS.STT_MODELS_DOWNLOAD,
+      expect.anything(),
+    );
+    // Once the network answers, the row goes back to offering the download.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Download: Balanced" })).toBeEnabled(),
+    );
+    expect(screen.queryByTestId("model-network-note")).not.toBeInTheDocument();
+  });
+
+  it("with no internet, the state reads offline and never blames the model host", async () => {
+    setOnline(false);
+    mockBackend(() => status(arm64Models(), { network: "offline", network_note: null }));
+    await mount();
+    expect(screen.getByText(/No internet connection/)).toBeInTheDocument();
+    expect(screen.queryByTestId("model-network-note")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/this network/i);
   });
 
   it("disables Download with a reason when offline; downloaded models are unaffected", async () => {

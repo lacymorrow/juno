@@ -311,6 +311,14 @@ pub mod stt_models {
     pub const CHANGED: &str = "stt-model-changed";
 }
 
+/// Whether model weights can be fetched from Hugging Face on this network.
+/// One answer for every download Juno makes.
+pub mod model_host {
+    /// The answer changed. Payload: one of "unknown", "reachable", "offline",
+    /// "blocked".
+    pub const CHANGED: &str = "model-host-changed";
+}
+
 /// Always listening events
 pub mod always_listening {
     pub const MODE_CHANGED: &str = "always-listening-mode-changed";

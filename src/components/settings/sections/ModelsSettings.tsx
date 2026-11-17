@@ -172,19 +172,27 @@ function ModelRow({ model, stt, advanced }: RowProps) {
       </Button>
     );
   } else {
-    const label = failed ? "Try again" : "Download";
+    // A network that blocks Hugging Face is not a reason to take the button
+    // away: pressing it is how the person says "try this network again", and
+    // the backend re-probes before it fetches. One control, not a disabled
+    // button plus a separate Retry somewhere else. No internet at all is
+    // different: there is nothing to try until it comes back.
+    const blocked = stt.network === "blocked";
+    const label = failed || blocked ? "Try again" : "Download";
     action = (
       <Button
         size="sm"
-        onClick={() => stt.download(model.id)}
+        onClick={() => (blocked ? stt.retryNetwork() : stt.download(model.id))}
         disabled={!stt.online || anotherDownloading}
         aria-label={`${label}: ${title}`}
         title={
           !stt.online
             ? "No internet connection"
-            : anotherDownloading
-              ? "Another download is in progress"
-              : undefined
+            : blocked
+              ? (stt.networkNote ?? undefined)
+              : anotherDownloading
+                ? "Another download is in progress"
+                : undefined
         }
       >
         <Download aria-hidden />
@@ -302,6 +310,10 @@ export default function ModelsSettings() {
   // it. No popup and no badge: the row it points at is already in the list
   // below with its own Download button.
   const notice = stt.status?.quality_notice ?? null;
+  // Said once, above the list, not repeated on every row it applies to. The
+  // affected rows already say it in their own way: their button reads Try
+  // again. `offline` is left to the line below, which already covers it.
+  const blockedNote = stt.network === "blocked" ? stt.networkNote : null;
 
   return (
     <div className="space-y-6">
@@ -309,7 +321,7 @@ export default function ModelsSettings() {
         title="Dictation model"
         footer="All models run on your Mac. Your voice never leaves it."
       >
-        {(downloadingModel || changed || notice || !stt.online) && (
+        {(downloadingModel || changed || notice || blockedNote || !stt.online) && (
           <SettingsRow
             below={
               <div className="space-y-1 text-[12px] text-muted-foreground" role="status">
@@ -336,6 +348,7 @@ export default function ModelsSettings() {
                   </p>
                 )}
                 {notice && <p data-testid="model-quality-notice">{notice}</p>}
+                {blockedNote && <p data-testid="model-network-note">{blockedNote}</p>}
                 {!stt.online && <p>No internet connection. Downloaded models still work.</p>}
               </div>
             }
