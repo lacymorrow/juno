@@ -171,6 +171,34 @@ pub fn routes_permission_prompts(ask_first: bool, send_gate_enabled: bool) -> bo
     ask_first || send_gate_enabled
 }
 
+/// Whether the spawn has to route every change through the approval sheet.
+///
+/// `mode` is `None` when the permission mode could not be read at all: no
+/// settings manager registered, or a settings file the store refuses to open.
+/// That is not the same answer as reading [`PermissionMode::AskWhenRisky`],
+/// and here the difference decides the whole turn. This read happens once, at
+/// spawn time, and it is the only thing that decides whether
+/// `--permission-prompt-tool` is wired in. If it is not, `approve` is never
+/// called, so the per-call fresh read in [`ask_first_answer`] never happens
+/// either. An unreadable mode at this one site cannot degrade to the default
+/// the way a per-call read safely can.
+///
+/// Fail closed, for the same reason the spawn below it refuses to start a
+/// turn it cannot screen: an unreadable mode might be "Ask me first".
+/// Guessing high costs a person in a quieter mode some approval sheets they
+/// did not ask for, with a `warn!` naming the unreadable settings as the
+/// cause. Guessing low silently breaks the one promise this module exists to
+/// keep, and nothing a person can see says so.
+///
+/// Pure for the same reason as [`routes_permission_prompts`]: written inline
+/// at the spawn, the `None` arm is wiring no test can reach (LAC-8384).
+pub fn asks_before_every_change(mode: Option<PermissionMode>) -> bool {
+    match mode {
+        Some(mode) => mode == PermissionMode::AskFirst,
+        None => true,
+    }
+}
+
 /// Whether `approve` answers allow without reading the call at all.
 ///
 /// "Ask before Juno sends" off means off: the old behaviour, everything runs.
@@ -295,9 +323,14 @@ const SETTINGS_FLAG: &str = "--settings";
 ///   about the directory. A project hook was measured firing from the spawn's
 ///   cwd.
 ///
-///   That cwd is **always** the home directory, never a repo Juno happens to
-///   be looking at: [`super::claude_cli::claude_command`] sets it on every
-///   spawn, asserted by `claude_spawns_from_the_home_directory`. So both
+///   That cwd is the home directory, never a repo Juno happens to be looking
+///   at: [`super::claude_cli::claude_command`] sets it on every spawn,
+///   asserted by `claude_spawns_from_the_home_directory`. One exception, and
+///   it is in that function rather than here: if `dirs::home_dir()` cannot
+///   resolve, the cwd is left inherited and could be any directory the app
+///   was launched from. On macOS that read does not fail in practice, and a
+///   Finder or launchd launch inherits `/`, which needs root to plant
+///   anything in. It is still a precondition and not a guarantee. So both
 ///   halves of the bypass are the person's own `~/.claude` config rather than
 ///   third-party content, and at cwd `$HOME` the project path and the user
 ///   path are the same file. Juno reading an untrusted repo cannot plant a
@@ -1962,6 +1995,31 @@ mod tests {
         assert!(routes_permission_prompts(false, true));
         // Neither promise: the old skip-permissions spawn.
         assert!(!routes_permission_prompts(false, false));
+    }
+
+    /// LAC-8384 review item 1: an unreadable permission mode must read as
+    /// "Ask me first" at the spawn, not as the default.
+    ///
+    /// The spawn-time read is the only thing that decides whether
+    /// `--permission-prompt-tool` is wired in, so `None => false` here is not
+    /// a mode that asks a little less. It is a turn in which nothing can be
+    /// asked at all, reached by a settings file the store cannot open, and
+    /// invisible to the person. Flipping the `None` arm reddens this and
+    /// nothing else.
+    #[test]
+    fn an_unreadable_permission_mode_asks_before_every_change() {
+        use PermissionMode::{AskFirst, AskWhenRisky, DontAsk};
+
+        // The assert that turns red on a fail-open: no mode read, ask anyway.
+        assert!(
+            asks_before_every_change(None),
+            "an unreadable mode must fail closed, it might be Ask me first"
+        );
+        assert!(asks_before_every_change(Some(AskFirst)));
+        // A mode that was read is honoured as read. Fail-closed is for not
+        // knowing, not for overriding a quieter choice the person did make.
+        assert!(!asks_before_every_change(Some(AskWhenRisky)));
+        assert!(!asks_before_every_change(Some(DontAsk)));
     }
 
     /// LAC-8384 item 2: the second decision, which used to be an inline
