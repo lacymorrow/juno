@@ -3081,11 +3081,16 @@ mod computer_toolset_request_tests {
 
     #[test]
     fn toolset_only_models_select_the_toolset_path() {
-        // Claude 5.5 and later accept no earlier tool type, so they are the
+        // The current lineup accepts no earlier tool type, so these are the
         // models worth the toolset's ~2x input-token overhead. Every other
         // toolset-GA model stays on `computer_20251124` and is covered by the
         // test below.
-        for model in [model_ids::CLAUDE_OPUS_5_5, model_ids::CLAUDE_SONNET_5_5] {
+        for model in [
+            model_ids::CLAUDE_FABLE_5_2,
+            model_ids::CLAUDE_OPUS_5_5,
+            model_ids::CLAUDE_SONNET_5_5,
+            model_ids::CLAUDE_HAIKU_5_5,
+        ] {
             let b = brain(model);
             assert!(b.uses_computer_toolset(), "{model} should use the toolset");
             assert_eq!(b.computer_toolset_name(), Some("computer"));
@@ -3132,7 +3137,12 @@ mod computer_toolset_request_tests {
     /// rather than an exact string.
     #[test]
     fn toolset_models_send_no_computer_use_beta_flag() {
-        for model in [model_ids::CLAUDE_OPUS_5_5, model_ids::CLAUDE_SONNET_5_5] {
+        for model in [
+            model_ids::CLAUDE_FABLE_5_2,
+            model_ids::CLAUDE_OPUS_5_5,
+            model_ids::CLAUDE_SONNET_5_5,
+            model_ids::CLAUDE_HAIKU_5_5,
+        ] {
             let b = brain(model);
             assert_eq!(b.resolve_computer_use_beta_header(), None, "{model}");
             let header = b.beta_header_value();
@@ -3252,14 +3262,44 @@ mod thinking_block_binding_tests {
     #[test]
     fn prefix_check_models_ask_the_api_to_drop_stale_thinking_blocks() {
         for model in [
+            model_ids::CLAUDE_FABLE_5_2,
             model_ids::CLAUDE_FABLE_5_1,
             model_ids::CLAUDE_OPUS_5_5,
             model_ids::CLAUDE_SONNET_5_5,
+            // Haiku 5.5 joined this list by gaining adaptive thinking, and for
+            // it `drop_block` is not insurance but a requirement: the
+            // computer-use-tool page says client-side pruning on Haiku 5.5
+            // "invalidates every later thinking block already in the history",
+            // and Juno's screenshot pruner rewrites earlier turns on every long
+            // run.
+            //
+            // One condition, and it is a live trap. That page: "If you must
+            // prune on Claude Sonnet 5.5 or Claude Haiku 5.5:
+            // `prefix_mismatch_behavior` works only with
+            // `thinking: {"type": "adaptive"}`." Juno sends exactly that, so
+            // this holds — but Sonnet 5.5 also accepts
+            // `thinking: {"type": "between_tools"}`, and switching either model
+            // to it would silently void the field while leaving this test
+            // green, because the test reads the `block_binding` object and not
+            // the `type` beside it.
+            model_ids::CLAUDE_HAIKU_5_5,
         ] {
             assert_eq!(
                 binding(model),
                 Some(serde_json::json!({ "prefix_mismatch_behavior": "drop_block" })),
                 "{model} would 400 mid-conversation on a replayed thinking block"
+            );
+            // The field is only honoured alongside `thinking.type: "adaptive"`,
+            // so asserting the object alone would stay green while the setting
+            // it depends on was swapped out from under it.
+            assert_eq!(
+                brain(model)
+                    .thinking_param()
+                    .as_ref()
+                    .and_then(|t| t.get("type"))
+                    .and_then(|t| t.as_str()),
+                Some("adaptive"),
+                "{model} sends block_binding, which needs thinking.type=adaptive"
             );
         }
     }

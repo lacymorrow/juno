@@ -907,6 +907,16 @@ mod tests {
     /// every turn independently and flags >1% disagreement, which only means
     /// something if both sides are keyed the same way and sourced from the
     /// same live docs.
+    ///
+    /// Long-context pricing has exactly two acceptable shapes, and both are
+    /// asserted. Juno carries a tier, in which case the threshold and all
+    /// four rates must match; or Juno carries none, in which case prices.json
+    /// must document none either — no rates and **no threshold**. A model
+    /// with no tier in Juno is billed at the short rate however long the
+    /// prompt gets, so either half of a tier present only in prices.json is a
+    /// silent underprice on Juno's side, and one the cross-check could never
+    /// report, because the two tables would still agree with each other
+    /// (LAC-8405).
     #[test]
     fn the_rust_price_table_agrees_with_the_analyzer_price_table() {
         let path =
@@ -952,6 +962,80 @@ mod tests {
                                  Re-read the LIVE pricing page and fix whichever is wrong."
                             );
                         }
+                        // The long-context tier is a second, independent set of
+                        // rates, and comparing only the four above is how a
+                        // swapped `long_input`/`long_output` pair passes
+                        // (LAC-8403). Every turn under the threshold prices
+                        // identically on both sides, so the tables agree right
+                        // up to the first long prompt in production.
+                        match &rates.long_context {
+                            Some(long) => {
+                                let threshold = long.threshold_tokens;
+                                assert_eq!(
+                                    entry.get("long_context_threshold").and_then(|v| v.as_u64()),
+                                    Some(threshold),
+                                    "{key}: Juno switches to long-context rates above \
+                                     {threshold} prompt tokens and prices.json does not \
+                                     agree, so the same turn is priced from two different \
+                                     tiers."
+                                );
+                                for (name, ours) in [
+                                    ("long_input", long.input),
+                                    ("long_output", long.output),
+                                    ("long_cache_read", long.cache_read),
+                                    ("long_cache_write", long.cache_write),
+                                ] {
+                                    let theirs = rate(entry, name);
+                                    assert!(
+                                        (ours - theirs).abs() < 1e-9,
+                                        "{key} {name}: Juno says {ours}, prices.json says \
+                                         {theirs}. Re-read the LIVE pricing page and fix \
+                                         whichever is wrong."
+                                    );
+                                }
+                            }
+                            // Juno has no tier here, so every prompt for
+                            // this model is billed at the short rate whatever
+                            // its length. That is only safe while the provider
+                            // documents no tier either, so any trace of one in
+                            // prices.json is refused — the bare threshold
+                            // included.
+                            //
+                            // A bare threshold used to be allowed, on the
+                            // reading that the analyzer's own `DataError`
+                            // covered the case. It does not: it covers the
+                            // analyzer, while Juno prices the same turn at the
+                            // short rate and the two tables never disagree
+                            // (LAC-8405). This arm only ever sees models Juno
+                            // can select, because the loop is over Juno's
+                            // catalog, so a hit is always a live underprice.
+                            None => {
+                                assert!(
+                                    entry.get("long_context_threshold").is_none(),
+                                    "{key}: prices.json documents a long-context threshold \
+                                     and Juno declares no tier, so Juno bills every prompt \
+                                     past it at the short rate. Read the live pricing page \
+                                     and declare the tier with `Price::per_mtok_tiered`. A \
+                                     provider that publishes the threshold but not the rates \
+                                     leaves neither table able to price a long prompt, which \
+                                     is a decision to take, not a default to accept."
+                                );
+                                for name in [
+                                    "long_input",
+                                    "long_output",
+                                    "long_cache_read",
+                                    "long_cache_write",
+                                ] {
+                                    assert!(
+                                        entry.get(name).is_none(),
+                                        "{key}: prices.json publishes {name} but Juno has no \
+                                         long-context tier for it, so Juno underprices every \
+                                         prompt past the threshold. Declare the tier with \
+                                         `Price::per_mtok_tiered`."
+                                    );
+                                }
+                            }
+                        }
                     }
                     Price::Subscription => {
                         let entry = models
@@ -971,6 +1055,64 @@ mod tests {
                          if a rate was published, price it on both sides"
                     ),
                 }
+            }
+        }
+    }
+
+    /// The other end of the arm above. `prices.json` carries four OpenAI keys
+    /// Juno has never had in its catalog (`gpt-5`, `gpt-5.1`, `gpt-5.2`,
+    /// `gpt-5.5`), left over from reading OpenAI's pricing page whole when
+    /// cost telemetry shipped — Juno's OpenAI rows were already
+    /// `gpt-5.6-sol` and `gpt-5.3-codex` by then (LAC-4127, #826). Nothing
+    /// reaches them: the parity test loops over Juno's catalog, and the
+    /// analyzer only looks a key up when a cost-log row names it, which Juno
+    /// has never been able to write.
+    ///
+    /// `gpt-5.5` is the one that matters, as the only key with a
+    /// `long_context_threshold` and no rates. That shape was read once as a
+    /// live model Juno underprices above 272K prompt tokens (LAC-8405), when
+    /// in fact Juno cannot select it and never prices a turn for it. The same
+    /// shape on a model Juno *can* select is a real underprice; this test
+    /// fails the day one of these keys becomes a catalog model without a
+    /// tier, which is the only way the misreading could come true.
+    #[test]
+    fn a_rateless_long_context_threshold_sits_on_a_model_juno_cannot_select() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/pricing/prices.json");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        let json: serde_json::Value = serde_json::from_str(&text).expect("prices.json is JSON");
+        let models = json
+            .get("models")
+            .and_then(|m| m.as_object())
+            .expect("prices.json has a models object");
+
+        let mut catalog = std::collections::HashSet::new();
+        for provider in all_providers() {
+            for def in provider.model_definitions() {
+                catalog.insert(billing_model_id(&provider, def.id));
+            }
+        }
+
+        // Positive control. Without it this test passes on an empty table, and
+        // dropping a reference key is then silent rather than deliberate.
+        assert!(
+            models.contains_key("gpt-5.5"),
+            "gpt-5.5 is the entry this test exists for; if it was removed on \
+             purpose, retire this test with it"
+        );
+
+        for (key, entry) in models {
+            let rateless_tier =
+                entry.get("long_context_threshold").is_some() && entry.get("long_input").is_none();
+            if rateless_tier {
+                assert!(
+                    !catalog.contains(key),
+                    "{key} is in Juno's catalog and prices.json gives it a long-context \
+                     threshold with no rates, so Juno bills every prompt past it at the \
+                     short rate and the analyzer raises on the same row. Look the rates \
+                     up and declare them on both sides."
+                );
             }
         }
     }

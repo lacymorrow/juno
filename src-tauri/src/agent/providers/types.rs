@@ -5,18 +5,29 @@ use crate::agent::tools::tool_versioning::ApiVersion;
 
 // Model ID Constants - Single source of truth
 pub mod model_ids {
-    // Anthropic Claude Models — the current lineup, per the "Compare models"
+    // Anthropic Claude Models — the current lineup, per the "Latest models"
     // table at <https://platform.claude.com/docs/en/about-claude/models/overview>.
-    pub const CLAUDE_FABLE_5_1: &str = "claude-fable-5-1";
+    //
+    // That page has renamed both of its sections: "Compare models" is now
+    // "Latest models", and "Legacy models (still available)" is now "All
+    // models", which lists the current four alongside every older model rather
+    // than only the older ones. Read the "Latest models" table for the current
+    // lineup and treat everything else in "All models" as legacy.
+    // (Verified live 2026-11-16, LAC-8375.)
+    pub const CLAUDE_FABLE_5_2: &str = "claude-fable-5-2";
     pub const CLAUDE_OPUS_5_5: &str = "claude-opus-5-5";
     pub const CLAUDE_SONNET_5_5: &str = "claude-sonnet-5-5";
-    pub const CLAUDE_HAIKU_4_5: &str = "claude-haiku-4-5-20251001";
+    pub const CLAUDE_HAIKU_5_5: &str = "claude-haiku-5-5";
 
-    // Anthropic Claude Models — "Legacy models (still available)" on that same
-    // page: Fable 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6, Opus 4.5, Sonnet 5,
-    // Sonnet 4.6. Still callable, so they stay selectable, but only under
-    // advanced settings. (Sonnet 5 moved here from the current lineup when
-    // Sonnet 5.5 launched; 2026-10-05 weekly check, LAC-4142.)
+    // Anthropic Claude Models — the older rows of "All models" on that same
+    // page: Fable 5.1, Fable 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6, Opus 4.5,
+    // Sonnet 5, Sonnet 4.6, Sonnet 4.5, Haiku 4.5. Still callable, so they stay
+    // selectable, but only under advanced settings.
+    //
+    // (Sonnet 5 moved here from the current lineup when Sonnet 5.5 launched;
+    // 2026-10-05 weekly check, LAC-4142. Fable 5.1 and Haiku 4.5 moved here
+    // when Fable 5.2 and Haiku 5.5 launched; 2026-11-16 weekly check,
+    // LAC-8375.)
     //
     // NOTE: Only models the Anthropic API still serves belong here. Opus 4.1
     // (retired 2026-08-05), Opus 4, and Sonnet 4 (both retired 2026-06-15) were
@@ -24,11 +35,17 @@ pub mod model_ids {
     // deprecations page before adding an ID back:
     // https://platform.claude.com/docs/en/about-claude/model-deprecations
     //
-    // Sonnet 4.5 stays only because the deprecations page still lists it as
-    // SERVED, but it was DEPRECATED 2026-09-30 and retires 2026-11-30, and the
-    // models-overview page has already dropped it from "Legacy models (still
-    // available)". Remove it from this catalog once that page lists it as
-    // Retired (verify live, do not guess the date).
+    // Sonnet 4.5 is the ONE deprecated model in this catalog. Re-verified live
+    // 2026-11-16 (LAC-8375): the deprecations page reads `Deprecated`,
+    // retirement 2026-11-30, replacement `claude-sonnet-5-5`. It stays until
+    // that page reads `Retired`, because a saved choice still answers requests
+    // until then and removing it early breaks working function. Every other
+    // row here reads `Active`, Haiku 4.5 included.
+    //
+    // Retirement is 14 days out as of that check, so the weekly check that
+    // runs after 2026-11-30 should expect to delete this row. Verify the page
+    // reads `Retired` first; do not act on the announced date alone.
+    pub const CLAUDE_FABLE_5_1: &str = "claude-fable-5-1";
     pub const CLAUDE_FABLE_5: &str = "claude-fable-5";
     pub const CLAUDE_OPUS_5: &str = "claude-opus-5";
     pub const CLAUDE_OPUS_4_8: &str = "claude-opus-4-8";
@@ -38,10 +55,12 @@ pub mod model_ids {
     pub const CLAUDE_SONNET_5: &str = "claude-sonnet-5";
     pub const CLAUDE_SONNET_4_6: &str = "claude-sonnet-4-6";
     pub const CLAUDE_SONNET_4_5: &str = "claude-sonnet-4-5-20250929";
+    pub const CLAUDE_HAIKU_4_5: &str = "claude-haiku-4-5-20251001";
 
-    // Claude Mythos 5 / 5.1 are deliberately absent: they are invite-only
-    // Project Glasswing access, so listing them would offer every user a model
-    // almost none of them can call.
+    // Claude Mythos 5 / 5.1 / 5.2 are deliberately absent: the models-overview
+    // page marks each one "limited availability" (verification-program access
+    // only), so listing them would offer every user a model almost none of them
+    // can call.
 
     // NOTE: computer-use tiering is NOT a list of model IDs here. Each model
     // declares what it supports in its own `ModelDefinition` (`computer_use`,
@@ -79,7 +98,16 @@ pub mod model_ids {
 /// turn — so `cache_read` is the load-bearing number here, not `input`.
 ///
 /// `long_context`, when present, replaces all four rates once a request's
-/// prompt tokens pass its threshold.
+/// prompt tokens pass its threshold. When it is absent every prompt is billed
+/// at the four rates above, however long it gets, so a provider tier that is
+/// not declared here is a silent underprice and not an error.
+///
+/// There is deliberately no "threshold known, rates unknown" state: no
+/// catalog model needs one, and a variant with no caller is machinery that
+/// the first real case would be designed around rather than into (LAC-8405).
+/// What guards the gap instead is the parity test in `cost_log`, which
+/// refuses any tier that `scripts/pricing/prices.json` documents and this
+/// table does not — a bare threshold included.
 #[derive(Debug, Clone)]
 pub struct Rates {
     pub input: f64,
@@ -232,10 +260,11 @@ impl ComputerUse {
 /// This tracks the provider's own lifecycle label, not any tool version.
 /// For Anthropic that is the split on
 /// <https://platform.claude.com/docs/en/about-claude/models/overview>: the
-/// "Compare models" table is `Current` (Fable 5.1, Opus 5.5, Sonnet 5.5,
-/// Haiku 4.5) and everything under "Legacy models (still available)" is
-/// `Legacy` (Fable 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6, Opus 4.5,
-/// Sonnet 5, Sonnet 4.6).
+/// "Latest models" table is `Current` (Fable 5.2, Opus 5.5, Sonnet 5.5,
+/// Haiku 5.5) and every older row of "All models" is `Legacy` (Fable 5.1,
+/// Fable 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6, Opus 4.5, Sonnet 5,
+/// Sonnet 4.6, Sonnet 4.5, Haiku 4.5). Note "All models" lists the current
+/// four as well, so it is not itself the legacy list.
 ///
 /// `Legacy` models stay callable and stay **visible**: nothing filters on this
 /// field. The Settings picker had a filter that read the same advanced toggle
@@ -569,7 +598,9 @@ impl Provider {
         //
         // `CU_20251124` is the DEFAULT. `CU_TOOLSET` is the current GA toolset,
         // and a model gets it only when it accepts nothing earlier — today that
-        // is Opus 5.5 alone. The toolset is not an upgrade to reach for: it
+        // is the whole current lineup (Fable 5.2, Opus 5.5, Sonnet 5.5,
+        // Haiku 5.5), each of which 400s on `computer_20251124` on the Claude
+        // API. The toolset is not an upgrade to reach for: it
         // costs roughly 2x the input-token overhead on every request (4,530 vs
         // 2,152 on an identical call, measured against the live API
         // 2026-09-22) because it ships 17 member tool definitions instead of
@@ -588,12 +619,27 @@ impl Provider {
                 // calls `Price::per_mtok`. Naming the constant makes the
                 // `'static` explicit instead of hoping promotion applies.
                 const MODELS: &[ModelDefinition] = &[
-                    // --- Current lineup (models overview "Compare models") ---
+                    // --- Current lineup (models overview "Latest models") ---
+                    // Fable 5.2 replaced Fable 5.1 in the current lineup
+                    // (2026-11-16 weekly check, LAC-8375). Same request surface
+                    // as Fable 5.1 — always-on adaptive thinking, forced
+                    // `tool_choice` rejected, the same refusal handling — at a
+                    // lower price, with one difference that matters here: the
+                    // earlier `computer_20251124` tool returns a 400 on every
+                    // platform except Amazon Bedrock, so this row is
+                    // toolset-only.
+                    //
+                    // It also REQUIRES 30-day data retention: a request from an
+                    // organization or workspace without it returns a 400
+                    // `invalid_request_error`, whatever else is in the request.
+                    // Nothing Juno can detect in advance, but it is the first
+                    // thing to check when someone reports that only this model
+                    // fails for them.
                     ModelDefinition {
-                        id: model_ids::CLAUDE_FABLE_5_1,
-                        name: "Claude Fable 5.1",
-                        price: Price::per_mtok(10.0, 50.0, 0.25, 12.50),
-                        computer_use: CU_20251124,
+                        id: model_ids::CLAUDE_FABLE_5_2,
+                        name: "Claude Fable 5.2",
+                        price: Price::per_mtok(8.0, 40.0, 0.20, 10.0),
+                        computer_use: CU_TOOLSET,
                         availability: Availability::Current,
                         toolset_ga: true,
                         image_tier: ImageTier::HighResolution,
@@ -645,26 +691,70 @@ impl Provider {
                         // Sonnet 5.5 is the only current non-Opus/non-Haiku one.
                         router_role: Some(RouterRole::Chat),
                     },
-                    // Haiku 4.5 is in the current lineup even though it drives
-                    // the computer through the oldest tool version Juno sends.
-                    // Lifecycle and tool version are separate axes.
+                    // Haiku 5.5 replaced Haiku 4.5 in the current lineup
+                    // (2026-11-16 weekly check, LAC-8375). Every axis moved, so
+                    // this is not a version bump of the row above it: the
+                    // toolset instead of `computer_20250124`, adaptive thinking
+                    // instead of `budget_tokens` (which now 400s), and the
+                    // high-resolution image tier instead of standard — which
+                    // means Juno captures screenshots for it at 2576 px, not
+                    // 1568 px.
+                    //
+                    // Priced by prompt length rather than by a long-context
+                    // tier bolted onto one rate: a request whose prompt passes
+                    // 100k tokens pays 5x on all four categories, counting
+                    // cache reads and writes toward that length, and each
+                    // request is priced on its own.
+                    //
+                    // The one capability it does NOT have is a server-side
+                    // fallback. It is named on the refusals page because it has
+                    // safety classifiers, but that page also says it has no
+                    // server-side fallback: `fallbacks: "default"` leaves a
+                    // decline standing and a list of fallback models returns a
+                    // 400. So `server_side_fallback` is false and Juno omits
+                    // the parameter.
                     ModelDefinition {
-                        id: model_ids::CLAUDE_HAIKU_4_5,
-                        name: "Claude Haiku 4.5",
-                        price: Price::per_mtok(1.0, 5.0, 0.10, 1.25),
-                        computer_use: CU_20250124,
+                        id: model_ids::CLAUDE_HAIKU_5_5,
+                        name: "Claude Haiku 5.5",
+                        price: Price::per_mtok_tiered(
+                            0.10, 0.50, 0.01, 0.125, 100_000, 0.50, 2.50, 0.05, 0.625,
+                        ),
+                        computer_use: CU_TOOLSET,
                         availability: Availability::Current,
-                        toolset_ga: false,
-                        image_tier: ImageTier::Standard,
-                        adaptive_thinking: false,
+                        toolset_ga: true,
+                        image_tier: ImageTier::HighResolution,
+                        adaptive_thinking: true,
                         server_side_fallback: false,
                         is_recommended: false,
+                        // The Classifier role follows the current Haiku: 10x
+                        // cheaper per input token than Haiku 4.5 and the fastest
+                        // model in the lineup. The toolset overhead does not
+                        // reach it — `router::build_classifier_request` sends
+                        // one tool of its own and no computer-use tools — and
+                        // Haiku 5.5 still accepts the forced `tool_choice` that
+                        // request depends on, unlike the 5.5 Opus/Sonnet rows.
                         router_role: Some(RouterRole::Classifier),
                     },
-                    // --- Legacy models (still available) ---
-                    // Anthropic's own "Legacy models (still available)" list.
+                    // --- Legacy: the older rows of "All models" ---
                     // Every one of these still answers requests; the picker
                     // just keeps them behind advanced settings.
+                    //
+                    // Fable 5.1 keeps `computer_20251124`: the toolset-only
+                    // rule applies to Fable 5.2, not to it, and it is still
+                    // listed under that tool version's models.
+                    ModelDefinition {
+                        id: model_ids::CLAUDE_FABLE_5_1,
+                        name: "Claude Fable 5.1",
+                        price: Price::per_mtok(10.0, 50.0, 0.25, 12.50),
+                        computer_use: CU_20251124,
+                        availability: Availability::Legacy,
+                        toolset_ga: true,
+                        image_tier: ImageTier::HighResolution,
+                        adaptive_thinking: true,
+                        server_side_fallback: true,
+                        is_recommended: false,
+                        router_role: None,
+                    },
                     ModelDefinition {
                         id: model_ids::CLAUDE_FABLE_5,
                         name: "Claude Fable 5",
@@ -783,6 +873,23 @@ impl Provider {
                         id: model_ids::CLAUDE_SONNET_4_5,
                         name: "Claude Sonnet 4.5",
                         price: Price::per_mtok(3.0, 15.0, 0.30, 3.75),
+                        computer_use: CU_20250124,
+                        availability: Availability::Legacy,
+                        toolset_ga: false,
+                        image_tier: ImageTier::Standard,
+                        adaptive_thinking: false,
+                        server_side_fallback: false,
+                        is_recommended: false,
+                        router_role: None,
+                    },
+                    // Haiku 4.5 keeps every capability it had; only its
+                    // lifecycle label moved when Haiku 5.5 launched. It is the
+                    // one model in this catalog on the oldest tool version that
+                    // is not also deprecated.
+                    ModelDefinition {
+                        id: model_ids::CLAUDE_HAIKU_4_5,
+                        name: "Claude Haiku 4.5",
+                        price: Price::per_mtok(1.0, 5.0, 0.10, 1.25),
                         computer_use: CU_20250124,
                         availability: Availability::Legacy,
                         toolset_ga: false,
@@ -951,6 +1058,13 @@ impl Provider {
             // picks its own tool versions and Juno sends no Anthropic beta
             // flag. The aliases track the current generation, which is the
             // high-resolution image tier.
+            //
+            // These IDs are FLOATING pointers, so a new model release changes
+            // what a row describes with no ID anywhere to grep for. `haiku` sat
+            // on the standard tier because the latest Haiku was 4.5; Haiku 5.5
+            // is documented on the high-resolution tier, so the row moved with
+            // it (2026-11-16 weekly check, LAC-8375). Re-read these three rows
+            // on every model check, not just the dated ones.
             Provider::ClaudeCli => {
                 const MODELS: &[ModelDefinition] = &[
                     ModelDefinition {
@@ -986,7 +1100,7 @@ impl Provider {
                         computer_use: ComputerUse::FunctionTools,
                         availability: Availability::Current,
                         toolset_ga: false,
-                        image_tier: ImageTier::Standard,
+                        image_tier: ImageTier::HighResolution,
                         adaptive_thinking: false,
                         server_side_fallback: false,
                         is_recommended: false,
@@ -1105,12 +1219,15 @@ impl Provider {
                         is_recommended: false,
                         router_role: None,
                     },
+                    // Legacy since Haiku 5.5 launched. Availability is a fact
+                    // about the model, not about Copilot serving it, so this
+                    // row follows the Claude API row.
                     ModelDefinition {
                         id: "claude-haiku-4.5",
                         name: "Claude Haiku 4.5 (via Copilot)",
                         price: Price::Subscription,
                         computer_use: CU_20250124,
-                        availability: Availability::Current,
+                        availability: Availability::Legacy,
                         toolset_ga: false,
                         image_tier: ImageTier::Standard,
                         adaptive_thinking: false,
@@ -1449,8 +1566,9 @@ mod tests {
             model_ids::CLAUDE_SONNET_5,
         );
         // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
-        // what Juno sends. Only the 5.5 models (Opus 5.5, Sonnet 5.5) take the
-        // toolset, because they accept no earlier tool type.
+        // what Juno sends. Only the current lineup (Fable 5.2, Opus 5.5,
+        // Sonnet 5.5, Haiku 5.5) takes the toolset, because those four accept
+        // no earlier tool type.
         assert_eq!(computer, "computer_20251124");
 
         let editor = Provider::Anthropic.resolve_tool_type(
@@ -1469,8 +1587,9 @@ mod tests {
             model_ids::CLAUDE_OPUS_5,
         );
         // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
-        // what Juno sends. Only the 5.5 models (Opus 5.5, Sonnet 5.5) take the
-        // toolset, because they accept no earlier tool type.
+        // what Juno sends. Only the current lineup (Fable 5.2, Opus 5.5,
+        // Sonnet 5.5, Haiku 5.5) takes the toolset, because those four accept
+        // no earlier tool type.
         assert_eq!(computer, "computer_20251124");
 
         let editor = Provider::Anthropic.resolve_tool_type(
@@ -1489,6 +1608,7 @@ mod tests {
         let pairs = [
             ("claude-opus-5.5", model_ids::CLAUDE_OPUS_5_5),
             ("claude-sonnet-5.5", model_ids::CLAUDE_SONNET_5_5),
+            ("claude-haiku-5.5", model_ids::CLAUDE_HAIKU_5_5),
             ("claude-haiku-4.5", model_ids::CLAUDE_HAIKU_4_5),
             ("claude-opus-5", model_ids::CLAUDE_OPUS_5),
             ("claude-sonnet-5", model_ids::CLAUDE_SONNET_5),
@@ -1515,13 +1635,15 @@ mod tests {
         }
 
         // Every Copilot row is either checked above or named here with the
-        // reason, so a row added later cannot go unchecked.
-        // `claude-haiku-5.5`: the Claude API catalog has no Haiku 5.5 row yet.
-        let unpaired = ["claude-haiku-5.5"];
+        // reason, so a row added later cannot go unchecked. Empty since the
+        // Claude API catalog gained its Haiku 5.5 row (2026-11-16, LAC-8375);
+        // keep the mechanism, so the next Copilot-only model has a sanctioned
+        // place to be declared instead of this assertion being weakened.
+        const UNPAIRED: &[&str] = &[];
         for def in Provider::Copilot.model_definitions() {
             assert!(
                 pairs.iter().any(|(copilot_id, _)| *copilot_id == def.id)
-                    || unpaired.contains(&def.id),
+                    || UNPAIRED.contains(&def.id),
                 "{} has no Claude API row to agree with",
                 def.id
             );
@@ -1711,8 +1833,9 @@ mod tests {
             model_ids::CLAUDE_FABLE_5_1,
         );
         // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
-        // what Juno sends. Only the 5.5 models (Opus 5.5, Sonnet 5.5) take the
-        // toolset, because they accept no earlier tool type.
+        // what Juno sends. Only the current lineup (Fable 5.2, Opus 5.5,
+        // Sonnet 5.5, Haiku 5.5) takes the toolset, because those four accept
+        // no earlier tool type.
         assert_eq!(computer, "computer_20251124");
         assert_eq!(
             Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_FABLE_5_1),
@@ -1722,10 +1845,14 @@ mod tests {
 
     #[test]
     fn test_adaptive_thinking_and_fallback_capabilities() {
+        assert!(Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_FABLE_5_2));
         assert!(Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_FABLE_5_1));
         assert!(Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_OPUS_5_5));
         assert!(Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_SONNET_5_5));
         assert!(Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_OPUS_5));
+        // The Haiku line crossed this axis: `budget_tokens` is a 400 on
+        // Haiku 5.5, where it was the only thinking mode Haiku 4.5 took.
+        assert!(Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_HAIKU_5_5));
         assert!(!Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_HAIKU_4_5));
         assert!(!Provider::Anthropic.supports_adaptive_thinking(model_ids::CLAUDE_OPUS_4_5));
 
@@ -1734,6 +1861,7 @@ mod tests {
         // request."
         // <https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback>
         for id in [
+            model_ids::CLAUDE_FABLE_5_2,
             model_ids::CLAUDE_FABLE_5_1,
             model_ids::CLAUDE_FABLE_5,
             model_ids::CLAUDE_OPUS_5_5,
@@ -1746,7 +1874,18 @@ mod tests {
             );
         }
         // Sonnet 5 is NOT in that list — only Sonnet 5.5 gained the classifier.
-        for id in [model_ids::CLAUDE_SONNET_5, model_ids::CLAUDE_OPUS_4_8] {
+        //
+        // Haiku 5.5 is the trap: it IS on the refusals page, because it has
+        // safety classifiers, and it still has no server-side fallback. That
+        // page says so in words — `fallbacks: "default"` leaves a decline
+        // standing, and a list of fallback models returns a 400 — so reading
+        // the page's model list as the `fallbacks` accept list is wrong for
+        // exactly this one row.
+        for id in [
+            model_ids::CLAUDE_HAIKU_5_5,
+            model_ids::CLAUDE_SONNET_5,
+            model_ids::CLAUDE_OPUS_4_8,
+        ] {
             assert!(
                 !Provider::Anthropic.supports_server_side_fallbacks(id),
                 "{id}"
@@ -1763,8 +1902,9 @@ mod tests {
             model_ids::CLAUDE_FABLE_5,
         );
         // Toolset-GA, but it also accepts the cheaper legacy tool, so that is
-        // what Juno sends. Only the 5.5 models (Opus 5.5, Sonnet 5.5) take the
-        // toolset, because they accept no earlier tool type.
+        // what Juno sends. Only the current lineup (Fable 5.2, Opus 5.5,
+        // Sonnet 5.5, Haiku 5.5) takes the toolset, because those four accept
+        // no earlier tool type.
         assert_eq!(computer, "computer_20251124");
 
         let editor = Provider::Anthropic.resolve_tool_type(
@@ -1787,21 +1927,22 @@ mod tests {
     /// The catalog must match Anthropic's docs on all four axes. If Anthropic
     /// moves a model, this is the test that should fail.
     ///
-    /// Lifecycle:    the "Compare models" table and the "Legacy models (still
-    ///               available)" line at
+    /// Lifecycle:    the "Latest models" table at
     ///               <https://platform.claude.com/docs/en/about-claude/models/overview>
+    ///               (the second section is now "All models", which lists the
+    ///               current four as well, so it is not the legacy list)
     /// Tool version: <https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool#earlier-tool-versions>
     /// Toolset GA:   the `supportedModels` list on that same page
     /// Image tier:   <https://platform.claude.com/docs/en/build-with-claude/vision#evaluate-image-size>
     #[test]
     fn anthropic_catalog_matches_the_documented_tables() {
-        // "Compare models" — the whole current lineup, and all of it is in
-        // Juno's catalog.
+        // "Latest models" — the whole current lineup, and all of it is in
+        // Juno's catalog. Verified live 2026-11-16 (LAC-8375).
         let current_lineup = [
-            model_ids::CLAUDE_FABLE_5_1,
+            model_ids::CLAUDE_FABLE_5_2,
             model_ids::CLAUDE_OPUS_5_5,
             model_ids::CLAUDE_SONNET_5_5,
-            model_ids::CLAUDE_HAIKU_4_5,
+            model_ids::CLAUDE_HAIKU_5_5,
         ];
 
         // The docs list exactly these two under `computer_20250124`; every
@@ -1811,23 +1952,33 @@ mod tests {
         // The models Juno actually SENDS the toolset to: the ones that accept
         // no earlier tool type, so the toolset's ~2x input-token overhead buys
         // the only working path. The computer-use-tool page (verified live
-        // 2026-10-05) states "Claude 5.5 and later models support computer use
-        // only through the computer_toolset_20260801 toolset and return an
-        // error for the earlier computer_20251124 tool version", which is both
-        // Opus 5.5 and Sonnet 5.5. Opus 5.5 was additionally wire-verified
-        // 2026-09-22 (it returned "does not support tool types:
-        // computer_20251124"); every other toolset-GA model returned HTTP 200
-        // for the legacy tool.
-        let toolset_only = [model_ids::CLAUDE_OPUS_5_5, model_ids::CLAUDE_SONNET_5_5];
+        // 2026-11-16) states "Claude Fable 5.2, Claude Mythos 5.2, Claude Opus
+        // 5.5, Claude Sonnet 5.5, and Claude Haiku 5.5 support computer use
+        // through the computer_toolset_20260801 toolset. They return a 400
+        // error for any computer use tool version they don't accept, such as
+        // computer_20251124 on the Claude API" — which is the whole current
+        // lineup. That page's `computer_20251124` model list confirms the
+        // other direction: none of these four appears on it. Opus 5.5 was
+        // additionally wire-verified 2026-09-22 (it returned "does not support
+        // tool types: computer_20251124"); every other toolset-GA model
+        // returned HTTP 200 for the legacy tool.
+        let toolset_only = [
+            model_ids::CLAUDE_FABLE_5_2,
+            model_ids::CLAUDE_OPUS_5_5,
+            model_ids::CLAUDE_SONNET_5_5,
+            model_ids::CLAUDE_HAIKU_5_5,
+        ];
 
         // `supportedModels` for computer_toolset_20260801, intersected with
         // what Juno offers — the documented capability, which is broader than
         // what Juno sends. (The docs also list claude-mythos-5 and
         // claude-mythos-5-1, which are invite-only and not in Juno's catalog.)
         let toolset_ga = [
+            model_ids::CLAUDE_FABLE_5_2,
             model_ids::CLAUDE_FABLE_5_1,
             model_ids::CLAUDE_OPUS_5_5,
             model_ids::CLAUDE_SONNET_5_5,
+            model_ids::CLAUDE_HAIKU_5_5,
             model_ids::CLAUDE_SONNET_5,
             model_ids::CLAUDE_FABLE_5,
             model_ids::CLAUDE_OPUS_5,
@@ -1835,11 +1986,18 @@ mod tests {
         ];
 
         // "High-resolution | Claude 4.7 and later models". Opus 4.7 is legacy
-        // on lifecycle but high-resolution on image tier.
+        // on lifecycle but high-resolution on image tier. Haiku 5.5 is here and
+        // Haiku 4.5 is not: the Haiku 5.5 migration guide says so outright
+        // ("Claude Haiku 5.5 uses the high-resolution image tier ... Claude
+        // Haiku 4.5 and earlier Haiku models use the standard tier"), so the
+        // same screenshot costs about 2.5x the visual tokens across that
+        // boundary.
         let high_res = [
+            model_ids::CLAUDE_FABLE_5_2,
             model_ids::CLAUDE_FABLE_5_1,
             model_ids::CLAUDE_OPUS_5_5,
             model_ids::CLAUDE_SONNET_5_5,
+            model_ids::CLAUDE_HAIKU_5_5,
             model_ids::CLAUDE_SONNET_5,
             model_ids::CLAUDE_FABLE_5,
             model_ids::CLAUDE_OPUS_5,
@@ -1914,9 +2072,68 @@ mod tests {
         }
     }
 
-    /// Lifecycle and toolset GA are separate axes, and #580 conflated them.
-    /// Opus 4.8 is toolset-GA yet legacy; Haiku 4.5 is current yet not
-    /// toolset-GA. Either direction must be representable.
+    /// Haiku 5.5 is the first catalog row priced by prompt length, so the
+    /// long-context tier is no longer dead machinery. Every figure here is from
+    /// the live pricing page (verified 2026-11-16): base $0.10 / $0.50 with
+    /// $0.01 cache reads and $0.125 5-minute cache writes, and 5x all four
+    /// above a 100,000-token prompt.
+    ///
+    /// Cache reads dominate a computer-use turn, so that one rate is the
+    /// load-bearing number; a cached catalog once reported Sonnet 5.5's at
+    /// double the published figure (LAC-3106, LAC-4127).
+    #[test]
+    fn haiku_5_5_is_the_one_row_priced_by_prompt_length() {
+        let tiered: Vec<_> = Provider::Anthropic
+            .model_definitions()
+            .iter()
+            .filter(
+                |def| matches!(&def.price, Price::Metered(rates) if rates.long_context.is_some()),
+            )
+            .map(|def| def.id)
+            .collect();
+        assert_eq!(
+            tiered,
+            vec![model_ids::CLAUDE_HAIKU_5_5],
+            "only Haiku 5.5 is priced by prompt length; every other current model \
+             includes the full 1M window at standard pricing"
+        );
+
+        let def = Provider::Anthropic
+            .model_definitions()
+            .iter()
+            .find(|def| def.id == model_ids::CLAUDE_HAIKU_5_5)
+            .expect("Haiku 5.5 must be in the catalog");
+        let Price::Metered(rates) = &def.price else {
+            panic!("Haiku 5.5 is metered, not a subscription seat");
+        };
+        assert_eq!(
+            (
+                rates.input,
+                rates.output,
+                rates.cache_read,
+                rates.cache_write
+            ),
+            (0.10, 0.50, 0.01, 0.125)
+        );
+        let long = rates
+            .long_context
+            .as_ref()
+            .expect("the filter above already matched on this");
+        assert_eq!(long.threshold_tokens, 100_000);
+        assert_eq!(
+            (long.input, long.output, long.cache_read, long.cache_write),
+            (0.50, 2.50, 0.05, 0.625)
+        );
+    }
+
+    /// Which computer-use shape each model gets, asserted per model, because
+    /// #580 derived it from a lifecycle label and made a legacy model the
+    /// default. This test owns the tool-version axis only; the independence of
+    /// `availability` and `toolset_ga` is asserted by the three tests below
+    /// (`lifecycle_is_not_inferred_from_toolset_ga`,
+    /// `toolset_ga_is_not_inferred_from_a_legacy_lifecycle` and the
+    /// `every_current_model_is_toolset_ga_today` census), which is also where
+    /// the one empty cell of that 2x2 is recorded.
     #[test]
     fn the_toolset_path_is_selected_per_model_and_leaves_the_rest_alone() {
         for (model, expected_type, expected_flag) in [
@@ -1925,9 +2142,20 @@ mod tests {
                 "computer_toolset_20260801",
                 None,
             ),
-            // Claude 5.5 and later are toolset-only on the Claude API.
+            // The whole current lineup is toolset-only on the Claude API, and
+            // the toolset is GA, so none of these sends a beta flag.
             (
                 model_ids::CLAUDE_SONNET_5_5,
+                "computer_toolset_20260801",
+                None,
+            ),
+            (
+                model_ids::CLAUDE_FABLE_5_2,
+                "computer_toolset_20260801",
+                None,
+            ),
+            (
+                model_ids::CLAUDE_HAIKU_5_5,
                 "computer_toolset_20260801",
                 None,
             ),
@@ -2069,23 +2297,213 @@ mod tests {
         );
     }
 
+    fn anthropic_model(id: &str) -> &'static ModelDefinition {
+        Provider::Anthropic
+            .model_definitions()
+            .iter()
+            .find(|def| def.id == id)
+            .expect("model must be in the catalog")
+    }
+
+    /// Fable 5.2 replaced Fable 5.1 in the current lineup, and the request
+    /// shape moved with it: one field changed and four deliberately did not.
+    /// A version bump that copied the old row forward would keep sending
+    /// `computer_20251124`, which Fable 5.2 answers with a 400.
+    ///
+    /// Ported from PR #963 (LAC-7413, the 2026-11-09 weekly check) via
+    /// LAC-8416. Two independent readings of the same live docs produced the
+    /// same row, which is stronger evidence than either reading alone.
+    /// Negative controls recorded on #963, not re-run here: mutating Fable
+    /// 5.2's `CU_TOOLSET` to `CU_20251124` reds this test (M1).
+    #[test]
+    fn fable_5_2_is_not_a_point_upgrade_of_fable_5_1() {
+        let new = anthropic_model(model_ids::CLAUDE_FABLE_5_2);
+        let old = anthropic_model(model_ids::CLAUDE_FABLE_5_1);
+
+        assert_eq!(new.availability, Availability::Current);
+        assert_eq!(old.availability, Availability::Legacy);
+
+        // The one field that moved. Fable 5.1 accepts computer use BOTH ways
+        // and Juno sends it the cheaper legacy tool; Fable 5.2 accepts only
+        // the toolset.
+        assert_eq!(
+            new.computer_use,
+            ComputerUse::AnthropicTool(ApiVersion::ComputerToolset20260801)
+        );
+        assert_eq!(
+            old.computer_use,
+            ComputerUse::AnthropicTool(ApiVersion::Computer20251124)
+        );
+        assert_eq!(
+            Provider::Anthropic.resolve_tool_type(
+                "computer",
+                "computer_20251124",
+                model_ids::CLAUDE_FABLE_5_2
+            ),
+            "computer_toolset_20260801",
+            "the tool version a generation test would pick is exactly what Fable 5.2 400s on"
+        );
+        // GA, so no beta header — where Fable 5.1 still needs one.
+        assert_eq!(
+            Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_FABLE_5_2),
+            None
+        );
+        assert_eq!(
+            Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_FABLE_5_1),
+            Some("computer-use-2025-11-24")
+        );
+        assert_eq!(
+            Provider::Anthropic.computer_toolset_name(model_ids::CLAUDE_FABLE_5_2),
+            Some("computer")
+        );
+
+        // The four that did NOT move. Checked, not inherited.
+        assert!(new.toolset_ga && old.toolset_ga);
+        assert_eq!(new.image_tier, ImageTier::HighResolution);
+        assert_eq!(old.image_tier, ImageTier::HighResolution);
+        assert!(new.adaptive_thinking && old.adaptive_thinking);
+        assert!(new.server_side_fallback && old.server_side_fallback);
+
+        // Opus 5.5 stays the recommended default: the overview still says
+        // "start with Claude Opus 5.5", and Fable 5.2 is the escalation for
+        // demanding reasoning, at 2x the input price.
+        assert!(!new.is_recommended);
+        assert_eq!(
+            Provider::Anthropic.default_model(),
+            model_ids::CLAUDE_OPUS_5_5
+        );
+    }
+
+    /// Haiku 5.5 crossed four axes at once, not just the version number. A
+    /// find-and-replace of the model ID would have shipped the legacy tool
+    /// version, the wrong screenshot resolution, `budget_tokens` on an
+    /// adaptive-thinking model, and `fallbacks` on the one current model that
+    /// returns a 400 for it.
+    ///
+    /// Ported from PR #963 (LAC-7413) via LAC-8416. Negative controls recorded
+    /// on #963, not re-run here: flipping `toolset_ga` true -> false reds this
+    /// test (M2), and moving `long_output` 2.50 -> 2.60 reds the price parity
+    /// test (M3).
+    #[test]
+    fn haiku_5_5_is_not_a_point_upgrade_of_haiku_4_5() {
+        let new = anthropic_model(model_ids::CLAUDE_HAIKU_5_5);
+        let old = anthropic_model(model_ids::CLAUDE_HAIKU_4_5);
+
+        assert_eq!(new.availability, Availability::Current);
+        assert_eq!(old.availability, Availability::Legacy);
+
+        // 1. Computer use: toolset-only, where Haiku 4.5 is on the oldest tool
+        //    version Juno sends. Sending `computer_20250124` here is a 400.
+        assert_eq!(
+            new.computer_use,
+            ComputerUse::AnthropicTool(ApiVersion::ComputerToolset20260801)
+        );
+        assert_eq!(
+            old.computer_use,
+            ComputerUse::AnthropicTool(ApiVersion::Computer20250124)
+        );
+        assert!(new.toolset_ga);
+        assert_eq!(
+            Provider::Anthropic.resolve_tool_type(
+                "computer",
+                "computer_20250124",
+                model_ids::CLAUDE_HAIKU_5_5
+            ),
+            "computer_toolset_20260801",
+            "the legacy type it would otherwise inherit is exactly what it 400s on"
+        );
+        // GA means no beta flag, where Haiku 4.5 still needs its own.
+        assert_eq!(
+            Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_HAIKU_5_5),
+            None
+        );
+        assert_eq!(
+            Provider::Anthropic.computer_use_beta_flag(model_ids::CLAUDE_HAIKU_4_5),
+            Some("computer-use-2025-01-24")
+        );
+        assert_eq!(
+            Provider::Anthropic.computer_toolset_name(model_ids::CLAUDE_HAIKU_5_5),
+            Some("computer")
+        );
+
+        // 2. Image tier: high-resolution, so screenshots capture at 2576 px.
+        assert_eq!(new.image_tier, ImageTier::HighResolution);
+        assert_eq!(old.image_tier, ImageTier::Standard);
+
+        // 3. Adaptive thinking: on, where Haiku 4.5 takes `budget_tokens`.
+        assert!(new.adaptive_thinking);
+        assert!(!old.adaptive_thinking);
+
+        // 4. Classifiers without server-side fallback. Sending `fallbacks` to
+        //    this model returns a 400, so this must stay false even though the
+        //    refusals page lists it among the models that can decline.
+        assert!(!new.server_side_fallback);
+
+        // It is not the recommended default — Opus 5.5 is, and a cheap routing
+        // model becoming the default is the #580 shape in reverse.
+        assert!(!new.is_recommended);
+        assert_eq!(
+            Provider::Anthropic.default_model(),
+            model_ids::CLAUDE_OPUS_5_5
+        );
+    }
+
+    /// `availability` does not follow from `toolset_ga`: two toolset-GA models
+    /// sit on opposite sides of the lifecycle line. This direction has live
+    /// instances in both cells and is proven outright.
     #[test]
     fn lifecycle_is_not_inferred_from_toolset_ga() {
-        let by_id = |id: &str| {
-            Provider::Anthropic
-                .model_definitions()
-                .iter()
-                .find(|def| def.id == id)
-                .expect("model must be in the catalog")
-        };
-
-        let opus_4_8 = by_id(model_ids::CLAUDE_OPUS_4_8);
+        let opus_4_8 = anthropic_model(model_ids::CLAUDE_OPUS_4_8);
         assert!(opus_4_8.toolset_ga);
         assert_eq!(opus_4_8.availability, Availability::Legacy);
 
-        let haiku = by_id(model_ids::CLAUDE_HAIKU_4_5);
-        assert!(!haiku.toolset_ga);
-        assert_eq!(haiku.availability, Availability::Current);
+        let haiku_5_5 = anthropic_model(model_ids::CLAUDE_HAIKU_5_5);
+        assert!(haiku_5_5.toolset_ga);
+        assert_eq!(haiku_5_5.availability, Availability::Current);
+    }
+
+    /// The converse, and it is deliberately named for the half that has
+    /// instances. Two *legacy* models disagree on `toolset_ga`, so the flag
+    /// cannot be derived from a legacy label. Among *current* models the
+    /// catalog holds no counter-example today — see
+    /// `every_current_model_is_toolset_ga_today`, which records that gap as
+    /// a measurement rather than leaving this test's name to imply it.
+    #[test]
+    fn toolset_ga_is_not_inferred_from_a_legacy_lifecycle() {
+        let opus_4_8 = anthropic_model(model_ids::CLAUDE_OPUS_4_8);
+        assert_eq!(opus_4_8.availability, Availability::Legacy);
+        assert!(opus_4_8.toolset_ga);
+
+        let haiku_4_5 = anthropic_model(model_ids::CLAUDE_HAIKU_4_5);
+        assert_eq!(haiku_4_5.availability, Availability::Legacy);
+        assert!(!haiku_4_5.toolset_ga);
+    }
+
+    /// The empty cell of that 2x2, asserted so it cannot rot into a comment.
+    ///
+    /// As of 2026-11-16 every current Anthropic model is toolset-GA — Haiku
+    /// 4.5 was the last current row that was not, and it went legacy when
+    /// Haiku 5.5 launched. Nothing in the types forbids the combination, so
+    /// this is a census, not a rule: when it fails, Anthropic has shipped a
+    /// current model that declines the toolset. That is the live instance
+    /// `toolset_ga_is_not_inferred_from_a_legacy_lifecycle` is missing, so
+    /// add it there, widen this test's name, and fix the paragraph in
+    /// `CLAUDE.md` that still says the gap exists. Do not "fix" it by
+    /// deriving either field from the other.
+    #[test]
+    fn every_current_model_is_toolset_ga_today() {
+        let current_without_toolset: Vec<_> = Provider::Anthropic
+            .model_definitions()
+            .iter()
+            .filter(|def| def.availability == Availability::Current && !def.toolset_ga)
+            .map(|def| def.id)
+            .collect();
+        assert!(
+            current_without_toolset.is_empty(),
+            "{current_without_toolset:?} are current but not toolset-GA. The \
+             current-and-not-GA cell has an instance again: give it a real \
+             assertion instead of this census."
+        );
     }
 
     /// Image tier and tool version are separate axes. Opus 4.6 shares Opus
@@ -2152,8 +2570,11 @@ mod tests {
             "computer_20250124"
         );
 
-        // The default model is on the newer version and must not inherit the
-        // old hardcoded default.
+        // A model on the newer tool version must not inherit the old
+        // hardcoded default. (Fable 5.1 is legacy since 2026-11-16 and was
+        // never Juno's default — Opus 5.5 is — but it is still the clearest
+        // `computer_20251124` case, since it is toolset-GA and declines the
+        // toolset anyway.)
         let fable = model_ids::CLAUDE_FABLE_5_1;
         assert_eq!(
             Provider::Anthropic.computer_use_beta_flag(fable),
@@ -2245,14 +2666,42 @@ mod tests {
         }
     }
 
+    /// The Claude CLI aliases resolve to whatever Anthropic ships as latest, so
+    /// a release moves what a row describes with no model ID to grep for. That
+    /// is how `haiku` sat on the standard tier after Haiku 5.5 shipped on the
+    /// high-resolution one, downscaling every screenshot for it to 1568 px.
+    ///
+    /// All three track the current generation, and the current generation is
+    /// entirely high-resolution, so pin that rather than wait to notice again.
+    #[test]
+    fn the_cli_aliases_track_the_current_generation_image_tier() {
+        for alias in ["opus", "sonnet", "haiku"] {
+            let def = Provider::ClaudeCli
+                .model_definitions()
+                .iter()
+                .find(|def| def.id == alias)
+                .unwrap_or_else(|| panic!("{alias} must be in the Claude CLI catalog"));
+            assert_eq!(
+                def.image_tier,
+                ImageTier::HighResolution,
+                "the CLI `{alias}` alias resolves to the latest model in its line, \
+                 and every current model is on the high-resolution tier"
+            );
+        }
+    }
+
     /// The screenshot resolution tier reads the per-model declaration rather
     /// than keeping a second list of model IDs.
     #[test]
     fn high_res_tier_follows_the_declared_image_tier() {
         use crate::constants::ui::standard_resolutions::supports_high_res;
 
+        assert!(supports_high_res(model_ids::CLAUDE_FABLE_5_2));
         assert!(supports_high_res(model_ids::CLAUDE_FABLE_5_1));
         assert!(supports_high_res(model_ids::CLAUDE_OPUS_5));
+        // The Haiku line crosses the tier boundary, so both rows are asserted:
+        // a screenshot for 5.5 is captured at 2576 px and for 4.5 at 1568 px.
+        assert!(supports_high_res(model_ids::CLAUDE_HAIKU_5_5));
         assert!(!supports_high_res(model_ids::CLAUDE_HAIKU_4_5));
         assert!(!supports_high_res(model_ids::CLAUDE_SONNET_4_5));
         // Claude CLI aliases track the current generation.
@@ -2302,8 +2751,9 @@ mod tests {
 
     /// Sonnet 4.5 and Haiku 4.5 drive the computer through the oldest tool
     /// version Juno sends. Marking them chat-only would remove working
-    /// function — and note Haiku 4.5 is in the *current* lineup, so an old
-    /// tool version is not the same thing as a legacy model.
+    /// function. An old tool version is still not the same thing as a legacy
+    /// model — Fable 5.1 is legacy on `computer_20251124` while Opus 4.8 is
+    /// legacy and toolset-GA — it is only that these two happen to be both.
     #[test]
     fn older_tool_version_models_are_not_chat_only() {
         for id in [model_ids::CLAUDE_SONNET_4_5, model_ids::CLAUDE_HAIKU_4_5] {
