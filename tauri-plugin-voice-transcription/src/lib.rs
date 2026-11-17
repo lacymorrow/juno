@@ -423,6 +423,6 @@ fn configure_metal_shader_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 #[allow(dead_code)]
 fn planted_violation() -> u8 {
     let a: Option<u8> = None;
-    let b: Result<u8, ()> = Ok(1);
+    let b: std::result::Result<u8, ()> = Ok(1);
     a.unwrap() + b.expect("planted")
 }
