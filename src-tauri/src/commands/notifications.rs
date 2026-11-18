@@ -21,6 +21,35 @@ pub struct NotificationSettings {
     pub enabled: bool,
 }
 
+/// Where a click on a Juno notification goes.
+///
+/// macOS hands a click back the identifier of the notification it belongs to
+/// and nothing else, so this enum is the whole vocabulary: one table, matched
+/// in one place, rather than a callback per caller. It exists because a banner
+/// that names a place to go and cannot take you there is a dead end, which
+/// every notification Juno posted was until LAC-8588.
+///
+/// Not to be confused with macOS's `UNNotificationAction`, which is a button
+/// drawn on the banner. This is what the banner itself does when clicked.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ClickAction {
+    /// Put Juno's conversation in front of the person, and nothing else.
+    ///
+    /// The default, and the floor: a notification that names no destination,
+    /// one posted by a build that knew an action this one does not, and an
+    /// identifier macOS hands back that Juno did not write all land here. No
+    /// click is ever answered with nothing.
+    #[default]
+    BringJunoForward,
+    /// System Settings > Accessibility > Read & Speak, where the Mac's voice
+    /// is chosen. The destination the "no voice to speak with" notice names in
+    /// as many words.
+    OpenReadAndSpeak,
+    /// The conversation a background agent session belongs to.
+    ShowSession { session_id: String },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationData {
     pub title: String,
@@ -28,6 +57,12 @@ pub struct NotificationData {
     pub level: String, // "info", "success", "warning", "error"
     pub important: Option<bool>,
     pub timeout: Option<u32>, // Override default duration
+    /// Where a click on this notification goes. Absent means
+    /// [`ClickAction::BringJunoForward`], so a caller that names no
+    /// destination, and the frontend payload that has never carried one, both
+    /// keep working untouched.
+    #[serde(default)]
+    pub action: ClickAction,
 }
 
 /// What macOS says about Juno's notifications, read from
@@ -235,12 +270,79 @@ fn next_request_identifier() -> String {
     request_identifier(SEQUENCE.fetch_add(1, Ordering::Relaxed), millis)
 }
 
+/// What separates the unique part of a request identifier from the action it
+/// carries.
+///
+/// A click hands the delegate the identifier and nothing else, so the
+/// identifier is where the action has to live. Neither the unique part (digits
+/// and dots) nor a session id (a UUID) can contain this character, so the
+/// split is never ambiguous, and the unique part in front of it is untouched:
+/// two notifications with the same action still replace nothing of each
+/// other's in Notification Center.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const ACTION_SEPARATOR: char = '#';
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const READ_AND_SPEAK_SLUG: &str = "read-and-speak";
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const SESSION_SLUG_PREFIX: &str = "session=";
+
+impl ClickAction {
+    /// What this action is written as on a request identifier, if anything.
+    ///
+    /// `None` for the default, so an identifier with no action appended reads
+    /// as "bring Juno forward", which is what every notification posted before
+    /// LAC-8588, and any still sitting in Notification Center from an older
+    /// build, reads as too.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn slug(&self) -> Option<String> {
+        match self {
+            Self::BringJunoForward => None,
+            Self::OpenReadAndSpeak => Some(READ_AND_SPEAK_SLUG.to_string()),
+            Self::ShowSession { session_id } => {
+                Some(format!("{}{}", SESSION_SLUG_PREFIX, session_id))
+            }
+        }
+    }
+}
+
+/// The identifier a notification carrying `action` is posted under.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn identifier_with_action(unique: &str, action: &ClickAction) -> String {
+    match action.slug() {
+        Some(slug) => format!("{}{}{}", unique, ACTION_SEPARATOR, slug),
+        None => unique.to_string(),
+    }
+}
+
+/// What a click on the notification posted under `identifier` should do.
+///
+/// The one table. Total by construction: no separator, a separator with no
+/// slug, a slug this build does not know, an empty session id, and a string
+/// Juno never posted all read as [`ClickAction::BringJunoForward`]. There is
+/// deliberately no path through here that does nothing. A banner that named a
+/// destination and answered a click with silence is the defect.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn action_from_identifier(identifier: &str) -> ClickAction {
+    let Some((_unique, slug)) = identifier.split_once(ACTION_SEPARATOR) else {
+        return ClickAction::BringJunoForward;
+    };
+    if slug == READ_AND_SPEAK_SLUG {
+        return ClickAction::OpenReadAndSpeak;
+    }
+    match slug.strip_prefix(SESSION_SLUG_PREFIX) {
+        Some(session_id) if !session_id.is_empty() => ClickAction::ShowSession {
+            session_id: session_id.to_string(),
+        },
+        _ => ClickAction::BringJunoForward,
+    }
+}
+
 /// Hand one notification to `UNUserNotificationCenter` and wait for its answer.
 ///
 /// This is the same center the authorization comes from, so what the
 /// notifications row shows and what posting does can no longer disagree.
 #[cfg(target_os = "macos")]
-fn post(title: &str, body: &str) -> Result<(), String> {
+fn post(title: &str, body: &str, action: &ClickAction) -> Result<(), String> {
     use block2::RcBlock;
     use objc2_foundation::{NSError, NSString};
     use objc2_user_notifications::{
@@ -253,7 +355,8 @@ fn post(title: &str, body: &str) -> Result<(), String> {
     content.setBody(&NSString::from_str(body));
     content.setSound(Some(&UNNotificationSound::defaultSound()));
 
-    let identifier = NSString::from_str(&next_request_identifier());
+    let identifier =
+        NSString::from_str(&identifier_with_action(&next_request_identifier(), action));
     let request =
         UNNotificationRequest::requestWithIdentifier_content_trigger(&identifier, &content, None);
 
@@ -278,7 +381,7 @@ fn post(title: &str, body: &str) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn post(title: &str, _body: &str) -> Result<(), String> {
+fn post(title: &str, _body: &str, _action: &ClickAction) -> Result<(), String> {
     info!("Notification '{}' has no presenter on this platform", title);
     Ok(())
 }
@@ -300,9 +403,17 @@ mod presenter {
     use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
     use objc2::{define_class, msg_send, AnyThread};
     use objc2_user_notifications::{
-        UNNotification, UNNotificationPresentationOptions, UNUserNotificationCenter,
-        UNUserNotificationCenterDelegate,
+        UNNotification, UNNotificationDefaultActionIdentifier, UNNotificationPresentationOptions,
+        UNNotificationResponse, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
     };
+    use tauri::AppHandle;
+
+    /// The app a click acts on.
+    ///
+    /// The delegate is an Objective-C object macOS owns and calls with a
+    /// response and nothing else, so the handle it needs has to be waiting
+    /// here for it. Set once, when the delegate is installed.
+    static APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 
     define_class!(
         // SAFETY: NSObject has no subclassing requirements and this class has
@@ -323,6 +434,42 @@ mod presenter {
             ) {
                 completion_handler.call((super::foreground_presentation(),));
             }
+
+            // Somebody clicked a Juno banner. The only way one reaches Rust:
+            // without this method macOS has nowhere to deliver a click, so
+            // every banner Juno posted was a dead end (LAC-8588).
+            //
+            // macOS calls this for the person *opening* a notification and,
+            // where a category asks for one, for dismissing it. Only the
+            // default action is someone asking to go somewhere: a dismissal
+            // is answered by closing the handler and nothing else. Juno
+            // registers no category today, so only the default action
+            // arrives, but sending a dismissal to System Settings is a real
+            // bug the day one is registered.
+            #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
+            fn did_receive_response(
+                &self,
+                _center: &UNUserNotificationCenter,
+                response: &UNNotificationResponse,
+                completion_handler: &block2::DynBlock<dyn Fn()>,
+            ) {
+                // SAFETY: a framework string constant, present for as long as
+                // UserNotifications is loaded, which it is inside this method.
+                let opened = unsafe { UNNotificationDefaultActionIdentifier }.to_string();
+                if response.actionIdentifier().to_string() == opened {
+                    let identifier = response.notification().request().identifier().to_string();
+                    match APP.get() {
+                        Some(app) => super::handle_click(app, &identifier),
+                        None => log::warn!(
+                            "Notification '{}' was clicked before Juno had a handle to act on",
+                            identifier
+                        ),
+                    }
+                }
+                // macOS holds the next response until this is called, so it is
+                // called on every path out, dismissal included.
+                completion_handler.call(());
+            }
         }
     );
 
@@ -335,9 +482,10 @@ mod presenter {
     }
 
     /// Make Juno the center's delegate, once, for the life of the process.
-    pub fn install() {
+    pub fn install(app: &AppHandle) {
         static ONCE: std::sync::Once = std::sync::Once::new();
         ONCE.call_once(|| {
+            let _ = APP.set(app.clone());
             let presenter = Presenter::new();
             UNUserNotificationCenter::currentNotificationCenter()
                 .setDelegate(Some(ProtocolObject::from_ref(&*presenter)));
@@ -347,17 +495,100 @@ mod presenter {
     }
 }
 
-/// Let notifications show as banners while Juno is frontmost.
+/// Let notifications show as banners while Juno is frontmost, and let a click
+/// on one reach Rust.
 ///
 /// Called once from setup. Does nothing where there is no Juno.app to post as,
-/// because the notification center raises without a bundle.
-pub fn install_presenter() {
+/// because the notification center raises without a bundle. The handle is
+/// what a click is carried out against, so there is no banner without it and
+/// no click without the banner.
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+pub fn install_presenter(app: &AppHandle) {
     if let Some(reason) = unavailable_reason() {
         info!("Notification presenter not installed: {}", reason);
         return;
     }
     #[cfg(target_os = "macos")]
-    presenter::install();
+    presenter::install(app);
+}
+
+/// Carry out a click on a Juno notification.
+///
+/// Reads the action off the identifier and hands it to [`run_action`] on the
+/// async runtime: this is called from an Objective-C delegate method on the
+/// main thread, and both opening System Settings and putting a window in
+/// front of someone can wait on AppKit.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn handle_click(app: &AppHandle, identifier: &str) {
+    let action = action_from_identifier(identifier);
+    info!("Notification '{}' was clicked: {:?}", identifier, action);
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        run_action(&app, action).await;
+    });
+}
+
+/// Do what the click asked for.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+async fn run_action(app: &AppHandle, action: ClickAction) {
+    match action {
+        ClickAction::OpenReadAndSpeak => {
+            // The same two URLs the Voice picker's own link opens, so the
+            // banner and the picker cannot disagree about where the Mac's
+            // voice is set. Juno is deliberately not brought forward: the
+            // person is being sent to System Settings, and fighting it for
+            // the foreground would land them back where they started.
+            if let Err(reason) = crate::tts::voices::open_read_and_speak().await {
+                warn!(
+                    "A notification click could not open Read & Speak: {}",
+                    reason
+                );
+            }
+        }
+        ClickAction::ShowSession { session_id } => {
+            // Best effort, and in this order. A session that has already
+            // finished is gone from the registry, so focusing it fails for the
+            // most ordinary click there is: the one on "finished". The
+            // conversation is still what the person asked for, so the window
+            // comes forward either way.
+            match app.try_state::<AppState>() {
+                Some(state) => {
+                    if let Err(reason) = crate::commands::agent_sessions::focus_agent_session(
+                        app.clone(),
+                        state,
+                        Some(session_id.clone()),
+                    )
+                    .await
+                    {
+                        info!(
+                            "Session {} was not there to focus, showing the conversation anyway: {}",
+                            session_id, reason
+                        );
+                    }
+                }
+                // A click that arrives before setup finished. The window is
+                // still the right answer, and this never panics for it.
+                None => info!("Juno is not ready to focus session {} yet", session_id),
+            }
+            bring_juno_forward(app).await;
+        }
+        ClickAction::BringJunoForward => bring_juno_forward(app).await,
+    }
+}
+
+/// Put Juno's conversation in front of the person.
+///
+/// Through `open_main_window`, which is the one place that decides which
+/// surface holds the full chat (the window, or the Island when it owns it), so
+/// a click never reaches for a window label of its own.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+async fn bring_juno_forward(app: &AppHandle) {
+    if let Err(reason) = crate::window_management::open_main_window(app.clone()).await {
+        warn!(
+            "A notification click could not bring Juno forward: {}",
+            reason
+        );
+    }
 }
 
 /// What macOS currently allows for Juno.
@@ -416,6 +647,16 @@ fn refusal(enabled: bool, status: &NotificationStatus) -> Result<(), String> {
 /// single check in a single place. Blocks while macOS answers (and, the first
 /// time, while the person answers the prompt), so call it off the main thread.
 pub fn deliver(app: &AppHandle, title: &str, body: &str) -> Result<(), String> {
+    deliver_action(app, title, body, &ClickAction::BringJunoForward)
+}
+
+/// [`deliver`], for a notification that has somewhere for a click to go.
+pub fn deliver_action(
+    app: &AppHandle,
+    title: &str,
+    body: &str,
+    action: &ClickAction,
+) -> Result<(), String> {
     let enabled = notifications_enabled(app);
     let mut status = current_status();
     if should_ask_first(enabled, status.authorization) {
@@ -428,7 +669,7 @@ pub fn deliver(app: &AppHandle, title: &str, body: &str) -> Result<(), String> {
         info!("Withholding '{}': {}", title, reason);
         return Err(reason);
     }
-    post(title, body)
+    post(title, body, action)
 }
 
 /// Notify from anywhere, without waiting and without telling anyone if it
@@ -439,13 +680,18 @@ pub fn deliver(app: &AppHandle, title: &str, body: &str) -> Result<(), String> {
 /// main thread, and the first notification can wait on the permission prompt,
 /// so the work happens on its own thread. A failure is logged and nothing more.
 pub fn notify(app: &AppHandle, title: &str, body: &str) {
+    notify_action(app, title, body, ClickAction::BringJunoForward);
+}
+
+/// [`notify`], for a notification that names a place to go.
+pub fn notify_action(app: &AppHandle, title: &str, body: &str, action: ClickAction) {
     let app = app.clone();
     let title = title.to_string();
     let body = body.to_string();
     let spawned = std::thread::Builder::new()
         .name("juno-notify".into())
         .spawn(move || {
-            if let Err(reason) = deliver(&app, &title, &body) {
+            if let Err(reason) = deliver_action(&app, &title, &body, &action) {
                 warn!("Notification '{}' did not go out: {}", title, reason);
             }
         });
@@ -455,9 +701,9 @@ pub fn notify(app: &AppHandle, title: &str, body: &str) {
 }
 
 /// [`deliver`] on a blocking thread, logging rather than returning a failure.
-async fn deliver_quietly(app: AppHandle, title: String, body: String) {
+async fn deliver_quietly(app: AppHandle, title: String, body: String, action: ClickAction) {
     let result = tauri::async_runtime::spawn_blocking(move || {
-        deliver(&app, &title, &body).map_err(|reason| (title, reason))
+        deliver_action(&app, &title, &body, &action).map_err(|reason| (title, reason))
     })
     .await;
     match result {
@@ -512,7 +758,7 @@ pub async fn send_notification(
     _state: tauri::State<'_, AppState>,
     data: NotificationData,
 ) -> Result<(), String> {
-    deliver_quietly(app, data.title, data.message).await;
+    deliver_quietly(app, data.title, data.message, data.action).await;
     Ok(())
 }
 
@@ -526,6 +772,7 @@ pub async fn test_notification(app: AppHandle) -> Result<(), String> {
         app,
         "Juno".to_string(),
         "This is what a notification from Juno looks like.".to_string(),
+        ClickAction::BringJunoForward,
     )
     .await;
     Ok(())
@@ -607,6 +854,100 @@ mod tests {
         assert!(options.contains(Options::Banner));
         assert!(options.contains(Options::List));
         assert!(options.contains(Options::Sound));
+    }
+
+    /// The routing table. A click hands Juno back the identifier and nothing
+    /// else, so this mapping is the whole decision.
+    #[test]
+    fn an_identifier_says_where_its_click_goes() {
+        assert_eq!(
+            action_from_identifier("juno.42.7#read-and-speak"),
+            ClickAction::OpenReadAndSpeak
+        );
+        assert_eq!(
+            action_from_identifier("juno.42.7#session=9d3f7c1e-4aaa-bbbb-1234567890ab"),
+            ClickAction::ShowSession {
+                session_id: "9d3f7c1e-4aaa-bbbb-1234567890ab".to_string()
+            }
+        );
+        // Nothing appended: bring Juno forward. Every notification Juno posted
+        // before LAC-8588 looks exactly like this, including any still sitting
+        // in Notification Center from an older build.
+        assert_eq!(
+            action_from_identifier(&request_identifier(7, 42)),
+            ClickAction::BringJunoForward
+        );
+    }
+
+    /// An action this build does not know must not crash and must not answer
+    /// with silence: it brings Juno forward like any other click.
+    #[test]
+    fn an_unknown_action_brings_juno_forward() {
+        for identifier in [
+            "juno.42.7#open-the-pod-bay-doors", // a build that knew more
+            "juno.42.7#",                       // a separator and no slug
+            "juno.42.7#session=",               // an empty session id
+            "juno.42.7#session",                // the prefix without its =
+            "#read-and-speak",                  // no unique part at all
+            "",                                 // not an identifier
+            "ABCD-EFGH",                        // not posted by Juno
+        ] {
+            assert_eq!(
+                action_from_identifier(identifier),
+                ClickAction::BringJunoForward,
+                "'{}' should bring Juno forward",
+                identifier
+            );
+        }
+    }
+
+    /// Posting and clicking are two halves of one encoding, so they are tested
+    /// as a round trip: however an action is written, reading it back gives
+    /// the same action.
+    #[test]
+    fn every_action_survives_the_round_trip() {
+        for action in [
+            ClickAction::BringJunoForward,
+            ClickAction::OpenReadAndSpeak,
+            ClickAction::ShowSession {
+                session_id: "9d3f7c1e-0000-4aaa-bbbb-1234567890ab".to_string(),
+            },
+        ] {
+            let identifier = identifier_with_action("juno.1763000000000.3", &action);
+            assert_eq!(
+                action_from_identifier(&identifier),
+                action,
+                "{:?} did not survive '{}'",
+                action,
+                identifier
+            );
+        }
+    }
+
+    /// The action rides on the identifier, so it must not cost the identifier
+    /// its uniqueness: macOS replaces a delivered notification that shares
+    /// one, and two sessions finishing together have to both be seen.
+    #[test]
+    fn an_action_does_not_make_two_notifications_collide() {
+        let action = ClickAction::ShowSession {
+            session_id: "same-session".to_string(),
+        };
+        let first = identifier_with_action(&request_identifier(0, 5), &action);
+        let second = identifier_with_action(&request_identifier(1, 5), &action);
+        assert_ne!(first, second);
+        // The unique part is still the prefix, untouched.
+        assert!(first.starts_with("juno.5.0"), "got {}", first);
+    }
+
+    /// The default is what every caller that names no destination gets, so a
+    /// payload with no action has to deserialize to it. The frontend's has
+    /// never carried one.
+    #[test]
+    fn a_payload_with_no_action_brings_juno_forward() {
+        let data: NotificationData =
+            serde_json::from_str(r#"{"title":"t","message":"m","level":"info"}"#)
+                .expect("a payload with no action is still a notification");
+        assert_eq!(data.action, ClickAction::BringJunoForward);
     }
 
     /// The reported defect: the Open Settings button failed. The row now opens
