@@ -589,7 +589,6 @@ export const COMMANDS = {
   PROVIDERS_GET_ACTIVE_PROVIDER: 'get_active_provider',
   PROVIDERS_SET_ACTIVE_PROVIDER: 'set_active_provider',
   PROVIDERS_VALIDATE_PROVIDER_MODEL: 'validate_provider_model',
-  PROVIDERS_GET_PROVIDER_MODELS: 'get_provider_models',
   PROVIDERS_UPDATE_PROVIDER_API_KEY: 'update_provider_api_key',
   PROVIDERS_CLEAR_PROVIDER_API_KEY: 'clear_provider_api_key',
   PROVIDERS_UPDATE_PROVIDER_MODEL: 'update_provider_model',
