@@ -51,11 +51,33 @@ pub const NO_VOICE_TITLE: &str = "Juno has no voice to speak with";
 /// Settings > Voice reads "Pick a Siri voice in Read & Speak and Juno will
 /// use it". The path is spelled out because the pane is two levels into
 /// System Settings and nothing in Juno names it anywhere else.
+///
+/// **The pane name is a macOS name, so it can be renamed under us** (Spoken
+/// Content became Read & Speak). `the_notice_agrees_with_the_picker` catches
+/// the two surfaces drifting apart, but nothing here can notice both drifting
+/// together: re-read it on a macOS major, alongside
+/// [`crate::tts::voices::READ_AND_SPEAK_URLS`], whose anchor is already a
+/// guess.
 pub const NO_VOICE_BODY: &str =
     "Pick a Siri voice in System Settings > Accessibility > Read & Speak.";
 
 /// Said once per run. A reply is spoken a sentence at a time, so the silence
 /// happens once per sentence; a notification per sentence is its own defect.
+///
+/// Two things this deliberately does not promise:
+///
+/// - **It is spent on the attempt, not on the delivery.** Nothing is retried
+///   if the banner does not go out (notifications switched off, macOS
+///   authorization denied, a dev build, which posts nothing at all because
+///   `notifications::running_from_app_bundle` is false). Latching on delivery
+///   instead would mean `notify` reporting back, and it cannot: it is
+///   fire-and-forget on its own thread precisely so the first notification of
+///   a run can sit on the macOS permission prompt without blocking a turn. A
+///   person who turned notifications off has said what they want, and the
+///   `warn!` line is still in the log for the ones who did not.
+/// - **It is per run, not per cause.** Fix the System Voice, break it again
+///   in the same session, and there is no second banner. That is what "once
+///   per run" means rather than an oversight.
 static TOLD: AtomicBool = AtomicBool::new(false);
 
 /// Bound at launch. The playback path holds an `AppState` and no `AppHandle`,
@@ -140,6 +162,26 @@ mod tests {
         );
     }
 
+    /// Both surfaces have to call the pane the same thing. The picker's link
+    /// label ("Open Read & Speak") carries the name, so the name is checked
+    /// against it rather than typed twice: whichever file is edited, a rename
+    /// that reaches only one of them fails here.
+    ///
+    /// They are not a single constant because they are different sentences on
+    /// different surfaces (a link label and an instruction), and the shared
+    /// part is one noun. Joining them would need runtime formatting, which
+    /// would cost both of them being `const` to save nothing.
+    #[test]
+    fn the_notice_agrees_with_the_picker() {
+        let pane = crate::tts::voices::READ_AND_SPEAK_LINK
+            .strip_prefix("Open ")
+            .unwrap_or(crate::tts::voices::READ_AND_SPEAK_LINK);
+        assert!(
+            NO_VOICE_BODY.contains(pane),
+            "the picker calls the pane {pane:?}; the notice has to agree: {NO_VOICE_BODY}"
+        );
+    }
+
     /// The notice is worth nothing if the arm it hangs off stops calling it,
     /// and that arm cannot be reached from a unit test: `play_rendered` wants
     /// an `AppState`, and the three ways to produce `NO_VOICE` want a Mac with
@@ -150,6 +192,14 @@ mod tests {
     #[test]
     fn the_no_voice_arm_reports_the_silence() {
         let source = include_str!("mod.rs");
+        // The scan reads the FIRST match, so a second one anywhere in the file
+        // would silently move the window to the wrong arm. Pin it: a new
+        // comparison is a change to this test, not a quiet weakening of it.
+        assert_eq!(
+            source.matches("result == NO_VOICE").count(),
+            1,
+            "the scan below reads the first match, so it has to be the only one"
+        );
         let (_, after) = source
             .split_once("result == NO_VOICE")
             .expect("play_rendered still has the arm that turns NO_VOICE into an Ok");
