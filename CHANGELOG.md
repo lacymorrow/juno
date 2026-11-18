@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.297] - 2026-11-18
+
+### Fixed
+
+- **voice:** say why nothing was spoken, once per run (LAC-8231) (#1041) (61060a59)
+
 ## [0.8.296] - 2026-11-18
 
 ### Fixed
@@ -1917,7 +1923,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.296...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.297...HEAD
+[0.8.297]: https://github.com/lacymorrow/juno/compare/cua-v0.8.296...v0.8.297
 [0.8.296]: https://github.com/lacymorrow/juno/compare/cua-v0.8.295...v0.8.296
 [0.8.294]: https://github.com/lacymorrow/juno/compare/cua-v0.8.293...v0.8.294
 [0.8.293]: https://github.com/lacymorrow/juno/compare/cua-v0.8.292...v0.8.293
