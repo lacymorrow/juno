@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.294] - 2026-11-18
+
+### Changed
+
+- **providers:** delete uncalled get_provider_models command (LAC-8399) (#1025) (7e643362)
+
 ## [0.8.293] - 2026-11-17
 
 ### Fixed
@@ -1905,7 +1911,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.293...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.294...HEAD
+[0.8.294]: https://github.com/lacymorrow/juno/compare/cua-v0.8.293...v0.8.294
 [0.8.293]: https://github.com/lacymorrow/juno/compare/cua-v0.8.292...v0.8.293
 [0.8.291]: https://github.com/lacymorrow/juno/compare/cua-v0.8.290...v0.8.291
 [0.8.289]: https://github.com/lacymorrow/juno/compare/cua-v0.8.288...v0.8.289
