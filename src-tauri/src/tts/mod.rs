@@ -1,6 +1,7 @@
 pub mod account_keys;
 pub mod elevenlabs;
 pub mod kokoro;
+pub mod no_voice;
 pub mod pcm_player;
 pub mod prerender;
 pub mod rate;
@@ -1461,7 +1462,10 @@ async fn play_rendered(
                 info!("TTS content was filtered out");
                 Ok(result)
             } else if result == NO_VOICE {
-                // Nothing allowed to speak it; the text is on screen.
+                // Nothing allowed to speak it. The text is on screen, and the
+                // silence is said once per run rather than left to read as a
+                // broken app (LAC-8231).
+                no_voice::report_silence();
                 Ok(result)
             } else if result == "TTS_COMPLETED" {
                 // Already spoken. The system provider streams out of `say`
@@ -1574,7 +1578,10 @@ async fn play_rendered(
 
 /// The status for a sentence nothing was allowed to speak: the System Voice
 /// is not a Siri voice and no other engine could take it. The text is on
-/// screen; nothing is said about the silence (Juno fails silently).
+/// screen, and the silence itself is reported once per run by
+/// [`no_voice::report_silence`], which names the setting that causes it
+/// (LAC-8231). The status stays an `Ok`: one sentence that cannot be spoken
+/// is not an error, and the rest of the answer still has to get through.
 pub(crate) const NO_VOICE: &str = "TTS_NO_VOICE";
 
 /// The engines tried for one utterance, in order. Pure.
@@ -1614,11 +1621,11 @@ pub(crate) const NO_VOICE: &str = "TTS_NO_VOICE";
 /// if a credential-free, download-free engine is ever added, that test fails
 /// and this decision should be made again rather than inherited.
 ///
-/// What is *not* settled is that the silence is unexplained. Juno says
-/// nothing and tells nobody why, and the cause is a macOS Accessibility
-/// setting Juno never names outside the Voice pane. That is LAC-8231, and it
-/// is a defect rather than a judgement call; keeping the chain rule here does
-/// not depend on it.
+/// The silence being *unexplained* was the separate half, and that half was
+/// a defect rather than a judgement call. It is fixed: the first sentence
+/// nothing can speak posts one notification naming the Accessibility setting
+/// behind it and what to change (`no_voice`, LAC-8231). Keeping the chain
+/// rule here never depended on it, and still does not.
 pub(crate) fn fallback_chain(
     primary_provider: &str,
     mac_voice_allowed: bool,
