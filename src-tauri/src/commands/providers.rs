@@ -170,49 +170,6 @@ pub(crate) async fn validate_provider_model(
     Ok(is_valid)
 }
 
-/// Get available models for a specific provider
-#[tauri::command]
-pub(crate) async fn get_provider_models(
-    provider_id: String,
-) -> Result<Vec<serde_json::Value>, String> {
-    let providers = BrainFactory::list_providers();
-    let provider = providers
-        .iter()
-        .find(|p| p.id == provider_id)
-        .ok_or_else(|| format!("Provider '{}' not found", provider_id))?;
-
-    // Return enhanced model info if available, otherwise fall back to simple model list
-    if !provider.model_info.is_empty() {
-        Ok(provider
-            .model_info
-            .iter()
-            .map(|m| {
-                serde_json::json!({
-                    "id": m.id,
-                    "name": m.name,
-                    "supports_computer_use": m.supports_computer_use,
-                    "is_recommended": m.is_recommended,
-                    "is_legacy": m.is_legacy
-                })
-            })
-            .collect())
-    } else {
-        Ok(provider
-            .models
-            .iter()
-            .map(|m| {
-                serde_json::json!({
-                    "id": m,
-                    "name": m,
-                    "supports_computer_use": false,
-                    "is_recommended": false,
-                    "is_legacy": false
-                })
-            })
-            .collect())
-    }
-}
-
 /// Get settings for a specific provider
 #[tauri::command]
 pub(crate) async fn get_provider_settings(
