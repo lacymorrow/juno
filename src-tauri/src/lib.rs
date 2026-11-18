@@ -970,6 +970,8 @@ pub fn run() {
 
             // Juno's speaking level goes to every window from here on.
             tts::speech_level::bind(app_handle.clone());
+            // And a sentence nothing could speak can say so (LAC-8231).
+            tts::no_voice::remember_app(&app_handle);
             // The launch greeting, rendered in parallel with the rest of
             // startup so it plays the moment the bar appears. It renders in
             // the engine that will actually speak, which depends on the
