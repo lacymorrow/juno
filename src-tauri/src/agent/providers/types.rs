@@ -2085,23 +2085,38 @@ mod tests {
     /// which protects exactly the models someone remembered to list, so a
     /// newly added row was unguarded by construction. The weekly model check
     /// adds rows, which is why it is the one that had to notice.
+    ///
+    /// Anthropic and Copilot are the only providers that can reach the
+    /// toolset, so sweeping both makes the coverage total: the other five are
+    /// held by `function_tool_providers_are_never_on_the_toolset_path`, which
+    /// asserts they declare neither the toolset nor `toolset_ga`. Copilot
+    /// needs its own sweep rather than inheriting Anthropic's through
+    /// `copilot_rows_agree_with_the_same_models_on_the_claude_api`: that test
+    /// compares `computer_use` and `toolset_ga` only for rows it can pair with
+    /// a Claude API row, and its `unpaired` list exists precisely for
+    /// Copilot-only models -- today `claude-haiku-5.5`, which is on the
+    /// toolset. Every model Copilot ships ahead of the Claude API catalog
+    /// lands there, so without this sweep it would be unguarded by
+    /// construction.
     #[test]
     fn catalog_toolset_ga_agrees_with_the_declared_tool_version() {
         let mut on_toolset = 0usize;
         let mut ga_on_an_earlier_version = 0usize;
 
-        for def in Provider::Anthropic.model_definitions() {
-            if def.uses_computer_toolset() {
-                on_toolset += 1;
-                assert!(
-                    def.toolset_ga,
-                    "{} is sent computer_toolset_20260801 but is not recorded as \
-                     toolset-GA; Anthropic answers 400 to a toolset request from a \
-                     model that does not support it",
-                    def.name
-                );
-            } else if def.toolset_ga {
-                ga_on_an_earlier_version += 1;
+        for provider in [Provider::Anthropic, Provider::Copilot] {
+            for def in provider.model_definitions() {
+                if def.uses_computer_toolset() {
+                    on_toolset += 1;
+                    assert!(
+                        def.toolset_ga,
+                        "{} ({}) on {:?} is sent computer_toolset_20260801 but is \
+                         not recorded as toolset-GA; Anthropic answers 400 to a \
+                         toolset request from a model that does not support it",
+                        def.name, def.id, provider
+                    );
+                } else if def.toolset_ga {
+                    ga_on_an_earlier_version += 1;
+                }
             }
         }
 
@@ -2110,18 +2125,20 @@ mod tests {
         // this weekly check moves.
         assert!(
             on_toolset >= 1,
-            "no Anthropic row declares computer_toolset_20260801, so the arm above \
-             never ran and this sweep proves nothing; the current lineup is \
-             toolset-only, so zero here means the catalog lost those rows entirely"
+            "no Anthropic or Copilot row declares computer_toolset_20260801, so the \
+             arm above never ran and this sweep proves nothing; the current lineup \
+             is toolset-only, so zero here means the catalog lost those rows \
+             entirely"
         );
         // And the asymmetry is deliberate, not an oversight. If this reaches
         // zero, someone has put every GA model on the toolset and doubled the
         // input-token overhead on rows that do not need it.
         assert!(
             ga_on_an_earlier_version >= 1,
-            "no Anthropic row is toolset-GA while still being sent an earlier tool \
-             version, so the one-directional claim in the `toolset_ga` docs is \
-             untested; if that is genuinely true now, say so there"
+            "no row is toolset-GA while still being sent an earlier tool version, so \
+             the one-directional claim is untested; if that is genuinely true now, \
+             say so in the `toolset_ga` field docs AND in the model policy section \
+             of the root CLAUDE.md, which states the same asymmetry"
         );
     }
 
