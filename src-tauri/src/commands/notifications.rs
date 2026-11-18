@@ -332,11 +332,20 @@ fn identifier_with_action(unique: &str, action: &ClickAction) -> String {
 
 /// What a click on the notification posted under `identifier` should do.
 ///
-/// The one table. Total by construction: no separator, a separator with no
-/// slug, a slug this build does not know, an empty session id, and a string
-/// Juno never posted all read as [`ClickAction::BringJunoForward`]. There is
-/// deliberately no path through here that does nothing. A banner that named a
-/// destination and answered a click with silence is the defect.
+/// The one table, and it reads **only the slug** after the separator. The
+/// unique part in front is macOS's dedup key and carries no routing
+/// information, so it is deliberately not validated: tying routing to
+/// `request_identifier`'s format would mean a later change to that format
+/// silently stopped routing the notifications already sitting in Notification
+/// Center. Nothing is risked by leaving it unchecked, because only Juno's own
+/// bundle can have a response delivered to Juno's delegate, so every
+/// identifier that reaches here was written by some build of Juno.
+///
+/// Total by construction: no separator, a separator with no slug, a slug this
+/// build does not know, and an empty session id all read as
+/// [`ClickAction::BringJunoForward`]. There is deliberately no path through
+/// here that does nothing. A banner that named a destination and answered a
+/// click with silence is the defect.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn action_from_identifier(identifier: &str) -> ClickAction {
     let Some((_unique, slug)) = identifier.split_once(ACTION_SEPARATOR) else {
@@ -910,14 +919,38 @@ mod tests {
             "juno.42.7#",                       // a separator and no slug
             "juno.42.7#session=",               // an empty session id
             "juno.42.7#session",                // the prefix without its =
-            "#read-and-speak",                  // no unique part at all
             "",                                 // not an identifier
-            "ABCD-EFGH",                        // not posted by Juno
+            "ABCD-EFGH",                        // no separator, so no action
         ] {
             assert_eq!(
                 action_from_identifier(identifier),
                 ClickAction::BringJunoForward,
                 "'{}' should bring Juno forward",
+                identifier
+            );
+        }
+    }
+
+    /// The slug is the whole decision. The unique part in front of the
+    /// separator is macOS's dedup key, carries no routing information, and is
+    /// deliberately not validated, so the same slug routes the same way behind
+    /// any prefix or none.
+    ///
+    /// Pinned because the first version of this test assumed the opposite and
+    /// listed `#read-and-speak` as an unknown action. CI disagreed, and it was
+    /// right: the doc comment had promised that an identifier Juno never wrote
+    /// brings Juno forward, which the code did not do and should not do.
+    #[test]
+    fn routing_reads_the_slug_and_never_the_unique_part() {
+        for identifier in [
+            "juno.1763480000123.4#read-and-speak", // what Juno actually posts
+            "#read-and-speak",                     // no unique part at all
+            "not-an-identifier#read-and-speak",    // a prefix Juno never writes
+        ] {
+            assert_eq!(
+                action_from_identifier(identifier),
+                ClickAction::OpenReadAndSpeak,
+                "'{}' names the Read & Speak action whatever sits in front of it",
                 identifier
             );
         }
