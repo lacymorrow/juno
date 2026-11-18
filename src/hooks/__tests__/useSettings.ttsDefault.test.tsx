@@ -36,7 +36,7 @@ vi.mock("@/lib/constants.generated", async (importOriginal) => {
 });
 
 import { invoke } from "@tauri-apps/api/core";
-import { COMMANDS, SETTING_DEFAULTS } from "@/lib/constants.generated";
+import { SETTING_DEFAULTS } from "@/lib/constants.generated";
 import { useSettings } from "@/hooks/useSettings";
 
 const invokeMock = vi.mocked(invoke);
@@ -50,10 +50,7 @@ describe("useSettings: the engine shown before Rust answers", () => {
     // Every read is left unanswered, so the hook is held in the state a fresh
     // install is in for the first frames: nothing from Rust yet.
     const pending = new Promise<never>(() => {});
-    invokeMock.mockImplementation(((command: string) => {
-      if (command === COMMANDS.AUDIO_GET_JUNO_VOICES) return pending;
-      return pending;
-    }) as typeof invoke);
+    invokeMock.mockImplementation((() => pending) as typeof invoke);
 
     const { result } = renderHook(() => useSettings());
 
