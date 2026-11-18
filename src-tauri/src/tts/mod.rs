@@ -1585,6 +1585,40 @@ pub(crate) const NO_VOICE: &str = "TTS_NO_VOICE";
 /// is not, the Mac's voice is dropped from every chain, and a chain left empty
 /// (the Mac was the engine) falls to Kokoro when its model is on disk, or to
 /// nothing at all: silence beats a voice that is not Siri.
+///
+/// # The empty chain stays empty (LAC-8225)
+///
+/// LAC-7987 made the Mac's voice the default engine on macOS, which turned
+/// the empty chain from a path somebody chose into a default path: anyone
+/// whose Read and Speak voice is a non-Siri voice, with no Kokoro model on
+/// disk, now reaches it without having picked anything. That was decided on
+/// purpose rather than left as it fell, and the decision is to keep it.
+///
+/// The alternative was to resolve the default against the System Voice
+/// reading at first run so a fresh install always lands on an engine that
+/// can speak. It does not survive `voices::engine_needs`: **no engine but
+/// the Mac's is free.** Kokoro is an 82 MB download, Supertonic needs a
+/// server somebody starts, and every other engine needs an account key. So
+/// "prefer an engine that can speak" has only one candidate, and choosing it
+/// charges a fresh install exactly the download LAC-7987 removed, which
+/// [`AccountKeys::can_stand_in`] already refuses on purpose ("a minute of
+/// downloading is not a fallback"). It would also make the default depend on
+/// a runtime reading, which is the drift
+/// `state::the_default_voice_engine_needs_no_credentials` exists to catch,
+/// and the condition is not even permanent: picking a Siri voice in Read and
+/// Speak makes the Mac's voice work again, so a download started here can be
+/// wasted outright.
+///
+/// Two tests hold this. `the_default_path_without_siri_is_deliberate_silence`
+/// pins the outcome, and `no_engine_but_the_mac_is_free` pins the premise:
+/// if a credential-free, download-free engine is ever added, that test fails
+/// and this decision should be made again rather than inherited.
+///
+/// What is *not* settled is that the silence is unexplained. Juno says
+/// nothing and tells nobody why, and the cause is a macOS Accessibility
+/// setting Juno never names outside the Voice pane. That is LAC-8231, and it
+/// is a defect rather than a judgement call; keeping the chain rule here does
+/// not depend on it.
 pub(crate) fn fallback_chain(
     primary_provider: &str,
     mac_voice_allowed: bool,
@@ -2186,16 +2220,23 @@ pub async fn set_supertonic_settings_command(
 mod tests {
     use super::*;
 
-    /// Kokoro is the default, and when it cannot speak the Mac does, while
-    /// the Mac's voice is Siri.
+    /// LAC-7987. On a Mac the default engine *is* the Mac's own voice, so the
+    /// default chain is the Mac alone and nothing has to be downloaded or
+    /// fetched before Juno speaks. Off macOS there is no `say`, so the default
+    /// is Kokoro and the Mac still ends its chain.
     #[test]
-    fn the_default_engine_falls_back_to_the_mac() {
+    fn the_default_engine_speaks_with_nothing_downloaded() {
         let default = crate::constants::settings::defaults::TTS_PROVIDER;
-        assert_eq!(default, "kokoro");
-        assert_eq!(
-            fallback_chain(default, true, false),
-            vec!["kokoro", "system"]
-        );
+        if cfg!(target_os = "macos") {
+            assert_eq!(default, "system");
+            assert_eq!(fallback_chain(default, true, false), vec!["system"]);
+        } else {
+            assert_eq!(default, "kokoro");
+            assert_eq!(
+                fallback_chain(default, true, false),
+                vec!["kokoro", "system"]
+            );
+        }
     }
 
     /// While the Mac's voice is Siri (or unread), every chain ends in it.
@@ -2246,6 +2287,55 @@ mod tests {
             vec!["elevenlabs", "kokoro"]
         );
         assert_eq!(fallback_chain("system", true, true), vec!["system"]);
+    }
+
+    /// LAC-8225. The shipped default, a System Voice that is positively not
+    /// Siri, and no Kokoro model: nothing speaks, and that is the decision
+    /// rather than an oversight. See `fallback_chain`'s own docs for why the
+    /// alternative was rejected. This pins the *default* path specifically,
+    /// which is what LAC-7987 changed: before it, reaching an empty chain
+    /// took somebody choosing the Mac's voice themselves.
+    #[test]
+    fn the_default_path_without_siri_is_deliberate_silence() {
+        let default = crate::constants::settings::defaults::TTS_PROVIDER;
+        let chain = fallback_chain(default, false, false);
+        if cfg!(target_os = "macos") {
+            assert!(
+                chain.is_empty(),
+                "the default chain should be empty, got {chain:?}"
+            );
+            assert_eq!(
+                effective_engine(default, false, false, AccountKeys::default()),
+                None,
+                "an empty chain prepares nothing, and the utterance is NO_VOICE"
+            );
+            // The model landing on disk is the whole difference.
+            assert_eq!(fallback_chain(default, false, true), vec!["kokoro"]);
+        } else {
+            // No `say` off macOS, so the default is Kokoro and speaks here.
+            assert_eq!(chain, vec!["kokoro"], "{default}");
+        }
+        // Picking a Siri voice in Read and Speak clears it, on every platform:
+        // the condition is a setting, not a property of the install.
+        assert!(!fallback_chain(default, true, false).is_empty());
+    }
+
+    /// LAC-8225's premise, as a tripwire. The decision to let the chain stay
+    /// empty rests on there being no engine that can speak for free: Kokoro
+    /// is a download, Supertonic needs a server, the rest need an account
+    /// key. If a credential-free, download-free engine is ever added, this
+    /// fails, and "prefer an engine that can actually speak" becomes possible
+    /// at no cost to a fresh install. Make the decision again then.
+    #[test]
+    fn no_engine_but_the_mac_is_free() {
+        for engine in crate::tts::voices::ENGINES.iter().copied() {
+            let free = crate::tts::voices::engine_needs(engine).nothing();
+            assert_eq!(
+                free,
+                engine == "system",
+                "{engine} is free={free}; LAC-8225 assumed only the Mac's voice is"
+            );
+        }
     }
 
     /// LAC-6340. ElevenLabs with no key cannot speak, so the engine that
