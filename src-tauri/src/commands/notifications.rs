@@ -282,10 +282,18 @@ fn next_request_identifier() -> String {
 /// carries.
 ///
 /// A click hands the delegate the identifier and nothing else, so the
-/// identifier is where the action has to live. Neither the unique part (digits
-/// and dots) nor a session id (a UUID) can contain this character, so the
-/// split is never ambiguous, and the unique part in front of it is untouched:
-/// two notifications with the same action still replace nothing of each
+/// identifier is where the action has to live.
+///
+/// The split is unambiguous because the **unique part** cannot contain this
+/// character: it is digits and dots by construction, which
+/// `the_unique_part_of_an_identifier_never_contains_the_separator` asserts. The
+/// slug after it may contain more of them and still parses, since the first
+/// one ends the unique part and everything past it is the slug. Session ids
+/// are UUIDs today, but that is convention rather than a type guarantee, so
+/// the parse does not lean on it.
+///
+/// The unique part in front of the separator is left untouched, so two
+/// notifications carrying the same action still replace nothing of each
 /// other's in Notification Center.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const ACTION_SEPARATOR: char = '#';
