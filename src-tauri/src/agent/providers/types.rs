@@ -653,7 +653,7 @@ impl Provider {
                         name: "Claude Haiku 4.5",
                         price: Price::per_mtok(1.0, 5.0, 0.10, 1.25),
                         computer_use: CU_20250124,
-                        availability: Availability::Legacy,
+                        availability: Availability::Current,
                         toolset_ga: false,
                         image_tier: ImageTier::Standard,
                         adaptive_thinking: false,
