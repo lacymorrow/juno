@@ -31,8 +31,15 @@ pub struct NotificationSettings {
 ///
 /// Not to be confused with macOS's `UNNotificationAction`, which is a button
 /// drawn on the banner. This is what the banner itself does when clicked.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+///
+/// **Backend only, deliberately.** It carries no serde derives and the field
+/// on [`NotificationData`] is skipped, so the webview cannot name a
+/// destination through `send_notification`: where a click goes is policy the
+/// backend owns, like every other decision in Juno. Keep it that way. Every
+/// variant here is a fixed destination compiled into the app; a variant
+/// carrying a path, a URL or a shell word would hand a chosen target to
+/// whatever can reach that command.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ClickAction {
     /// Put Juno's conversation in front of the person, and nothing else.
     ///
@@ -57,11 +64,12 @@ pub struct NotificationData {
     pub level: String, // "info", "success", "warning", "error"
     pub important: Option<bool>,
     pub timeout: Option<u32>, // Override default duration
-    /// Where a click on this notification goes. Absent means
-    /// [`ClickAction::BringJunoForward`], so a caller that names no
-    /// destination, and the frontend payload that has never carried one, both
-    /// keep working untouched.
-    #[serde(default)]
+    /// Where a click on this notification goes.
+    ///
+    /// Skipped on the wire, so a Rust caller sets it and a frontend payload
+    /// cannot: it reads as [`ClickAction::BringJunoForward`] whatever the
+    /// webview sends, including nothing, which is what it has always sent.
+    #[serde(skip)]
     pub action: ClickAction,
 }
 
@@ -460,6 +468,12 @@ mod presenter {
                     let identifier = response.notification().request().identifier().to_string();
                     match APP.get() {
                         Some(app) => super::handle_click(app, &identifier),
+                        // Unreachable by construction, including for a click
+                        // that launches Juno: `install` sets APP *before* it
+                        // sets the delegate, and this object cannot be sent a
+                        // message until it is the delegate. Logged rather than
+                        // latched for replay, because a latch here would be
+                        // code no click can reach.
                         None => log::warn!(
                             "Notification '{}' was clicked before Juno had a handle to act on",
                             identifier
@@ -912,6 +926,13 @@ mod tests {
             ClickAction::ShowSession {
                 session_id: "9d3f7c1e-0000-4aaa-bbbb-1234567890ab".to_string(),
             },
+            // Session ids are UUIDs today, but `AgentSessionId` is a
+            // `From<String>` newtype, so one carrying the separator has to
+            // survive too. It does: the first separator ends the unique part
+            // and everything after it is the slug, separators included.
+            ClickAction::ShowSession {
+                session_id: "not#a#uuid".to_string(),
+            },
         ] {
             let identifier = identifier_with_action("juno.1763000000000.3", &action);
             assert_eq!(
@@ -939,15 +960,31 @@ mod tests {
         assert!(first.starts_with("juno.5.0"), "got {}", first);
     }
 
-    /// The default is what every caller that names no destination gets, so a
-    /// payload with no action has to deserialize to it. The frontend's has
-    /// never carried one.
+    /// The separator earns its keep by being impossible in the unique part of
+    /// an identifier. That is the whole reason the split is unambiguous, so it
+    /// is asserted rather than left to the comment that claims it.
     #[test]
-    fn a_payload_with_no_action_brings_juno_forward() {
-        let data: NotificationData =
+    fn the_unique_part_of_an_identifier_never_contains_the_separator() {
+        assert!(!next_request_identifier().contains(ACTION_SEPARATOR));
+        assert!(!request_identifier(u64::MAX, u128::MAX).contains(ACTION_SEPARATOR));
+    }
+
+    /// Where a click goes is backend policy. `send_notification` takes its
+    /// payload from the webview, so an action named there must not be honoured
+    /// and must not be an error either: it reads as the default, exactly like
+    /// the payload the frontend has always sent.
+    #[test]
+    fn a_payload_cannot_choose_where_a_click_goes() {
+        let plain: NotificationData =
             serde_json::from_str(r#"{"title":"t","message":"m","level":"info"}"#)
                 .expect("a payload with no action is still a notification");
-        assert_eq!(data.action, ClickAction::BringJunoForward);
+        assert_eq!(plain.action, ClickAction::BringJunoForward);
+
+        let asking: NotificationData = serde_json::from_str(
+            r#"{"title":"t","message":"m","level":"info","action":{"kind":"open_read_and_speak"}}"#,
+        )
+        .expect("an action in the payload is ignored, not a parse error");
+        assert_eq!(asking.action, ClickAction::BringJunoForward);
     }
 
     /// The reported defect: the Open Settings button failed. The row now opens
