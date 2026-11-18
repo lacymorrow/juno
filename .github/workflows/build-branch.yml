@@ -8,18 +8,29 @@
 # browser, and `gh run download` does not quarantine what it saves.
 name: Build branch
 
-# Also on every push to main: that run saves the release build cache on main,
-# where every branch build can restore it (a cache saved on a branch is
-# visible only to that branch). It also leaves a downloadable app for each
-# main commit, which `juno-build main` reuses without building.
+# Also on every push to main that is a release commit (`release: vX`, pushed by
+# the release bot after each merge): that run saves the release build cache on
+# main, where every branch build can restore it (a cache saved on a branch is
+# visible only to that branch). It also leaves a downloadable app for that
+# release commit, which `juno-build main` reuses without building.
+#
+# Feature merges do NOT build here (LAC-8534). The release bot pushes its commit
+# 20 to 30 minutes later, inside the feature build's ~22 minute window, and the
+# concurrency group killed the feature run every time (23 of 27 measured), so
+# it never produced an artifact and held a macOS slot for nothing. A feature sha
+# built on demand with `juno-build` still works through workflow_dispatch.
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
-# A second request for the same branch replaces the first.
+# A second request for the same branch replaces the first. A skipped feature
+# push gets a group of its own: otherwise its (skipped) run would still cancel a
+# release-commit build in flight.
 concurrency:
-  group: build-branch-${{ github.ref }}
+  group: >-
+    ${{ github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'release: v')
+    && format('build-branch-skip-{0}', github.sha) || format('build-branch-{0}', github.ref) }}
   cancel-in-progress: true
 
 permissions:
@@ -27,6 +38,7 @@ permissions:
 
 jobs:
   build:
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release: v') }}
     runs-on: macos-latest
 
     steps:
