@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.296] - 2026-11-18
+
+### Fixed
+
+- **voice:** default to the Mac's own voice on macOS, Kokoro elsewhere (LAC-7987) (#1010) (4cc6a5dc)
+
 ## [0.8.294] - 2026-11-18
 
 ### Changed
@@ -1911,7 +1917,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.294...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.296...HEAD
+[0.8.296]: https://github.com/lacymorrow/juno/compare/cua-v0.8.295...v0.8.296
 [0.8.294]: https://github.com/lacymorrow/juno/compare/cua-v0.8.293...v0.8.294
 [0.8.293]: https://github.com/lacymorrow/juno/compare/cua-v0.8.292...v0.8.293
 [0.8.291]: https://github.com/lacymorrow/juno/compare/cua-v0.8.290...v0.8.291
