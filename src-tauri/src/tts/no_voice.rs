@@ -31,7 +31,7 @@ use crate::commands::notifications;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use tauri::AppHandle;
-use tracing::warn;
+use tracing::{debug, warn};
 
 /// What the notification says happened, in the person's terms: they noticed
 /// silence, not a status string. The cause lives here so the body can be the
@@ -66,15 +66,16 @@ pub const NO_VOICE_BODY: &str =
 ///
 /// Two things this deliberately does not promise:
 ///
-/// - **It is spent on the attempt, not on the delivery.** Nothing is retried
-///   if the banner does not go out (notifications switched off, macOS
-///   authorization denied, a dev build, which posts nothing at all because
-///   `notifications::running_from_app_bundle` is false). Latching on delivery
-///   instead would mean `notify` reporting back, and it cannot: it is
-///   fire-and-forget on its own thread precisely so the first notification of
-///   a run can sit on the macOS permission prompt without blocking a turn. A
-///   person who turned notifications off has said what they want, and the
-///   `warn!` line is still in the log for the ones who did not.
+/// - **It is spent on the posting, not on the delivery.** It is not spent
+///   when there is nobody to post through (see `report_silence`), but nothing
+///   is retried once the banner is handed to macOS and does not arrive:
+///   notifications switched off, authorization denied, or a dev build, which
+///   posts nothing at all because `notifications::running_from_app_bundle` is
+///   false. Latching on arrival would mean `notify` reporting back, and it
+///   cannot: it is fire-and-forget on its own thread precisely so the first
+///   notification of a run can sit on the macOS permission prompt without
+///   blocking a turn. A person who switched notifications off has said what
+///   they want, and the `warn!` line is still there for the ones who did not.
 /// - **It is per run, not per cause.** Fix the System Voice, break it again
 ///   in the same session, and there is no second banner. That is what "once
 ///   per run" means rather than an oversight.
@@ -100,15 +101,21 @@ fn is_first_silence(told: &AtomicBool) -> bool {
 /// Called from the one arm that turns `NO_VOICE` into an `Ok`, so a fourth
 /// way to reach the silence is covered by construction.
 pub fn report_silence() {
+    // The handle is checked *before* the latch, so an unbound handle cannot
+    // eat the run's one notice. Today `remember_app` runs before anything can
+    // speak, but that is the order of two lines in `lib.rs` rather than a
+    // guarantee, and this way the ordering stops mattering. Headless and the
+    // test paths never bind one at all, and there the log is the whole signal,
+    // at `debug` because it is per sentence.
+    let Some(app) = APP.get() else {
+        debug!("[TTS] Nothing could speak, and there is no window to say so in");
+        return;
+    };
     if !is_first_silence(&TOLD) {
         return;
     }
     warn!("[TTS] {NO_VOICE_TITLE}: {NO_VOICE_BODY}");
-    match APP.get() {
-        Some(app) => notifications::notify(app, NO_VOICE_TITLE, NO_VOICE_BODY),
-        // Before the handle is bound (headless, tests) the log is the signal.
-        None => warn!("[TTS] No app handle; the silence was logged and not shown"),
-    }
+    notifications::notify(app, NO_VOICE_TITLE, NO_VOICE_BODY);
 }
 
 #[cfg(test)]
@@ -203,7 +210,13 @@ mod tests {
         let (_, after) = source
             .split_once("result == NO_VOICE")
             .expect("play_rendered still has the arm that turns NO_VOICE into an Ok");
-        let arm = after.split_once("} else if").map_or(after, |(arm, _)| arm);
+        // The window ends at the next arm's own comparison, not at a brace:
+        // `} else if` is formatting, and rustfmt is free to move it, which
+        // would quietly shorten or lengthen what is scanned.
+        let end = after
+            .find("\"TTS_COMPLETED\"")
+            .expect("the TTS_COMPLETED arm still follows the NO_VOICE one");
+        let arm = &after[..end];
         assert!(
             arm.contains("no_voice::report_silence()"),
             "the NO_VOICE arm has to tell the person, not just return Ok: {arm}"
