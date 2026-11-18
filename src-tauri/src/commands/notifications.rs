@@ -582,6 +582,16 @@ async fn run_action(app: &AppHandle, action: ClickAction) {
             // most ordinary click there is: the one on "finished". The
             // conversation is still what the person asked for, so the window
             // comes forward either way.
+            //
+            // Focusing *before* showing the window is safe, and that is a fact
+            // about the registry rather than a hope: `set_focused` has exactly
+            // one caller in the app, `focus_agent_session` just below, and
+            // nothing on `open_main_window`'s path (`show_bar`,
+            // `create_or_show_window`, `announce_main_window`) writes focus.
+            // The frontend only focuses from a click on a session row, never on
+            // mount, so putting the window on screen cannot clear the selection
+            // made here. If a second focus writer ever appears, this order is
+            // what breaks: bring the window forward first, then focus.
             match app.try_state::<AppState>() {
                 Some(state) => {
                     if let Err(reason) = crate::commands::agent_sessions::focus_agent_session(
