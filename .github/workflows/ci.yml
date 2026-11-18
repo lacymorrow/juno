@@ -23,6 +23,78 @@ permissions:
   contents: read
 
 jobs:
+  # Decides whether this change can affect the Rust jobs, so a PR that cannot
+  # does not ask GitHub for a macOS runner (LAC-8428).
+  #
+  # The hosted macOS pool is a small fraction of the Linux one, and every PR
+  # used to ask for two of them. Four concurrent agent PRs meant eight slots
+  # requested, so a comment-only PR waited 25+ minutes for a required check
+  # that had not started.
+  #
+  # Fail-safe by construction: the list below names what is known NOT to reach
+  # the Rust suite, and anything else (new top-level dirs, workflow files,
+  # Cargo.*, rust-toolchain.toml, scripts/, public/, .github/ISSUE_TEMPLATE,
+  # vendor/, crates/) runs Rust. A list of Rust paths would fail the other way:
+  # a missed path silently skips the check. Known skip list:
+  #   docs/ marketing/ media/   nothing in cargo reads them
+  #   *.md at the repo root     same (CHANGELOG, README, CLAUDE)
+  #   src/ except src/components/settings/
+  #       the frontend. The exception is real: src-tauri/src/settings/registry.rs
+  #       include_str!s ten files under src/components/settings/ and asserts on
+  #       their contents, so editing one can fail `cargo test`.
+  # A push to main always runs Rust: release-every-merge reads that run as its
+  # verdict and a release must not be cut from a tree Rust never saw.
+  changes:
+    name: Detect Rust-relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.detect.outputs.rust }}
+    steps:
+      - name: Detect
+        id: detect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          run_rust() {
+            echo "::notice title=Rust runs::$1"
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          [ "$EVENT" = "pull_request" ] || run_rust "Not a pull request ($EVENT): main is always fully checked."
+
+          # Renames list both names, so moving a Rust file out of a skipped
+          # directory is still seen.
+          files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)') \
+            || run_rust "Could not list the PR's files; running Rust rather than guess."
+
+          # The endpoint stops at 3000 files. A list that long is not a docs PR.
+          [ "$(printf '%s\n' "$files" | grep -c .)" -lt 3000 ] \
+            || run_rust "File list reached the API cap; running Rust."
+
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            case "$f" in
+              src/components/settings/*) run_rust "$f is read by a Rust test." ;;
+              docs/*|marketing/*|media/*|src/*) ;;
+              */*) run_rust "$f is outside the known-safe list." ;;
+              *.md) ;;
+              *) run_rust "$f is outside the known-safe list." ;;
+            esac
+          done <<< "$files"
+
+          echo "::notice title=Rust skipped::No changed file can reach the Rust suite."
+          echo "rust=false" >> "$GITHUB_OUTPUT"
+
   # ESLint, vitest, TypeScript typecheck and the Vite bundle. Cheap and fast;
   # catches the most common breakage class in this codebase.
   frontend:
@@ -102,8 +174,10 @@ jobs:
   # (This job was impossible until the `playwright` crate was dropped — its
   # build script downloaded a 2021 driver from a decommissioned Microsoft CDN
   # and panicked on any clean checkout. See docs/ci-rust-blocker.md.)
-  rust:
-    name: Rust (fmt + clippy + test)
+  rust-macos:
+    name: Rust (macOS fmt + clippy + test)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: macos-latest
     # A cold build (any change to Cargo.lock) takes about 50 minutes here. At
     # 45 the job was cancelled before it could save a cache, so the next run
@@ -170,6 +244,39 @@ jobs:
       - name: Clippy the audio start probe
         run: cargo clippy -p audio-start-probe --all-targets -- -D warnings
 
+  # The required check. Ruleset 25966443 requires the context
+  # "Rust (fmt + clippy + test)", and a job that is skipped never posts a
+  # context, which leaves the PR BLOCKED forever. So the name lives on this
+  # always-running Linux job, and the macOS work it reports on (`rust-macos`)
+  # may be skipped. Do not give `rust-macos` this name, and do not add an `if:`
+  # to this job other than `always()`: `always()` is what makes it report when
+  # `rust-macos` is skipped or failed.
+  #
+  # Passes when Rust was not needed and `rust-macos` was skipped, or when it
+  # was needed and `rust-macos` succeeded. Every other combination fails,
+  # including `changes` itself failing.
+  rust:
+    name: Rust (fmt + clippy + test)
+    needs: [changes, rust-macos]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          NEEDED: ${{ needs.changes.outputs.rust }}
+          MACOS: ${{ needs.rust-macos.result }}
+        run: |
+          set -euo pipefail
+          [ "$CHANGES" = "success" ] || { echo "::error::change detection was '$CHANGES'"; exit 1; }
+          if [ "$NEEDED" = "true" ]; then
+            [ "$MACOS" = "success" ] || { echo "::error::Rust was needed and rust-macos was '$MACOS'"; exit 1; }
+          else
+            [ "$MACOS" = "skipped" ] || { echo "::error::Rust was not needed but rust-macos was '$MACOS'"; exit 1; }
+            echo "No Rust-relevant change; macOS job skipped."
+          fi
+
   # The Intel half of the universal build.
   #
   # The `rust` job above compiles the runner's own architecture (arm64), so
@@ -186,6 +293,8 @@ jobs:
   # here as code even though they are not run.
   rust-intel:
     name: Rust (x86_64 check)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -315,6 +424,10 @@ jobs:
   # make the gate stricter by accident while costing a brew install per run.
   homebrew-formula-macos:
     name: Homebrew formula rewrite (macOS, release toolchain)
+    # Not a required check, so it can be skipped outright. It tests scripts/,
+    # which the change filter above never treats as skippable.
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: macos-latest
     timeout-minutes: 5
     steps:
