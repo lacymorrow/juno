@@ -235,7 +235,7 @@ render
 exited "exits 0" 0
 body_has "prints 1" "Consecutive failed release dispatches: 1"
 body_lacks "no floor marker" "dispatches: 1+"
-body_has "gives first-failure advice" "does not on its own mean APPLE_PASSWORD is wrong"
+body_has "gives first-failure advice" "does not on its own mean the App Store Connect API key is wrong"
 
 begin "a window whose newest run succeeded is a first failure"
 runs_list success

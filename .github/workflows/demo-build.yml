@@ -28,13 +28,11 @@ name: Demo build
 #   APPLE_CERTIFICATE_PASSWORD   password for the .p12
 #   APPLE_SIGNING_IDENTITY       e.g. "Developer ID Application: Name (TEAMID)"
 #   APPLE_TEAM_ID                10-character team ID
-# and ONE notarization credential set, preferring the first:
+# and the notarization API key (the Apple ID + password pair was removed in
+# LAC-8494; APPLE_PASSWORD existed at no scope):
 #   APPLE_API_ISSUER             App Store Connect issuer UUID
 #   APPLE_API_KEY                the 10-character Key ID
 #   APPLE_API_KEY_P8_B64         base64 of the AuthKey_<KeyID>.p8 itself
-# or the legacy pair:
-#   APPLE_ID                     Apple ID email for notarization
-#   APPLE_PASSWORD               app-specific password for that Apple ID
 #
 # Same reasoning as release-tauri.yml: a password-backed notary profile
 # authenticates through appstoreconnect.apple.com/notary/v2/asp, which answers
@@ -122,8 +120,6 @@ jobs:
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -131,31 +127,26 @@ jobs:
         run: |
           set -euo pipefail
 
-          # All three API-key secrets or none, so a partial set can never fall
-          # back to the password silently. Mirrors release-tauri.yml.
+          # All three API-key secrets are required; there is no password
+          # fallback. Mirrors release-tauri.yml.
           api_present=0
           for var in APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8_B64; do
             if [ -n "${!var:-}" ]; then
               api_present=$((api_present + 1))
             fi
           done
-          if [ "$api_present" = 3 ]; then
-            notary_mode=api_key
-            required="APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_TEAM_ID"
-          elif [ "$api_present" = 0 ]; then
-            notary_mode=password
-            required="APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID"
-          else
+          if [ "$api_present" != 3 ]; then
             missing=""
             for var in APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8_B64; do
               if [ -z "${!var:-}" ]; then
                 missing="$missing $var"
               fi
             done
-            echo "App Store Connect API key notarization is half-configured; missing secret(s):$missing" >&2
-            echo "Set all three, or none of them." >&2
+            echo "App Store Connect API key notarization is not fully configured; missing secret(s):$missing" >&2
             exit 1
           fi
+          notary_mode=api_key
+          required="APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_TEAM_ID"
 
           for var in $required; do
             if [ -z "${!var:-}" ]; then
@@ -217,12 +208,6 @@ jobs:
               --keychain "$keychain" || store_rc=$?
             rm -f "$key_path"
             [ "$store_rc" -eq 0 ] || exit "$store_rc"
-          else
-            xcrun notarytool store-credentials juno \
-              --apple-id "$APPLE_ID" \
-              --team-id "$APPLE_TEAM_ID" \
-              --password "$APPLE_PASSWORD" \
-              --keychain "$keychain"
           fi
 
           echo "Imported signing identity and stored notary profile 'juno' (${notary_mode})."
