@@ -643,6 +643,12 @@ async fn finish_session_terminal_state(
             level: level.to_string(),
             important: Some(matches!(terminal_status, AgentSessionStatus::Failed)),
             timeout: None,
+            // Nobody was watching this session, which is the only reason to
+            // notify about it, so a click goes back to the conversation that
+            // ended rather than wherever Juno happened to be left.
+            action: crate::commands::notifications::ClickAction::ShowSession {
+                session_id: handle.session().id().as_str().to_string(),
+            },
         };
         if let Err(e) = crate::commands::notifications::send_notification(
             app_handle.clone(),

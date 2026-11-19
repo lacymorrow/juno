@@ -1411,6 +1411,12 @@ where
                 level: "warning".to_string(),
                 important: Some(true),
                 timeout: None,
+                // This session is waiting on a person, so the click has to
+                // land on the session that is waiting. Unlike a finished one,
+                // it is still in the registry, so the focus takes.
+                action: crate::commands::notifications::ClickAction::ShowSession {
+                    session_id: session_id.as_str().to_string(),
+                },
             };
             if let Err(e) = crate::commands::notifications::send_notification(
                 self.app_handle.as_ref().clone(),
