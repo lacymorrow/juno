@@ -115,7 +115,15 @@ pub fn report_silence() {
         return;
     }
     warn!("[TTS] {NO_VOICE_TITLE}: {NO_VOICE_BODY}");
-    notifications::notify(app, NO_VOICE_TITLE, NO_VOICE_BODY);
+    // The body names System Settings > Accessibility > Read & Speak, so the
+    // click goes there. Naming a place without being able to take someone
+    // there is what LAC-8588 closed.
+    notifications::notify_action(
+        app,
+        NO_VOICE_TITLE,
+        NO_VOICE_BODY,
+        notifications::ClickAction::OpenReadAndSpeak,
+    );
 }
 
 #[cfg(test)]

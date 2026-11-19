@@ -1149,9 +1149,10 @@ pub fn run() {
             // never comes up.
             startup_windows::schedule_fallback(&app_handle);
 
-            // Banners while Juno is frontmost. Set early so the first
-            // notification already goes through the delegate.
-            commands::notifications::install_presenter();
+            // Banners while Juno is frontmost, and somewhere for a click on
+            // one to land. Set early so the first notification already goes
+            // through the delegate.
+            commands::notifications::install_presenter(&app_handle);
 
             #[cfg(target_os = "linux")]
             platform::apply_linux_setup(&app_handle);
