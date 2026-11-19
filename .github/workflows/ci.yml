@@ -53,6 +53,10 @@ jobs:
     outputs:
       rust: ${{ steps.detect.outputs.rust }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: scripts/ci-rust-relevant.sh
+          sparse-checkout-cone-mode: false
       - name: Detect
         id: detect
         env:
@@ -77,21 +81,11 @@ jobs:
             --jq '.[] | .filename, (.previous_filename // empty)') \
             || run_rust "Could not list the PR's files; running Rust rather than guess."
 
-          # The endpoint stops at 3000 files. A list that long is not a docs PR.
-          [ "$(printf '%s\n' "$files" | grep -c .)" -lt 3000 ] \
-            || run_rust "File list reached the API cap; running Rust."
-
-          while IFS= read -r f; do
-            [ -n "$f" ] || continue
-            case "$f" in
-              src/components/settings/*) run_rust "$f is read by a Rust test." ;;
-              docs/*|marketing/*|media/*|src/*) ;;
-              */*) run_rust "$f is outside the known-safe list." ;;
-              *.md) ;;
-              *) run_rust "$f is outside the known-safe list." ;;
-            esac
-          done <<< "$files"
-
+          # The case table and the 3000-file cap live in
+          # scripts/ci-rust-relevant.sh so a test can pin them (LAC-8445).
+          verdict=$(printf '%s\n' "$files" | scripts/ci-rust-relevant.sh) \
+            || run_rust "Classifier failed; running Rust rather than guess."
+          [ "$verdict" = "false" ] || run_rust "Classifier said run Rust."
           echo "::notice title=Rust skipped::No changed file can reach the Rust suite."
           echo "rust=false" >> "$GITHUB_OUTPUT"
 
@@ -386,7 +380,10 @@ jobs:
             scripts/notarize-dmg.sh \
             scripts/__tests__/notarize-dmg.test.sh \
             scripts/update-homebrew-formula.sh \
-            scripts/__tests__/update-homebrew-formula.test.sh
+            scripts/__tests__/update-homebrew-formula.test.sh \
+            scripts/ci-rust-relevant.sh \
+            scripts/check-rust-skip-reads.sh \
+            scripts/__tests__/ci-rust-relevant.test.sh
 
       - name: Render the report against stubbed gh
         run: scripts/__tests__/release-failure-report.test.sh
@@ -405,6 +402,14 @@ jobs:
       # instead, including the reformattings that make each pattern miss.
       - name: Rewrite the Homebrew formula against fixture formulas
         run: scripts/__tests__/update-homebrew-formula.test.sh
+
+      # The skip list in "Detect Rust-relevant changes" is safe only while no
+      # Rust code reads a skipped directory (LAC-8445), and its case arms must
+      # keep failing closed. Both run here, on Linux, with no Rust toolchain.
+      - name: Classifier test and skip-list read guard
+        run: |
+          scripts/__tests__/ci-rust-relevant.test.sh
+          scripts/check-rust-skip-reads.sh
 
   # The same suite again, on the platform the RELEASE runs on. `release-report`
   # above runs it on ubuntu-latest, but release-cua.yml's homebrew job is
