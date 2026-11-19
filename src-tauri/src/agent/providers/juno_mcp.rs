@@ -48,6 +48,7 @@ use crate::agent::tools::anthropic_computer_use::{create_versioned_tools, run_co
 use crate::agent::tools::mac_apps;
 use crate::agent::tools::permission_policy::{self, PermissionMode};
 use crate::agent::tools::risk_classifier;
+use crate::agent::tools::schedule_tools;
 use crate::agent::tools::settings_tool;
 use crate::agent::tools::tool_versioning::{ApiVersion, ToolVersionConfig};
 use crate::constants::agent::tool_names;
@@ -342,6 +343,16 @@ fn tool_list() -> Vec<Value> {
         "description": settings.description,
         "inputSchema": settings.input_schema,
     }));
+    // Scheduled automations (LAC-8365): without these the CLI only sees the
+    // account's cloud routine scheduler and proposes a UTC routine that never
+    // reaches Settings > Automations.
+    tools.extend(schedule_tools::definitions().into_iter().map(|tool| {
+        json!({
+            "name": tool.name,
+            "description": tool.description,
+            "inputSchema": tool.input_schema,
+        })
+    }));
     tools.push(json!({
         "name": cli_approval::APPROVE_TOOL_NAME,
         "description": "Internal: Juno's permission prompt. The Claude CLI calls this \
@@ -379,6 +390,14 @@ async fn call_tool(app: &tauri::AppHandle, request: &Value) -> Result<Value, Rpc
                 "isError": true
             }),
         });
+    }
+    if schedule_tools::is_schedule_tool(name) {
+        return Ok(
+            match schedule_tools::run(app.clone(), name, arguments).await {
+                Ok(value) => to_mcp_content(value),
+                Err(e) => tool_error(&e),
+            },
+        );
     }
     if is_mac_app_tool(name) {
         // Before anything else, and before the send gate resolves a name through
@@ -681,9 +700,30 @@ mod tests {
     }
 
     #[test]
+    fn the_schedule_tools_are_offered_and_routed() {
+        let names: Vec<String> = tool_list()
+            .iter()
+            .filter_map(|t| t["name"].as_str().map(str::to_string))
+            .collect();
+        for name in [
+            "create_scheduled_automation",
+            "list_scheduled_automations",
+            "delete_scheduled_automation",
+        ] {
+            assert!(names.iter().any(|n| n == name), "{name} not offered");
+            assert!(schedule_tools::is_schedule_tool(name));
+        }
+        assert!(!schedule_tools::is_schedule_tool("computer"));
+    }
+
+    #[test]
     fn the_computer_settings_and_approve_tools_are_offered() {
         let tools = tool_list();
-        assert_eq!(tools.len(), 3 + mac_apps::tool_definitions().len());
+        // computer, settings, approve, and the three schedule tools (LAC-8365).
+        assert_eq!(
+            tools.len(),
+            3 + schedule_tools::definitions().len() + mac_apps::tool_definitions().len()
+        );
         assert_eq!(tools[0]["name"], "computer");
         assert!(
             tools[0]["inputSchema"]["properties"]["action"].is_object(),
