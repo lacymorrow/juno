@@ -1011,6 +1011,81 @@ mod tests {
         assert!(first.starts_with("juno.5.0"), "got {}", first);
     }
 
+    /// The `ShowSession` arm focuses the session and *then* brings the window
+    /// forward. That order is correct only while nothing on the
+    /// window-opening path writes focus, and six review passes asked whether
+    /// `open_main_window` could undo the focus. The answer was prose in a
+    /// comment, which is the weakest kind of guard, so it is pinned here.
+    ///
+    /// Exactly two files may write focus: the registry that defines the setter,
+    /// and the command module whose whole job is focusing a session. A write
+    /// anywhere else, `window_management.rs` above all, means showing a window
+    /// can change the focused session and this ordering is what breaks.
+    #[test]
+    fn nothing_outside_the_session_registry_writes_focus() {
+        // Assembled rather than written out, because this file would otherwise
+        // match its own marker and report itself.
+        let marker = format!("set_{}(", "focused");
+        const ALLOWED: [&str; 2] = ["agents/session.rs", "commands/agent_sessions.rs"];
+
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut found = std::collections::BTreeSet::new();
+
+        for entry in walkdir::WalkDir::new(&src).into_iter().flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            for line in text.lines() {
+                let code = line.trim_start();
+                // The setter is named in prose above, so every comment form is
+                // skipped: //, /// and //!.
+                if code.starts_with("//") {
+                    continue;
+                }
+                if code.contains(&marker) {
+                    found.insert(
+                        path.strip_prefix(&src)
+                            .unwrap_or(path)
+                            .to_string_lossy()
+                            .replace('\\', "/"),
+                    );
+                    break;
+                }
+            }
+        }
+
+        // Non-vacuity first: a scan that walked the wrong tree, or stopped
+        // matching, would find nothing and pass while proving nothing. Both
+        // allowed files really do write focus, so both have to be there.
+        for allowed in ALLOWED {
+            assert!(
+                found.contains(allowed),
+                "the scan did not find {} and so proves nothing; it found {:?}",
+                allowed,
+                found
+            );
+        }
+
+        let unexpected: Vec<&String> = found
+            .iter()
+            .filter(|f| !ALLOWED.contains(&f.as_str()))
+            .collect();
+        assert!(
+            unexpected.is_empty(),
+            "a new focus writer appeared in {:?}. `ClickAction::ShowSession` in \
+             this file focuses a session and then calls `open_main_window`, \
+             which is only safe while putting a window on screen cannot change \
+             the focused session. Either bring the window forward first and \
+             focus second, or add the file here once you have checked it can \
+             never run on a window-open path.",
+            unexpected
+        );
+    }
+
     /// The separator earns its keep by being impossible in the unique part of
     /// an identifier. That is the whole reason the split is unambiguous, so it
     /// is asserted rather than left to the comment that claims it.
