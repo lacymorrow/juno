@@ -169,8 +169,13 @@ describe("the current turn", () => {
 });
 
 describe("the answer line", () => {
-  it("is the first sentence, with markdown and components dropped", () => {
-    expect(firstSentence("**Done.** The draft is with Maya.")).toBe("Done.");
+  it("is the first sentence, with components dropped and markdown kept for the renderer", () => {
+    expect(firstSentence("**Done.** The draft is with Maya.")).toBe("**Done.**");
+    expect(firstSentence("Saved `my_file_name.txt`. Next.")).toBe("Saved `my_file_name.txt`.");
+    expect(firstSentence("Open my_file_name.txt now. Then go.")).toBe("Open my_file_name.txt now.");
+    expect(firstSentence("2 * 3 is 6. Easy.")).toBe("2 * 3 is 6.");
+    expect(firstSentence("# Heading\n\nBody text.")).toBe("# Heading Body text.");
+    expect(firstSentence("**Done")).toBe("**Done");
     expect(firstSentence("Here is the list:\n\n<TaskList items={[]} />\n\nThat is all.")).toBe("Here is the list: That is all.");
     expect(firstSentence("Sent! The draft is with Maya.")).toBe("Sent!");
     expect(firstSentence("Sunny, 72 degrees")).toBe("Sunny, 72 degrees");

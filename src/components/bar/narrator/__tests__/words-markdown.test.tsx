@@ -29,3 +29,14 @@ describe("Words inline markdown", () => {
     expect(el.getAttribute("title")).toBe(text);
   });
 });
+
+describe("the answer line, end to end from the model", () => {
+  it("renders **Done.** bold and keeps file names and products intact", async () => {
+    const { firstSentence } = await import("../narratorModel");
+    const { unmount } = render(<Words segment={seg("answer", firstSentence("**Done.** Sent."))} theme="light" />);
+    expect(screen.getByTestId("bar-answer").querySelector("strong")?.textContent).toBe("Done.");
+    unmount();
+    render(<Words segment={seg("answer", firstSentence("Wrote my_file_name.txt, 2 * 3 times. More."))} theme="light" />);
+    expect(screen.getByTestId("bar-answer").textContent).toBe("Wrote my_file_name.txt, 2 * 3 times.");
+  });
+});
