@@ -172,6 +172,18 @@ async fn show_listening(app_handle: &AppHandle) {
     }
 }
 
+/// Text for the live bar from a raw Whisper partial, or `None` when the shared
+/// final-text filter (artifact strip, ellipsis strip, name correction) leaves
+/// only whitespace. `None` means "don't update the bar".
+fn partial_bar_text(raw: &str) -> Option<String> {
+    let filtered = tauri_plugin_voice_transcription::utils::filter_transcription_text(raw);
+    if filtered.trim().is_empty() {
+        None
+    } else {
+        Some(filtered)
+    }
+}
+
 /// Setup voice transcription event listeners for specialized behavior
 fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
     // Listen for app-dictation-finished events to trigger the agent (legacy UI path)
@@ -329,7 +341,14 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                 if let Some(text_value) = payload_json.get("text") {
                     if let Some(text) = text_value.as_str() {
                         let app_handle_clone = app_handle_for_listener.clone();
-                        let partial_text = text.to_string();
+                        // Same filter the final text goes through (LAC-8264,
+                        // juno#1014). Nothing left means nothing to show: skip,
+                        // and the bar keeps whatever it already had ("Listening"
+                        // before the first words, the last partial after). The
+                        // freeze is intended.
+                        let Some(partial_text) = partial_bar_text(text) else {
+                            return;
+                        };
                         // Live streaming partials carry `provisional: true` so the
                         // bar can render them dimmed/italic. Absent = coarse (solid).
                         let provisional = payload_json
@@ -2011,5 +2030,33 @@ mod capture_failure_scope_tests {
         };
         assert_eq!(capture_failure_scope(r#"{"code":"x"}"#), both);
         assert_eq!(capture_failure_scope("not json"), both);
+    }
+}
+
+#[cfg(test)]
+mod partial_bar_text_tests {
+    use super::partial_bar_text;
+
+    #[test]
+    fn a_blank_audio_marker_is_skipped() {
+        assert_eq!(partial_bar_text("[BLANK_AUDIO]"), None);
+    }
+
+    #[test]
+    fn a_sound_description_is_skipped() {
+        assert_eq!(partial_bar_text("(music)"), None);
+    }
+
+    #[test]
+    fn a_marker_inside_speech_is_stripped() {
+        assert_eq!(
+            partial_bar_text("hello [BLANK_AUDIO] world"),
+            Some("hello world".to_string())
+        );
+    }
+
+    #[test]
+    fn plain_speech_passes_through() {
+        assert_eq!(partial_bar_text("hello"), Some("hello".to_string()));
     }
 }
