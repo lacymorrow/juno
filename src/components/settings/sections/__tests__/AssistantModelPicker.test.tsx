@@ -1,5 +1,7 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { invoke } from "@tauri-apps/api/core";
 import { describe, expect, it, vi } from "vitest";
+import { COMMANDS } from "@/lib/constants.generated";
 import AssistantModelPicker from "../AssistantModelPicker";
 
 // cmdk calls scrollIntoView, which jsdom does not implement.
@@ -11,10 +13,12 @@ vi.mock("@tauri-apps/api/event", () => ({
   emit: vi.fn(),
 }));
 
-const advanced = vi.hoisted(() => ({ on: false }));
-vi.mock("../../AdvancedSettingsContext", () => ({
-  useAdvancedSettings: () => ({ advanced: advanced.on }),
-}));
+// No `AdvancedSettingsContext` mock here on purpose. This component no longer
+// reads that flag at all: it is mounted only inside a `SettingsGroup advanced`,
+// so it lists everything (LAC-8407). Mocking the flag is what let this suite
+// assert on a state the app cannot produce. The flag's real effect on this
+// picker — whether it is mounted — is tested through the real provider in
+// AssistantModelPicker.composition.test.tsx.
 
 type Model = {
   id: string;
@@ -83,7 +87,6 @@ const settingsWith = (models: Model[], selectedId = models[0].id) =>
 
 describe("AssistantModelPicker computer-use marking", () => {
   it("does not mark a model that can control the computer", () => {
-    advanced.on = false;
     render(<AssistantModelPicker settings={settingsWith([CAPABLE])} />);
 
     // Absence is the signal: computer use is the norm, so a capable model
@@ -93,14 +96,12 @@ describe("AssistantModelPicker computer-use marking", () => {
   });
 
   it("explains the limit when the selected model is chat only", () => {
-    advanced.on = false;
     render(<AssistantModelPicker settings={settingsWith([CHAT_ONLY])} />);
 
     expect(screen.getByText(/cannot\s+control the computer/i)).toBeInTheDocument();
   });
 
   it("treats a toolset model as an ordinary capable model", () => {
-    advanced.on = false;
     render(<AssistantModelPicker settings={settingsWith([TOOLSET])} />);
 
     // Juno sends the toolset now, so there is no "Juno cannot drive this"
@@ -113,7 +114,6 @@ describe("AssistantModelPicker computer-use marking", () => {
   });
 
   it("says nothing about the limit when the selected model is capable", () => {
-    advanced.on = false;
     render(<AssistantModelPicker settings={settingsWith([CAPABLE])} />);
 
     expect(
@@ -129,38 +129,84 @@ const openModelList = () => {
   return screen.getByRole("listbox");
 };
 
-describe("AssistantModelPicker legacy gating", () => {
-  it("hides older-tool-version models while advanced settings are off", () => {
-    advanced.on = false;
+describe("AssistantModelPicker model list", () => {
+  it("lists every model the provider reports, legacy included", () => {
+    // This picker filters nothing. It is advanced-only, and someone who turned
+    // advanced settings on is asking to see everything (LAC-8407).
     render(
       <AssistantModelPicker settings={settingsWith([CAPABLE, LEGACY])} />
     );
 
     const list = openModelList();
-    expect(within(list).queryByText(LEGACY.name)).not.toBeInTheDocument();
-    // the current-generation model is still listed
     expect(within(list).getByText(CAPABLE.name)).toBeInTheDocument();
+    expect(within(list).getByText(LEGACY.name)).toBeInTheDocument();
+    expect(within(list).getAllByRole("option")).toHaveLength(2);
   });
 
-  it("shows older models once advanced settings are on", () => {
-    advanced.on = true;
-    render(
-      <AssistantModelPicker settings={settingsWith([CAPABLE, LEGACY])} />
-    );
-
-    expect(within(openModelList()).getByText(LEGACY.name)).toBeInTheDocument();
-  });
-
-  it("always shows the model in use, even when it is an older one", () => {
+  it("lists the model in use even when it is a legacy one", () => {
     // Never hide what Juno is actually running: the person has to be able to
     // see it and switch off it.
-    advanced.on = false;
+    //
+    // Not redundant with the test above, and the difference is what it
+    // discriminates. The filter LAC-8407 removed carried an exception for the
+    // selected model. Re-add that filter WITHOUT the exception and both tests
+    // red; re-add it WITH the exception and only the test above reds, because
+    // this one's legacy model is the selected one. Keeping both says which
+    // variant came back.
     render(
       <AssistantModelPicker
         settings={settingsWith([CAPABLE, LEGACY], LEGACY.id)}
       />
     );
 
-    expect(within(openModelList()).getByText(LEGACY.name)).toBeInTheDocument();
+    const list = openModelList();
+    expect(within(list).getByText(LEGACY.name)).toBeInTheDocument();
+    expect(within(list).getAllByRole("option")).toHaveLength(2);
+  });
+});
+
+describe("AssistantModelPicker model persistence", () => {
+  const pick = (settings: ReturnType<typeof settingsWith>) => {
+    render(<AssistantModelPicker settings={settings} />);
+    fireEvent.click(
+      within(openModelList()).getByText(TOOLSET.name)
+    );
+  };
+
+  it("does not show a model that failed to save", async () => {
+    const settings = settingsWith([CAPABLE, TOOLSET], CAPABLE.id);
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === COMMANDS.PROVIDERS_VALIDATE_PROVIDER_MODEL) return true;
+      throw new Error("persist failed");
+    });
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    pick(settings);
+
+    await waitFor(() =>
+      expect(err).toHaveBeenCalledWith(
+        "AssistantModelPicker: Failed to change model:",
+        expect.any(Error)
+      )
+    );
+    expect(
+      (settings as unknown as { setFormData: ReturnType<typeof vi.fn> })
+        .setFormData
+    ).not.toHaveBeenCalled();
+    err.mockRestore();
+  });
+
+  it("shows the model once it saved", async () => {
+    const settings = settingsWith([CAPABLE, TOOLSET], CAPABLE.id);
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockResolvedValue(true as never);
+
+    pick(settings);
+
+    const setFormData = (
+      settings as unknown as { setFormData: ReturnType<typeof vi.fn> }
+    ).setFormData;
+    await waitFor(() => expect(setFormData).toHaveBeenCalledTimes(1));
   });
 });

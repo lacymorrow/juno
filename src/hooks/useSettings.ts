@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { KeyboardShortcuts } from "@/types/keyboard";
-import { AUDIO, SETTINGS, COMMANDS, EVENTS } from "@/lib/constants.generated";
+import { AUDIO, SETTINGS, COMMANDS, EVENTS, SETTING_DEFAULTS } from "@/lib/constants.generated";
 import { useEventListener } from "@/hooks/useEventListener";
 import { useInvoke } from "@/hooks/useInvoke";
 import type {
@@ -211,7 +211,11 @@ const invalidateCache = (cacheKey?: keyof SettingsCache) => {
 export function useSettings() {
 	const { invokeCommand } = useInvoke();
 	// TTS Settings
-	const [ttsProvider, setTtsProvider] = useState<string>("kokoro");
+	// The generated default, not a copy of it: Rust owns the choice and it is
+	// platform-dependent since LAC-7987 (the Mac's voice on macOS, Kokoro
+	// elsewhere). A hardcoded engine here paints the wrong row in Settings
+	// until the backend answers.
+	const [ttsProvider, setTtsProvider] = useState<string>(SETTING_DEFAULTS.TTS_PROVIDER);
 
 	// Chatterbox TTS Settings
 	const [chatterboxReferenceAudioUrl, setChatterboxReferenceAudioUrl] = useState<string>("");

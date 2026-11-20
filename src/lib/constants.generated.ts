@@ -589,7 +589,6 @@ export const COMMANDS = {
   PROVIDERS_GET_ACTIVE_PROVIDER: 'get_active_provider',
   PROVIDERS_SET_ACTIVE_PROVIDER: 'set_active_provider',
   PROVIDERS_VALIDATE_PROVIDER_MODEL: 'validate_provider_model',
-  PROVIDERS_GET_PROVIDER_MODELS: 'get_provider_models',
   PROVIDERS_UPDATE_PROVIDER_API_KEY: 'update_provider_api_key',
   PROVIDERS_CLEAR_PROVIDER_API_KEY: 'clear_provider_api_key',
   PROVIDERS_UPDATE_PROVIDER_MODEL: 'update_provider_model',
@@ -1152,7 +1151,7 @@ export const KEYBOARD_SHORTCUTS = {
 // Everything else settings::defaults holds, with Rust's types kept: a Rust
 // bool arrives as a boolean, not the string 'true'.
 export const SETTING_DEFAULTS = {
-  TTS_PROVIDER: 'kokoro',
+  TTS_PROVIDER: isMac ? 'system' : 'kokoro',
   SOUND_ENABLED: true,
   CLI_PERSISTENT_SESSION_ENABLED: true,
   COST_LOGGING_ENABLED: false,
