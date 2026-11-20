@@ -35,6 +35,22 @@ use crate::constants::timeouts::{SMART_ROUTER_CONNECT_TIMEOUT_MS, SMART_ROUTER_T
 const ANTHROPIC_API_URL: &str = crate::constants::api::endpoints::ANTHROPIC_API_URL;
 const ROUTE_TOOL_NAME: &str = "route_request";
 /// The classifier answers with one short tool call; this is plenty.
+///
+/// It stays plenty on an adaptive-thinking classifier only because the request
+/// forces `tool_choice`: "Claude Haiku 5.5 accepts a forced `tool_choice`
+/// (`any` or a named tool), but the response starts with the tool call and has
+/// no `thinking` block." Thinking tokens count toward `max_tokens`, so moving
+/// to `tool_choice: auto` would spend this budget on reasoning and stop with
+/// `max_tokens` before the route ever arrives. Raise this first if that
+/// changes.
+///
+/// The quoted sentence is from the Haiku 5.5 docs as read on 2026-11-10
+/// (LAC-7413, PR #963); it has not been re-verified since, and CLAUDE.md says
+/// to check capabilities against the live docs rather than from memory. Re-read
+/// it before relying on it. Nothing rests on it today: the classifier is
+/// Haiku 4.5, which declares `adaptive_thinking: false`, so this is a warning
+/// for when the role moves to an adaptive-thinking model, not a live
+/// constraint.
 const CLASSIFIER_MAX_TOKENS: u32 = 200;
 /// Long pasted text says nothing more about the route than its opening does.
 const MAX_QUERY_CHARS: usize = 2000;
@@ -518,6 +534,28 @@ mod tests {
         // model) — 2026-10-05 weekly model check, LAC-4142.
         assert_eq!(classifier, model_ids::CLAUDE_HAIKU_4_5);
         assert_eq!(chat, model_ids::CLAUDE_SONNET_5_5);
+    }
+
+    /// Both router roles must be held by a model Anthropic still lists as
+    /// current. `chat_model` enforces this at runtime; `classifier_model`
+    /// deliberately does not, because a runtime filter there would silently
+    /// disable routing rather than fail loudly. This test is that gate: it
+    /// turns the next lineup change into a red CI run, which is where the
+    /// weekly model check wants to find out.
+    #[test]
+    fn both_router_roles_are_held_by_current_models() {
+        let provider = Provider::Anthropic;
+        for role in [RouterRole::Classifier, RouterRole::Chat] {
+            let def = provider
+                .router_model(role)
+                .unwrap_or_else(|| panic!("no model holds {role:?}"));
+            assert_eq!(
+                def.availability,
+                Availability::Current,
+                "{} holds {role:?} but is legacy",
+                def.name
+            );
+        }
     }
 
     #[test]

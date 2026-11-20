@@ -237,9 +237,13 @@ impl ComputerUse {
 /// `Legacy` (Fable 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6, Opus 4.5,
 /// Sonnet 5, Sonnet 4.6).
 ///
-/// `Legacy` models stay callable and stay selectable, but the picker hides
-/// them unless advanced settings are on — except for the active model, which
-/// is always shown so a saved choice never disappears.
+/// `Legacy` models stay callable and stay **visible**: nothing filters on this
+/// field. The Settings picker had a filter that read the same advanced toggle
+/// that gated the group it lived in, so its first clause was always true and it
+/// hid nothing; it is deleted (LAC-8407). The chat picker (`ChatInput`) never
+/// had one, so every model the backend reports is offered to everyone. Whether
+/// it should filter is an open product question (LAC-8418). Treat this field as
+/// the provider's label and a badge input, not as a visibility rule.
 ///
 /// Toolset GA is a *separate* axis: see `ModelDefinition::toolset_ga`. #580
 /// conflated the two, which is how a model Anthropic had already moved to
@@ -368,13 +372,14 @@ pub struct ModelInfo {
     pub category: ModelCategory,
     pub supports_computer_use: bool,
     pub is_recommended: bool,
-    /// True when the provider lists the model as legacy. The picker hides
-    /// these unless advanced settings are on, or the model is the active one.
+    /// True when the provider lists the model as legacy. Nothing hides these:
+    /// both pickers list every model the backend reports. See `Availability`.
     pub is_legacy: bool,
     /// True when the model can only do computer use through
-    /// `computer_toolset_20260801`. Hidden like a legacy model: the toolset is
-    /// newer, costs roughly 2x the input-token overhead per request, and is not
-    /// what Juno drives by default, so opting into it is an advanced choice.
+    /// `computer_toolset_20260801`, which costs roughly 2x the input-token
+    /// overhead per request. Not a visibility rule, and not an advanced opt-in:
+    /// Juno's default model (Opus 5.5) is one of these, so filtering on this
+    /// field would hide the default and the only `is_recommended` Anthropic row.
     pub requires_computer_toolset: bool,
 }
 
@@ -799,7 +804,15 @@ impl Provider {
                     ModelDefinition {
                         id: model_ids::OPENAI_SOL_5_6,
                         name: "GPT-5.6 Sol",
-                        price: Price::per_mtok(4.0, 20.0, 0.40, 0.0),
+                        // Verified 2026-11-16 against developers.openai.com/api/docs/models/gpt-5.6-sol:
+                        // above 272K input tokens the whole request bills at 2x input
+                        // and 1.5x output; cache writes are 1.25x the input rate.
+                        // $4/$20 is promotional through 2026-11-30 (LAC-8411).
+                        price: Price::per_mtok_tiered(
+                            4.0, 20.0, 0.40, 5.0,     // short context
+                            272_000, // threshold, prompt tokens
+                            8.0, 30.0, 0.80, 10.0, // long context
+                        ),
                         computer_use: ComputerUse::FunctionTools,
                         availability: Availability::Current,
                         toolset_ga: false,
@@ -829,7 +842,15 @@ impl Provider {
                 const MODELS: &[ModelDefinition] = &[ModelDefinition {
                     id: model_ids::OPENAI_SOL_5_6,
                     name: "GPT-5.6 Sol via Rig",
-                    price: Price::per_mtok(4.0, 20.0, 0.40, 0.0),
+                    // Verified 2026-11-16 against developers.openai.com/api/docs/models/gpt-5.6-sol:
+                    // above 272K input tokens the whole request bills at 2x input
+                    // and 1.5x output; cache writes are 1.25x the input rate.
+                    // $4/$20 is promotional through 2026-11-30 (LAC-8411).
+                    price: Price::per_mtok_tiered(
+                        4.0, 20.0, 0.40, 5.0,     // short context
+                        272_000, // threshold, prompt tokens
+                        8.0, 30.0, 0.80, 10.0, // long context
+                    ),
                     computer_use: ComputerUse::FunctionTools,
                     availability: Availability::Current,
                     toolset_ga: false,
@@ -2045,6 +2066,79 @@ mod tests {
         assert_eq!(
             Provider::Anthropic.computer_toolset_name("claude-does-not-exist"),
             None
+        );
+    }
+
+    /// `toolset_ga` is a citation; `computer_use` is the wire format. This is
+    /// the guard that keeps the two from drifting, and the implication runs
+    /// one way only: a row that declares `computer_toolset_20260801` must be
+    /// toolset-GA, because Anthropic answers 400 to a toolset request from a
+    /// model that does not support it. A row that is GA and still declares an
+    /// earlier version is correct and deliberate, since the toolset costs
+    /// roughly 2x the input-token overhead on every request.
+    ///
+    /// Both comments that cite this test by name (the `toolset_ga` field docs
+    /// and `model_definitions`) predate the test itself, and CLAUDE.md
+    /// asserted it existed too. All three described a guard nobody had
+    /// written. Until LAC-8406 the only coverage was the enumerated table in
+    /// `the_toolset_path_is_selected_per_model_and_leaves_the_rest_alone`,
+    /// which protects exactly the models someone remembered to list, so a
+    /// newly added row was unguarded by construction. The weekly model check
+    /// adds rows, which is why it is the one that had to notice.
+    ///
+    /// Anthropic and Copilot are the only providers that can reach the
+    /// toolset, so sweeping both makes the coverage total: the other five are
+    /// held by `function_tool_providers_are_never_on_the_toolset_path`, which
+    /// asserts they declare neither the toolset nor `toolset_ga`. Copilot
+    /// needs its own sweep rather than inheriting Anthropic's through
+    /// `copilot_rows_agree_with_the_same_models_on_the_claude_api`: that test
+    /// compares `computer_use` and `toolset_ga` only for rows it can pair with
+    /// a Claude API row, and its `unpaired` list exists precisely for
+    /// Copilot-only models -- today `claude-haiku-5.5`, which is on the
+    /// toolset. Every model Copilot ships ahead of the Claude API catalog
+    /// lands there, so without this sweep it would be unguarded by
+    /// construction.
+    #[test]
+    fn catalog_toolset_ga_agrees_with_the_declared_tool_version() {
+        let mut on_toolset = 0usize;
+        let mut ga_on_an_earlier_version = 0usize;
+
+        for provider in [Provider::Anthropic, Provider::Copilot] {
+            for def in provider.model_definitions() {
+                if def.uses_computer_toolset() {
+                    on_toolset += 1;
+                    assert!(
+                        def.toolset_ga,
+                        "{} ({}) on {:?} is sent computer_toolset_20260801 but is \
+                         not recorded as toolset-GA; Anthropic answers 400 to a \
+                         toolset request from a model that does not support it",
+                        def.name, def.id, provider
+                    );
+                } else if def.toolset_ga {
+                    ga_on_an_earlier_version += 1;
+                }
+            }
+        }
+
+        // Neither counter may be zero, or the sweep above proves nothing: an
+        // empty toolset arm passes vacuously, and the lineup is exactly what
+        // this weekly check moves.
+        assert!(
+            on_toolset >= 1,
+            "no Anthropic or Copilot row declares computer_toolset_20260801, so the \
+             arm above never ran and this sweep proves nothing; the current lineup \
+             is toolset-only, so zero here means the catalog lost those rows \
+             entirely"
+        );
+        // And the asymmetry is deliberate, not an oversight. If this reaches
+        // zero, someone has put every GA model on the toolset and doubled the
+        // input-token overhead on rows that do not need it.
+        assert!(
+            ga_on_an_earlier_version >= 1,
+            "no row is toolset-GA while still being sent an earlier tool version, so \
+             the one-directional claim is untested; if that is genuinely true now, \
+             say so in the `toolset_ga` field docs AND in the model policy section \
+             of the root CLAUDE.md, which states the same asymmetry"
         );
     }
 

@@ -1,4 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// "Zero `.unwrap()` in production Rust" (CLAUDE.md) is a gate, not a convention.
+// `unwrap_used` and `expect_used` sit in clippy's `restriction` group, which
+// `cargo clippy -D warnings` does not enable, so CI never saw them (LAC-8436).
+// `not(test)` leaves `#[cfg(test)]` modules and the lib's own test build alone,
+// where unwrap is fine. Integration tests under `tests/` are separate crates and
+// never see this attribute. Do not add `#[allow]` to land a branch: a violation
+// means the code needs `?`, `ok_or`, or `unwrap_or_else`.
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
 // Import necessary external crates and standard library items
 use tauri::{AppHandle, Listener, Manager};
@@ -489,7 +497,6 @@ pub fn run() {
             get_active_provider,
             set_active_provider,
             validate_provider_model,
-            get_provider_models,
             get_provider_settings,
             update_provider_api_key,
             clear_provider_api_key,
@@ -963,6 +970,8 @@ pub fn run() {
 
             // Juno's speaking level goes to every window from here on.
             tts::speech_level::bind(app_handle.clone());
+            // And a sentence nothing could speak can say so (LAC-8231).
+            tts::no_voice::remember_app(&app_handle);
             // The launch greeting, rendered in parallel with the rest of
             // startup so it plays the moment the bar appears. It renders in
             // the engine that will actually speak, which depends on the
@@ -1140,9 +1149,10 @@ pub fn run() {
             // never comes up.
             startup_windows::schedule_fallback(&app_handle);
 
-            // Banners while Juno is frontmost. Set early so the first
-            // notification already goes through the delegate.
-            commands::notifications::install_presenter();
+            // Banners while Juno is frontmost, and somewhere for a click on
+            // one to land. Set early so the first notification already goes
+            // through the delegate.
+            commands::notifications::install_presenter(&app_handle);
 
             #[cfg(target_os = "linux")]
             platform::apply_linux_setup(&app_handle);
