@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.301] - 2026-11-21
+
+### Fixed
+
+- **cli:** recurring tasks on the Claude CLI create a Juno automation (LAC-8365) (#1020) (e4599ea1)
+
 ## [0.8.298] - 2026-11-19
 
 ### Added
@@ -1929,7 +1935,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.298...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.301...HEAD
+[0.8.301]: https://github.com/lacymorrow/juno/compare/cua-v0.8.300...v0.8.301
 [0.8.298]: https://github.com/lacymorrow/juno/compare/cua-v0.8.297...v0.8.298
 [0.8.297]: https://github.com/lacymorrow/juno/compare/cua-v0.8.296...v0.8.297
 [0.8.296]: https://github.com/lacymorrow/juno/compare/cua-v0.8.295...v0.8.296
