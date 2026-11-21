@@ -205,6 +205,32 @@ async fn delete_exec(input: Value, app_handle: AppHandle) -> Result<Value, Strin
     Ok(json!({ "success": true, "deleted_id": id }))
 }
 
+/// The three tool definitions, for servers that are not a `LocalToolProvider`
+/// (the Juno MCP server the Claude CLI gets, LAC-8365).
+pub fn definitions() -> Vec<ToolDefinition> {
+    vec![create_definition(), list_definition(), delete_definition()]
+}
+
+/// Whether `name` is one of the schedule tools.
+pub fn is_schedule_tool(name: &str) -> bool {
+    matches!(
+        name,
+        agent::tool_names::CREATE_SCHEDULED_AUTOMATION
+            | agent::tool_names::LIST_SCHEDULED_AUTOMATIONS
+            | agent::tool_names::DELETE_SCHEDULED_AUTOMATION
+    )
+}
+
+/// Run one schedule tool by name. An `Err` is a message for the model to read.
+pub async fn run(app: AppHandle, name: &str, input: Value) -> Result<Value, String> {
+    match name {
+        agent::tool_names::CREATE_SCHEDULED_AUTOMATION => create_exec(input, app).await,
+        agent::tool_names::LIST_SCHEDULED_AUTOMATIONS => list_exec(input, app).await,
+        agent::tool_names::DELETE_SCHEDULED_AUTOMATION => delete_exec(input, app).await,
+        other => Err(format!("Unknown schedule tool: {other}")),
+    }
+}
+
 /// Registers the scheduled automation tools with the given tool provider.
 ///
 /// # Tools Registered
