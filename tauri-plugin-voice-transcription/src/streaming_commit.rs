@@ -587,6 +587,111 @@ mod tests {
     }
 
     #[test]
+    fn join_binds_a_segment_that_opens_with_a_word_that_cannot_open_a_sentence() {
+        assert_eq!(
+            join_segments(&["you've got complete control.", "Of my agenda."]),
+            "you've got complete control of my agenda."
+        );
+        assert_eq!(
+            join_segments(&["It should be filed.", "Into the Juno."]),
+            "It should be filed into the Juno."
+        );
+        assert_eq!(
+            join_segments(&["It cost more.", "Than I expected."]),
+            "It cost more than I expected."
+        );
+    }
+
+    #[test]
+    fn join_binds_a_subjectless_auxiliary_that_is_not_a_question() {
+        assert_eq!(
+            join_segments(&["the issues with dictation.", "Should be filed."]),
+            "the issues with dictation should be filed."
+        );
+        assert_eq!(
+            join_segments(&["The report.", "Was late again."]),
+            "The report was late again."
+        );
+    }
+
+    #[test]
+    fn join_drops_a_full_stop_the_decoder_wrote_before_a_lowercase_carry_on() {
+        assert_eq!(
+            join_segments(&["I went to the store.", "and bought milk."]),
+            "I went to the store and bought milk."
+        );
+    }
+
+    #[test]
+    fn join_keeps_the_full_stop_at_a_real_sentence_boundary() {
+        assert_eq!(join_segments(&["Hello.", "World."]), "Hello. World.");
+        // A question or an exclamation before the seam ended the sentence,
+        // whatever opens the next segment.
+        assert_eq!(
+            join_segments(&["Did you see it?", "Of course."]),
+            "Did you see it? Of course."
+        );
+        assert_eq!(
+            join_segments(&["Stop that!", "Of course."]),
+            "Stop that! Of course."
+        );
+        // An auxiliary that opens a real question keeps its own sentence.
+        assert_eq!(
+            join_segments(&["I filed it.", "Should I close it?"]),
+            "I filed it. Should I close it?"
+        );
+    }
+
+    #[test]
+    fn join_leaves_a_seam_alone_when_the_repair_would_need_its_own_punctuation() {
+        // "Engineering" may be a list item or a new sentence. Either way the
+        // join would need a comma this function cannot know about, and a
+        // run-on reads worse than the stray full stop. Left as the decoder
+        // wrote it, on purpose.
+        assert_eq!(
+            join_segments(&["Of my agenda.", "Engineering."]),
+            "Of my agenda. Engineering."
+        );
+        assert_eq!(
+            join_segments(&["for better helping.", "Apps to have access."]),
+            "for better helping. Apps to have access."
+        );
+    }
+
+    // The two transcripts from Lacy's 2026-11-02 log (LAC-6492), as the
+    // segments the decoder produced. Every seam repaired below is one where
+    // the next segment opens with a word that binds to the text before it;
+    // the seams left standing are the ones no text-only rule can settle.
+    #[test]
+    fn the_logged_transcript_loses_its_stray_full_stops_at_binding_seams() {
+        assert_eq!(
+            join_segments(&[
+                "Alright Commander, you've got complete control.",
+                "Of my agenda.",
+                "Engineering.",
+                "Job.",
+                "I want to be clear, professional.",
+                "And sing.",
+            ]),
+            "Alright Commander, you've got complete control of my agenda. \
+             Engineering. Job. I want to be clear, professional. And sing."
+        );
+
+        assert_eq!(
+            join_segments(&[
+                "the issues with dictation.",
+                "Should be filed.",
+                "Into the Juno.",
+                "Project as they are related so that we can create a process for better helping.",
+                "Apps to have access moving forward.",
+            ]),
+            "the issues with dictation should be filed into the Juno. \
+             Project as they are related so that we can create a process for better helping. \
+             Apps to have access moving forward."
+        );
+    }
+
+    #[test]
     fn prompt_tail_is_short_starts_on_a_word_and_has_no_nul() {
         let long = "word ".repeat(100);
         let tail = prompt_tail(&long);
