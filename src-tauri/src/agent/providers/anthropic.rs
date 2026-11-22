@@ -929,8 +929,9 @@ impl AnthropicBrain {
     /// not accept adaptive thinking (older models would return 400).
     ///
     /// `block_binding.prefix_mismatch_behavior: "drop_block"` is the insurance on the
-    /// thinking blocks Juno replays on tool-use turns. From Fable 5.1 onward (so Opus 5.5,
-    /// Sonnet 5.5 and Haiku 5.5, i.e. the default model) a replayed block's signature is
+    /// thinking blocks Juno replays on tool-use turns. From Fable 5.1 onward (so Fable 5.2,
+    /// Opus 5.5, Sonnet 5.5 and Haiku 5.5, which includes the default model) a replayed
+    /// block's signature is
     /// bound to the prefix that produced it: the top-level `system` prompt, the `tools`
     /// array, and every message before the block. Juno changes all three inside a live
     /// conversation — the system prompt is rebuilt per turn from live settings and the MCP
@@ -1715,10 +1716,12 @@ impl AnthropicBrain {
                             // transformations here, with the serving model's entries.
                             // These are the drops `message_start` cannot have seen: the
                             // fallback is what invalidated the blocks, and it happens
-                            // after the opening event. Juno asks for fallbacks on exactly
-                            // the models that get `block_binding` (`fallbacks_param`), so
-                            // this is a common drop rather than an edge case, and it takes
-                            // the whole replayed set with it.
+                            // after the opening event. The two sets overlap but are not
+                            // identical: `block_binding` rides on adaptive thinking, while
+                            // `fallbacks_param` reads `server_side_fallback`, and Haiku 5.5
+                            // gets the first and declines the second. So on every model that
+                            // does fall back this is a common drop rather than an edge case,
+                            // and it takes the whole replayed set with it.
                             if let Some(transformations) =
                                 Self::event_input_transformations(&event_data)
                             {
@@ -3396,8 +3399,9 @@ mod thinking_block_binding_tests {
 
     /// A mid-stream server-side fallback re-reports the transformations on the final
     /// `message_delta`, and those entries are the ones `message_start` cannot have seen.
-    /// Juno requests fallbacks on exactly the models that get `block_binding`, so reading
-    /// only `message_start` makes the most likely drop in the whole feature invisible.
+    /// Juno requests fallbacks on most of the models that get `block_binding` (Haiku 5.5
+    /// is the exception: `server_side_fallback: false`), so reading only `message_start`
+    /// makes the most likely drop in the whole feature invisible.
     /// The docs do not fix the nesting at this event, so both shapes must be accepted.
     #[test]
     fn transformations_are_read_from_a_fallback_message_delta() {
