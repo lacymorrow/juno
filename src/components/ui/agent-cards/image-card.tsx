@@ -11,7 +11,7 @@
  *
  * A shadcn Card: the picture (tall ones are capped and contained so they do
  * not take the Island), a caption, and the two actions that matter once the
- * file already exists on disk — Open it, or Show it in Finder. Before and
+ * file already exists on disk: Open it, or Show it in Finder. Before and
  * after panes carry words, not just an alt attribute. No hover, no glyph on
  * the buttons.
  */
@@ -81,8 +81,9 @@ function useAssetSrc(path?: string): Resolved | null {
 }
 
 /**
- * Show in Finder. The file is already saved — the image tools write it before
- * the model ever mentions it — so "Save" would be a lie. This reveals it.
+ * Show in Finder. The image tools write the PNG before the model ever
+ * mentions it, so the file is already saved and a Save button would be a lie
+ * about what just happened. This reveals it instead.
  */
 function RevealButton({ path }: { path: string }) {
   const [status, setStatus] = useState<"idle" | "error">("idle");
@@ -134,7 +135,7 @@ export function ImageCard({ path, caption, before, className }: ImageCardProps) 
   } else if (!after) {
     picture = <div className={PLACEHOLDER} aria-hidden="true" />;
   } else if (beforeImage && !beforeMissing) {
-    // The source of an edit can come from anywhere — ~/Desktop, a screenshot —
+    // The source of an edit can come from anywhere (~/Desktop, a screenshot)
     // and the asset scope only covers ~/Pictures/Juno. When the before pane
     // cannot load, drop to the single picture rather than show the broken
     // image this card exists to stop showing.
