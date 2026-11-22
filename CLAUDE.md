@@ -232,7 +232,7 @@ Do not run `cargo check`, `cargo clippy`, `cargo test` or `tauri build` locally.
 Local cargo is the exception: only when the task is a build-system change that CI cannot show you, and say so in the PR.
 
 ### Rust: No `.unwrap()` or `.expect()` in Production Code
-**Enforced by clippy (LAC-8436):** `src-tauri/src/lib.rs` denies `clippy::unwrap_used` and `clippy::expect_used` outside `cfg(test)`, and CI's clippy step fails on a hit. Do not add `#[allow]` to land a branch. Not yet covered: `tauri-plugin-voice-transcription`, `crates/juno-cua` and `mcp-server-os-level` (CI does not run clippy on them).
+**Enforced by clippy (LAC-8436):** `src-tauri/src/lib.rs` denies `clippy::unwrap_used` and `clippy::expect_used` outside `cfg(test)`, and CI's clippy step fails on a hit. Do not add `#[allow]` to land a branch. The same deny sits in the roots of `tauri-plugin-voice-transcription`, `crates/juno-cua` and `mcp-server-os-level`, linted by a separate CI step without `-D warnings` because those crates carry unrelated clippy debt (LAC-8449).
 
 ```rust
 // BANNED

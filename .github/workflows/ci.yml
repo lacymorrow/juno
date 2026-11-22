@@ -238,6 +238,16 @@ jobs:
       - name: Clippy the audio start probe
         run: cargo clippy -p audio-start-probe --all-targets -- -D warnings
 
+      # The no-unwrap deny (LAC-8449) lives in each crate's root, and clippy
+      # only reads it when it runs on that crate: `--manifest-path src-tauri`
+      # compiles these as dependencies and never lints them. No `-D warnings`
+      # here: these crates carry unrelated clippy debt (sort_by,
+      # type_complexity, module_inception) that would turn this red for
+      # reasons that have nothing to do with unwrap. The `deny` attribute
+      # alone fails the build on an unwrap or expect, which is the gate.
+      - name: Clippy the member crates (no-unwrap deny)
+        run: cargo clippy -p tauri-plugin-voice-transcription -p juno-cua -p computer-use-ai-sdk --all-targets
+
   # The required check. Ruleset 25966443 requires the context
   # "Rust (fmt + clippy + test)", and a job that is skipped never posts a
   # context, which leaves the PR BLOCKED forever. So the name lives on this
