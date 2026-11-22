@@ -26,6 +26,10 @@ use computer_use_ai_sdk::platforms::macos::utils::capture_window_via_coregraphic
 /// A window id that no window server will ever hand out.
 const NO_SUCH_WINDOW: u32 = u32::MAX;
 
+// TODO(LAC-4829): duplicate of
+// `capture_backend::tests::hosts_below_macos_14_get_coregraphics`. Delete this copy when
+// LAC-4829 makes CI compile the `computer-use-ai-sdk` crate's own tests;
+// until then it is the only one of the pair that runs anywhere.
 #[test]
 fn a_host_below_macos_14_does_not_get_screencapturekit() {
     // 12.3 is Juno's declared floor, 13 the other version in range. On either,
@@ -35,11 +39,19 @@ fn a_host_below_macos_14_does_not_get_screencapturekit() {
     assert_eq!(capture_backend_for(Some(13)), CaptureBackend::CoreGraphics);
 }
 
+// TODO(LAC-4829): duplicate of
+// `capture_backend::tests::an_unreadable_version_gets_coregraphics`. Delete this copy when
+// LAC-4829 makes CI compile the `computer-use-ai-sdk` crate's own tests;
+// until then it is the only one of the pair that runs anywhere.
 #[test]
 fn an_unknown_host_version_does_not_get_screencapturekit() {
     assert_eq!(capture_backend_for(None), CaptureBackend::CoreGraphics);
 }
 
+// TODO(LAC-4829): duplicate of
+// `capture_backend::tests::macos_14_and_newer_get_screencapturekit`. Delete this copy when
+// LAC-4829 makes CI compile the `computer-use-ai-sdk` crate's own tests;
+// until then it is the only one of the pair that runs anywhere.
 #[test]
 fn macos_14_and_newer_still_get_the_fast_path() {
     assert_eq!(
@@ -55,6 +67,10 @@ fn macos_14_and_newer_still_get_the_fast_path() {
 /// If the host version read breaks, `capture_backend_for(None)` sends every
 /// Mac down the slow path. That is not an error anywhere and nothing else
 /// would notice.
+// TODO(LAC-4829): duplicate of
+// `capture_backend::tests::the_host_reports_its_own_macos_major`. Delete this copy when
+// LAC-4829 makes CI compile the `computer-use-ai-sdk` crate's own tests;
+// until then it is the only one of the pair that runs anywhere.
 #[test]
 fn this_host_reads_its_own_macos_version() {
     let major = host_macos_major().expect("the host must report a macOS major version");
@@ -68,6 +84,9 @@ fn this_host_reads_its_own_macos_version() {
 /// The point of the whole change: there is a window-capture path that does not
 /// need ScreenCaptureKit. Before it existed, window capture on an older host
 /// had nothing to fall back to.
+// Not a duplicate, and not covered by LAC-4829: `utils.rs` has no unit test
+// for `capture_window_via_coregraphics`, so this is the only test of the
+// CoreGraphics window path anywhere. It stays after the four above go.
 #[test]
 fn window_capture_has_a_path_that_does_not_need_screencapturekit() {
     let error = capture_window_via_coregraphics(NO_SUCH_WINDOW)
