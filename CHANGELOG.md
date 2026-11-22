@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.303] - 2026-11-22
+
+### Fixed
+
+- **capture:** gate ScreenCaptureKit on macOS 14 and add a CoreGraphics window fallback (LAC-7986) (#1009) (62ae6e3e)
+
+## [0.8.302] - 2026-11-22
+
+### Changed
+
+- **models:** delete ModelInfo.requires_computer_toolset (LAC-7431) (#1049) (143fc9ca)
+
+## [0.8.301] - 2026-11-21
+
+### Fixed
+
+- **cli:** recurring tasks on the Claude CLI create a Juno automation (LAC-8365) (#1020) (e4599ea1)
+
+## [0.8.298] - 2026-11-19
+
+### Added
+
+- **notifications:** a click on a Juno banner goes where the banner says (LAC-8588) (#1042) (8e06adb8)
+
+## [0.8.297] - 2026-11-18
+
+### Fixed
+
+- **voice:** say why nothing was spoken, once per run (LAC-8231) (#1041) (61060a59)
+
+## [0.8.296] - 2026-11-18
+
+### Fixed
+
+- **voice:** default to the Mac's own voice on macOS, Kokoro elsewhere (LAC-7987) (#1010) (4cc6a5dc)
+
+## [0.8.294] - 2026-11-18
+
+### Changed
+
+- **providers:** delete uncalled get_provider_models command (LAC-8399) (#1025) (7e643362)
+
+## [0.8.293] - 2026-11-17
+
+### Fixed
+
+- **settings:** show the picked model only after it saved (LAC-8423) (#1031) (9a1e8638)
+
 ## [0.8.291] - 2026-11-17
 
 ### Changed
@@ -1899,7 +1947,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.291...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.303...HEAD
+[0.8.303]: https://github.com/lacymorrow/juno/compare/cua-v0.8.302...v0.8.303
+[0.8.302]: https://github.com/lacymorrow/juno/compare/cua-v0.8.301...v0.8.302
+[0.8.301]: https://github.com/lacymorrow/juno/compare/cua-v0.8.300...v0.8.301
+[0.8.298]: https://github.com/lacymorrow/juno/compare/cua-v0.8.297...v0.8.298
+[0.8.297]: https://github.com/lacymorrow/juno/compare/cua-v0.8.296...v0.8.297
+[0.8.296]: https://github.com/lacymorrow/juno/compare/cua-v0.8.295...v0.8.296
+[0.8.294]: https://github.com/lacymorrow/juno/compare/cua-v0.8.293...v0.8.294
+[0.8.293]: https://github.com/lacymorrow/juno/compare/cua-v0.8.292...v0.8.293
 [0.8.291]: https://github.com/lacymorrow/juno/compare/cua-v0.8.290...v0.8.291
 [0.8.289]: https://github.com/lacymorrow/juno/compare/cua-v0.8.288...v0.8.289
 [0.8.288]: https://github.com/lacymorrow/juno/compare/cua-v0.8.287...v0.8.288

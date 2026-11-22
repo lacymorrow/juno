@@ -84,7 +84,6 @@ pub mod providers {
     pub const GET_ACTIVE_PROVIDER: &str = "get_active_provider";
     pub const SET_ACTIVE_PROVIDER: &str = "set_active_provider";
     pub const VALIDATE_PROVIDER_MODEL: &str = "validate_provider_model";
-    pub const GET_PROVIDER_MODELS: &str = "get_provider_models";
     pub const UPDATE_PROVIDER_API_KEY: &str = "update_provider_api_key";
     pub const CLEAR_PROVIDER_API_KEY: &str = "clear_provider_api_key";
     pub const UPDATE_PROVIDER_MODEL: &str = "update_provider_model";
