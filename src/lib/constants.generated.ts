@@ -60,6 +60,7 @@ export const EVENTS = {
   VOICE_TRANSCRIPTION_AUDIO_LEVEL: 'voice-transcription:audio-level',
   VOICE_CAPTURE_FAILED: 'voice-capture:failed',
   VOICE_CAPTURE_DEVICE_SUBSTITUTED: 'voice-capture:device-substituted',
+  AUDIO_DEVICES_CHANGED: 'audio-devices:changed',
   JUNO_VOICE_AUDITION: 'juno-voice:audition',
   JUNO_VOICE_PREPARING: 'preparing',
   JUNO_VOICE_SPEAKING: 'speaking',
