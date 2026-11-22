@@ -444,6 +444,110 @@ async fn read_source_image(image_arg: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("read source image {expanded:?}: {e}"))
 }
 
+/// Longest edge we upload. Both edit models work from a 1K input; a 12 MP
+/// phone photo spends upload seconds and provider tokens on detail the model
+/// resamples away.
+pub const MAX_UPLOAD_EDGE: u32 = 1024;
+
+/// Decode ceiling. Well past any camera roll, far short of a decompression
+/// bomb. A source over this fails to decode and goes up untouched, which is
+/// what happened to every source before this function existed.
+const MAX_DECODE_EDGE: u32 = 16_384;
+const MAX_DECODE_ALLOC: u64 = 512 * 1024 * 1024;
+
+/// Normalise a source image for upload: at most [`MAX_UPLOAD_EDGE`] on its
+/// longest edge, upright, and encoded as PNG.
+///
+/// All three matter.
+///
+/// *Size*: the providers resample to about 1K anyway, so a full-resolution
+/// photo buys nothing and costs upload time and tokens.
+///
+/// *Orientation*: a portrait phone photo is stored landscape with an EXIF tag
+/// saying which way is up. Decoding drops the tag, so without applying it
+/// first the model is asked to repaint a sideways room.
+///
+/// *Format*: [`GeminiImageProvider::edit`] labels whatever bytes it is handed
+/// `image/png`. Re-encoding every non-PNG source makes that label true.
+///
+/// An unrotated PNG already inside the budget is the one case that comes
+/// back byte-identical. Bytes we cannot decode pass through untouched: the
+/// provider's error about them is better than ours.
+pub fn downscale_for_upload(bytes: &[u8]) -> Vec<u8> {
+    match prepare_for_upload(bytes) {
+        Ok(Some(out)) => out,
+        Ok(None) => bytes.to_vec(),
+        Err(e) => {
+            warn!(error = %e, "image could not be prepared; uploading it unchanged");
+            bytes.to_vec()
+        }
+    }
+}
+
+/// `Ok(None)` means "the source is already what we would send".
+fn prepare_for_upload(bytes: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    use image::ImageDecoder as _;
+
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| format!("guess image format: {e}"))?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_DECODE_EDGE);
+    limits.max_image_height = Some(MAX_DECODE_EDGE);
+    limits.max_alloc = Some(MAX_DECODE_ALLOC);
+    reader.limits(limits);
+    let source_format = reader.format();
+
+    let mut decoder = reader
+        .into_decoder()
+        .map_err(|e| format!("open image decoder: {e}"))?;
+    let orientation = decoder
+        .orientation()
+        .map_err(|e| format!("read image orientation: {e}"))?;
+    let mut decoded =
+        image::DynamicImage::from_decoder(decoder).map_err(|e| format!("decode image: {e}"))?;
+    decoded.apply_orientation(orientation);
+
+    let (w, h) = (decoded.width(), decoded.height());
+    let oversized = w.max(h) > MAX_UPLOAD_EDGE;
+    // Only an in-budget PNG that `apply_orientation` left alone is already
+    // what we would send. A PNG carrying an `eXIf` orientation tag is rare,
+    // but returning its original bytes would ship the tag unapplied and make
+    // the "upright" promise above false.
+    if !oversized
+        && source_format == Some(image::ImageFormat::Png)
+        && orientation == image::metadata::Orientation::NoTransforms
+    {
+        return Ok(None);
+    }
+
+    let prepared = if oversized {
+        // `resize` fits inside the box and keeps the aspect ratio.
+        decoded.resize(
+            MAX_UPLOAD_EDGE,
+            MAX_UPLOAD_EDGE,
+            image::imageops::FilterType::Lanczos3,
+        )
+    } else {
+        decoded
+    };
+
+    let mut out = Vec::new();
+    prepared
+        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .map_err(|e| format!("re-encode as png: {e}"))?;
+
+    info!(
+        from = format!("{w}x{h}"),
+        to = format!("{}x{}", prepared.width(), prepared.height()),
+        source_format = ?source_format,
+        bytes_before = bytes.len(),
+        bytes_after = out.len(),
+        "prepared image for upload"
+    );
+    Ok(Some(out))
+}
+
 fn log_cost(action: &str, provider: &dyn ImageProvider) {
     // Per-turn cost report (PR #595 telemetry hook). LAC-4124 reads these
     // lines to price Pro usage.
@@ -500,7 +604,12 @@ async fn edit_exec(input: Value) -> Result<Value, String> {
     };
     log_cost("edit", provider.as_ref());
 
-    let source = read_source_image(image_arg).await?;
+    // Decode, rotate, resize and re-encode of a 12 MP photo is hundreds of
+    // milliseconds of CPU; it does not belong on an async worker.
+    let raw = read_source_image(image_arg).await?;
+    let source = tokio::task::spawn_blocking(move || downscale_for_upload(&raw))
+        .await
+        .map_err(|e| format!("prepare image for upload: {e}"))?;
     let bytes = provider.edit(&source, instruction).await.map_err(|e| {
         error!(provider = provider.name(), error = %e, "image edit failed");
         e
@@ -656,5 +765,74 @@ mod tests {
             ]}}]
         });
         assert_eq!(extract_inline_image(&snake).unwrap(), b"world".to_vec());
+    }
+
+    /// Encode a solid test image at `w`x`h` in `format`.
+    fn encoded(w: u32, h: u32, format: image::ImageFormat) -> Vec<u8> {
+        let buf = image::RgbImage::from_fn(w, h, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, 128])
+        });
+        let mut out = Vec::new();
+        image::DynamicImage::ImageRgb8(buf)
+            .write_to(&mut std::io::Cursor::new(&mut out), format)
+            .expect("encode test image");
+        out
+    }
+
+    #[test]
+    fn downscale_caps_the_longest_edge_and_keeps_the_aspect_ratio() {
+        let src = encoded(2048, 1024, image::ImageFormat::Png);
+        let out = downscale_for_upload(&src);
+        let got = image::load_from_memory(&out).expect("result decodes");
+        assert_eq!(got.width(), MAX_UPLOAD_EDGE);
+        assert_eq!(got.height(), MAX_UPLOAD_EDGE / 2);
+    }
+
+    #[test]
+    fn downscale_caps_the_tall_edge_too() {
+        let src = encoded(600, 3000, image::ImageFormat::Png);
+        let got = image::load_from_memory(&downscale_for_upload(&src)).expect("result decodes");
+        assert_eq!(got.height(), MAX_UPLOAD_EDGE);
+        assert!(got.width() < MAX_UPLOAD_EDGE);
+    }
+
+    #[test]
+    fn downscale_leaves_an_image_already_within_budget_byte_identical() {
+        let src = encoded(MAX_UPLOAD_EDGE, 400, image::ImageFormat::Png);
+        assert_eq!(downscale_for_upload(&src), src);
+    }
+
+    /// The Gemini edit path hardcodes `image/png`, so an oversized JPEG has to
+    /// come back out as a PNG or we lie to the provider about what we sent.
+    #[test]
+    fn downscale_reencodes_an_oversized_jpeg_as_png() {
+        let src = encoded(2000, 1500, image::ImageFormat::Jpeg);
+        let out = downscale_for_upload(&src);
+        assert_ne!(out, src);
+        assert_eq!(
+            image::guess_format(&out).expect("format is known"),
+            image::ImageFormat::Png
+        );
+    }
+
+    /// A small JPEG is inside the size budget and still has to be re-encoded:
+    /// the Gemini edit path calls everything it sends `image/png`.
+    #[test]
+    fn downscale_reencodes_a_small_jpeg_even_though_it_fits() {
+        let src = encoded(320, 240, image::ImageFormat::Jpeg);
+        let out = downscale_for_upload(&src);
+        assert_ne!(out, src);
+        assert_eq!(
+            image::guess_format(&out).expect("format is known"),
+            image::ImageFormat::Png
+        );
+        let got = image::load_from_memory(&out).expect("result decodes");
+        assert_eq!((got.width(), got.height()), (320, 240));
+    }
+
+    #[test]
+    fn downscale_passes_through_bytes_it_cannot_decode() {
+        let src = b"this is not an image".to_vec();
+        assert_eq!(downscale_for_upload(&src), src);
     }
 }
