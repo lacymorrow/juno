@@ -72,15 +72,15 @@ export default function AssistantModelPicker({
   // advanced-settings toggle is on — and someone who turned that on is asking
   // to see everything.
   //
-  // It used to filter on `is_legacy` / `requires_computer_toolset`, under a
-  // comment claiming Juno "offers the current generation and nothing else, the
-  // way an Apple product does". That filter read the SAME toggle that gates the
-  // group, so it short-circuited on `showAdvanced` every time it ran and hid
-  // nothing, in every build that ever shipped (LAC-8407). Do not re-add it
-  // here: a filter keyed on the toggle that decides whether this component
-  // exists at all can never fire. The surface where that rule would bite is the
-  // chat input's model selector (components/chat/ChatInput.tsx), which every
-  // person sees and which filters nothing today.
+  // It used to filter on legacy and capability flags, under a comment claiming
+  // Juno "offers the current generation and nothing else, the way an Apple
+  // product does". That filter read the SAME toggle that gates the group, so it
+  // short-circuited on `showAdvanced` every time it ran and hid nothing, in
+  // every build that ever shipped (LAC-8407). Do not re-add it here: a filter
+  // keyed on the toggle that decides whether this component exists at all can
+  // never fire. The surface where that rule would bite is the chat input's
+  // model selector (components/chat/ChatInput.tsx), which every person sees and
+  // which filters nothing today.
   //
   // A provider that reports no models drops out rather than rendering an empty
   // group.

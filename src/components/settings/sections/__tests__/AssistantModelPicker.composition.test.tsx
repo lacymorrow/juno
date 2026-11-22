@@ -65,17 +65,15 @@ type Model = {
   supports_computer_use: boolean;
   is_recommended: boolean;
   is_legacy: boolean;
-  requires_computer_toolset: boolean;
 };
 
-/** Current, recommended, and on the toolset — the shipping default. */
+/** Current and recommended — the shipping default. */
 const CURRENT: Model = {
   id: "claude-opus-5-5",
   name: "Claude Opus 5.5",
   supports_computer_use: true,
   is_recommended: true,
   is_legacy: false,
-  requires_computer_toolset: true,
 };
 
 /** A second current model, so the list has something to switch *to*. */
@@ -85,19 +83,24 @@ const ALSO_CURRENT: Model = {
   supports_computer_use: true,
   is_recommended: false,
   is_legacy: false,
-  requires_computer_toolset: true,
 };
 
-/** Legacy *and* off the toolset, so it would be hidden by either axis of the
- *  filter LAC-8407 removed. If any of that filtering comes back, this model is
- *  the one that disappears. */
+/** Legacy, so it is the model the filter LAC-8407 removed would have hidden.
+ *  If that filtering comes back, this is the one that disappears.
+ *
+ *  That filter had a second axis, a capability flag for models that drive the
+ *  computer only through `computer_toolset_20260801`. It is gone: LAC-7431
+ *  deleted the field from the wire format, so this fixture cannot express it
+ *  and nothing can filter on it. The deletion is what replaces that half of
+ *  the guard — re-adding the capability filter is now a type error rather than
+ *  a test failure, which is the stronger check. `is_legacy` keeps a real
+ *  fixture because it may yet gain a reader (LAC-8418). */
 const LEGACY: Model = {
   id: "claude-haiku-4-5-20251001",
   name: "Claude Haiku 4.5",
   supports_computer_use: true,
   is_recommended: false,
   is_legacy: true,
-  requires_computer_toolset: false,
 };
 
 const ALL_MODELS = [CURRENT, ALSO_CURRENT, LEGACY];

@@ -350,6 +350,13 @@ impl ModelDefinition {
     /// Whether this model drives the computer through the
     /// `computer_toolset_20260801` toolset. Derived from the declared tool
     /// version, never from `availability` and never from `toolset_ga`.
+    ///
+    /// This picks a request shape. It is not a visibility rule and not an
+    /// advanced opt-in: Juno's default model (Opus 5.5) is one of these, so a
+    /// picker that filtered on it would hide the default and the only
+    /// `is_recommended` Anthropic row (LAC-6396, LAC-8407). That is why it is
+    /// no longer serialized to the frontend at all (LAC-7431) — the only
+    /// consumer that ever read it read it wrongly.
     pub fn uses_computer_toolset(&self) -> bool {
         self.computer_use.uses_toolset()
     }
@@ -375,12 +382,6 @@ pub struct ModelInfo {
     /// True when the provider lists the model as legacy. Nothing hides these:
     /// both pickers list every model the backend reports. See `Availability`.
     pub is_legacy: bool,
-    /// True when the model can only do computer use through
-    /// `computer_toolset_20260801`, which costs roughly 2x the input-token
-    /// overhead per request. Not a visibility rule, and not an advanced opt-in:
-    /// Juno's default model (Opus 5.5) is one of these, so filtering on this
-    /// field would hide the default and the only `is_recommended` Anthropic row.
-    pub requires_computer_toolset: bool,
 }
 
 impl From<&ModelDefinition> for ModelInfo {
@@ -392,7 +393,6 @@ impl From<&ModelDefinition> for ModelInfo {
             supports_computer_use: def.supports_computer_use(),
             is_recommended: def.is_recommended,
             is_legacy: def.availability == Availability::Legacy,
-            requires_computer_toolset: def.uses_computer_toolset(),
         }
     }
 }
