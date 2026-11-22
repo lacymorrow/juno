@@ -200,13 +200,100 @@ fn strip_trailing_ellipsis(s: &mut String) {
     }
 }
 
+/// Words a segment may open with that cannot open an English sentence.
+///
+/// A cut lands in any pause over [`MIN_PAUSE_MS`], so most seams are a
+/// hesitation, not a sentence end. The decoder cannot tell: it sees each
+/// segment alone and punctuates it as a whole utterance, so it writes a
+/// leading capital and a closing full stop either way. Whisper does it even
+/// when prompted with the text before the segment, and Parakeet TDT writes
+/// its own capitals and punctuation with no way to be prompted at all (see
+/// `TranscriptionSession::transcribe_final_segment`, whose default drops the
+/// context). So at a seam the capital carries no information and the full
+/// stop before it is an artefact, and the repair has to be here, in text.
+///
+/// Only this class is repaired, and the reason is narrow: these words bind
+/// syntactically to the phrase before them, so joining needs no punctuation
+/// of its own. `control.` + `Of my agenda.` is "control of my agenda", never
+/// "control, of my agenda". A seam whose truth might be a comma (a dropped
+/// list item, an appositive) is left exactly as the decoder wrote it,
+/// because a run-on reads worse than a stray full stop.
+const BINDING_WORDS: &[&str] = &["of", "into", "than", "unto", "atop", "versus", "vs"];
+
+/// Auxiliaries and wh-words that open a clause only when it is a question or
+/// an inversion. `Should be filed.` has no subject, so it continues the
+/// segment before it; `Should I close it?` and `Had I known` do not. The two
+/// tests are the segment's own question mark, which both decoders write, and
+/// a subject pronoun sitting right after the auxiliary.
+const BINDING_UNLESS_QUESTION: &[&str] = &[
+    "should", "would", "could", "must", "might", "shall", "ought", "is", "are", "was", "were",
+    "has", "had", "does", "did", "am", "whom", "whose",
+];
+
+/// Subjects that mark an auxiliary-initial segment as a question or an
+/// inversion rather than a subjectless continuation.
+const SUBJECT_PRONOUNS: &[&str] = &["i", "you", "he", "she", "it", "we", "they", "there"];
+
+/// The `index`-th word of `text`, lowercased, or `""` past the end.
+fn word_at(text: &str, index: usize) -> String {
+    text.split(|c: char| !(c.is_alphanumeric() || c == '\''))
+        .filter(|w| !w.is_empty())
+        .nth(index)
+        .unwrap_or("")
+        .to_lowercase()
+}
+
+/// Whether `text` opens with a word that binds to whatever came before it,
+/// making the seam's full stop and capital the decoder's invention.
+fn binds_to_previous(text: &str) -> bool {
+    // Anything not starting on a letter is punctuation the caller already
+    // handles, never a binding word.
+    if !matches!(text.chars().next(), Some(c) if c.is_alphabetic()) {
+        return false;
+    }
+    let first = word_at(text, 0);
+    if BINDING_WORDS.contains(&first.as_str()) {
+        return true;
+    }
+    if !BINDING_UNLESS_QUESTION.contains(&first.as_str()) {
+        return false;
+    }
+    if text.trim_end().ends_with('?') {
+        return false;
+    }
+    !SUBJECT_PRONOUNS.contains(&word_at(text, 1).as_str())
+}
+
+/// A question mark or an exclamation ends the sentence for real, whatever
+/// opens the next segment.
+fn ends_a_question_or_exclamation(s: &str) -> bool {
+    matches!(s.trim_end().chars().last(), Some('?') | Some('!'))
+}
+
+/// Drops one trailing full stop, leaving an ellipsis (handled separately) and
+/// every other mark alone.
+fn drop_trailing_full_stop(s: &mut String) {
+    let trimmed = s.trim_end();
+    let keep = match trimmed.strip_suffix('.') {
+        Some(rest) if !rest.ends_with('.') => rest.len(),
+        _ => trimmed.len(),
+    };
+    s.truncate(keep);
+}
+
 /// Joins segment texts into one transcript.
 ///
 /// Each part is trimmed and empty parts are skipped. Parts are separated by
 /// one space, except that leading punctuation attaches to the previous word.
 /// Whisper marks a segment that "trails off" with an ellipsis; when the next
-/// segment carries on mid-sentence (starts lowercase or with an ellipsis of
-/// its own), those seam ellipses are dropped. Case is never changed.
+/// segment carries on mid-sentence (starts lowercase, with an ellipsis of its
+/// own, or with a [binding word](BINDING_WORDS)), those seam ellipses are
+/// dropped, along with the full stop the decoder wrote before the seam.
+///
+/// Case is changed in exactly one place: the leading word of a binding seam
+/// is lowercased. Every word in [`BINDING_WORDS`] and
+/// [`BINDING_UNLESS_QUESTION`] is a closed-class function word, never a
+/// proper noun, so that is safe by construction.
 pub fn join_segments<S: AsRef<str>>(parts: &[S]) -> String {
     let mut out = String::new();
     for part in parts {
@@ -235,13 +322,29 @@ pub fn join_segments<S: AsRef<str>>(parts: &[S]) -> String {
             continue;
         }
         let first = text.chars().next().unwrap_or(' ');
-        if continues || first.is_lowercase() {
+        let binds = !ends_a_question_or_exclamation(&out) && binds_to_previous(text);
+        let carries_on = continues || first.is_lowercase() || binds;
+        if carries_on {
             strip_trailing_ellipsis(&mut out);
+        }
+        // A full stop before a seam the speaker did not end is the decoder's,
+        // not theirs. A lowercase carry-on says so as plainly as a binding
+        // word does: no decoder writes a lowercase start after a real stop.
+        if first.is_lowercase() || binds {
+            drop_trailing_full_stop(&mut out);
         }
         if !out.is_empty() && !is_attaching_punctuation(first) {
             out.push(' ');
         }
-        out.push_str(text);
+        if binds {
+            let mut chars = text.chars();
+            if let Some(c) = chars.next() {
+                out.extend(c.to_lowercase());
+                out.push_str(chars.as_str());
+            }
+        } else {
+            out.push_str(text);
+        }
     }
     out
 }
@@ -578,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn join_keeps_an_ellipsis_before_a_new_sentence_and_never_changes_case() {
+    fn join_keeps_an_ellipsis_and_the_case_before_a_new_sentence() {
         assert_eq!(
             join_segments(&["Let me think...", "Okay, yes."]),
             "Let me think... Okay, yes."
