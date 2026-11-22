@@ -264,21 +264,27 @@ export function failedStep(turn: Turn): Step | null {
 // === THE ANSWER LINE ===
 
 /**
- * The first sentence of an answer, for the one line on the strip. Markdown
- * marks and component tags are dropped: the line is prose, the sheet has the
- * rest.
+ * The first sentence of an answer, for the one line on the strip. Component
+ * tags and fenced code are dropped; inline markdown marks are KEPT, because
+ * the strip renders them (`InlineMarkdown`) and a mark stripped here is a mark
+ * the renderer cannot tell from prose: `my_file_name` must stay intact and
+ * `2 * 3` must not become `2 3`.
+ *
+ * The sentence ends at `.`, `!` or `?` followed by whitespace or the end, with
+ * any closing marks that hug the punctuation kept on it (`**Done.** Next`).
+ * The dot in `my_file_name.txt` is followed by a letter, so it does not end it.
+ * An unclosed mark (`**Done` while streaming) is left for the renderer, which
+ * prints it as plain text until it closes.
  */
 export function firstSentence(text: string): string {
   const prose = text
     .replace(/<[A-Za-z][^>]*\/>/g, " ")
     .replace(/<[A-Za-z][^>]*>[\s\S]*?<\/[A-Za-z]+>/g, " ")
     .replace(/```[\s\S]*?```/g, " ")
-    .replace(/[#*_`>]+/g, "")
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
   if (!prose) return "";
-  const match = prose.match(/^(.+?[.!?])(?:\s|$)/);
+  const match = prose.match(/^(.+?[.!?][*_~`)\]"']*)(?:\s|$)/);
   return match ? match[1] : prose;
 }
 

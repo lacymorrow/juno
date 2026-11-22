@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { InlineMarkdown } from "@/components/ui/inline-markdown";
+import { inlineMarkdownToText } from "@/lib/inlineMarkdown";
 import { cn } from "@/lib/utils";
 import {
   SYSTEM_BLUE,
@@ -262,7 +264,12 @@ export function Words({
       transition: "opacity 200ms ease, color 200ms ease",
     },
   };
-  const text = tail ? <bdi style={{ direction: "ltr", unicodeBidi: "isolate" }}>{segment.text}</bdi> : segment.text;
+  // Only the answer is model prose. A question, step, error or note stays
+  // literal: a filename with `_` in it must not be read as emphasis.
+  const isAnswer = segment.kind === "answer";
+  const plain = isAnswer ? inlineMarkdownToText(segment.text) : segment.text;
+  const words = isAnswer ? <InlineMarkdown text={segment.text} /> : segment.text;
+  const text = tail ? <bdi style={{ direction: "ltr", unicodeBidi: "isolate" }}>{words}</bdi> : words;
   if (onClick) {
     return (
       <button
@@ -274,7 +281,7 @@ export function Words({
         }}
         aria-label={ariaLabel}
         aria-expanded={ariaExpanded}
-        title={segment.text}
+        title={plain}
         {...shared}
       >
         {text}
@@ -282,7 +289,7 @@ export function Words({
     );
   }
   return (
-    <span ref={boxRef as React.RefObject<HTMLSpanElement>} title={tail ? undefined : segment.text} {...shared}>
+    <span ref={boxRef as React.RefObject<HTMLSpanElement>} title={tail ? undefined : plain} {...shared}>
       {text}
     </span>
   );
