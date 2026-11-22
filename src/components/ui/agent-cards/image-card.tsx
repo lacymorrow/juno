@@ -42,7 +42,9 @@ const PLACEHOLDER = "block h-40 w-full bg-muted";
  * for a directory literally named `~`.
  */
 export async function expandHome(path: string): Promise<string> {
-  if (!path.startsWith("~")) return path;
+  // Only a bare "~" or "~/…". "~someone/x" is that person's home, not a
+  // suffix on ours, and we have no business guessing where it is.
+  if (!/^~(?=\/|$)/.test(path)) return path;
   const home = (await homeDir()).replace(/\/$/, "");
   return path.replace(/^~/, home);
 }
@@ -111,9 +113,11 @@ export function ImageCard({ path, caption, before, className }: ImageCardProps) 
   const after = useAssetSrc(path);
   const beforeImage = useAssetSrc(before);
   const [missing, setMissing] = useState(false);
+  const [beforeMissing, setBeforeMissing] = useState(false);
 
   // A new path is a new picture: let it try to load before calling it missing.
   useEffect(() => setMissing(false), [path]);
+  useEffect(() => setBeforeMissing(false), [before]);
 
   if (!path) return null;
 
@@ -129,11 +133,20 @@ export function ImageCard({ path, caption, before, className }: ImageCardProps) 
     );
   } else if (!after) {
     picture = <div className={PLACEHOLDER} aria-hidden="true" />;
-  } else if (beforeImage) {
+  } else if (beforeImage && !beforeMissing) {
+    // The source of an edit can come from anywhere — ~/Desktop, a screenshot —
+    // and the asset scope only covers ~/Pictures/Juno. When the before pane
+    // cannot load, drop to the single picture rather than show the broken
+    // image this card exists to stop showing.
     picture = (
       <div className="grid grid-cols-2 gap-px bg-[var(--hair,var(--border))]">
         <figure className="bg-card">
-          <img src={beforeImage.src} alt="Before" className={PICTURE} />
+          <img
+            src={beforeImage.src}
+            alt="Before"
+            className={PICTURE}
+            onError={() => setBeforeMissing(true)}
+          />
           <figcaption className="px-3 py-1 text-[11px] text-muted-foreground">Before</figcaption>
         </figure>
         <figure className="bg-card">

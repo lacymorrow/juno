@@ -85,6 +85,33 @@ describe("ImageCard", () => {
     });
   });
 
+  it("leaves ~user alone rather than treating it as our home", async () => {
+    render(<ImageCard path="~someone/Pictures/x.png" caption="Theirs" />);
+    await waitFor(() => {
+      expect(mockedConvert).toHaveBeenCalledWith("~someone/Pictures/x.png");
+    });
+    expect(mockedConvert).not.toHaveBeenCalledWith("/Users/testsomeone/Pictures/x.png");
+  });
+
+  it("drops to the single picture when the before pane cannot load", async () => {
+    render(
+      <ImageCard
+        path="~/Pictures/Juno/after.png"
+        before="~/Desktop/outside-the-scope.png"
+        caption="Repainted"
+      />,
+    );
+
+    const beforeImg = await screen.findByAltText("Before");
+    fireEvent.error(beforeImg);
+
+    await waitFor(() => {
+      expect(screen.queryByAltText("Before")).toBeNull();
+    });
+    // The after image is still there, now as the whole picture.
+    expect(screen.getByAltText("Repainted")).toBeTruthy();
+  });
+
   it("says so when the file is gone instead of showing a broken image", async () => {
     render(<ImageCard path="~/Pictures/Juno/deleted.png" caption="Gone" />);
 
