@@ -33,6 +33,7 @@ export interface ImageCardProps {
 
 const PICTURE = "block max-h-80 w-full object-contain";
 const PLACEHOLDER = "block h-40 w-full bg-muted";
+const CAPTION = "px-3 py-1 text-[11px] text-muted-foreground";
 
 /**
  * `~/Pictures/Juno/x.png` -> `/Users/you/Pictures/Juno/x.png`.
@@ -41,7 +42,7 @@ const PLACEHOLDER = "block h-40 w-full bg-muted";
  * expand the tilde; it percent-encodes it, and the asset protocol then looks
  * for a directory literally named `~`.
  */
-export async function expandHome(path: string): Promise<string> {
+async function expandHome(path: string): Promise<string> {
   // Only a bare "~" or "~/…". "~someone/x" is that person's home, not a
   // suffix on ours, and we have no business guessing where it is.
   if (!/^~(?=\/|$)/.test(path)) return path;
@@ -81,6 +82,25 @@ function useAssetSrc(path?: string): Resolved | null {
 }
 
 /**
+ * A "this one failed to load" flag that clears itself whenever `token`
+ * changes, during render rather than in an effect, so the card never paints a
+ * frame of the old failure over a new file.
+ * https://react.dev/learn/you-might-not-need-an-effect
+ */
+function useFailureFlag(token: unknown): [boolean, () => void] {
+  const [failed, setFailed] = useState(false);
+  const [seen, setSeen] = useState(token);
+
+  if (seen !== token) {
+    setSeen(token);
+    if (failed) setFailed(false);
+  }
+
+  const mark = useCallback(() => setFailed(true), []);
+  return [failed, mark];
+}
+
+/**
  * Show in Finder. The image tools write the PNG before the model ever
  * mentions it, so the file is already saved and a Save button would be a lie
  * about what just happened. This reveals it instead.
@@ -110,15 +130,44 @@ function RevealButton({ path }: { path: string }) {
   );
 }
 
+interface PictureProps {
+  after: Resolved;
+  /** Null when there is no before pane, or when it failed to load. */
+  beforeImage: Resolved | null;
+  label: string;
+  caption?: string;
+  onError: () => void;
+  onBeforeError: () => void;
+}
+
+function Picture({ after, beforeImage, label, caption, onError, onBeforeError }: PictureProps) {
+  if (!beforeImage) {
+    return <img src={after.src} alt={label} className={PICTURE} onError={onError} />;
+  }
+  return (
+    <div className="grid grid-cols-2 gap-px bg-[var(--hair,var(--border))]">
+      <figure className="bg-card">
+        <img src={beforeImage.src} alt="Before" className={PICTURE} onError={onBeforeError} />
+        <figcaption className={CAPTION}>Before</figcaption>
+      </figure>
+      <figure className="bg-card">
+        <img
+          src={after.src}
+          alt={caption ? `After: ${caption}` : "After"}
+          className={PICTURE}
+          onError={onError}
+        />
+        <figcaption className={CAPTION}>After</figcaption>
+      </figure>
+    </div>
+  );
+}
+
 export function ImageCard({ path, caption, before, className }: ImageCardProps) {
   const after = useAssetSrc(path);
   const beforeImage = useAssetSrc(before);
-  const [missing, setMissing] = useState(false);
-  const [beforeMissing, setBeforeMissing] = useState(false);
-
-  // A new path is a new picture: let it try to load before calling it missing.
-  useEffect(() => setMissing(false), [path]);
-  useEffect(() => setBeforeMissing(false), [before]);
+  const [missing, markMissing] = useFailureFlag(path);
+  const [beforeMissing, markBeforeMissing] = useFailureFlag(before);
 
   if (!path) return null;
 
@@ -134,36 +183,20 @@ export function ImageCard({ path, caption, before, className }: ImageCardProps) 
     );
   } else if (!after) {
     picture = <div className={PLACEHOLDER} aria-hidden="true" />;
-  } else if (beforeImage && !beforeMissing) {
+  } else {
     // The source of an edit can come from anywhere (~/Desktop, a screenshot)
     // and the asset scope only covers ~/Pictures/Juno. When the before pane
     // cannot load, drop to the single picture rather than show the broken
     // image this card exists to stop showing.
     picture = (
-      <div className="grid grid-cols-2 gap-px bg-[var(--hair,var(--border))]">
-        <figure className="bg-card">
-          <img
-            src={beforeImage.src}
-            alt="Before"
-            className={PICTURE}
-            onError={() => setBeforeMissing(true)}
-          />
-          <figcaption className="px-3 py-1 text-[11px] text-muted-foreground">Before</figcaption>
-        </figure>
-        <figure className="bg-card">
-          <img
-            src={after.src}
-            alt={caption ? `After: ${caption}` : "After"}
-            className={PICTURE}
-            onError={() => setMissing(true)}
-          />
-          <figcaption className="px-3 py-1 text-[11px] text-muted-foreground">After</figcaption>
-        </figure>
-      </div>
-    );
-  } else {
-    picture = (
-      <img src={after.src} alt={label} className={PICTURE} onError={() => setMissing(true)} />
+      <Picture
+        after={after}
+        beforeImage={beforeMissing ? null : beforeImage}
+        label={label}
+        caption={caption}
+        onError={markMissing}
+        onBeforeError={markBeforeMissing}
+      />
     );
   }
 
