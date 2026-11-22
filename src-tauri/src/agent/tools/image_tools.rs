@@ -527,10 +527,7 @@ fn prepare_for_upload(bytes: &[u8]) -> Result<Option<Vec<u8>>, String> {
 
     let mut out = Vec::new();
     prepared
-        .write_to(
-            &mut std::io::Cursor::new(&mut out),
-            image::ImageFormat::Png,
-        )
+        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
         .map_err(|e| format!("re-encode as png: {e}"))?;
 
     info!(
