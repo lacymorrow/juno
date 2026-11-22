@@ -470,8 +470,8 @@ const MAX_DECODE_ALLOC: u64 = 512 * 1024 * 1024;
 /// *Format*: [`GeminiImageProvider::edit`] labels whatever bytes it is handed
 /// `image/png`. Re-encoding every non-PNG source makes that label true.
 ///
-/// A PNG already inside the budget is the one case that comes back
-/// byte-identical. Bytes we cannot decode pass through untouched: the
+/// An unrotated PNG already inside the budget is the one case that comes
+/// back byte-identical. Bytes we cannot decode pass through untouched: the
 /// provider's error about them is better than ours.
 pub fn downscale_for_upload(bytes: &[u8]) -> Vec<u8> {
     match prepare_for_upload(bytes) {
@@ -510,7 +510,14 @@ fn prepare_for_upload(bytes: &[u8]) -> Result<Option<Vec<u8>>, String> {
 
     let (w, h) = (decoded.width(), decoded.height());
     let oversized = w.max(h) > MAX_UPLOAD_EDGE;
-    if !oversized && source_format == Some(image::ImageFormat::Png) {
+    // Only an in-budget PNG that `apply_orientation` left alone is already
+    // what we would send. A PNG carrying an `eXIf` orientation tag is rare,
+    // but returning its original bytes would ship the tag unapplied and make
+    // the "upright" promise above false.
+    if !oversized
+        && source_format == Some(image::ImageFormat::Png)
+        && orientation == image::metadata::Orientation::NoTransforms
+    {
         return Ok(None);
     }
 
