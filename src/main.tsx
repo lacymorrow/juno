@@ -39,6 +39,13 @@ const AppearancePreview = lazy(() => import("./bar-harness/AppearancePreview"));
 const ComponentGallery = lazy(() => import("./bar-harness/ComponentGallery"));
 
 import "./styles/globals.css";
+import { trackError } from "./lib/telemetry";
+
+// Error class only: the constructor name, never the message or stack.
+window.addEventListener("error", (e) => void trackError(e.error?.name ?? "Error"));
+window.addEventListener("unhandledrejection", (e) => {
+  void trackError(e.reason instanceof Error ? e.reason.name : "UnhandledRejection");
+});
 
 // Prevent scrollbar flash during dynamic island transitions in production.
 // In dev, leave overflow visible so browser dev tools and layout inspection work normally.
