@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.302] - 2026-11-22
+
+### Changed
+
+- **models:** delete ModelInfo.requires_computer_toolset (LAC-7431) (#1049) (143fc9ca)
+
 ## [0.8.301] - 2026-11-21
 
 ### Fixed
@@ -1935,7 +1941,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.301...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.302...HEAD
+[0.8.302]: https://github.com/lacymorrow/juno/compare/cua-v0.8.301...v0.8.302
 [0.8.301]: https://github.com/lacymorrow/juno/compare/cua-v0.8.300...v0.8.301
 [0.8.298]: https://github.com/lacymorrow/juno/compare/cua-v0.8.297...v0.8.298
 [0.8.297]: https://github.com/lacymorrow/juno/compare/cua-v0.8.296...v0.8.297
