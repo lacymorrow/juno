@@ -608,6 +608,18 @@ fn capture_via_screencapturekit(
     use screencapturekit::stream::configuration::SCStreamConfiguration;
     use screencapturekit::stream::content_filter::SCContentFilter;
 
+    // The gate lives here as well as at the call site, on purpose. Below
+    // macOS 14 the class reference is NULL and the call never returns, so a
+    // caller that forgets the check does not get an error, it gets a thread
+    // parked forever (LAC-7986). Refusing here turns that back into an
+    // ordinary error, which every caller already degrades to CoreGraphics.
+    if capture_backend() != CaptureBackend::ScreenCaptureKit {
+        return Err(AutomationError::PlatformError(
+            "ScreenCaptureKit display capture needs macOS 14; this host must use CoreGraphics"
+                .to_string(),
+        ));
+    }
+
     // Get shareable content (enumerates displays/windows)
     let content = SCShareableContent::get().map_err(|e| {
         AutomationError::PlatformError(format!("SCShareableContent::get failed: {}", e))
@@ -724,14 +736,29 @@ pub fn capture_window_buffer(window_id: u32) -> Result<WindowCapture, Automation
 
 /// One window, captured by ScreenCaptureKit.
 ///
-/// Only callable on macOS 14+ — see `capture_backend` for why the check
-/// cannot live inside the call.
+/// macOS 14+ only. The check cannot live inside `SCScreenshotManager`'s own
+/// call — Swift's availability model expects the caller to have made it, and
+/// Rust has none (see `capture_backend`) — so it is made twice on the way in:
+/// once by the caller to choose a backend, and once at the top of this
+/// function so that forgetting the first is an error rather than a hang.
 #[cfg(feature = "screencapturekit-backend")]
 fn capture_window_via_screencapturekit(window_id: u32) -> Result<WindowCapture, AutomationError> {
     use screencapturekit::screenshot_manager::SCScreenshotManager;
     use screencapturekit::shareable_content::SCShareableContent;
     use screencapturekit::stream::configuration::SCStreamConfiguration;
     use screencapturekit::stream::content_filter::SCContentFilter;
+
+    // The gate lives here as well as at the call site, on purpose. Below
+    // macOS 14 the class reference is NULL and the call never returns, so a
+    // caller that forgets the check does not get an error, it gets a thread
+    // parked forever (LAC-7986). Refusing here turns that back into an
+    // ordinary error, which every caller already degrades to CoreGraphics.
+    if capture_backend() != CaptureBackend::ScreenCaptureKit {
+        return Err(AutomationError::PlatformError(
+            "ScreenCaptureKit window capture needs macOS 14; this host must use CoreGraphics"
+                .to_string(),
+        ));
+    }
 
     let content = SCShareableContent::get().map_err(|e| {
         AutomationError::PlatformError(format!("SCShareableContent::get failed: {}", e))
