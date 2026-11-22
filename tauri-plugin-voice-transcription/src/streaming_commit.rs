@@ -220,11 +220,22 @@ fn strip_trailing_ellipsis(s: &mut String) {
 /// because a run-on reads worse than a stray full stop.
 const BINDING_WORDS: &[&str] = &["of", "into", "than", "unto", "atop", "versus", "vs"];
 
+/// Fixed phrases that open with a [binding word](BINDING_WORDS) and are a
+/// sentence of their own. `Of course.` is one of the commonest things anyone
+/// dictates, and binding it would turn `He is coming. Of course.` into
+/// `He is coming of course.`, which says something else.
+const NON_BINDING_PHRASES: &[(&str, &str)] = &[("of", "course"), ("of", "late"), ("of", "all")];
+
 /// Auxiliaries and wh-words that open a clause only when it is a question or
 /// an inversion. `Should be filed.` has no subject, so it continues the
 /// segment before it; `Should I close it?` and `Had I known` do not. The two
 /// tests are the segment's own question mark, which both decoders write, and
 /// a subject pronoun sitting right after the auxiliary.
+///
+/// Known limit: a question with a *noun* subject that was cut before its
+/// question mark (`Should Juno` + `close it?`) has neither signal and binds.
+/// It needs the audio to settle, and the result reads as a statement rather
+/// than nonsense, so it is accepted rather than guessed at.
 const BINDING_UNLESS_QUESTION: &[&str] = &[
     "should", "would", "could", "must", "might", "shall", "ought", "is", "are", "was", "were",
     "has", "had", "does", "did", "am", "whom", "whose",
@@ -233,6 +244,17 @@ const BINDING_UNLESS_QUESTION: &[&str] = &[
 /// Subjects that mark an auxiliary-initial segment as a question or an
 /// inversion rather than a subjectless continuation.
 const SUBJECT_PRONOUNS: &[&str] = &["i", "you", "he", "she", "it", "we", "they", "there"];
+
+/// Whether the first word of `text` is entirely lowercase.
+///
+/// A mixed-case opener is a brand or an identifier the decoder wrote
+/// deliberately (`iPhone`, `eBay`, `macOS`), not a carry-on, so the full stop
+/// before it is the speaker's and stays.
+fn opens_with_an_all_lowercase_word(text: &str) -> bool {
+    text.split(|c: char| !(c.is_alphanumeric() || c == '\''))
+        .find(|w| !w.is_empty())
+        .is_some_and(|w| !w.chars().any(char::is_uppercase))
+}
 
 /// The `index`-th word of `text`, lowercased, or `""` past the end.
 fn word_at(text: &str, index: usize) -> String {
@@ -252,22 +274,28 @@ fn binds_to_previous(text: &str) -> bool {
         return false;
     }
     let first = word_at(text, 0);
+    let second = word_at(text, 1);
+    if NON_BINDING_PHRASES.contains(&(first.as_str(), second.as_str())) {
+        return false;
+    }
     if BINDING_WORDS.contains(&first.as_str()) {
         return true;
     }
     if !BINDING_UNLESS_QUESTION.contains(&first.as_str()) {
         return false;
     }
-    if text.trim_end().ends_with('?') {
+    if ends_a_question_or_exclamation(text) {
         return false;
     }
-    !SUBJECT_PRONOUNS.contains(&word_at(text, 1).as_str())
+    !SUBJECT_PRONOUNS.contains(&second.as_str())
 }
 
 /// A question mark or an exclamation ends the sentence for real, whatever
-/// opens the next segment.
+/// opens the next segment. Closing quotes and brackets are looked past, so
+/// `he asked, "why?"` and `(stop!)` count.
 fn ends_a_question_or_exclamation(s: &str) -> bool {
-    matches!(s.trim_end().chars().last(), Some('?') | Some('!'))
+    let end = s.trim_end_matches(|c| matches!(c, '"' | '\'' | ')' | ']' | '\u{201d}' | '\u{2019}'));
+    matches!(end.trim_end().chars().last(), Some('?') | Some('!'))
 }
 
 /// Drops one trailing full stop, leaving an ellipsis (handled separately) and
@@ -328,9 +356,11 @@ pub fn join_segments<S: AsRef<str>>(parts: &[S]) -> String {
             strip_trailing_ellipsis(&mut out);
         }
         // A full stop before a seam the speaker did not end is the decoder's,
-        // not theirs. A lowercase carry-on says so as plainly as a binding
-        // word does: no decoder writes a lowercase start after a real stop.
-        if first.is_lowercase() || binds {
+        // not theirs. An all-lowercase carry-on says so as plainly as a
+        // binding word does: no decoder writes a lowercase word after a real
+        // stop. A mixed-case one does (`iPhone`, `eBay`, `macOS`), so that
+        // full stop is the speaker's and stays.
+        if binds || (first.is_lowercase() && opens_with_an_all_lowercase_word(text)) {
             drop_trailing_full_stop(&mut out);
         }
         if !out.is_empty() && !is_attaching_punctuation(first) {
@@ -743,6 +773,57 @@ mod tests {
             join_segments(&["I filed it.", "Should I close it?"]),
             "I filed it. Should I close it?"
         );
+        // An inversion is a sentence, not a subjectless carry-on.
+        assert_eq!(
+            join_segments(&["I never asked.", "Had I known, I would have."]),
+            "I never asked. Had I known, I would have."
+        );
+        // The mark still ends the sentence behind a closing quote or bracket.
+        assert_eq!(
+            join_segments(&["He asked, \"why?\"", "Of my agenda."]),
+            "He asked, \"why?\" Of my agenda."
+        );
+    }
+
+    #[test]
+    fn join_leaves_a_sentence_that_merely_opens_like_a_binding_word() {
+        // "Of course." is one of the commonest things anyone dictates.
+        // Binding it would say something else.
+        assert_eq!(
+            join_segments(&["He is coming.", "Of course."]),
+            "He is coming. Of course."
+        );
+        assert_eq!(
+            join_segments(&["It is rare.", "Of late, anyway."]),
+            "It is rare. Of late, anyway."
+        );
+        // The word on its own still binds.
+        assert_eq!(
+            join_segments(&["He is coming.", "Of his own accord."]),
+            "He is coming of his own accord."
+        );
+    }
+
+    #[test]
+    fn join_keeps_a_full_stop_before_a_mixed_case_word() {
+        // A decoder writes `iPhone` lowercase-first on purpose, so the stop
+        // before it is the speaker's. An all-lowercase word is a carry-on.
+        assert_eq!(
+            join_segments(&["Use it.", "iPhone is great."]),
+            "Use it. iPhone is great."
+        );
+        assert_eq!(
+            join_segments(&["I went to the store.", "and bought milk."]),
+            "I went to the store and bought milk."
+        );
+    }
+
+    #[test]
+    fn join_binds_across_a_seam_ellipsis() {
+        assert_eq!(
+            join_segments(&["Let me think...", "Of the options."]),
+            "Let me think of the options."
+        );
     }
 
     #[test]
@@ -751,6 +832,9 @@ mod tests {
         // join would need a comma this function cannot know about, and a
         // run-on reads worse than the stray full stop. Left as the decoder
         // wrote it, on purpose.
+        //
+        // This pins today's output, not a contract: a later rule that settles
+        // these seams correctly is an improvement, not a regression.
         assert_eq!(
             join_segments(&["Of my agenda.", "Engineering."]),
             "Of my agenda. Engineering."
