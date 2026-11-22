@@ -209,6 +209,14 @@ pub async fn request_accessibility_permission_native(app: AppHandle) -> Result<b
                 // the same pane, the split bought nothing but a second window.
                 match NativePermissionChecker::request_accessibility_permission() {
                     Ok(()) => {
+                        // The pane is opening. Point at the row, because the
+                        // list it opens on says nothing about which one is
+                        // Juno's. The other route into a pane is
+                        // `open_system_preferences`, which does the same.
+                        crate::permission_coach::point_at(
+                            &app,
+                            crate::constants::permissions::types::ACCESSIBILITY,
+                        );
                         tokio::time::sleep(tokio::time::Duration::from_millis(
                             timeouts::PERMISSION_CHECK_DELAY_MS,
                         ))
@@ -486,10 +494,19 @@ pub async fn request_input_monitoring_permission_native(app: AppHandle) -> Resul
     }
 }
 
-/// Open system preferences for a specific permission type
+/// Open system preferences for a specific permission type.
+///
+/// Also the moment the coaching card goes up: the person is about to be looking
+/// at a list of applications with no idea which row is Juno's.
+/// `permission_coach` returns without doing anything for a pane it does not
+/// coach, so every route into a Privacy pane can call it.
 #[tauri::command]
-pub async fn open_system_preferences(preference_pane: String) -> Result<(), String> {
+pub async fn open_system_preferences(
+    app: AppHandle,
+    preference_pane: String,
+) -> Result<(), String> {
     info!("Opening system preferences for: {}", preference_pane);
+    crate::permission_coach::point_at(&app, &preference_pane);
 
     #[cfg(target_os = "macos")]
     {
@@ -544,11 +561,17 @@ pub async fn open_system_preferences(preference_pane: String) -> Result<(), Stri
     }
 }
 
-/// Enhanced system settings opening with better URL handling
+/// Enhanced system settings opening with better URL handling.
+///
+/// What the permission card's one button calls, so the coaching card goes up
+/// through the same path as every other route into a Privacy pane.
 #[tauri::command]
-pub async fn open_system_settings_enhanced(permission_type: String) -> Result<(), String> {
+pub async fn open_system_settings_enhanced(
+    app: AppHandle,
+    permission_type: String,
+) -> Result<(), String> {
     info!("Opening enhanced system settings for: {}", permission_type);
-    open_system_preferences(permission_type).await
+    open_system_preferences(app, permission_type).await
 }
 
 /// Start continuous permission monitoring at 1-second intervals.
@@ -572,9 +595,20 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
         info!("Stopped existing permissions monitoring");
     }
 
+    let (handle, cancellation_token) = spawn_monitor(app);
+
+    STOP_DEFERRED.store(false, Ordering::SeqCst);
+    *task_guard = Some((handle, cancellation_token));
+    info!("Permissions monitoring started successfully (1s interval)");
+    Ok(())
+}
+
+/// Spawn the 1s poll loop, so the command above and
+/// [`ensure_permissions_monitoring`] share one loop rather than growing two.
+fn spawn_monitor(app: AppHandle) -> (JoinHandle<()>, CancellationToken) {
     let cancellation_token = CancellationToken::new();
     let token_clone = cancellation_token.clone();
-    let app_clone = app.clone();
+    let app_clone = app;
 
     let handle = tauri::async_runtime::spawn(async move {
         // 1-second tick for responsive onboarding auto-advance
@@ -627,9 +661,52 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
         }
     });
 
-    *task_guard = Some((handle, cancellation_token));
-    info!("Permissions monitoring started successfully (1s interval)");
-    Ok(())
+    (handle, cancellation_token)
+}
+
+/// Make sure *something* is watching for a permission flip, without disturbing a
+/// watcher that is already running. `true` means this call started it, so the
+/// caller owes a [`release_permissions_monitoring`] once nobody needs it.
+///
+/// Not the same as calling the command. `start_permissions_monitoring`
+/// deliberately restarts, which resets the delta baseline, and a flip that
+/// lands in that gap is recorded as the baseline and never reported as a
+/// change. Anything that merely needs *a* watcher has to come through here.
+///
+/// This exists because the coaching card leaves on an event and on nothing
+/// else, and monitoring used to start only when `PermissionsFlow` or
+/// `Onboarding` mounted (and stop again when they unmounted). A card raised
+/// from any other route therefore had nothing able to take it down, and went on
+/// saying "turn its switch on" for two minutes after the person had.
+pub(crate) fn ensure_permissions_monitoring(app: &AppHandle) -> bool {
+    match MONITORING_TASK.lock() {
+        Ok(mut guard) => {
+            if guard.is_some() {
+                return false;
+            }
+            info!("Nothing was watching for a permission flip; starting monitoring");
+            STOP_DEFERRED.store(false, Ordering::SeqCst);
+            *guard = Some(spawn_monitor(app.clone()));
+            true
+        }
+        Err(e) => {
+            warn!("Could not lock the monitoring task to start it: {}", e);
+            false
+        }
+    }
+}
+
+/// The last coaching card is down. Stop the watcher if this caller started it,
+/// or if somebody else's stop was deferred while the card still needed it.
+///
+/// Called only once no card is up, so both branches are safe. Without the
+/// deferred half, a stop refused during a card would never be taken and a 1s
+/// native permission poll would run for the life of the process, which is
+/// exactly the leak LAC-2070 fixed.
+pub(crate) fn release_permissions_monitoring(started_here: bool) {
+    if started_here || STOP_DEFERRED.load(Ordering::SeqCst) {
+        stop_monitoring_now();
+    }
 }
 
 /// Emit `permission-granted` when a permission flips from denied → granted.
@@ -647,6 +724,10 @@ fn emit_granted_if_flipped(
         clear_relaunch_pending(permission_type);
         // Whatever prompt was up has been answered.
         restore_bar_after_prompt(app);
+        // The coaching card beside System Settings has nothing left to point
+        // at. It says the switch is on for a moment, then goes. This is the
+        // event the card leaves on: it never polls for the grant itself.
+        crate::permission_coach::note_granted(app, permission_type);
         // The person granted it in System Settings and is on their way back
         // to setup. Meet them there rather than leave it behind Settings.
         crate::window_management::bring_onboarding_forward(app);
@@ -674,24 +755,50 @@ fn emit_granted_if_flipped(
     }
 }
 
-/// Stop background permission monitoring
+/// A stop that arrived while a coaching card still needed the watcher. Honoured
+/// the moment it stops being needed, so a deferred stop cannot become a leak.
+static STOP_DEFERRED: AtomicBool = AtomicBool::new(false);
+
+/// Stop background permission monitoring.
+///
+/// Refuses while a coaching card is up, because that card is dismissed by
+/// `permission-granted` and by nothing else: stopping the poll strands it,
+/// still pointing at a switch the person may have flipped already. The stop is
+/// remembered and taken as soon as the card goes.
+///
+/// This used to be unconditional, on the premise written at its caller in
+/// `window_management::restore_after_onboarding` — that setup was the only
+/// thing wanting permissions polled every second. The coaching card made that
+/// false, and there are four callers (setup closing by any route,
+/// `PermissionsFlow` unmounting, and this command from the UI), so the check
+/// belongs here rather than at each of them.
 #[tauri::command]
 pub async fn stop_permissions_monitoring() -> Result<(), String> {
     info!("Stopping permissions monitoring");
 
-    let task_handle = MONITORING_TASK.clone();
-    let mut task_guard = task_handle
-        .lock()
-        .map_err(|e| format!("Failed to lock monitoring task: {}", e))?;
+    if crate::permission_coach::a_card_needs_the_watcher() {
+        STOP_DEFERRED.store(true, Ordering::SeqCst);
+        info!("A coaching card still needs permission monitoring; stop deferred");
+        return Ok(());
+    }
 
-    if let Some((handle, token)) = task_guard.take() {
-        token.cancel();
-        handle.abort();
-        info!("Permissions monitoring stopped");
-        Ok(())
-    } else {
-        info!("No permissions monitoring was running");
-        Ok(())
+    stop_monitoring_now();
+    Ok(())
+}
+
+/// Take the watcher down. No stakeholder check: callers have done it.
+fn stop_monitoring_now() {
+    STOP_DEFERRED.store(false, Ordering::SeqCst);
+    match MONITORING_TASK.lock() {
+        Ok(mut guard) => match guard.take() {
+            Some((handle, token)) => {
+                token.cancel();
+                handle.abort();
+                info!("Permissions monitoring stopped");
+            }
+            None => info!("No permissions monitoring was running"),
+        },
+        Err(e) => warn!("Could not lock the monitoring task to stop it: {}", e),
     }
 }
 
