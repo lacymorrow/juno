@@ -444,6 +444,60 @@ async fn read_source_image(image_arg: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("read source image {expanded:?}: {e}"))
 }
 
+/// Longest edge we upload. Both edit models work from a 1K input; a 12 MP
+/// phone photo spends upload seconds and provider tokens on detail the model
+/// resamples away.
+pub const MAX_UPLOAD_EDGE: u32 = 1024;
+
+/// Shrink a source image so its longest edge is at most [`MAX_UPLOAD_EDGE`],
+/// re-encoded as PNG.
+///
+/// Re-encoding is not incidental. The Gemini edit path labels whatever bytes
+/// it is handed as `image/png`, so a JPEG straight off the camera roll used to
+/// go up with the wrong mime type. Everything that reaches a provider is a PNG
+/// now, which is what both of them are told it is.
+///
+/// Images already inside the budget are returned untouched, and so are bytes we
+/// cannot decode: the provider gives a better error for those than we can.
+pub fn downscale_for_upload(bytes: &[u8]) -> Vec<u8> {
+    let decoded = match image::load_from_memory(bytes) {
+        Ok(decoded) => decoded,
+        Err(e) => {
+            warn!(error = %e, "image could not be decoded; uploading it unchanged");
+            return bytes.to_vec();
+        }
+    };
+
+    let (w, h) = (decoded.width(), decoded.height());
+    if w.max(h) <= MAX_UPLOAD_EDGE {
+        return bytes.to_vec();
+    }
+
+    // `resize` fits inside the box and keeps the aspect ratio.
+    let resized = decoded.resize(
+        MAX_UPLOAD_EDGE,
+        MAX_UPLOAD_EDGE,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let mut out = Vec::new();
+    match resized.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png) {
+        Ok(()) => {
+            info!(
+                from = format!("{w}x{h}"),
+                to = format!("{}x{}", resized.width(), resized.height()),
+                bytes_before = bytes.len(),
+                bytes_after = out.len(),
+                "downscaled image before upload"
+            );
+            out
+        }
+        Err(e) => {
+            warn!(error = %e, "re-encode after downscale failed; uploading the original");
+            bytes.to_vec()
+        }
+    }
+}
+
 fn log_cost(action: &str, provider: &dyn ImageProvider) {
     // Per-turn cost report (PR #595 telemetry hook). LAC-4124 reads these
     // lines to price Pro usage.
@@ -500,7 +554,7 @@ async fn edit_exec(input: Value) -> Result<Value, String> {
     };
     log_cost("edit", provider.as_ref());
 
-    let source = read_source_image(image_arg).await?;
+    let source = downscale_for_upload(&read_source_image(image_arg).await?);
     let bytes = provider.edit(&source, instruction).await.map_err(|e| {
         error!(provider = provider.name(), error = %e, "image edit failed");
         e
@@ -656,5 +710,59 @@ mod tests {
             ]}}]
         });
         assert_eq!(extract_inline_image(&snake).unwrap(), b"world".to_vec());
+    }
+
+    /// Encode a solid test image at `w`x`h` in `format`.
+    fn encoded(w: u32, h: u32, format: image::ImageFormat) -> Vec<u8> {
+        let buf = image::RgbImage::from_fn(w, h, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, 128])
+        });
+        let mut out = Vec::new();
+        image::DynamicImage::ImageRgb8(buf)
+            .write_to(&mut std::io::Cursor::new(&mut out), format)
+            .expect("encode test image");
+        out
+    }
+
+    #[test]
+    fn downscale_caps_the_longest_edge_and_keeps_the_aspect_ratio() {
+        let src = encoded(2048, 1024, image::ImageFormat::Png);
+        let out = downscale_for_upload(&src);
+        let got = image::load_from_memory(&out).expect("result decodes");
+        assert_eq!(got.width(), MAX_UPLOAD_EDGE);
+        assert_eq!(got.height(), MAX_UPLOAD_EDGE / 2);
+    }
+
+    #[test]
+    fn downscale_caps_the_tall_edge_too() {
+        let src = encoded(600, 3000, image::ImageFormat::Png);
+        let got = image::load_from_memory(&downscale_for_upload(&src)).expect("result decodes");
+        assert_eq!(got.height(), MAX_UPLOAD_EDGE);
+        assert!(got.width() < MAX_UPLOAD_EDGE);
+    }
+
+    #[test]
+    fn downscale_leaves_an_image_already_within_budget_byte_identical() {
+        let src = encoded(MAX_UPLOAD_EDGE, 400, image::ImageFormat::Png);
+        assert_eq!(downscale_for_upload(&src), src);
+    }
+
+    /// The Gemini edit path hardcodes `image/png`, so an oversized JPEG has to
+    /// come back out as a PNG or we lie to the provider about what we sent.
+    #[test]
+    fn downscale_reencodes_an_oversized_jpeg_as_png() {
+        let src = encoded(2000, 1500, image::ImageFormat::Jpeg);
+        let out = downscale_for_upload(&src);
+        assert_ne!(out, src);
+        assert_eq!(
+            image::guess_format(&out).expect("format is known"),
+            image::ImageFormat::Png
+        );
+    }
+
+    #[test]
+    fn downscale_passes_through_bytes_it_cannot_decode() {
+        let src = b"this is not an image".to_vec();
+        assert_eq!(downscale_for_upload(&src), src);
     }
 }

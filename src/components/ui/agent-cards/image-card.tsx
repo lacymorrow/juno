@@ -1,15 +1,27 @@
 /**
- * ImageCard: a PNG Juno generated or edited, with Open.
+ * ImageCard: a PNG Juno generated or edited, with Open and Show in Finder.
  *
  * Loaded through the asset protocol so no base64 crosses the IPC boundary.
+ * That protocol serves absolute paths only, and only paths inside the scope
+ * in `tauri.conf.json`. The image tools write to `~/Pictures/Juno/` and hand
+ * the model that tilde path, so two things have to be true for a picture to
+ * appear: the tilde is expanded before `convertFileSrc` sees it, and
+ * `$PICTURE/Juno/**` is in the asset scope. Neither was (LAC-4204), so every
+ * generated image rendered as a broken `<img>`. Both are fixed here.
+ *
  * A shadcn Card: the picture (tall ones are capped and contained so they do
- * not take the Island), a caption, and one secondary Open button that goes
- * through OpenButton, which expands "~/" correctly. Before and after panes
- * carry words, not just an alt attribute. No hover, no glyph on the button.
+ * not take the Island), a caption, and the two actions that matter once the
+ * file already exists on disk — Open it, or Show it in Finder. Before and
+ * after panes carry words, not just an alt attribute. No hover, no glyph on
+ * the buttons.
  */
 
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { homeDir } from "@tauri-apps/api/path";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { useCallback, useEffect, useState } from "react";
 import { OpenButton } from "@/components/ui/agent-actions";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
 export interface ImageCardProps {
@@ -20,31 +32,136 @@ export interface ImageCardProps {
 }
 
 const PICTURE = "block max-h-80 w-full object-contain";
+const PLACEHOLDER = "block h-40 w-full bg-muted";
+
+/**
+ * `~/Pictures/Juno/x.png` -> `/Users/you/Pictures/Juno/x.png`.
+ *
+ * The model writes paths the way people say them. `convertFileSrc` does not
+ * expand the tilde; it percent-encodes it, and the asset protocol then looks
+ * for a directory literally named `~`.
+ */
+export async function expandHome(path: string): Promise<string> {
+  if (!path.startsWith("~")) return path;
+  const home = (await homeDir()).replace(/\/$/, "");
+  return path.replace(/^~/, home);
+}
+
+interface Resolved {
+  abs: string;
+  src: string;
+}
+
+/** Absolute path plus asset URL for a path the model may have written with `~/`. */
+function useAssetSrc(path?: string): Resolved | null {
+  const [resolved, setResolved] = useState<Resolved | null>(null);
+
+  useEffect(() => {
+    if (!path) {
+      setResolved(null);
+      return;
+    }
+    let live = true;
+    expandHome(path)
+      .then((abs) => {
+        if (live) setResolved({ abs, src: convertFileSrc(abs) });
+      })
+      .catch((err) => {
+        console.error("ImageCard: could not resolve path:", err);
+        if (live) setResolved(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [path]);
+
+  return resolved;
+}
+
+/**
+ * Show in Finder. The file is already saved — the image tools write it before
+ * the model ever mentions it — so "Save" would be a lie. This reveals it.
+ */
+function RevealButton({ path }: { path: string }) {
+  const [status, setStatus] = useState<"idle" | "error">("idle");
+
+  const handleClick = useCallback(async () => {
+    try {
+      await revealItemInDir(path);
+      setStatus("idle");
+    } catch (err) {
+      console.error("ImageCard: Failed to reveal:", err);
+      setStatus("error");
+    }
+  }, [path]);
+
+  return (
+    <span className="inline-flex flex-col items-end gap-1">
+      <Button type="button" size="card" variant="secondary" onClick={handleClick}>
+        Show in Finder
+      </Button>
+      {status === "error" && (
+        <span className="text-[11px] text-muted-foreground">Could not show that.</span>
+      )}
+    </span>
+  );
+}
 
 export function ImageCard({ path, caption, before, className }: ImageCardProps) {
+  const after = useAssetSrc(path);
+  const beforeImage = useAssetSrc(before);
+  const [missing, setMissing] = useState(false);
+
+  // A new path is a new picture: let it try to load before calling it missing.
+  useEffect(() => setMissing(false), [path]);
+
   if (!path) return null;
-  const src = convertFileSrc(path);
-  const beforeSrc = before ? convertFileSrc(before) : undefined;
+
+  const label = caption || "Image";
+  const fileName = path.split("/").pop() || path;
+
+  let picture: React.ReactNode;
+  if (missing) {
+    picture = (
+      <div className="px-3 py-6 text-[13px] text-muted-foreground">
+        That picture is not at {fileName} any more.
+      </div>
+    );
+  } else if (!after) {
+    picture = <div className={PLACEHOLDER} aria-hidden="true" />;
+  } else if (beforeImage) {
+    picture = (
+      <div className="grid grid-cols-2 gap-px bg-[var(--hair,var(--border))]">
+        <figure className="bg-card">
+          <img src={beforeImage.src} alt="Before" className={PICTURE} />
+          <figcaption className="px-3 py-1 text-[11px] text-muted-foreground">Before</figcaption>
+        </figure>
+        <figure className="bg-card">
+          <img
+            src={after.src}
+            alt={caption ? `After: ${caption}` : "After"}
+            className={PICTURE}
+            onError={() => setMissing(true)}
+          />
+          <figcaption className="px-3 py-1 text-[11px] text-muted-foreground">After</figcaption>
+        </figure>
+      </div>
+    );
+  } else {
+    picture = (
+      <img src={after.src} alt={label} className={PICTURE} onError={() => setMissing(true)} />
+    );
+  }
 
   return (
     <Card className={`overflow-hidden ${className ?? ""}`} data-testid="image-card">
-      {beforeSrc ? (
-        <div className="grid grid-cols-2 gap-px bg-[var(--hair,var(--border))]">
-          <figure className="bg-card">
-            <img src={beforeSrc} alt="Before" className={PICTURE} />
-            <figcaption className="px-3 py-1 text-[11px] text-muted-foreground">Before</figcaption>
-          </figure>
-          <figure className="bg-card">
-            <img src={src} alt={caption ? `After: ${caption}` : "After"} className={PICTURE} />
-            <figcaption className="px-3 py-1 text-[11px] text-muted-foreground">After</figcaption>
-          </figure>
-        </div>
-      ) : (
-        <img src={src} alt={caption || "Image"} className={PICTURE} />
-      )}
+      {picture}
       <div className="flex items-center justify-between gap-3 px-3 py-2.5">
-        <div className="min-w-0 truncate text-[13px]">{caption || "Image"}</div>
-        <OpenButton path={path} label="Open" />
+        <div className="min-w-0 truncate text-[13px]">{label}</div>
+        <div className="flex shrink-0 items-start gap-2">
+          {after && <RevealButton path={after.abs} />}
+          <OpenButton path={path} label="Open" primary />
+        </div>
       </div>
     </Card>
   );
