@@ -200,13 +200,128 @@ fn strip_trailing_ellipsis(s: &mut String) {
     }
 }
 
+/// Words a segment may open with that cannot open an English sentence.
+///
+/// A cut lands in any pause over [`MIN_PAUSE_MS`], so most seams are a
+/// hesitation, not a sentence end. The decoder cannot tell: it sees each
+/// segment alone and punctuates it as a whole utterance, so it writes a
+/// leading capital and a closing full stop either way. Whisper does it even
+/// when prompted with the text before the segment, and Parakeet TDT writes
+/// its own capitals and punctuation with no way to be prompted at all (see
+/// `TranscriptionSession::transcribe_final_segment`, whose default drops the
+/// context). So at a seam the capital carries no information and the full
+/// stop before it is an artefact, and the repair has to be here, in text.
+///
+/// Only this class is repaired, and the reason is narrow: these words bind
+/// syntactically to the phrase before them, so joining needs no punctuation
+/// of its own. `control.` + `Of my agenda.` is "control of my agenda", never
+/// "control, of my agenda". A seam whose truth might be a comma (a dropped
+/// list item, an appositive) is left exactly as the decoder wrote it,
+/// because a run-on reads worse than a stray full stop.
+const BINDING_WORDS: &[&str] = &["of", "into", "than", "unto", "atop", "versus", "vs"];
+
+/// Fixed phrases that open with a [binding word](BINDING_WORDS) and are a
+/// sentence of their own. `Of course.` is one of the commonest things anyone
+/// dictates, and binding it would turn `He is coming. Of course.` into
+/// `He is coming of course.`, which says something else.
+const NON_BINDING_PHRASES: &[(&str, &str)] = &[("of", "course"), ("of", "late"), ("of", "all")];
+
+/// Auxiliaries and wh-words that open a clause only when it is a question or
+/// an inversion. `Should be filed.` has no subject, so it continues the
+/// segment before it; `Should I close it?` and `Had I known` do not. The two
+/// tests are the segment's own question mark, which both decoders write, and
+/// a subject pronoun sitting right after the auxiliary.
+///
+/// Known limit: a question with a *noun* subject that was cut before its
+/// question mark (`Should Juno` + `close it?`) has neither signal and binds.
+/// It needs the audio to settle, and the result reads as a statement rather
+/// than nonsense, so it is accepted rather than guessed at.
+const BINDING_UNLESS_QUESTION: &[&str] = &[
+    "should", "would", "could", "must", "might", "shall", "ought", "is", "are", "was", "were",
+    "has", "had", "does", "did", "am", "whom", "whose",
+];
+
+/// Subjects that mark an auxiliary-initial segment as a question or an
+/// inversion rather than a subjectless continuation.
+const SUBJECT_PRONOUNS: &[&str] = &["i", "you", "he", "she", "it", "we", "they", "there"];
+
+/// Whether the first word of `text` is entirely lowercase.
+///
+/// A mixed-case opener is a brand or an identifier the decoder wrote
+/// deliberately (`iPhone`, `eBay`, `macOS`), not a carry-on, so the full stop
+/// before it is the speaker's and stays.
+fn opens_with_an_all_lowercase_word(text: &str) -> bool {
+    text.split(|c: char| !(c.is_alphanumeric() || c == '\''))
+        .find(|w| !w.is_empty())
+        .is_some_and(|w| !w.chars().any(char::is_uppercase))
+}
+
+/// The `index`-th word of `text`, lowercased, or `""` past the end.
+fn word_at(text: &str, index: usize) -> String {
+    text.split(|c: char| !(c.is_alphanumeric() || c == '\''))
+        .filter(|w| !w.is_empty())
+        .nth(index)
+        .unwrap_or("")
+        .to_lowercase()
+}
+
+/// Whether `text` opens with a word that binds to whatever came before it,
+/// making the seam's full stop and capital the decoder's invention.
+fn binds_to_previous(text: &str) -> bool {
+    // Anything not starting on a letter is punctuation the caller already
+    // handles, never a binding word.
+    if !matches!(text.chars().next(), Some(c) if c.is_alphabetic()) {
+        return false;
+    }
+    let first = word_at(text, 0);
+    let second = word_at(text, 1);
+    if NON_BINDING_PHRASES.contains(&(first.as_str(), second.as_str())) {
+        return false;
+    }
+    if BINDING_WORDS.contains(&first.as_str()) {
+        return true;
+    }
+    if !BINDING_UNLESS_QUESTION.contains(&first.as_str()) {
+        return false;
+    }
+    if ends_a_question_or_exclamation(text) {
+        return false;
+    }
+    !SUBJECT_PRONOUNS.contains(&second.as_str())
+}
+
+/// A question mark or an exclamation ends the sentence for real, whatever
+/// opens the next segment. Closing quotes and brackets are looked past, so
+/// `he asked, "why?"` and `(stop!)` count.
+fn ends_a_question_or_exclamation(s: &str) -> bool {
+    let end = s.trim_end_matches(|c| matches!(c, '"' | '\'' | ')' | ']' | '\u{201d}' | '\u{2019}'));
+    matches!(end.trim_end().chars().last(), Some('?') | Some('!'))
+}
+
+/// Drops one trailing full stop, leaving an ellipsis (handled separately) and
+/// every other mark alone.
+fn drop_trailing_full_stop(s: &mut String) {
+    let trimmed = s.trim_end();
+    let keep = match trimmed.strip_suffix('.') {
+        Some(rest) if !rest.ends_with('.') => rest.len(),
+        _ => trimmed.len(),
+    };
+    s.truncate(keep);
+}
+
 /// Joins segment texts into one transcript.
 ///
 /// Each part is trimmed and empty parts are skipped. Parts are separated by
 /// one space, except that leading punctuation attaches to the previous word.
 /// Whisper marks a segment that "trails off" with an ellipsis; when the next
-/// segment carries on mid-sentence (starts lowercase or with an ellipsis of
-/// its own), those seam ellipses are dropped. Case is never changed.
+/// segment carries on mid-sentence (starts lowercase, with an ellipsis of its
+/// own, or with a [binding word](BINDING_WORDS)), those seam ellipses are
+/// dropped, along with the full stop the decoder wrote before the seam.
+///
+/// Case is changed in exactly one place: the leading word of a binding seam
+/// is lowercased. Every word in [`BINDING_WORDS`] and
+/// [`BINDING_UNLESS_QUESTION`] is a closed-class function word, never a
+/// proper noun, so that is safe by construction.
 pub fn join_segments<S: AsRef<str>>(parts: &[S]) -> String {
     let mut out = String::new();
     for part in parts {
@@ -235,13 +350,31 @@ pub fn join_segments<S: AsRef<str>>(parts: &[S]) -> String {
             continue;
         }
         let first = text.chars().next().unwrap_or(' ');
-        if continues || first.is_lowercase() {
+        let binds = !ends_a_question_or_exclamation(&out) && binds_to_previous(text);
+        let carries_on = continues || first.is_lowercase() || binds;
+        if carries_on {
             strip_trailing_ellipsis(&mut out);
+        }
+        // A full stop before a seam the speaker did not end is the decoder's,
+        // not theirs. An all-lowercase carry-on says so as plainly as a
+        // binding word does: no decoder writes a lowercase word after a real
+        // stop. A mixed-case one does (`iPhone`, `eBay`, `macOS`), so that
+        // full stop is the speaker's and stays.
+        if binds || (first.is_lowercase() && opens_with_an_all_lowercase_word(text)) {
+            drop_trailing_full_stop(&mut out);
         }
         if !out.is_empty() && !is_attaching_punctuation(first) {
             out.push(' ');
         }
-        out.push_str(text);
+        if binds {
+            let mut chars = text.chars();
+            if let Some(c) = chars.next() {
+                out.extend(c.to_lowercase());
+                out.push_str(chars.as_str());
+            }
+        } else {
+            out.push_str(text);
+        }
     }
     out
 }
@@ -578,12 +711,171 @@ mod tests {
     }
 
     #[test]
-    fn join_keeps_an_ellipsis_before_a_new_sentence_and_never_changes_case() {
+    fn join_keeps_an_ellipsis_and_the_case_before_a_new_sentence() {
         assert_eq!(
             join_segments(&["Let me think...", "Okay, yes."]),
             "Let me think... Okay, yes."
         );
         assert_eq!(join_segments(&["Hello.", "World."]), "Hello. World.");
+    }
+
+    #[test]
+    fn join_binds_a_segment_that_opens_with_a_word_that_cannot_open_a_sentence() {
+        assert_eq!(
+            join_segments(&["you've got complete control.", "Of my agenda."]),
+            "you've got complete control of my agenda."
+        );
+        assert_eq!(
+            join_segments(&["It should be filed.", "Into the Juno."]),
+            "It should be filed into the Juno."
+        );
+        assert_eq!(
+            join_segments(&["It cost more.", "Than I expected."]),
+            "It cost more than I expected."
+        );
+    }
+
+    #[test]
+    fn join_binds_a_subjectless_auxiliary_that_is_not_a_question() {
+        assert_eq!(
+            join_segments(&["the issues with dictation.", "Should be filed."]),
+            "the issues with dictation should be filed."
+        );
+        assert_eq!(
+            join_segments(&["The report.", "Was late again."]),
+            "The report was late again."
+        );
+    }
+
+    #[test]
+    fn join_drops_a_full_stop_the_decoder_wrote_before_a_lowercase_carry_on() {
+        assert_eq!(
+            join_segments(&["I went to the store.", "and bought milk."]),
+            "I went to the store and bought milk."
+        );
+    }
+
+    #[test]
+    fn join_keeps_the_full_stop_at_a_real_sentence_boundary() {
+        assert_eq!(join_segments(&["Hello.", "World."]), "Hello. World.");
+        // A question or an exclamation before the seam ended the sentence,
+        // whatever opens the next segment.
+        assert_eq!(
+            join_segments(&["Did you see it?", "Of course."]),
+            "Did you see it? Of course."
+        );
+        assert_eq!(
+            join_segments(&["Stop that!", "Of course."]),
+            "Stop that! Of course."
+        );
+        // An auxiliary that opens a real question keeps its own sentence.
+        assert_eq!(
+            join_segments(&["I filed it.", "Should I close it?"]),
+            "I filed it. Should I close it?"
+        );
+        // An inversion is a sentence, not a subjectless carry-on.
+        assert_eq!(
+            join_segments(&["I never asked.", "Had I known, I would have."]),
+            "I never asked. Had I known, I would have."
+        );
+        // The mark still ends the sentence behind a closing quote or bracket.
+        assert_eq!(
+            join_segments(&["He asked, \"why?\"", "Of my agenda."]),
+            "He asked, \"why?\" Of my agenda."
+        );
+    }
+
+    #[test]
+    fn join_leaves_a_sentence_that_merely_opens_like_a_binding_word() {
+        // "Of course." is one of the commonest things anyone dictates.
+        // Binding it would say something else.
+        assert_eq!(
+            join_segments(&["He is coming.", "Of course."]),
+            "He is coming. Of course."
+        );
+        assert_eq!(
+            join_segments(&["It is rare.", "Of late, anyway."]),
+            "It is rare. Of late, anyway."
+        );
+        // The word on its own still binds.
+        assert_eq!(
+            join_segments(&["He is coming.", "Of his own accord."]),
+            "He is coming of his own accord."
+        );
+    }
+
+    #[test]
+    fn join_keeps_a_full_stop_before_a_mixed_case_word() {
+        // A decoder writes `iPhone` lowercase-first on purpose, so the stop
+        // before it is the speaker's. An all-lowercase word is a carry-on.
+        assert_eq!(
+            join_segments(&["Use it.", "iPhone is great."]),
+            "Use it. iPhone is great."
+        );
+        assert_eq!(
+            join_segments(&["I went to the store.", "and bought milk."]),
+            "I went to the store and bought milk."
+        );
+    }
+
+    #[test]
+    fn join_binds_across_a_seam_ellipsis() {
+        assert_eq!(
+            join_segments(&["Let me think...", "Of the options."]),
+            "Let me think of the options."
+        );
+    }
+
+    #[test]
+    fn join_leaves_a_seam_alone_when_the_repair_would_need_its_own_punctuation() {
+        // "Engineering" may be a list item or a new sentence. Either way the
+        // join would need a comma this function cannot know about, and a
+        // run-on reads worse than the stray full stop. Left as the decoder
+        // wrote it, on purpose.
+        //
+        // This pins today's output, not a contract: a later rule that settles
+        // these seams correctly is an improvement, not a regression.
+        assert_eq!(
+            join_segments(&["Of my agenda.", "Engineering."]),
+            "Of my agenda. Engineering."
+        );
+        assert_eq!(
+            join_segments(&["for better helping.", "Apps to have access."]),
+            "for better helping. Apps to have access."
+        );
+    }
+
+    // The two transcripts from Lacy's 2026-11-02 log (LAC-6492), as the
+    // segments the decoder produced. Every seam repaired below is one where
+    // the next segment opens with a word that binds to the text before it;
+    // the seams left standing are the ones no text-only rule can settle.
+    #[test]
+    fn the_logged_transcript_loses_its_stray_full_stops_at_binding_seams() {
+        assert_eq!(
+            join_segments(&[
+                "Alright Commander, you've got complete control.",
+                "Of my agenda.",
+                "Engineering.",
+                "Job.",
+                "I want to be clear, professional.",
+                "And sing.",
+            ]),
+            "Alright Commander, you've got complete control of my agenda. \
+             Engineering. Job. I want to be clear, professional. And sing."
+        );
+
+        assert_eq!(
+            join_segments(&[
+                "the issues with dictation.",
+                "Should be filed.",
+                "Into the Juno.",
+                "Project as they are related so that we can create a process for better helping.",
+                "Apps to have access moving forward.",
+            ]),
+            "the issues with dictation should be filed into the Juno. \
+             Project as they are related so that we can create a process for better helping. \
+             Apps to have access moving forward."
+        );
     }
 
     #[test]
