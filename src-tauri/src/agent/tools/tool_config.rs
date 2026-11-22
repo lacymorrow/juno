@@ -667,6 +667,14 @@ impl ToolConfigManager {
                 "Check which page is open",
             ),
             (tool_names::BROWSER_SCREENSHOT, "Take browser screenshots"),
+            (
+                tool_names::BROWSER_LIST_PAGE_TOOLS,
+                "See the actions a page offers directly",
+            ),
+            (
+                tool_names::BROWSER_CALL_PAGE_TOOL,
+                "Use an action a page offers instead of clicking",
+            ),
         ];
 
         // Safari tools (specialized Safari automation - disabled by default)

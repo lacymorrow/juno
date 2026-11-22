@@ -1,6 +1,7 @@
 use base64;
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::page::Viewport;
+use chromiumoxide::cdp::js_protocol::runtime::CallFunctionOnParams;
 use chromiumoxide::handler::Handler;
 use chromiumoxide::page::{Page, ScreenshotParams};
 use futures::StreamExt;
@@ -14,12 +15,14 @@ use tauri::async_runtime::JoinHandle;
 use tokio::sync::Mutex;
 
 use crate::agent::core::{AgentError, ToolResult};
+use crate::agent::tools::webmcp;
 use crate::constants::{
     browser::{system_url_commands, url_protocols},
     chrome_debug_urls,
     files::shell_commands,
     timeouts,
 };
+use crate::state::RiskLevel;
 
 // Helper type alias for brevity
 type ControllerResult<T> = Result<T, AgentError>;
@@ -374,6 +377,8 @@ impl BrowserController {
                 "--disable-component-update",
                 // Enable remote debugging for future CDP connections
                 crate::constants::browser::chrome_flags::REMOTE_DEBUG_PORT_FLAG,
+                // Let pages publish WebMCP tools on document.modelContext
+                webmcp::CHROME_ENABLE_FLAG,
             ])
             .build()
             .map_err(|e| AgentError::ToolError(format!("Failed to build browser config: {}", e)))?;
@@ -434,6 +439,7 @@ impl BrowserController {
                 "--disable-component-update",
                 // Use different port to avoid conflicts
                 crate::constants::browser::chrome_flags::REMOTE_DEBUG_PORT_FLAG_ALT1,
+                webmcp::CHROME_ENABLE_FLAG,
             ])
             .build()
             .map_err(|e| AgentError::ToolError(format!("Failed to build browser config: {}", e)))?;
@@ -637,6 +643,7 @@ impl BrowserController {
             crate::constants::browser::chrome_flags::REMOTE_DEBUG_PORT_FLAG,
             // Improve stability
             "--disable-features=VizDisplayCompositor",
+            webmcp::CHROME_ENABLE_FLAG,
         ];
 
         // Reduced timeout to 45 seconds for better user experience
@@ -1113,15 +1120,20 @@ impl BrowserController {
                     _ => "Unknown".to_string(),
                 };
 
+                let mut output = serde_json::json!({
+                    "status": "success",
+                    "url": url,
+                    "title": title
+                });
+
+                // If the page publishes WebMCP tools, say so: calling one beats
+                // clicking. Silent on every failure path (Juno rule).
+                if let Some(hint) = Self::page_tools_hint(page).await {
+                    output["page_tools"] = hint;
+                }
+
                 let call_id = "nav_call".to_string();
-                Ok(ToolResult {
-                    call_id,
-                    output: serde_json::json!({
-                        "status": "success",
-                        "url": url,
-                        "title": title
-                    }),
-                })
+                Ok(ToolResult { call_id, output })
             }
             Err(e) => {
                 log::error!("Navigation failed for {}: {}", url, e);
@@ -1160,6 +1172,199 @@ impl BrowserController {
             Err(AgentError::ToolError(
                 "No active browser page to get URL from".to_string(),
             ))
+        }
+    }
+
+    // --- WebMCP page tools (document.modelContext) ---
+
+    /// Run an `async function() {...}` body in the page and return its value.
+    /// `awaitPromise` is set explicitly: the page tools are all async.
+    async fn eval_async(page: &Page, js: &str) -> ControllerResult<Value> {
+        let params = CallFunctionOnParams::builder()
+            .function_declaration(js)
+            .await_promise(true)
+            .build()
+            .map_err(|e| AgentError::ToolError(format!("Failed to build page script: {}", e)))?;
+        let result = page
+            .evaluate_function(params)
+            .await
+            .map_err(|e| AgentError::ToolError(format!("JavaScript evaluation failed: {}", e)))?;
+        Ok(result.value().cloned().unwrap_or(Value::Null))
+    }
+
+    /// The page's WebMCP tools. `None` when the page has no WebMCP API or the
+    /// read failed or timed out; both mean "use the DOM", so no error escapes.
+    /// Refreshes the risk registry the approval gate reads.
+    async fn fetch_page_tools(page: &Page) -> Option<Vec<webmcp::PageTool>> {
+        let raw = tokio::time::timeout(
+            Duration::from_millis(webmcp::LIST_TIMEOUT_MS),
+            Self::eval_async(page, webmcp::LIST_TOOLS_JS),
+        )
+        .await
+        .ok()?
+        .ok()?;
+        let tools = webmcp::parse_tools(&raw)?;
+        webmcp::remember_tools(&tools);
+        Some(tools)
+    }
+
+    /// Tools right after a navigation. Pages often register on load, so an
+    /// API that answers with an empty list is asked again a few times.
+    async fn fetch_page_tools_settled(page: &Page) -> Vec<webmcp::PageTool> {
+        for attempt in 0..webmcp::SETTLE_ATTEMPTS {
+            match Self::fetch_page_tools(page).await {
+                None => return Vec::new(),
+                Some(tools) if !tools.is_empty() => return tools,
+                Some(_) => {
+                    if attempt + 1 < webmcp::SETTLE_ATTEMPTS {
+                        tokio::time::sleep(Duration::from_millis(webmcp::SETTLE_DELAY_MS)).await;
+                    }
+                }
+            }
+        }
+        Vec::new()
+    }
+
+    async fn page_tools_hint(page: &Page) -> Option<Value> {
+        webmcp::navigate_hint(&Self::fetch_page_tools_settled(page).await)
+    }
+
+    /// `browser_list_page_tools`: what the page publishes. An empty list, never
+    /// an error, when it publishes nothing.
+    pub async fn list_page_tools(&self, _args: &Value) -> ControllerResult<ToolResult> {
+        let page_guard = self.page.lock().await;
+        let tools = match page_guard.as_ref() {
+            Some(page) => Self::fetch_page_tools_settled(page).await,
+            None => Vec::new(),
+        };
+        Ok(ToolResult {
+            call_id: "page_tools_list".to_string(),
+            output: webmcp::list_output(&tools),
+        })
+    }
+
+    /// `browser_call_page_tool`: run one page tool with a timeout and an abort
+    /// signal. A tool the page flagged `consequentialHint` that the approval
+    /// gate has not seen flagged is refused here (stale registry), so the model
+    /// re-lists and the gate asks; failing closed beats running it unasked.
+    pub async fn call_page_tool(&self, args: &Value) -> ControllerResult<ToolResult> {
+        let name = args
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|n| !n.is_empty())
+            .ok_or_else(|| AgentError::ToolError("Missing 'name' argument".to_string()))?;
+        let input = match args.get("input") {
+            None | Some(Value::Null) => serde_json::json!({}),
+            Some(v) if v.is_object() => v.clone(),
+            Some(_) => {
+                return Err(AgentError::ToolError(
+                    "'input' must be an object matching the tool's input_schema".to_string(),
+                ))
+            }
+        };
+        let timeout_ms = Self::optional_timeout_ms(args).unwrap_or(webmcp::DEFAULT_CALL_TIMEOUT_MS);
+
+        let fall_back = || {
+            AgentError::ToolError(format!(
+                "No page tool named '{}' on this page. Use browser_list_page_tools to see what exists, or fall back to browser_extract_content and browser_interact.",
+                name
+            ))
+        };
+
+        let page_guard = self.page.lock().await;
+        let page = page_guard.as_ref().ok_or_else(fall_back)?;
+
+        // What the approval gate decided this call was, read before the fetch
+        // below refreshes the registry it read from.
+        let gated_as_consequential = matches!(webmcp::classify_call(args), RiskLevel::High);
+
+        let tools = Self::fetch_page_tools(page).await.ok_or_else(fall_back)?;
+        let tool = tools
+            .iter()
+            .find(|t| t.name == name)
+            .ok_or_else(fall_back)?;
+        if tool.consequential && !gated_as_consequential {
+            return Err(AgentError::ToolError(format!(
+                "'{}' is marked consequential by the page and was not approved as such. Call browser_list_page_tools, then call it again so approval can be asked.",
+                name
+            )));
+        }
+
+        let script = webmcp::call_tool_js(
+            &Self::js_string_literal(name),
+            &Self::js_string_literal(&input.to_string()),
+            timeout_ms,
+        );
+        let budget = Duration::from_millis(timeout_ms.saturating_add(webmcp::ABORT_GRACE_MS));
+        let raw = match tokio::time::timeout(budget, Self::eval_async(page, &script)).await {
+            Err(_) => {
+                return Err(AgentError::ToolError(format!(
+                    "Page tool '{}' did not finish within {}ms",
+                    name, timeout_ms
+                )))
+            }
+            // The script never reported back. The usual cause is that the tool
+            // navigated and took the execution context with it.
+            Ok(Err(e)) => {
+                log::debug!("Page tool '{}' returned no result: {}", name, e);
+                return Ok(ToolResult {
+                    call_id: "page_tool_call".to_string(),
+                    output: serde_json::json!({
+                        "status": "page_changed",
+                        "tool": name,
+                        "note": "The call did not return; the page probably navigated. Check browser_get_current_url."
+                    }),
+                });
+            }
+            Ok(Ok(v)) => v,
+        };
+
+        let outcome: Value = raw
+            .as_str()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or(Value::Null);
+        let status = outcome.get("status").and_then(Value::as_str).unwrap_or("");
+        match status {
+            "ok" => {
+                let result = outcome.get("result").cloned().unwrap_or(Value::Null);
+                let result = if tool.untrusted_content {
+                    webmcp::wrap_untrusted(tool.origin.as_deref(), result)
+                } else {
+                    result
+                };
+                Ok(ToolResult {
+                    call_id: "page_tool_call".to_string(),
+                    output: serde_json::json!({ "status": "ok", "tool": name, "result": result }),
+                })
+            }
+            "navigated" => Ok(ToolResult {
+                call_id: "page_tool_call".to_string(),
+                output: serde_json::json!({
+                    "status": "navigated",
+                    "tool": name,
+                    "note": "The tool navigated the page and returned nothing. Check browser_get_current_url."
+                }),
+            }),
+            "timeout" => Err(AgentError::ToolError(format!(
+                "Page tool '{}' was aborted after {}ms",
+                name, timeout_ms
+            ))),
+            "error" => {
+                let detail = outcome
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown error");
+                let detail = if tool.untrusted_content {
+                    String::from("the tool reported an error")
+                } else {
+                    detail.chars().take(500).collect()
+                };
+                Err(AgentError::ToolError(format!(
+                    "Page tool '{}' failed: {}",
+                    name, detail
+                )))
+            }
+            _ => Err(fall_back()),
         }
     }
 
