@@ -22,7 +22,8 @@ import {
 import { Check } from "lucide-react";
 import { SettingsSectionProps } from "../types";
 import { SettingsGroup, SettingsRow } from "../ui";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import { COMMANDS } from "@/lib/constants.generated";
 
@@ -107,32 +108,54 @@ export default function AssistantModelPicker({
       ? "Loading..."
       : "Select model";
 
+  // Newest pick wins: a slower earlier pick that resolves late must not write
+  // its model over a later one (LAC-8469).
+  const latestPick = useRef(0);
+
   const handleModelSelect = useCallback(
     async (providerId: string, modelId: string) => {
       setModelSelectorOpen(false);
+      const pick = ++latestPick.current;
+      const previousProvider = settings.activeProvider;
+      const switching = providerId !== previousProvider;
+      let switched = false;
       try {
-        // If switching providers, change the active provider first
-        if (providerId !== settings.activeProvider) {
-          await settings.handleActiveProviderChange(providerId);
-        }
-
-        // Validate and set the model
+        // Validate before touching anything, so a rejected model never
+        // leaves the provider half switched.
         const isValid = await invoke<boolean>(
           COMMANDS.PROVIDERS_VALIDATE_PROVIDER_MODEL,
           { providerId, modelId }
         );
-        if (!isValid) return;
+        if (pick !== latestPick.current) return;
+        if (!isValid) {
+          toast.error("That model isn't available for this provider.");
+          return;
+        }
+
+        if (switching) {
+          await settings.handleActiveProviderChange(providerId);
+          switched = true;
+          if (pick !== latestPick.current) return;
+        }
 
         await invoke(COMMANDS.PROVIDERS_UPDATE_PROVIDER_MODEL, {
           providerId,
           model: modelId,
         });
+        if (pick !== latestPick.current) return;
 
         // Only show the new model once Rust has it. Setting it before the
         // persist left the picker showing a model that failed to save (LAC-8423).
         settings.setFormData((prev) => ({ ...prev, model: modelId }));
       } catch (error) {
         console.error("AssistantModelPicker: Failed to change model:", error);
+        toast.error("Couldn't save the model. Nothing was changed.");
+        // The provider switch already landed in Rust. Switch back, which also
+        // reloads the old provider's model from the backend, so the picker
+        // and Rust agree again.
+        if (switched && pick === latestPick.current && previousProvider) {
+          await settings.handleActiveProviderChange(previousProvider);
+        }
       }
     },
     [settings]
