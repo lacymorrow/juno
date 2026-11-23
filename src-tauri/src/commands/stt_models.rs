@@ -83,6 +83,10 @@ pub struct ModelDef {
     /// ggml filename for Whisper models; the model directory's name under
     /// `<app data>/models/` for Parakeet (`ParakeetVariant::dir_leaf`).
     pub filename: &'static str,
+    /// Shown to the person, and the floor a Whisper download must clear to
+    /// count as a model file rather than a block page (`min_bytes_for`).
+    /// There is no second place to keep in step: the floor is derived from
+    /// this, so correcting a size corrects the floor with it.
     pub size_mb: u32,
     pub bundled: bool,
     /// Parakeet only builds on Apple Silicon (parakeet-rs / ort). Mirrors

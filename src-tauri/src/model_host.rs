@@ -56,7 +56,7 @@
 //! a download has found the host unavailable, automatic fetching stops until
 //! one of the two events above.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -176,6 +176,17 @@ static STATUS: LazyLock<Mutex<HostStatus>> = LazyLock::new(|| Mutex::new(HostSta
 static APP: OnceLock<AppHandle> = OnceLock::new();
 /// One probe at a time, however many callers ask at once.
 static PROBING: AtomicBool = AtomicBool::new(false);
+/// Which network the answer describes, bumped every time the route changes.
+///
+/// A probe takes seconds, and the laptop this bug was found on moves between
+/// a work network and a home one. A probe begun on the work network can
+/// therefore land after the Mac has joined the home one, and its answer
+/// describes a network the Mac has left. Worse, it is wrong in the sticky
+/// direction: the host request dies with the old route while the internet
+/// request succeeds on the new one, which classifies as `Blocked` on a
+/// network where Hugging Face is perfectly reachable. Nothing re-probes on a
+/// timer, so that answer would stand until the next route change or Retry.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 fn set(next: HostStatus) {
     let changed = {
@@ -198,6 +209,24 @@ fn set(next: HostStatus) {
             warn!("[ModelHost] Could not emit the change: {}", e);
         }
     }
+}
+
+/// Record `next` only if the Mac is still on the network the probe asked.
+///
+/// Returns whether it was recorded, so a caller can tell its own answer from
+/// a discarded one. Discarding leaves the status as the route change set it
+/// (`Unknown`), which is the honest answer: nobody has asked this network
+/// yet, and `Unknown` permits the next fetch to find out.
+fn set_if_current(asked_on: u64, next: HostStatus) -> bool {
+    if GENERATION.load(Ordering::SeqCst) != asked_on {
+        info!(
+            "[ModelHost] Dropping a {:?} answer: the route changed while the probe was in flight",
+            next
+        );
+        return false;
+    }
+    set(next);
+    true
 }
 
 /// What is known right now. Never does I/O, so it is safe on the speech path.
@@ -261,6 +290,8 @@ pub fn recheck_in_background() {
 /// the next thing that wants a model does, so a network that flaps costs one
 /// probe per actual need and not one per flap.
 pub fn on_network_change(up: bool) {
+    // Before the `set`, so a probe landing in between is already stale.
+    GENERATION.fetch_add(1, Ordering::SeqCst);
     set(if up {
         HostStatus::Unknown
     } else {
@@ -297,10 +328,12 @@ async fn probe() -> HostStatus {
         return status();
     }
     let _in_flight = ProbeInFlight;
+    let asked_on = GENERATION.load(Ordering::SeqCst);
     let outcome = run_probes().await;
     if let Some(outcome) = outcome {
-        set(outcome);
-        return outcome;
+        if set_if_current(asked_on, outcome) {
+            return outcome;
+        }
     }
     status()
 }
@@ -547,6 +580,52 @@ mod tests {
             PROBING.store(true, Ordering::SeqCst);
         }
         assert!(!PROBING.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn an_answer_about_a_network_the_mac_has_left_is_thrown_away() {
+        // Owns STATUS and GENERATION for the process: no other test writes
+        // either, and the real path records a probe only through
+        // `set_if_current`, which is what this drives.
+
+        // A probe begins while the Mac is on the work network.
+        let asked_on = GENERATION.load(Ordering::SeqCst);
+
+        // Nothing has moved, so its answer counts.
+        assert!(set_if_current(asked_on, HostStatus::Blocked));
+        assert_eq!(status(), HostStatus::Blocked);
+
+        // The Mac joins the home network while that probe is still in
+        // flight. The route change throws the old answer away; nothing is
+        // known about this network yet, and `Unknown` permits a fetch.
+        on_network_change(true);
+        assert_eq!(status(), HostStatus::Unknown);
+
+        // Now the work network's probe lands. It must not be recorded.
+        // Without the generation check it wrote `Blocked` over that
+        // `Unknown`, and it is wrong in the sticky direction: the host
+        // request dies with the old route while the internet request
+        // succeeds on the new one, so a reachable network classifies as
+        // blocked. Nothing re-probes on a timer, so that stood until the
+        // next route change or Retry.
+        assert!(
+            !set_if_current(asked_on, HostStatus::Blocked),
+            "an answer from the old network reported itself as recorded"
+        );
+        assert_eq!(
+            status(),
+            HostStatus::Unknown,
+            "a probe answered for a network the Mac has left"
+        );
+
+        // A probe that asks on this network is recorded normally, so the
+        // guard discards stale answers rather than stopping probing.
+        let on_this_network = GENERATION.load(Ordering::SeqCst);
+        assert!(set_if_current(on_this_network, HostStatus::Reachable));
+        assert_eq!(status(), HostStatus::Reachable);
+
+        // Leave the statics as they were found.
+        set(HostStatus::Unknown);
     }
 
     #[test]

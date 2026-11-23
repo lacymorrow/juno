@@ -115,7 +115,17 @@ impl FetchError {
         match status {
             HostStatus::Blocked => FetchError::HostUnavailable,
             HostStatus::Offline => FetchError::Network("no route to the model host".into()),
+            // Neither of these is a reason not to fetch, so arriving here
+            // means a caller turned a usable status into an error. The
+            // fallback stays the mild one (a retryable network error, not a
+            // sticky `HostUnavailable`) and is pinned by a test, so this
+            // logs rather than asserts: the arm is a supported fallback, and
+            // a `debug_assert!` here would fail the test that pins it.
             HostStatus::Unknown | HostStatus::Reachable => {
+                warn!(
+                    "[ModelDownload] A fetch failed with the host status {:?}, which permits fetching",
+                    status
+                );
                 FetchError::Network("host answer not settled".into())
             }
         }
