@@ -336,6 +336,7 @@ async fn initialize_onboarding_state(app_handle: AppHandle) -> Result<(), String
     // With the provider settled, start watching whether Juno can reach it
     // (and the network at all), for the bar's dot and for submit_query.
     crate::connectivity::start(app_handle.clone());
+    crate::model_host::start(app_handle.clone());
 
     // With the provider settled, keep a booted `claude` process ready for the
     // next new conversation when the CLI is the provider. Spawned, never awaited.
