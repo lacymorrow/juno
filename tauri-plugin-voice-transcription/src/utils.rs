@@ -501,6 +501,22 @@ mod transcription_filter_tests {
     }
 
     #[test]
+    fn every_known_mishearing_of_the_name_becomes_juno() {
+        assert_eq!(filter_transcription_text("Hi, Joono,"), "Hi, Juno,");
+        assert_eq!(filter_transcription_text("Juneou's"), "Juno's");
+        assert_eq!(
+            filter_transcription_text("JUNEAU, joono and juneou"),
+            "Juno, Juno and Juno"
+        );
+    }
+
+    #[test]
+    fn words_near_the_name_are_left_alone() {
+        let text = "joonos and June, judo in juneous";
+        assert_eq!(filter_transcription_text(text), text);
+    }
+
+    #[test]
     fn the_named_tokens_still_go() {
         assert_eq!(
             filter_transcription_text("hello [BLANK_AUDIO] world"),

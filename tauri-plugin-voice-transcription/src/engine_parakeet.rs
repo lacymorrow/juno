@@ -49,6 +49,10 @@ const TDT_VOCAB: &str = "vocab.txt";
 enum Loaded {
     Ctc(Box<Parakeet>),
     Tdt(Box<ParakeetTDT>),
+    /// Hears the same words whatever the audio. CI has no model, so this is
+    /// how the session's handling of model output gets tested there.
+    #[cfg(test)]
+    Canned(&'static str),
 }
 
 impl Loaded {
@@ -56,6 +60,8 @@ impl Loaded {
         let result = match self {
             Loaded::Ctc(model) => model.transcribe_samples(audio.to_vec(), 16000, 1, None)?,
             Loaded::Tdt(model) => model.transcribe_samples(audio.to_vec(), 16000, 1, None)?,
+            #[cfg(test)]
+            Loaded::Canned(text) => return Ok(text.to_string()),
         };
         Ok(result.text)
     }
@@ -415,6 +421,41 @@ mod tests {
         for f in variant.files() {
             std::fs::write(dir.join(f.name), contents).expect("model file");
         }
+    }
+
+    fn session_hearing(text: &'static str) -> ParakeetSession {
+        ParakeetSession {
+            model: Arc::new(Mutex::new(Some(Loaded::Canned(text)))),
+        }
+    }
+
+    #[test]
+    fn the_final_transcript_spells_junos_name_right() {
+        let mut session = session_hearing("Hi, Joono, open Juneau's notes");
+        assert_eq!(
+            session.transcribe_final(&[0.0]),
+            Ok("Hi, Juno, open Juno's notes".to_string())
+        );
+    }
+
+    #[test]
+    fn segments_and_partials_get_the_same_name_fix() {
+        let mut session = session_hearing("Juneou, stop");
+        assert_eq!(
+            session.transcribe_final_segment(&[0.0], "so"),
+            Ok("Juno, stop".to_string())
+        );
+        assert_eq!(
+            session.transcribe_partial(&[0.0]),
+            Ok(Some("Juno, stop".to_string()))
+        );
+    }
+
+    #[test]
+    fn parakeet_gets_the_name_fix_and_no_other_filter() {
+        let raw = "(upbeat music) well... joonos in June";
+        let mut session = session_hearing(raw);
+        assert_eq!(session.transcribe_final(&[0.0]), Ok(raw.to_string()));
     }
 
     #[test]
