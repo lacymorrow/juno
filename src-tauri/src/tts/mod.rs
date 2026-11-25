@@ -1,6 +1,7 @@
 pub mod account_keys;
 pub mod elevenlabs;
 pub mod kokoro;
+mod kokoro_recovery;
 pub mod no_voice;
 pub mod pcm_player;
 pub mod prerender;

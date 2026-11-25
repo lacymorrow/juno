@@ -22,10 +22,12 @@
 //!   unwanted. A background load that finishes after that drops what it
 //!   loaded instead of keeping 82MB nobody asked for, unless a speaking call
 //!   is already waiting on it.
+//! - **A broken engine is replaced.** See `kokoro_recovery`.
 //! - **Nothing here awaits.** Every lock is a `std` mutex held for a few
 //!   instructions on a blocking thread or in a plain function, never across an
 //!   `.await`.
 
+use super::kokoro_recovery::{guard, with_recovery, Engine, Fault, GpuHealth};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex as StdMutex, MutexGuard, OnceLock};
@@ -33,7 +35,7 @@ use tauri::AppHandle;
 use tracing::{error, info, warn};
 
 /// The loaded model. `TtsModel` is `Send + Sync`, so sharing one is sound.
-type KokoroModel = Arc<dyn any_tts::TtsModel>;
+type KokoroModel = Arc<Engine<Box<dyn any_tts::TtsModel>>>;
 
 enum Slot<M> {
     Empty,
@@ -154,6 +156,17 @@ impl<M: Clone> ModelCell<M> {
         }
     }
 
+    /// Throw away a ready model that turned out to be broken, so the next
+    /// call builds another. False when the slot no longer holds that model.
+    pub fn discard(&self, is_broken: impl FnOnce(&M) -> bool) -> bool {
+        let mut state = self.lock();
+        let discard = matches!(&state.slot, Slot::Ready(model) if is_broken(model));
+        if discard {
+            state.slot = Slot::Empty;
+        }
+        discard
+    }
+
     pub fn is_ready(&self) -> bool {
         matches!(self.lock().slot, Slot::Ready(_))
     }
@@ -165,6 +178,12 @@ impl<M: Clone> ModelCell<M> {
 }
 
 static KOKORO: ModelCell<KokoroModel> = ModelCell::new();
+
+static GPU: GpuHealth = GpuHealth::new();
+
+/// Intel Macs speak on the CPU. On their AMD GPUs macOS's shader compiler
+/// crashes on one of candle's Metal kernels, every time (LAC-9074).
+const GPU_SUPPORTED: bool = !cfg!(all(target_os = "macos", target_arch = "x86_64"));
 
 // -- the first download ------------------------------------------------------
 //
@@ -261,32 +280,80 @@ fn real_time_factor(synthesis_ms: u128, audio_secs: f32) -> Option<f32> {
     Some(synthesis_ms as f32 / 1000.0 / audio_secs)
 }
 
-fn load_kokoro() -> Result<KokoroModel, String> {
-    info!("[Kokoro] Loading Kokoro-82M (first run downloads ~82MB from HuggingFace Hub)");
-    let started = std::time::Instant::now();
-    // Metal where the Mac has it, CPU otherwise. Both architectures.
-    let config = any_tts::TtsConfig::new(any_tts::ModelType::Kokoro).with_preferred_runtime();
+/// A compute error comes from the engine, and a broken one keeps returning
+/// it. Anything else is about what was asked for.
+fn fault(error: any_tts::TtsError) -> Fault {
+    match error {
+        any_tts::TtsError::ComputeError(_) => Fault::Broken(error.to_string()),
+        _ => Fault::Request(error.to_string()),
+    }
+}
+
+fn build_kokoro(use_gpu: bool) -> Result<KokoroModel, Fault> {
+    let config = any_tts::TtsConfig::new(any_tts::ModelType::Kokoro);
+    let config = if use_gpu {
+        // Metal where the Mac has it, CPU otherwise.
+        config.with_preferred_runtime()
+    } else {
+        config
+            .with_device(any_tts::DeviceSelection::Cpu)
+            .with_dtype(any_tts::DType::F32)
+    };
     // Which device the preference actually resolved to. any-tts logs its own
     // "Metal device 0 initialized" without a prefix, so from Juno's log alone
     // there was no way to attribute it to Kokoro rather than to Parakeet,
     // which loads through candle too.
     let runtime = format!("{:?}/{:?}", config.device, config.dtype);
-    match any_tts::load_model(config) {
+    let on_gpu = !matches!(config.device, any_tts::DeviceSelection::Cpu);
+    let started = std::time::Instant::now();
+    let model = any_tts::load_model(config).map_err(fault)?;
+    info!(
+        "[Kokoro] Model loaded in {}ms on {}",
+        started.elapsed().as_millis(),
+        runtime
+    );
+    Ok(Arc::new(Engine { model, on_gpu }))
+}
+
+/// A new engine, on the GPU while the GPU is worth trying.
+fn load_kokoro() -> Result<KokoroModel, String> {
+    info!("[Kokoro] Loading Kokoro-82M (first run downloads ~82MB from HuggingFace Hub)");
+    let use_gpu = GPU_SUPPORTED && GPU.usable();
+    let mut result = guard(|| build_kokoro(use_gpu));
+    if let (true, Err(Fault::Broken(e))) = (use_gpu, &result) {
+        warn!("[Kokoro] Could not load on the GPU, trying the CPU: {}", e);
+        GPU.failed();
+        result = guard(|| build_kokoro(false));
+    }
+    match result {
         Ok(model) => {
-            info!(
-                "[Kokoro] Model loaded in {}ms on {}",
-                started.elapsed().as_millis(),
-                runtime
-            );
             set_load_problem(None);
-            Ok(Arc::from(model))
+            Ok(model)
         }
-        Err(e) => {
+        Err(Fault::Broken(e) | Fault::Request(e)) => {
             error!("[Kokoro] Model load failed: {}", e);
-            set_load_problem(Some(e.to_string()));
+            set_load_problem(Some(e.clone()));
             Err(format!("Failed to load Kokoro-82M model: {}", e))
         }
     }
+}
+
+/// Load an engine and say something with nobody listening: a first synthesis
+/// compiles the GPU kernels, which is slow, and is where a GPU that cannot
+/// compile them shows it. A broken engine is replaced before anyone waits on
+/// it.
+fn load_warm() -> Result<KokoroModel, String> {
+    let fresh = ModelCell::new();
+    fresh.get_or_load(load_kokoro)?;
+    let request = any_tts::SynthesisRequest::new("Ready.")
+        .with_voice(crate::tts::voices::KOKORO_DEFAULT_VOICE);
+    let warmed = with_recovery(&fresh, &GPU, load_kokoro, |model| {
+        model.synthesize(&request).map(|_| ()).map_err(fault)
+    });
+    if let Err(e) = warmed {
+        warn!("[Kokoro] Warm-up synthesis failed: {}", e);
+    }
+    fresh.get_or_load(load_kokoro)
 }
 
 /// Match the model to the engine in force: warm it when Kokoro is speaking,
@@ -311,16 +378,7 @@ pub fn sync_with_engine(engine: &str, on_settled: impl FnOnce() + Send + 'static
     }
 
     tauri::async_runtime::spawn_blocking(move || {
-        let result = load_kokoro();
-        // A first synthesis compiles the GPU kernels. Do it here, with nobody
-        // listening, rather than on the first real sentence.
-        if let Ok(model) = &result {
-            let warmup = any_tts::SynthesisRequest::new("Ready.")
-                .with_voice(crate::tts::voices::KOKORO_DEFAULT_VOICE);
-            if let Err(e) = model.synthesize(&warmup) {
-                warn!("[Kokoro] Warm-up synthesis failed: {}", e);
-            }
-        }
+        let result = load_warm();
         match KOKORO.finish_preload(result) {
             Ok(_) => announce_return(),
             Err(e) => warn!("[Kokoro] Preload failed: {}", e),
@@ -350,25 +408,27 @@ pub async fn invoke_kokoro_tts(text: String, voice: String, speed: f64) -> Resul
 
     // Candle inference is synchronous, so it runs off the async executor.
     let base64_audio = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        // Ready already when it was preloaded; otherwise this loads it, or
-        // waits for the preload in flight rather than starting a second one.
-        let model = KOKORO.get_or_load(load_kokoro)?;
-
-        if crate::tts::is_tts_stop_requested() {
-            return Ok("TTS_STOPPED_BY_USER".to_string());
-        }
-
         // any-tts reads Kokoro's speed factor from `temperature` (1.0 normal).
         let request = any_tts::SynthesisRequest::new(text.as_str())
             .with_voice(voice.as_str())
             .with_temperature(speed);
 
-        info!("[Kokoro] Synthesizing with voice '{}'", voice);
-        let synthesis_started = std::time::Instant::now();
-        let audio = model
-            .synthesize(&request)
-            .map_err(|e| format!("[Kokoro] Synthesis failed: {}", e))?;
-        let synthesis_ms = synthesis_started.elapsed().as_millis();
+        // The engine is ready already when it was preloaded; otherwise this
+        // loads it, or waits for the preload in flight rather than starting a
+        // second one. One that breaks is replaced and the sentence retried.
+        let spoken = with_recovery(&KOKORO, &GPU, load_kokoro, |model| {
+            if crate::tts::is_tts_stop_requested() {
+                return Ok(None);
+            }
+            info!("[Kokoro] Synthesizing with voice '{}'", voice);
+            let synthesis_started = std::time::Instant::now();
+            let audio = model.synthesize(&request).map_err(fault)?;
+            Ok(Some((audio, synthesis_started.elapsed().as_millis())))
+        })
+        .map_err(|e| format!("[Kokoro] Synthesis failed: {}", e))?;
+        let Some((audio, synthesis_ms)) = spoken else {
+            return Ok("TTS_STOPPED_BY_USER".to_string());
+        };
         // The sample rate comes from the model rather than from an assumption,
         // because the real-time factor is the whole point of the line and a
         // guessed rate would move it.
