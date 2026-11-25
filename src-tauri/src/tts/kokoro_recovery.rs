@@ -11,9 +11,11 @@
 //!   (unknown voice, a voice file that could not be fetched) is the request's
 //!   fault and keeps the engine.
 //! - The sentence that hit the broken engine is retried on the new one.
-//! - After [`MAX_GPU_FAILURES`] broken GPU engines in a row, the GPU is left
-//!   alone until relaunch and Kokoro speaks on the CPU. A GPU that cannot
-//!   compile a kernel fails the same way every time.
+//! - After [`MAX_GPU_FAILURES`] broken GPU engines, the GPU is left alone
+//!   until relaunch and Kokoro speaks on the CPU. A GPU that cannot compile a
+//!   kernel fails the same way every time.
+//! - A sentence that breaks the CPU engine too was never the GPU's fault, so
+//!   it costs the GPU nothing.
 //! - Nothing is remembered about a broken CPU engine. It is rebuilt every time.
 
 use super::kokoro::ModelCell;
@@ -23,8 +25,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tracing::warn;
 
-/// Broken GPU engines in a row before Kokoro moves to the CPU. Two, so a
-/// one-off GPU error gets a fresh engine on the same GPU first.
+/// Broken GPU engines before Kokoro moves to the CPU. Two, so a one-off GPU
+/// error gets a fresh engine on the same GPU first.
 pub const MAX_GPU_FAILURES: usize = 2;
 
 /// Enough to use up the GPU's chances and still try the CPU.
@@ -69,11 +71,9 @@ impl GpuHealth {
         }
     }
 
-    /// Only a run of failures counts. Once given up on, it stays given up on.
-    fn worked(&self) {
-        if self.usable() {
-            self.failures.store(0, Ordering::SeqCst);
-        }
+    /// Take back failures that turned out not to be the GPU's.
+    fn forgive(&self, failures: usize) {
+        self.failures.fetch_sub(failures, Ordering::SeqCst);
     }
 }
 
@@ -108,15 +108,12 @@ pub fn with_recovery<T, R>(
     job: impl Fn(&T) -> Result<R, Fault>,
 ) -> Result<R, String> {
     let mut last = String::new();
+    let mut blamed_on_gpu = 0;
+    let mut broke_the_cpu = false;
     for attempt in 1..=ATTEMPTS {
         let engine = cell.get_or_load(&load)?;
         match guard(|| job(&engine.model)) {
-            Ok(value) => {
-                if engine.on_gpu {
-                    gpu.worked();
-                }
-                return Ok(value);
-            }
+            Ok(value) => return Ok(value),
             Err(Fault::Request(e)) => return Err(e),
             Err(Fault::Broken(e)) => {
                 warn!(
@@ -127,10 +124,15 @@ pub fn with_recovery<T, R>(
                 // one that actually removes it counts against the GPU.
                 if cell.discard(|current| Arc::ptr_eq(current, &engine)) && engine.on_gpu {
                     gpu.failed();
+                    blamed_on_gpu += 1;
                 }
+                broke_the_cpu |= !engine.on_gpu;
                 last = e;
             }
         }
+    }
+    if broke_the_cpu {
+        gpu.forgive(blamed_on_gpu);
     }
     Err(last)
 }
@@ -214,18 +216,43 @@ mod tests {
     }
 
     #[test]
-    fn a_one_off_failure_rebuilds_on_the_gpu_and_does_so_again_next_time() {
-        // Engines 0 and 2 break; 1 and 3 work.
-        let factory = Factory::new(|n, _| n % 2 == 1);
+    fn a_one_off_failure_rebuilds_on_the_gpu() {
+        let factory = Factory::new(|n, _| n > 0);
+        assert_eq!(factory.speak(), Ok(()));
+        assert_eq!(factory.built(), vec![true, true]);
+        assert!(factory.gpu.usable());
+    }
+
+    /// Recovery is not a one-time thing: an engine that breaks after the GPU
+    /// was already given up on is replaced as well.
+    #[test]
+    fn a_second_break_later_is_recovered_too() {
+        // Engines 0 and 2 break.
+        let factory = Factory::new(|n, _| n != 0 && n != 2);
         assert_eq!(factory.speak(), Ok(()));
         // The next sentence needs a new engine, and that one breaks too.
         factory.cell.release();
         assert_eq!(factory.speak(), Ok(()));
-        assert_eq!(factory.built(), vec![true, true, true, true]);
-        assert!(factory.gpu.usable(), "failures were not in a row");
+        assert_eq!(factory.built(), vec![true, true, true, false]);
     }
 
-    /// Nothing is given up on for the CPU: it fails now, and is rebuilt for
+    /// A sentence no engine can say must not cost a healthy GPU its place.
+    #[test]
+    fn a_sentence_that_breaks_every_engine_does_not_blame_the_gpu() {
+        let factory = Factory::new(|_, _| true);
+        let result: Result<(), String> = with_recovery(
+            &factory.cell,
+            &factory.gpu,
+            || factory.load(),
+            |_| Err(Fault::Broken("shape mismatch".into())),
+        );
+        assert_eq!(result, Err("shape mismatch".to_string()));
+        assert!(factory.gpu.usable());
+        assert_eq!(factory.speak(), Ok(()));
+        assert_eq!(factory.built(), vec![true, true, false, true]);
+    }
+
+    /// When every attempt breaks, it fails now and a new engine is built for
     /// the next sentence.
     #[test]
     fn an_engine_that_keeps_breaking_reports_why_and_is_rebuilt_next_time() {
@@ -234,7 +261,8 @@ mod tests {
         assert!(error.contains("shader compiler crashed"), "got {error}");
         assert!(!factory.cell.is_ready(), "the broken engine is gone");
         assert_eq!(factory.speak(), Ok(()));
-        assert_eq!(factory.built(), vec![true, true, false, false]);
+        // The CPU broke too, so the GPU was not to blame and is tried again.
+        assert_eq!(factory.built(), vec![true, true, false, true]);
     }
 
     #[test]
