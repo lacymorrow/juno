@@ -113,7 +113,8 @@ import {
  * a capsule at rest (its controls under the pointer); past rest the island is
  * the text box, whatever Rust is doing, its placeholder saying what that is;
  * an answer streams in above the box, which stays as the follow-up field; a
- * component answer is the hero, edge to edge. The composer is one element for
+ * component with at most a one-paragraph caption is the hero, edge to edge
+ * (more prose than that and the whole answer is shown). The composer is one element for
  * the life of the island, so a draft or a dictation landing in it can never
  * lose its field to a state change (LAC-4240).
  *

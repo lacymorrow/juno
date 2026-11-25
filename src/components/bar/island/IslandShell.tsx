@@ -191,6 +191,17 @@ const DOT_KEYFRAMES = `
 .island-scroll::-webkit-scrollbar { width: 6px; }
 .island-scroll::-webkit-scrollbar-track { background: transparent; }
 .island-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.22); border-radius: 3px; }
+/*
+ * A table in the small answer pane: the rows and nothing around them, tight
+ * enough that a short plan fits with its buttons. Columns that cannot fit are
+ * reached by scrolling sideways. The frame's copy, download and fullscreen
+ * controls stay in the full conversation, which has the room for them.
+ */
+[data-surface="island"] [data-streamdown="table-wrapper"] { margin-block: 0; padding: 0; gap: 0; border: 0; background: transparent; }
+[data-surface="island"] [data-streamdown="table-wrapper"] > div:not(:last-child) { display: none; }
+[data-surface="island"] [data-streamdown="table-wrapper"] > div:last-child { background: transparent; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.22) transparent; }
+[data-surface="island"] [data-streamdown="table-header-cell"],
+[data-surface="island"] [data-streamdown="table-cell"] { padding: 5px 8px; font-size: 12px; line-height: 1.4; vertical-align: top; }
 `;
 
 function useDotKeyframes() {

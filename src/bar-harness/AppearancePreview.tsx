@@ -292,11 +292,10 @@ function heldFrame(state: string): Frame & FrameExtra {
   }
 }
 
-/** The canned answer `demo=card` plays: a sentence, a component, a sentence. */
+/** The canned answer `demo=card` plays: a one-line caption and its component. */
 const DEMO_ANSWER =
   "Done. The draft is with Maya and I asked for Friday.\n\n" +
-  '<TaskSummaryCard title="Sent" tasks={[{ "label": "Draft to Maya", "done": true }, { "label": "Ask for Friday", "done": true }]} />\n\n' +
-  "I will let you know when she replies.";
+  '<TaskSummaryCard title="Sent" tasks={[{ "label": "Draft to Maya", "done": true }, { "label": "Ask for Friday", "done": true }]} />';
 const DEMO_SPOKEN = "Done. The draft is with Maya and I asked for Friday.";
 
 /** Play one turn through the same events Rust would send, then rest. */

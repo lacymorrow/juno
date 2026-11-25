@@ -21,6 +21,7 @@ import {
   RATIONALE_ANYWHERE_PATTERN,
   RATIONALE_LEAD_PATTERN,
   hasMixedContent,
+  isCaption,
 } from "@/lib/mixedContent";
 
 /**
@@ -340,7 +341,9 @@ function findJsxBlockEnd(
 /**
  * An answer split for a surface that shows its component as the hero (the
  * Island's component face): the component markup on its own, and the prose
- * around it as one plain line. Null when the answer has no component.
+ * around it as one plain line. Null when there is no hero: the answer has no
+ * component, or its prose is more than a caption (`isCaption`: a table, a
+ * list, a second paragraph) and the whole answer has to be shown in order.
  *
  * `components` is markup `MixedContentRenderer` renders as it would inside the
  * full answer, so a component still streaming shows its skeleton there too.
@@ -357,9 +360,13 @@ export function splitHeroContent(
     .filter((s) => s.type === "text" || s.type === "fallback")
     .map((s) => s.content.trim())
     .filter(Boolean)
-    .join(" ")
-    .replace(/\s+/g, " ");
-  return { components: parts.map((s) => s.content).join("\n\n"), prose };
+    // Text on both sides of a component is two paragraphs.
+    .join("\n\n");
+  if (!isCaption(prose)) return null;
+  return {
+    components: parts.map((s) => s.content).join("\n\n"),
+    prose: prose.replace(/\s+/g, " "),
+  };
 }
 
 // Re-exported: the check lives in a module with no rendering in it, so the
