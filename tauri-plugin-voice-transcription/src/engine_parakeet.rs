@@ -16,6 +16,7 @@
 
 use crate::engine::{TranscriptionEngine, TranscriptionSession};
 use crate::parakeet_model::ParakeetVariant;
+use crate::utils::correct_name_mishearings;
 use parakeet_rs::{ExecutionConfig, Parakeet, ParakeetTDT, Transcriber};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -364,7 +365,12 @@ impl ParakeetSession {
             .as_mut()
             .ok_or_else(|| "Parakeet model not loaded".to_string())?;
 
-        model.transcribe(audio).map_err(|e| e.to_string())
+        // Partials, segments and finals all come through here. Juno's name is
+        // the only thing rewritten; Whisper's artifact filters do not apply.
+        model
+            .transcribe(audio)
+            .map(|text| correct_name_mishearings(&text))
+            .map_err(|e| e.to_string())
     }
 }
 
