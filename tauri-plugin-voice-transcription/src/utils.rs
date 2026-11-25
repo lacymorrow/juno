@@ -30,20 +30,22 @@ static WHOLE_UTTERANCE_ARTIFACT_RE: Lazy<Option<Regex>> = Lazy::new(|| {
         .ok()
 });
 
-/// "Juneau" is what Whisper reliably hears when someone says "Juno": the Alaska
-/// capital is in its vocabulary, the assistant's name is not. Rewrite the whole
-/// word back (case-insensitively) so addressing Juno by name works. Juno is an
-/// assistant, so a genuine dictation about the city is rare enough that the
-/// name recognition is the right trade.
-static JUNEAU_RE: Lazy<Option<Regex>> = Lazy::new(|| {
-    Regex::new(r"(?i)\bjuneau\b")
-        .map_err(|e| tracing::error!("Failed to compile JUNEAU_RE: {}", e))
+/// What speech models write when someone says "Juno". The name is not in their
+/// vocabulary, so they guess: "Juneau" (the Alaska capital), "joono",
+/// "Juneou". Only spellings actually heard are listed, and only as whole words.
+/// Juno is an assistant, so a genuine dictation about the city is rare enough
+/// that the name recognition is the right trade.
+static NAME_MISHEARING_RE: Lazy<Option<Regex>> = Lazy::new(|| {
+    Regex::new(r"(?i)\b(?:juneau|joono|juneou)\b")
+        .map_err(|e| tracing::error!("Failed to compile NAME_MISHEARING_RE: {}", e))
         .ok()
 });
 
-/// Fix known mishearings of Juno's own name in a cleaned transcript.
-fn correct_name_mishearings(text: &str) -> String {
-    match &*JUNEAU_RE {
+/// Fix known mishearings of Juno's own name in a transcript. Every engine's
+/// output passes through here: Whisper's by way of
+/// [`filter_transcription_text`], Parakeet's directly.
+pub(crate) fn correct_name_mishearings(text: &str) -> String {
+    match &*NAME_MISHEARING_RE {
         Some(re) => re.replace_all(text, "Juno").into_owned(),
         None => text.to_string(),
     }
@@ -498,6 +500,22 @@ mod transcription_filter_tests {
         );
         // Whole word only: a word that merely contains the letters is untouched.
         assert_eq!(filter_transcription_text("juneaus"), "juneaus");
+    }
+
+    #[test]
+    fn every_known_mishearing_of_the_name_becomes_juno() {
+        assert_eq!(filter_transcription_text("Hi, Joono,"), "Hi, Juno,");
+        assert_eq!(filter_transcription_text("Juneou's"), "Juno's");
+        assert_eq!(
+            filter_transcription_text("JUNEAU, joono and juneou"),
+            "Juno, Juno and Juno"
+        );
+    }
+
+    #[test]
+    fn words_near_the_name_are_left_alone() {
+        let text = "joonos and June, judo in juneous";
+        assert_eq!(filter_transcription_text(text), text);
     }
 
     #[test]
