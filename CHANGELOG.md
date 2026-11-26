@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.305] - 2026-11-26
+
+### Fixed
+
+- **voice:** replace a broken Kokoro engine and speak on the CPU when the GPU cannot (LAC-9074) (#1061) (b6f3575f)
+
 ## [0.8.304] - 2026-11-25
 
 ### Fixed
@@ -1953,7 +1959,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, OpenAI, and Gemini are available as providers
 - Juno runs from a CLI entry point without the UI
 
-[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.304...HEAD
+[Unreleased]: https://github.com/lacymorrow/juno/compare/v0.8.305...HEAD
+[0.8.305]: https://github.com/lacymorrow/juno/compare/cua-v0.8.304...v0.8.305
 [0.8.304]: https://github.com/lacymorrow/juno/compare/cua-v0.8.303...v0.8.304
 [0.8.303]: https://github.com/lacymorrow/juno/compare/cua-v0.8.302...v0.8.303
 [0.8.302]: https://github.com/lacymorrow/juno/compare/cua-v0.8.301...v0.8.302
