@@ -85,11 +85,42 @@ The card above is live-bound.`;
 });
 
 describe("splitHeroContent (the Island's component face)", () => {
-  it("lifts the component out and folds the prose around it into one line", () => {
-    const content = 'Done. The draft is with Maya.\n\n<TaskSummaryCard title="Sent" />\n\nI will let you know.';
-    const hero = splitHeroContent(content);
-    expect(hero?.components).toBe('<TaskSummaryCard title="Sent" />');
-    expect(hero?.prose).toBe("Done. The draft is with Maya. I will let you know.");
+  const CARD = '<TaskSummaryCard title="Sent" />';
+
+  it("lifts the component out and puts its one-paragraph caption on one line", () => {
+    const hero = splitHeroContent(`Done. The draft is\nwith **Maya**.\n\n${CARD}`);
+    expect(hero?.components).toBe(CARD);
+    expect(hero?.prose).toBe("Done. The draft is with **Maya**.");
+  });
+
+  it("keeps a component with no prose as the hero", () => {
+    expect(splitHeroContent(CARD)).toEqual({ components: CARD, prose: "" });
+  });
+
+  it.each([
+    ["a table", "| Day | Route |\n|---|---|\n| 1 | Highway 1 |"],
+    ["a table without outer pipes", "Day | Route\n--- | ---\n1 | Highway 1"],
+    ["a table still arriving", "| Day | Route |"],
+    ["a bulleted list", "Pack these:\n- Passport\n- Charger"],
+    ["a numbered list", "1. Passport\n2. Charger"],
+    ["a heading", "## The plan"],
+    ["a quote", "> Book early."],
+    ["a code fence", "```sh\nls\n```"],
+    ["two paragraphs", "Here is the plan.\n\nBook early."],
+  ])("has no hero when the prose is %s: that is the answer", (_, prose) => {
+    expect(splitHeroContent(`${prose}\n\n${CARD}`)).toBeNull();
+  });
+
+  it("has no hero when there is prose on both sides of the component", () => {
+    expect(splitHeroContent(`Done.\n\n${CARD}\n\nI will let you know.`)).toBeNull();
+  });
+
+  it.each([
+    "**Done.** The draft is with Maya.",
+    "*Done*: -5 degrees, | as a pipe, and C# too.",
+    "#1 on the list is Maya.",
+  ])("still reads %s as a caption", (prose) => {
+    expect(splitHeroContent(`${prose} ${CARD}`)).not.toBeNull();
   });
 
   it("is null for an answer with no component", () => {

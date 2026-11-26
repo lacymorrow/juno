@@ -132,14 +132,10 @@ vi.mock("@/components/chat/ChatContainerV2", () => ({
 vi.mock("@/components/input-control/InputControlNotices", () => ({
   InputControlNotices: () => null,
 }));
-vi.mock("@/components/ui/mixed-content-renderer", () => ({
+// The drawing is stubbed to its source; the splitter that picks the face is real.
+vi.mock("@/components/ui/mixed-content-renderer", async (importActual) => ({
+  ...(await importActual<typeof import("@/components/ui/mixed-content-renderer")>()),
   MixedContentRenderer: ({ content }: { content: string }) => <div data-testid="answer">{content}</div>,
-  // The real splitter is tested with the renderer; a component here is one self-closing tag.
-  splitHeroContent: (content: string) => {
-    const m = content.match(/<([A-Z]\w*)[^>]*\/>/);
-    if (!m) return null;
-    return { components: m[0], prose: content.replace(m[0], " ").replace(/\s+/g, " ").trim() };
-  },
 }));
 // The steady frame, already placed in a top-centre well: the island grows down.
 vi.mock("../useIslandFrame", async () => {
@@ -236,7 +232,7 @@ const MARKDOWN_CAPTION_ANSWER: ChatMessage[] = [
   { role: "user", content: "What is Jenny's number?", timestamp: 1 },
   {
     role: "assistant",
-    content: '**Jenny Song**, mobile: 867-5309 <ContactActions name="Jenny" />',
+    content: '**Jenny Song**, mobile: 867-5309 <TaskSummaryCard title="Jenny" />',
     messageId: "c2",
     timestamp: 2,
   },
@@ -246,7 +242,7 @@ const COMPONENT_ANSWER: ChatMessage[] = [
   { role: "user", content: "Send the draft to Maya", timestamp: 1 },
   {
     role: "assistant",
-    content: 'Done. The draft is with Maya. <TaskSummaryCard title="Sent" /> I will let you know.',
+    content: 'Done. The draft is with Maya.\n\n<TaskSummaryCard title="Sent" />',
     messageId: "c1",
     timestamp: 2,
   },
@@ -701,10 +697,62 @@ describe("IslandBar: component", () => {
     renderWithAnswer(COMPONENT_ANSWER);
     expect(face()).toBe("component");
     expect(screen.getByTestId("island-hero")).toHaveTextContent('<TaskSummaryCard title="Sent" />');
-    expect(screen.getByTestId("island-caption")).toHaveTextContent("Done. The draft is with Maya. I will let you know.");
+    expect(screen.getByTestId("island-caption")).toHaveTextContent("Done. The draft is with Maya.");
     expect(screen.queryByTestId("island-caption-full")).toBeNull();
     fireEvent.click(screen.getByTestId("island-caption"));
     expect(screen.getByTestId("island-caption-full")).toBeInTheDocument();
+  });
+
+  const BUTTONS =
+    '<div className="flex gap-2">\n<QueryButton query="Day 1 directions">Day 1 directions</QueryButton>\n' +
+    '<QueryButton query="Remind me to book">Remind me to book</QueryButton>\n</div>';
+  const TABLE = "| Day | Route |\n|---|---|\n| 1 | Highway 1 |";
+  const planned = (content: string, isStreaming = false): ChatMessage[] => [
+    { role: "user", content: "Plan a road trip", timestamp: 1 },
+    { role: "assistant", content, messageId: "p1", timestamp: 2, isStreaming },
+  ];
+
+  it.each([
+    ["a table", TABLE],
+    ["a list", "- Passport\n- Phone mount"],
+    ["two paragraphs", "Here is the plan.\n\nBook early."],
+  ])("shows %s with buttons as the whole answer, in order, under the question", (_, prose) => {
+    const content = `${prose}\n\n${BUTTONS}`;
+    renderWithAnswer(planned(content));
+    expect(face()).toBe("answer");
+    expect(screen.getByTestId("answer").textContent).toBe(content);
+    expect(screen.getByTestId("island-question")).toHaveTextContent("Plan a road trip");
+    expect(screen.queryByTestId("island-caption")).toBeNull();
+  });
+
+  it("stays on the answer when the buttons arrive after a table", () => {
+    const view = renderWithAnswer(planned(TABLE, true));
+    expect(face()).toBe("answer");
+    for (const tail of ['\n\n<div className="flex gap-2">\n<QueryBut', `\n\n${BUTTONS}`]) {
+      chat.messages = planned(TABLE + tail, true);
+      view.rerender(<IslandBar />);
+      expect(face()).toBe("answer");
+      expect(screen.queryByTestId("island-caption")).toBeNull();
+    }
+  });
+
+  it("keeps a one-line caption above its component", () => {
+    renderWithAnswer(planned(`Here are your next steps.\n\n${BUTTONS}`));
+    expect(face()).toBe("component");
+    expect(screen.getByTestId("island-caption").textContent).toBe("Here are your next steps.");
+    expect(screen.getByTestId("island-hero").textContent).toBe(BUTTONS);
+  });
+
+  it("closes a whole answer with its X", () => {
+    renderWithAnswer(planned(`${TABLE}\n\n${BUTTONS}`));
+    fireEvent.click(screen.getByTestId("island-linger"));
+    expect(face()).toBe("idle");
+  });
+
+  it("closes a whole answer with Escape", () => {
+    renderWithAnswer(planned(`${TABLE}\n\n${BUTTONS}`));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(face()).toBe("idle");
   });
 
   it("reads the caption's marks instead of printing them (juno#858)", async () => {

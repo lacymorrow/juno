@@ -46,3 +46,21 @@ export function hasMixedContent(content: string): boolean {
     JSX_OPEN_TAG_PATTERN.test(content) || RATIONALE_ANYWHERE_PATTERN.test(content)
   );
 }
+
+/**
+ * A line only the full renderer can draw: a heading, quote, list item, code
+ * fence, table row (or the divider of a table written without outer pipes),
+ * rule or setext underline.
+ */
+const BLOCK_MARKDOWN_LINE =
+  /^[ \t]*(?:#{1,6}(?:\s|$)|>|[-*+](?:\s|$)|\d{1,9}[.)](?:\s|$)|```|~~~|\||:?-+:?[ \t]*\||(?:[-_*]{3,}|=+)[ \t]*$)/m;
+
+/**
+ * Is this text a caption: one paragraph with nothing but inline marks, which
+ * can sit on a single line beside a component? Anything else is the answer
+ * itself. Ask with the newlines still in; collapsed, a table reads as prose.
+ */
+export function isCaption(text: string): boolean {
+  const trimmed = text.trim();
+  return !/\n[ \t\r]*\n/.test(trimmed) && !BLOCK_MARKDOWN_LINE.test(trimmed);
+}
