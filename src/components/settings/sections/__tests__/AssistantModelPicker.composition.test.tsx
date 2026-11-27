@@ -94,7 +94,7 @@ const ALSO_CURRENT: Model = {
  *  and nothing can filter on it. The deletion is what replaces that half of
  *  the guard — re-adding the capability filter is now a type error rather than
  *  a test failure, which is the stronger check. `is_legacy` keeps a real
- *  fixture because it may yet gain a reader (LAC-8418). */
+ *  fixture: the chat picker reads it (LAC-9116) and this one must not. */
 const LEGACY: Model = {
   id: "claude-haiku-4-5-20251001",
   name: "Claude Haiku 4.5",

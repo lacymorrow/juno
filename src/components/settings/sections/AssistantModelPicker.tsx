@@ -78,9 +78,9 @@ export default function AssistantModelPicker({
   // short-circuited on `showAdvanced` every time it ran and hid nothing, in
   // every build that ever shipped (LAC-8407). Do not re-add it here: a filter
   // keyed on the toggle that decides whether this component exists at all can
-  // never fire. The surface where that rule would bite is the chat input's
+  // never fire. The surface where that rule does bite is the chat input's
   // model selector (components/chat/ChatInput.tsx), which every person sees and
-  // which filters nothing today.
+  // which hides legacy models other than the selected one.
   //
   // A provider that reports no models drops out rather than rendering an empty
   // group.

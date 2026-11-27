@@ -237,13 +237,9 @@ impl ComputerUse {
 /// `Legacy` (Fable 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6, Opus 4.5,
 /// Sonnet 5, Sonnet 4.6).
 ///
-/// `Legacy` models stay callable and stay **visible**: nothing filters on this
-/// field. The Settings picker had a filter that read the same advanced toggle
-/// that gated the group it lived in, so its first clause was always true and it
-/// hid nothing; it is deleted (LAC-8407). The chat picker (`ChatInput`) never
-/// had one, so every model the backend reports is offered to everyone. Whether
-/// it should filter is an open product question (LAC-8418). Treat this field as
-/// the provider's label and a badge input, not as a visibility rule.
+/// `Legacy` models stay callable. The chat picker (`ChatInput`) hides them,
+/// except the selected one (LAC-9116). The Settings picker, mounted only while
+/// advanced settings are on, lists every model the backend reports (LAC-8407).
 ///
 /// Toolset GA is a *separate* axis: see `ModelDefinition::toolset_ga`. #580
 /// conflated the two, which is how a model Anthropic had already moved to
@@ -379,8 +375,8 @@ pub struct ModelInfo {
     pub category: ModelCategory,
     pub supports_computer_use: bool,
     pub is_recommended: bool,
-    /// True when the provider lists the model as legacy. Nothing hides these:
-    /// both pickers list every model the backend reports. See `Availability`.
+    /// True when the provider lists the model as legacy. The chat picker hides
+    /// these unless selected; the Settings picker lists them. See `Availability`.
     pub is_legacy: bool,
 }
 

@@ -10,8 +10,9 @@ export interface ProviderInfo {
     name: string;
     supports_computer_use: boolean;
     is_recommended: boolean;
-    /** The provider lists this model as legacy. Nothing hides it: every picker
-     * lists every model the backend reports (LAC-8407). */
+    /** The provider lists this model as legacy. The chat input's model picker
+     * hides it unless it is the selected model; the Settings picker lists it
+     * (LAC-9116). */
     is_legacy: boolean;
   }[];
   is_available: boolean;
