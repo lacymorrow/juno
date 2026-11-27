@@ -421,7 +421,9 @@ jobs:
   # exercise the rewrite ever got was a real release. PR #976 review, round 3.
   #
   # Verified locally before this job existed: 18/18 under /bin/bash 3.2 and BSD
-  # sed/awk/grep on macOS 15 (arm64). The job is what keeps that true.
+  # sed/awk/grep on macOS 15 (arm64), and 20/20 again on the same toolchain when
+  # the checksum keying moved off occurrence order (LAC-7748). The job is what
+  # keeps that true.
   #
   # Behaviour only, no shellcheck leg: shellcheck is preinstalled on
   # ubuntu-latest and not on macos-latest, `release-report` already holds these
