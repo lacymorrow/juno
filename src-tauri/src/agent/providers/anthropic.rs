@@ -929,8 +929,9 @@ impl AnthropicBrain {
     /// not accept adaptive thinking (older models would return 400).
     ///
     /// `block_binding.prefix_mismatch_behavior: "drop_block"` is the insurance on the
-    /// thinking blocks Juno replays on tool-use turns. From Fable 5.1 onward (so Opus 5.5,
-    /// Sonnet 5.5 and Haiku 5.5, i.e. the default model) a replayed block's signature is
+    /// thinking blocks Juno replays on tool-use turns. From Fable 5.1 onward (so Fable 5.2,
+    /// Opus 5.5, Sonnet 5.5 and Haiku 5.5, which includes the default model) a replayed
+    /// block's signature is
     /// bound to the prefix that produced it: the top-level `system` prompt, the `tools`
     /// array, and every message before the block. Juno changes all three inside a live
     /// conversation — the system prompt is rebuilt per turn from live settings and the MCP
@@ -1715,10 +1716,12 @@ impl AnthropicBrain {
                             // transformations here, with the serving model's entries.
                             // These are the drops `message_start` cannot have seen: the
                             // fallback is what invalidated the blocks, and it happens
-                            // after the opening event. Juno asks for fallbacks on exactly
-                            // the models that get `block_binding` (`fallbacks_param`), so
-                            // this is a common drop rather than an edge case, and it takes
-                            // the whole replayed set with it.
+                            // after the opening event. The two sets overlap but are not
+                            // identical: `block_binding` rides on adaptive thinking, while
+                            // `fallbacks_param` reads `server_side_fallback`, and Haiku 5.5
+                            // gets the first and declines the second. So on every model that
+                            // does fall back this is a common drop rather than an edge case,
+                            // and it takes the whole replayed set with it.
                             if let Some(transformations) =
                                 Self::event_input_transformations(&event_data)
                             {
@@ -3081,11 +3084,16 @@ mod computer_toolset_request_tests {
 
     #[test]
     fn toolset_only_models_select_the_toolset_path() {
-        // Claude 5.5 and later accept no earlier tool type, so they are the
+        // The current lineup accepts no earlier tool type, so these are the
         // models worth the toolset's ~2x input-token overhead. Every other
         // toolset-GA model stays on `computer_20251124` and is covered by the
         // test below.
-        for model in [model_ids::CLAUDE_OPUS_5_5, model_ids::CLAUDE_SONNET_5_5] {
+        for model in [
+            model_ids::CLAUDE_FABLE_5_2,
+            model_ids::CLAUDE_OPUS_5_5,
+            model_ids::CLAUDE_SONNET_5_5,
+            model_ids::CLAUDE_HAIKU_5_5,
+        ] {
             let b = brain(model);
             assert!(b.uses_computer_toolset(), "{model} should use the toolset");
             assert_eq!(b.computer_toolset_name(), Some("computer"));
@@ -3132,7 +3140,12 @@ mod computer_toolset_request_tests {
     /// rather than an exact string.
     #[test]
     fn toolset_models_send_no_computer_use_beta_flag() {
-        for model in [model_ids::CLAUDE_OPUS_5_5, model_ids::CLAUDE_SONNET_5_5] {
+        for model in [
+            model_ids::CLAUDE_FABLE_5_2,
+            model_ids::CLAUDE_OPUS_5_5,
+            model_ids::CLAUDE_SONNET_5_5,
+            model_ids::CLAUDE_HAIKU_5_5,
+        ] {
             let b = brain(model);
             assert_eq!(b.resolve_computer_use_beta_header(), None, "{model}");
             let header = b.beta_header_value();
@@ -3252,14 +3265,44 @@ mod thinking_block_binding_tests {
     #[test]
     fn prefix_check_models_ask_the_api_to_drop_stale_thinking_blocks() {
         for model in [
+            model_ids::CLAUDE_FABLE_5_2,
             model_ids::CLAUDE_FABLE_5_1,
             model_ids::CLAUDE_OPUS_5_5,
             model_ids::CLAUDE_SONNET_5_5,
+            // Haiku 5.5 joined this list by gaining adaptive thinking, and for
+            // it `drop_block` is not insurance but a requirement: the
+            // computer-use-tool page says client-side pruning on Haiku 5.5
+            // "invalidates every later thinking block already in the history",
+            // and Juno's screenshot pruner rewrites earlier turns on every long
+            // run.
+            //
+            // One condition, and it is a live trap. That page: "If you must
+            // prune on Claude Sonnet 5.5 or Claude Haiku 5.5:
+            // `prefix_mismatch_behavior` works only with
+            // `thinking: {"type": "adaptive"}`." Juno sends exactly that, so
+            // this holds — but Sonnet 5.5 also accepts
+            // `thinking: {"type": "between_tools"}`, and switching either model
+            // to it would silently void the field while leaving this test
+            // green, because the test reads the `block_binding` object and not
+            // the `type` beside it.
+            model_ids::CLAUDE_HAIKU_5_5,
         ] {
             assert_eq!(
                 binding(model),
                 Some(serde_json::json!({ "prefix_mismatch_behavior": "drop_block" })),
                 "{model} would 400 mid-conversation on a replayed thinking block"
+            );
+            // The field is only honoured alongside `thinking.type: "adaptive"`,
+            // so asserting the object alone would stay green while the setting
+            // it depends on was swapped out from under it.
+            assert_eq!(
+                brain(model)
+                    .thinking_param()
+                    .as_ref()
+                    .and_then(|t| t.get("type"))
+                    .and_then(|t| t.as_str()),
+                Some("adaptive"),
+                "{model} sends block_binding, which needs thinking.type=adaptive"
             );
         }
     }
@@ -3356,8 +3399,9 @@ mod thinking_block_binding_tests {
 
     /// A mid-stream server-side fallback re-reports the transformations on the final
     /// `message_delta`, and those entries are the ones `message_start` cannot have seen.
-    /// Juno requests fallbacks on exactly the models that get `block_binding`, so reading
-    /// only `message_start` makes the most likely drop in the whole feature invisible.
+    /// Juno requests fallbacks on most of the models that get `block_binding` (Haiku 5.5
+    /// is the exception: `server_side_fallback: false`), so reading only `message_start`
+    /// makes the most likely drop in the whole feature invisible.
     /// The docs do not fix the nesting at this event, so both shapes must be accepted.
     #[test]
     fn transformations_are_read_from_a_fallback_message_delta() {

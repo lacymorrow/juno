@@ -1,9 +1,10 @@
 {
   "_comment": "Price table for LAC-4124 pricing measurement. USD per million tokens.",
-  "_verified": "2026-10-16 Anthropic/OpenAI; gpt-5.6-sol and gpt-5.3-codex re-verified 2026-11-16 against developers.openai.com/api/docs/models/<id> and /api/docs/pricing (gpt-5.6-sol gained a long-context tier and a cache-write rate; gpt-5.3-codex publishes no long tier); Gemini rows re-verified 2026-10-27 against the live pricing page (all 3 match; 3.7-flash and 3.5-flash confirmed still unpublished). Fetched from live provider docs, not from a cached model catalog (LAC-3106).",
+  "_verified": "Anthropic rows re-verified 2026-11-16 against the live pricing page: all 15 metered Claude rows match, claude-fable-5-2 added (LAC-8375). OpenAI gpt-5.6-sol and gpt-5.3-codex re-verified 2026-11-16 against developers.openai.com/api/docs/models/<id> and /api/docs/pricing (gpt-5.6-sol gained a long-context tier and a cache-write rate; gpt-5.3-codex publishes no long tier); other OpenAI rows 2026-10-16. Gemini rows re-verified 2026-11-16 against the live page, now with its URL recorded below (all 3 match on the Standard tier; 3.7-flash, 3.5-flash and 2.5-computer-use-preview confirmed still unpublished) (LAC-8412). Fetched from live provider docs, not from a cached model catalog (LAC-3106).",
   "_sources": {
     "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
-    "openai": "https://developers.openai.com/api/docs/pricing"
+    "openai": "https://developers.openai.com/api/docs/pricing",
+    "gemini": "https://aistudio.google.com/docs/pricing"
   },
   "_schema": {
     "input": "base input tokens, per MTok",
@@ -14,6 +15,13 @@
     "billing": "metered = per-token API billing; subscription = flat-rate seat, no marginal token cost"
   },
   "models": {
+    "claude-fable-5-2": {
+      "billing": "metered",
+      "input": 8.0,
+      "output": 40.0,
+      "cache_read": 0.2,
+      "cache_write": 10.0
+    },
     "claude-opus-5-5": {
       "billing": "metered",
       "input": 4.0,
@@ -274,12 +282,17 @@
   "_notes": [
     "Anthropic usage reports input_tokens EXCLUDING cache_read_input_tokens and cache_creation_input_tokens, so summing all four categories does not double-count.",
     "Older OpenAI rows: no separate cache-write charge, cache_write is 0 and cached_tokens bill at the cache_read rate. NOT true of gpt-5.6-sol, whose model page says cache writes bill at 1.25x the uncached input rate (5.0 short, 10.0 long); the other OpenAI rows were last read 2026-10-16 and not re-checked for this.",
-    "gpt-5.6-sol is promotional at 4.0/20.0 through 2026-11-30; the standard rate afterward is 5.0/30.0 (gpt-5.5 list), re-verify then. gpt-5.5 above 272K input tokens moves to a long-context tier not published in the short-context table; long_* rates are intentionally absent so the analyzer fails loudly rather than guessing.",
+    "gpt-5, gpt-5.1, gpt-5.2 and gpt-5.5 are REFERENCE rows, not live ones. Juno has never carried any of them in its catalog -- its OpenAI rows were already gpt-5.6-sol and gpt-5.3-codex when this file was written (LAC-4127) -- so no cost-log row can name them and nothing here reads them: the Rust parity test loops over Juno's catalog, and this script only looks a key up when a row names it. gpt-5.5's long_context_threshold with no long_* rates records what the 2026-10-16 OpenAI check found, that a >272K-token request moves to a tier whose rates were not in the short-context table. It arms no tripwire. The same shape on a model Juno CAN select would be a silent underprice on Juno's side, and the Rust parity test refuses it (LAC-8405).",
+    "gpt-5.6-sol is promotional at 4.0/20.0 through 2026-11-30; the standard rate afterward is 5.0/30.0 (gpt-5.5 list), re-verify then.",
     "Claude CLI models are billed as a Claude Max/Pro seat, not per token. Marginal cost to Juno is zero; the analyzer reports them separately instead of as $0.00 alongside metered models.",
     "Opus 5.5 computer use requires computer_toolset_20260801, which roughly doubles per-request input overhead (4,530 vs 2,152 tokens, measured 2026-09-22). That overhead is already inside the reported input_tokens; do not add it again.",
     "Keys are BILLING keys, matching what Juno's cost log writes as model_id (cost_log::billing_model_id). Metered API models use the wire model id; subscription paths are prefixed with the provider, so claude-cli:opus is never averaged in with metered Anthropic traffic at $0.00.",
     "Every model in Juno's catalog is keyed here EXCEPT gemini-3.7-flash, gemini-3.5-flash and gemini-2.5-computer-use-preview-10-2025, which Google publishes no rate for. They are left out deliberately so this script raises on them rather than scoring them as free; Juno logs those turns at cost_usd 0.0 and warns.",
     "Gemini and OpenAI report prompt tokens INCLUSIVE of cached tokens, unlike Anthropic. Juno subtracts the cached part before writing input_tokens, so the four token fields in a record never double-count on any provider.",
+    "cache_write 0.0 on the Gemini rows is not a gap. Google charges no per-token cache WRITE; it charges cache STORAGE by the hour ($0.50 / 1M tokens / hour on gemini-3.8-flash promotional, rising to $1.00 on 2027-01-01; $1.00 on the other two), and that applies to EXPLICIT caches a caller creates and keeps alive. Juno creates none -- gemini.rs only reads cachedContentTokenCount off usageMetadata and never POSTs a cachedContents resource -- so its Gemini caching is implicit and bills at the cache_read rate only. Adding an explicit-cache path would make this row wrong (verified 2026-11-16, LAC-8412).",
+    "The Gemini source URL redirects: https://ai.google.dev/gemini-api/docs/pricing served a 200 from https://aistudio.google.com/docs/pricing, which is also the page's own rel=canonical. _sources records the destination, which is what was fetched 2026-11-16 (LAC-8412).",
+    "Google publishes FOUR service tiers per Gemini model (Standard, Batch, Flex, Priority) in tabs on one page. Every Gemini row here is the STANDARD tier, because Juno sends ordinary synchronous generateContent requests. Batch and Flex are half the Standard rate and Priority is 1.8x, so reading the wrong tab under-or-over-prices by up to 2x with no tripwire -- the same shape as the long-context tier that LAC-8405 refuses. Check the tab name before copying a figure.",
+    "Gemini prices some input modalities differently and this file has one input rate per model. gemini-3-flash-preview charges audio input at $1.00 and audio cache_read at $0.10, double its $0.50 / $0.05 text-image-video rates; the rates here are the text-image-video ones, which is what Juno sends (text plus screenshots). gemini-3.8-flash and gemini-3.5-flash-lite publish a single input rate across modalities. An audio turn on gemini-3-flash-preview would be under-priced by 2x on input; Juno has no audio path to the Gemini provider, so nothing can hit it today (verified 2026-11-16, LAC-8412).",
     "Gemini 3.8 Flash is on PROMOTIONAL pricing that ends 2026-12-31: input 0.75 -> 1.50, output 3.75 -> 7.50, cache_read 0.075 -> 0.15 on 2027-01-01, i.e. every rate doubles. The figures here are the promotional ones, verified 2026-10-27. A trial credit or Pro allowance sized on them is wrong from January onward if Gemini 3.8 Flash is in the mix. Re-verify before quoting a price with a lifetime past 2026-12-31.",
     "Google's output price is stated as INCLUDING thinking tokens, which is the pricing-page confirmation of the cost_log rule that output = candidatesTokenCount + thoughtsTokenCount (LAC-5822). candidatesTokenCount alone under-counts a thinking turn."
   ]

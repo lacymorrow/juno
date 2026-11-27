@@ -9,7 +9,7 @@ per-turn cost telemetry that produces the input, is LAC-4127.
 
 | File | What it is |
 |---|---|
-| `prices.json` | USD per MTok per model, verified against live provider docs 2026-10-16 |
+| `prices.json` | USD per MTok per model, verified against live provider docs. Its `_verified` field carries the dates, per provider; this table does not restate them |
 | `analyze-cost-log.py` | Cost log → the $/task table, the sizing answers, and a cross-check |
 | `fixtures/` | Invented data for the self-test. Never quote it as a measurement. |
 
@@ -98,6 +98,10 @@ right.
 
 ## Refreshing prices
 
-Re-fetch the two `_sources` URLs in `prices.json` and update `_verified`.
+Re-fetch every `_sources` URL in `prices.json` and update `_verified`.
 Do not take rates from a model catalog bundled with a tool — that is how a
 2x error on the Sonnet cache-read rate got close to shipping (LAC-3106).
+
+Google's page puts four service tiers (Standard, Batch, Flex, Priority) in
+tabs on the same model heading, and they differ by up to 2x. Every Gemini row
+here is **Standard**. Read the tab name, not just the heading (LAC-8412).

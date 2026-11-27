@@ -192,11 +192,56 @@ pub fn plan_from_classification(
 
 /// The request body for one classification. The route comes back as a forced
 /// call to a strict tool, so the answer is schema-checked JSON, not prose.
+///
+/// Thinking is sent explicitly disabled. The honest reason is narrower than
+/// the one this comment first carried, so read this before trusting either.
+///
+/// What protects `CLASSIFIER_MAX_TOKENS` is the **forced `tool_choice`**, not
+/// this key. Where forced tool use is accepted, "the response starts with the
+/// tool call and has no thinking block", so no thinking tokens are emitted and
+/// a 200-token ceiling is never spent on reasoning. LAC-8408 justified this
+/// key by arguing that an omitted `thinking` would spend that whole budget,
+/// end the response at `max_tokens` with no `tool_use` block and read back as
+/// `RouterError::NoRouteCall`. On a forced call that does not happen; the
+/// claim was checked against the live docs and withdrawn (LAC-8375).
+///
+/// The key stays for two reasons that survive the correction. It states the
+/// intent in the request instead of leaving it implicit in a `tool_choice` two
+/// fields below, and it is what would keep the budget safe if `tool_choice`
+/// ever became `"auto"` — at which point `CLASSIFIER_MAX_TOKENS` must rise
+/// too, because `auto` does let the model think before it calls the tool.
+///
+/// It is not free, which is the part worth knowing before copying this
+/// pattern: it narrows who may hold the Classifier role. Forced tool use is
+/// rejected by Opus 5.5, Sonnet 5.5, Fable 5.2, Mythos 5.2, Fable 5.1 and
+/// Mythos 5.1. `{"type": "disabled"}` is rejected by all of those **and** by
+/// Fable 5, Mythos 5 and Mythos Preview. So the second gate is strictly
+/// tighter than the first, `claude-fable-5` is the row that proves they
+/// differ, and
+/// `the_classifier_role_only_goes_to_a_model_that_accepts_disabled_thinking`
+/// is what enforces it rather than this paragraph.
+///
+/// `{"type": "disabled"}` is accepted on Haiku 5.5 at effort `high` or below;
+/// at `xhigh` or `max` the pair is a 400. The request sends no
+/// `output_config`, so the model's own default effort applies, which is below
+/// that ceiling. Keep it absent: while thinking is off, a per-message
+/// `output_config.effort` differing from the level in effect is itself a 400.
+///
+/// Every claim above is off the live Thinking page
+/// (`platform.claude.com/docs/en/build-with-claude/thinking`, read
+/// 2026-11-16, LAC-8375). Re-read it before moving this role; do not take it
+/// from here.
+///
+/// One caveat deliberately not relied on: with thinking off the model "can
+/// skip a tool call it needs when you also request JSON output". Not a risk
+/// here, because the call is forced rather than requested as JSON output —
+/// which is a further reason not to move this to structured outputs.
 pub fn build_classifier_request(model: &str, query: &str) -> Value {
     let query: String = query.chars().take(MAX_QUERY_CHARS).collect();
     json!({
         "model": model,
         "max_tokens": CLASSIFIER_MAX_TOKENS,
+        "thinking": { "type": "disabled" },
         "system": CLASSIFIER_SYSTEM_PROMPT,
         "tools": [{
             "name": ROUTE_TOOL_NAME,
@@ -515,6 +560,22 @@ mod tests {
     }
 
     #[test]
+    fn the_request_turns_thinking_off() {
+        let request = build_classifier_request("m", "what is the capital of France");
+        // Explicit rather than cosmetic, but narrower than it looks: the
+        // forced `tool_choice` is what actually keeps CLASSIFIER_MAX_TOKENS
+        // safe, because where forced tool use is accepted the response starts
+        // with the tool call and carries no thinking block. This asserts the
+        // request still says so out loud, so that a later switch to
+        // `tool_choice: "auto"` cannot quietly start spending a 200-token
+        // budget on reasoning and read back as `NoRouteCall` — which
+        // `plan_from_classification` would turn into `None`, the same thing
+        // "routing is switched off" looks like (LAC-8408, mechanism corrected
+        // on LAC-8375).
+        assert_eq!(request["thinking"]["type"], "disabled");
+    }
+
+    #[test]
     fn a_huge_query_is_shortened_before_it_is_sent() {
         let query = "ü".repeat(MAX_QUERY_CHARS * 3);
         let request = build_classifier_request("m", &query);
@@ -531,9 +592,79 @@ mod tests {
         assert!(provider.knows_model(chat));
         // Verified against the table, not memory. Chat moved from Sonnet 5 to
         // Sonnet 5.5 when Sonnet 5 went legacy (the role requires a current
-        // model) — 2026-10-05 weekly model check, LAC-4142.
-        assert_eq!(classifier, model_ids::CLAUDE_HAIKU_4_5);
+        // model) — 2026-10-05 weekly model check, LAC-4142. Classifier moved
+        // from Haiku 4.5 to Haiku 5.5 when Haiku 4.5 went legacy — 2026-11-16
+        // weekly model check, LAC-8375.
+        //
+        // Haiku 5.5 can hold the role because it still accepts the forced
+        // `tool_choice` that `build_classifier_request` sends; the Opus 5.5,
+        // Sonnet 5.5 and Fable 5.2 rows all reject it with a 400, so the role
+        // cannot move to any of those however cheap they get.
+        //
+        // Two constraints gate the role now, and they are not the same set.
+        // The request also sends `thinking: {"type": "disabled"}`. Per the
+        // live Thinking page configuration table (read 2026-11-16, LAC-8375),
+        // Opus 5.5, Sonnet 5.5 and the whole Fable and Mythos line all answer
+        // that with a 400 — Sonnet 5.5's lowest setting is `"between_tools"`
+        // instead. So the second gate excludes more than the first does, and
+        // `claude-fable-5` is the row that proves they differ: it accepts
+        // forced `tool_choice`, clearing gate one, and rejects `"disabled"`,
+        // failing gate two. A future move of this role has to check both,
+        // against that table rather than against this comment (LAC-8408).
+        assert_eq!(classifier, model_ids::CLAUDE_HAIKU_5_5);
         assert_eq!(chat, model_ids::CLAUDE_SONNET_5_5);
+    }
+
+    /// `build_classifier_request` sends `thinking: {"type": "disabled"}`
+    /// unconditionally, so the Classifier role may only be held by a model the
+    /// live docs document as accepting that value. Opus 5.5, Sonnet 5.5 and the
+    /// whole Fable and Mythos line answer it with a 400, and
+    /// `plan_from_classification` maps every error to `None`, which is
+    /// indistinguishable from "routing is switched off" — so getting this wrong
+    /// kills routing silently on every query while still paying for the call.
+    ///
+    /// Asked for by the claude-review bot on PR #1021, which pointed out that
+    /// this rule existed only as a comment, and a comment cannot fail CI
+    /// (LAC-8408).
+    ///
+    /// The list below is a transcription of the live per-model configuration
+    /// table on the Thinking page (read 2026-11-16, LAC-8375). It is the same
+    /// pattern `anthropic_catalog_matches_the_documented_tables` uses, and it is
+    /// deliberately **not** the `&[&str]` model list the catalog comment bans:
+    /// that ban is on production call sites deriving model behaviour from a
+    /// hand-kept list instead of from `model_definitions()`. Here the list is
+    /// the documentation, the catalog is what Juno sends, and the test asserts
+    /// the two agree.
+    ///
+    /// An allowlist on purpose. A model Anthropic ships later that is not named
+    /// here reds this test rather than silently inheriting permission to hold
+    /// the role, which is the correct failure for a weekly model check.
+    #[test]
+    fn the_classifier_role_only_goes_to_a_model_that_accepts_disabled_thinking() {
+        // Haiku 5.5 and Opus 5 accept `disabled` at effort `high` or below;
+        // Sonnet 5 accepts it outright. Sonnet 5.5's floor is `"between_tools"`
+        // instead, so it is absent even though it holds the Chat role.
+        const ACCEPTS_DISABLED: &[&str] = &[
+            model_ids::CLAUDE_HAIKU_5_5,
+            model_ids::CLAUDE_OPUS_5,
+            model_ids::CLAUDE_SONNET_5,
+        ];
+
+        let classifier = classifier_model(&Provider::Anthropic).expect("a classifier model");
+        assert!(
+            ACCEPTS_DISABLED.contains(&classifier),
+            "the Classifier role is held by {classifier}, which is not documented to accept \
+             thinking: {{\"type\": \"disabled\"}}. build_classifier_request sends that \
+             unconditionally, so this model would answer every classification with a 400 and \
+             routing would be silently dead. Re-read the per-model configuration table on the \
+             Thinking page before moving this role."
+        );
+
+        // Tie the assertion to the value it is about, so the two cannot drift.
+        assert_eq!(
+            build_classifier_request(classifier, "q")["thinking"]["type"],
+            "disabled"
+        );
     }
 
     /// Both router roles must be held by a model Anthropic still lists as
