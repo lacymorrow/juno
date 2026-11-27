@@ -1290,14 +1290,27 @@ fn spawn_prefetch(
     (text, generation, handle)
 }
 
+/// Whether the next chunk can be rendered while this one plays: yes when this
+/// one came back as audio. A status means there is nothing to play over the
+/// render (`say` has already spoken, or nothing could).
+///
+/// The configured engine says nothing about this. With the Mac's voice
+/// configured and the System Voice not a Siri voice, Kokoro is what speaks
+/// (see `fallback_chain`), and asking the setting left every sentence waiting
+/// for the one before it to finish playing (LAC-9077).
+fn renders_ahead(rendered: &Result<String, String>) -> bool {
+    matches!(rendered, Ok(result) if !is_status_result(result))
+}
+
 /// The one worker that speaks a turn's queued chunks, in order.
 ///
 /// Holds `TTS_MUTEX`, the playing flag (echo guard) and the Escape key for the
 /// whole run. While chunk N plays, chunk N+1 is already being rendered when
-/// the engine returns audio (Kokoro, Supertonic, ElevenLabs, Replicate), so
-/// the next sentence starts the moment the last one ends. The Mac's own voice
-/// speaks straight out of `say`, which starts in about a tenth of a second,
-/// so it has nothing to render ahead.
+/// the engine that spoke chunk N returns audio (Kokoro, Supertonic,
+/// ElevenLabs, Replicate), so the wait between sentences is only whatever
+/// rendering takes beyond playback. The Mac's own voice speaks straight out
+/// of `say`, which starts in about a tenth of a second, so it has nothing to
+/// render ahead.
 async fn drain_speech_queue(app_handle: AppHandle) {
     let _guard = TTS_MUTEX.lock().await;
 
@@ -1367,10 +1380,7 @@ async fn drain_speech_queue(app_handle: AppHandle) {
             text.chars().count()
         );
 
-        // Audio that came back (not a status) can be played while the next
-        // chunk is rendered. The system voice is never rendered ahead.
-        let can_render_ahead = !provider.eq_ignore_ascii_case("system")
-            && matches!(&rendered, Ok(result) if !is_status_result(result));
+        let can_render_ahead = renders_ahead(&rendered);
 
         let play = play_rendered(rendered, &app_state);
         tokio::pin!(play);
@@ -2784,6 +2794,18 @@ mod tests {
         assert_eq!(queue.try_pop().as_deref(), Some("b"));
         assert_eq!(queue.try_pop(), None);
         assert!(queue.is_busy(), "only pop_or_finish ends the run");
+    }
+
+    /// Kokoro standing in for a Mac voice that is not Siri hands back audio
+    /// while the setting still says "system", so only the result can decide.
+    #[test]
+    fn only_audio_is_rendered_ahead_of() {
+        assert!(renders_ahead(&Ok(
+            "UklGRiQAAABXQVZFZm10IBAAAAABAAEA+/8=".to_string()
+        )));
+        assert!(!renders_ahead(&Ok("TTS_COMPLETED".to_string())));
+        assert!(!renders_ahead(&Ok(NO_VOICE.to_string())));
+        assert!(!renders_ahead(&Err("engine failed".to_string())));
     }
 
     #[test]

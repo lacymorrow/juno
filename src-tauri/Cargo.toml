@@ -142,6 +142,11 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
 # Metal GPU acceleration for Kokoro-82M on Apple Silicon
 any-tts = { version = "0.1", default-features = false, features = ["kokoro", "download", "metal"] }
 
+[target.'cfg(all(target_os = "macos", target_arch = "x86_64"))'.dependencies]
+# Intel Macs speak on the CPU (their GPUs cannot compile candle's kernels), so
+# candle multiplies matrices with Apple's Accelerate there (LAC-9077).
+any-tts = { version = "0.1", default-features = false, features = ["accelerate"] }
+
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 # CPU-only fallback for non-macOS (no Metal framework available)
 any-tts = { version = "0.1", default-features = false, features = ["kokoro", "download"] }
