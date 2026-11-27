@@ -3,9 +3,10 @@
 //! The launch greeting is rendered before it is needed (`prerender.rs`) and
 //! played from here the moment the bar appears. Replies from engines that hand
 //! back audio play from here when a speaker is chosen (`rendered.rs`). This
-//! module only plays samples; it never synthesises speech. The Mac's own voice is always `say`
-//! with no `-v` (see `system.rs`), because that is the only way a third-party
-//! app can speak with a Siri voice: AVFoundation lists no Siri voices to apps.
+//! module only plays samples; it never synthesises speech. The Mac's own voice
+//! is always `say` with no `-v` (see `system.rs`), because that is the only way
+//! a third-party app can speak with a Siri voice: AVFoundation lists no Siri
+//! voices to apps.
 //!
 //! # How a line plays
 //!

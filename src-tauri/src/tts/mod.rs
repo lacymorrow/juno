@@ -546,8 +546,13 @@ async fn play_on_chosen_speaker(
     epoch: u64,
 ) -> Result<(), String> {
     let stopped = || is_tts_stop_requested() || STOP_EPOCH.load(Ordering::SeqCst) != epoch;
+    let decoding = std::time::Instant::now();
     let reason = match rendered::decode(&path, &audio_bytes).await {
         Ok((samples, rate)) => {
+            info!(
+                "[TTS] Decoded audio for the chosen speaker in {}ms",
+                decoding.elapsed().as_millis()
+            );
             match pcm_player::play_rendered_clip(
                 &samples,
                 f64::from(rate),
