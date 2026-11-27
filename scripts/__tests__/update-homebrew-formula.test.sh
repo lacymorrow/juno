@@ -78,6 +78,49 @@ end
 FORMULA
 }
 
+# The same formula with the two CPU blocks swapped: intel first, arm second.
+# Byte-for-byte the baseline otherwise, so the only variable under test is block
+# ORDER. A literal rather than an awk block-swapper for the same reason the
+# baseline is a literal - a fixture that is obviously the thing it claims to be
+# needs no reading of the generator that produced it.
+reversed_blocks() {
+  cat <<'FORMULA'
+# typed: false
+# frozen_string_literal: true
+
+class JunoCua < Formula
+  desc "Headless computer use agent — screenshot, click, type, scroll from the CLI"
+  homepage "https://github.com/lacymorrow/juno"
+  version "0.8.277"
+
+  depends_on :macos
+
+  on_macos do
+    if Hardware::CPU.intel?
+      url "https://github.com/lacymorrow/juno/releases/download/cua-v0.8.277/juno-cua-darwin-x64.tar.gz"
+      sha256 "b29756d5f462258258a61c6516b3165d973598ea6b4ef27c61716434caffedbe"
+
+      def install
+        bin.install "juno-cua"
+      end
+    end
+    if Hardware::CPU.arm?
+      url "https://github.com/lacymorrow/juno/releases/download/cua-v0.8.277/juno-cua-darwin-arm64.tar.gz"
+      sha256 "ba6e966f41d7579f37fe0748996d899b51a74f7386acf9d6c809d68d962e46f6"
+
+      def install
+        bin.install "juno-cua"
+      end
+    end
+  end
+
+  test do
+    assert_match "Computer Use Agent", shell_output("#{bin}/juno-cua capabilities")
+  end
+end
+FORMULA
+}
+
 # run -- runs the script against $formula with VERSION/ARM64_SHA/X64_SHA from
 # the environment, prints the exit code, keeps output in $work/out.
 #
@@ -170,8 +213,11 @@ rc=$(run)
 check "checksum pattern matches nothing: exits 1 before anything is committed" $?
 teardown
 
-# 6. A third platform block. The positional pass only knows two checksums, so
-#    the third keeps a stale one - red, not a quietly wrong formula.
+# 6. A third platform block. The rewrite keys each checksum to the url above it
+#    and knows two archive names, so a third block names one it has no checksum
+#    for and would keep a stale one - red, not a quietly wrong formula. The
+#    count is the tripwire because the keying cannot report a key it was never
+#    given.
 setup
 awk '
   /Hardware::CPU.intel\?/ && !done {
@@ -184,8 +230,9 @@ awk '
   { print }
 ' "$formula" >"$work/t" && mv "$work/t" "$formula"
 rc=$(run)
-[ "$rc" = 1 ] && said "::error title=Unexpected formula shape" && said "found 3" && said "LAC-7748"
-check "three checksum lines: exits 1 and names the follow-up, no partial rewrite shipped" $?
+[ "$rc" = 1 ] && said "::error title=Unexpected formula shape" && said "found 3" \
+  && said "Teach scripts/update-homebrew-formula.sh the new archive"
+check "three checksum lines: exits 1 and says what to change, no partial rewrite" $?
 teardown
 
 # 7. THE CASE THAT MUST STAY GREEN. Re-running a release whose formula is
@@ -300,16 +347,23 @@ teardown
 #
 #      The fixture has to get past the precondition, so the count must stay 2 -
 #      and commenting the arm64 line out keeps it: `# sha256 "..."` still
-#      contains `sha256 "`, so it still counts, and the positional rewrite still
-#      writes ARM64_SHA into it. What it is NOT is a declaration, because the
-#      line's first token is `#`. Only the anchored check can tell.
+#      contains `sha256 "`, so it still counts. What it is NOT is a declaration,
+#      because the line's first token is `#`.
+#
+#      LAC-7748 moved that distinction into the REWRITE too, so the release
+#      checksum is no longer written into the comment at all: the anchored
+#      pattern passes over it, the arm64 key is spent on nothing, and the arm64
+#      declaration is simply missing. Hence the assertion below is now "ARM is
+#      nowhere in the file" rather than the weaker "ARM is in the file but not
+#      as a declaration" - the comment is left exactly as the tap wrote it,
+#      which is what a rewrite that only touches declarations means.
 setup
 awk '/^      sha256 "/ && !seen { sub(/^      /, "      # "); seen = 1 } { print }' \
   "$formula" >"$work/t" && mv "$work/t" "$formula"
 rc=$(run)
 [ "$rc" = 1 ] && said "::error title=arm64 checksum not written" \
-  && in_formula "sha256 \"$ARM\"" && not_in_formula "  sha256 \"$ARM\""
-check "checksum written into a commented-out line: exits 1 (declaration, not presence)" $?
+  && not_in_formula "$ARM" && in_formula "      # sha256 \"$OLD_ARM\""
+check "commented-out checksum line: exits 1, and the comment is left untouched" $?
 teardown
 
 # 15. A missing formula is an error, not a no-op. The tap layout changing is
@@ -327,6 +381,51 @@ VERSION=0.8.278 ARM64_SHA="$ARM" X64_SHA="$X64" bash "$script" >"$work/out" 2>&1
 rc=$?
 [ "$rc" = 1 ] && said "usage: update-homebrew-formula.sh"
 check "no formula argument: exits 1 with usage" $?
+teardown
+
+# 17. THE LAC-7748 REGRESSION. The two CPU blocks in reverse order, intel
+#     first. Every assertion the script had passed on a swapped formula - both
+#     checksums present, both anchored declarations, count 2 - because all of
+#     them ask whether a value is THERE and none asks which archive it belongs
+#     to. A swap changes only the pairing, so presence cannot see it.
+#
+#     The pass this replaces gave the FIRST sha256 line arm64 unconditionally,
+#     so on this fixture it wrote x64's checksum into the arm block and exited
+#     0: a green release, and `brew install lacymorrow/tap/juno-cua` failing the
+#     checksum on Apple Silicon, which is most of the people installing it.
+#
+#     Asserted against the `if Hardware::CPU.*` blocks rather than against the
+#     url the script now keys on, deliberately: an oracle that shares the
+#     implementation's premise cannot test that premise.
+setup
+reversed_blocks >"$formula"
+rc=$(run)
+[ "$rc" = 0 ] && sha_in_arm_block "$ARM" && sha_in_intel_block "$X64" \
+  && not_in_formula "$OLD_ARM" && not_in_formula "$OLD_X64" \
+  && in_formula 'version "0.8.278"' \
+  && in_formula "releases/download/cua-v0.8.278/juno-cua-darwin-arm64.tar.gz"
+check "reversed CPU blocks: each checksum still lands in its own block" $?
+teardown
+
+# 18. The urls stop naming an architecture, so there is no key. Everything else
+#     still holds: the version rewrites, both urls rewrite onto the target
+#     release, both `sha256` declarations are present and the count is 2. The
+#     only thing missing is what says WHICH checksum belongs where.
+#
+#     The script must refuse rather than fall back to position, because position
+#     is what case 17 exists to retire. Falling back would reintroduce the swap
+#     on exactly the formula where nothing can detect it, so "no key" has to be
+#     red even though the stale checksums it leaves behind are a valid formula.
+setup
+sed -e 's/juno-cua-darwin-arm64\.tar\.gz/juno-cua-darwin.tar.gz/' \
+    -e 's/juno-cua-darwin-x64\.tar\.gz/juno-cua-darwin.tar.gz/' \
+  "$formula" >"$work/t" && mv "$work/t" "$formula"
+rc=$(run)
+[ "$rc" = 1 ] && said "::error title=arm64 checksum not written" \
+  && said "names juno-cua-darwin-arm64.tar.gz" \
+  && not_in_formula "$ARM" && not_in_formula "$X64" \
+  && in_formula "$OLD_ARM" && in_formula "$OLD_X64"
+check "urls name no architecture: exits 1 rather than guessing by position" $?
 teardown
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"

@@ -125,19 +125,22 @@ rewrite() {
 
 # --- precondition ---------------------------------------------------------
 
-# The checksum pass below is POSITIONAL: first sha256 line gets arm64, second
-# gets x64. That assumption is only safe while there are exactly two, so it is
+# The checksum pass below keys each checksum to the url declaration above it,
+# so it knows exactly two archives: juno-cua-darwin-arm64.tar.gz and -x64.tar.gz.
+# Two keys is the whole formula only while there are two checksums, so that is
 # checked rather than hoped for. A formula that grew a universal block (or lost
 # a platform) fails the release red here instead of quietly keeping a stale
-# checksum on the block the pass never reached.
+# checksum on the block there is no key for.
 #
-# The remaining hole this does NOT close is a SWAP: reorder the
-# `if Hardware::CPU.arm?` / `.intel?` blocks and both checksums are still
-# present and the count is still 2, but each is in the wrong block. Keying the
-# rewrite on the enclosing block retires that, and is LAC-7748.
+# Unanchored, unlike the rewrite and the assertions below, and on purpose: this
+# is the conservative "is this still the formula this script knows" gate, so a
+# commented-out checksum left behind by a previous release should reach a human
+# rather than be skipped silently. Anchoring it to declarations would also make
+# the commented-out-line case in the test suite vacuous, which is the trap that
+# case already documents.
 before_shas="$(count 'sha256 "')"
 if [ "$before_shas" != 2 ]; then
-  die "Unexpected formula shape" "expected 2 'sha256 \"' lines in $formula, found $before_shas. The checksum rewrite assigns arm64 to the first and x64 to the second, so it cannot be trusted on this formula. Update scripts/update-homebrew-formula.sh (see LAC-7748) rather than loosening this check."
+  die "Unexpected formula shape" "expected 2 'sha256 \"' lines in $formula, found $before_shas. Each checksum is keyed to the url declaration above it and this script knows two archives (juno-cua-darwin-arm64.tar.gz and -x64.tar.gz), so a third platform block names one it has no checksum for and would keep a stale value. Teach scripts/update-homebrew-formula.sh the new archive rather than loosening this check."
 fi
 
 # --- rewrite --------------------------------------------------------------
@@ -160,18 +163,46 @@ rewrite "s/^\\([[:space:]]*\\)version \"[^\"]*\"/\\1version \"${VERSION}\"/"
 # v* release.
 rewrite "s|releases/download/[^/]*/|releases/download/cua-v${VERSION}/|g"
 
-# Checksums, first occurrence arm64 and second x64. awk rather than the `python3
-# -c "..."` block this replaced: that interpolated the checksums into python
-# source through the shell, and shellcheck cannot see inside a heredoc, so the
-# one part of the step with a real injection surface was also the one part no
-# linter read. The validation above means neither value can carry an awk-special
-# character, and the behaviour is identical for any formula passing the
-# precondition.
+# Checksums, each keyed to the url declaration above it (LAC-7748). The pass
+# this replaces was POSITIONAL - first `sha256` line arm64, second x64 - with
+# nothing tying either to the `if Hardware::CPU.arm?` block it sat in. Today's
+# tap happens to put arm64 first. Swap the two blocks for any reason, including
+# alphabetising or adding a block above them, and every release after that would
+# write the x64 checksum into the arm64 block. No assertion in this script could see
+# it: both checksums are present, both are declarations, and the count is still
+# 2 in exactly that case. `brew install lacymorrow/tap/juno-cua` then fails the
+# checksum on Apple Silicon, which is most of the people installing it.
+#
+# The url is the key because it is the one thing in the block that names the
+# archive unambiguously, it lives inside the same CPU block as the checksum it
+# belongs to, and the pass above has already rewritten it, so nothing new has to
+# be matched. `pending` carries that arch down to the next checksum declaration
+# and is cleared by it: a checksum with no arch-naming url above it is left
+# alone rather than guessed at, and the assertions below then fail red. There is
+# deliberately no fall back to position - position is the bug.
+#
+# Both patterns are anchored to the line's first non-whitespace token, like the
+# version rewrite above and the checks below. A commented-out `# sha256 "..."`
+# is not a declaration brew reads, and writing a release checksum into one would
+# spend the key and leave the real declaration unwritten.
+#
+# awk rather than the `python3 -c "..."` block this replaced: that interpolated
+# the checksums into python source through the shell, and shellcheck cannot see
+# inside a heredoc, so the one part of the step with a real injection surface
+# was also the one part no linter read. The validation above means neither value
+# can carry an awk-special character.
 ARM64_SHA="$ARM64_SHA" X64_SHA="$X64_SHA" awk '
-  /sha256 "/ && n < 2 {
-    n++
-    sha = (n == 1 ? ENVIRON["ARM64_SHA"] : ENVIRON["X64_SHA"])
-    sub(/sha256 "[^"]*"/, "sha256 \"" sha "\"")
+  /^[[:space:]]*url "/ {
+    pending = ""
+    if (index($0, "juno-cua-darwin-arm64.tar.gz")) pending = "arm64"
+    else if (index($0, "juno-cua-darwin-x64.tar.gz")) pending = "x64"
+  }
+  /^[[:space:]]*sha256 "/ {
+    if (pending != "") {
+      key = (pending == "arm64" ? "ARM64_SHA" : "X64_SHA")
+      sub(/sha256 "[^"]*"/, "sha256 \"" ENVIRON[key] "\"")
+    }
+    pending = ""
   }
   { print }
 ' "$formula" >"$tmp"
@@ -216,26 +247,70 @@ fi
 # A validated checksum is 64 hex characters, so it carries no regex
 # metacharacter and needs no escaping - unlike VERSION, which has dots.
 #
-# What this still does NOT prove is WHICH block each checksum landed in: both
-# anchored, both present, count 2, and swapped is indistinguishable from
-# correct. That is LAC-7748.
+# Presence first, pairing second (the block below): "the arm64 checksum was
+# never written" and "it was written into the wrong block" are different
+# failures with different causes, and collapsing them into one message would
+# make the release log guess which happened.
 sha_decl() { grep -q -- "^[[:space:]]*sha256 \"$1\"" "$formula"; }
 
 sha_decl "$ARM64_SHA" \
-  || die "arm64 checksum not written" "$formula has no 'sha256 \"${ARM64_SHA}\"' declaration after the rewrite."
+  || die "arm64 checksum not written" "$formula has no 'sha256 \"${ARM64_SHA}\"' declaration after the rewrite. Either a checksum line changed shape, or no url declaration above one names juno-cua-darwin-arm64.tar.gz, which is the key this rewrite uses to decide where the arm64 checksum goes."
 sha_decl "$X64_SHA" \
-  || die "x64 checksum not written" "$formula has no 'sha256 \"${X64_SHA}\"' declaration after the rewrite."
+  || die "x64 checksum not written" "$formula has no 'sha256 \"${X64_SHA}\"' declaration after the rewrite. Either a checksum line changed shape, or no url declaration above one names juno-cua-darwin-x64.tar.gz, which is the key this rewrite uses to decide where the x64 checksum goes."
 
 after_shas="$(count 'sha256 "')"
 if [ "$after_shas" != "$before_shas" ]; then
   die "Checksum lines changed" "$formula had $before_shas 'sha256 \"' lines before the rewrite and $after_shas after. The rewrite damaged the formula."
 fi
 
+# --- prove each checksum is in the right block ----------------------------
+#
+# The deliverable of LAC-7748, and the only check here a SWAP cannot satisfy.
+# Everything above is true of a formula whose two checksums are exchanged, so
+# this one stops asking whether the values are present and asks which archive
+# each one is attached to. `url` and the `sha256` under it are the pair brew
+# acts on, so a checksum that does not match the archive named above it is the
+# bug, whatever order the blocks appear in.
+#
+# Read back off disk rather than trusting the rewrite's own bookkeeping: this
+# whole script exists because a rewrite that wrote nothing looked green. What it
+# does share with the rewrite is the url-as-key premise, so the oracle for THAT
+# lives in the test suite, which asserts against the `if Hardware::CPU.*` blocks
+# instead - see "reversed CPU blocks" in
+# scripts/__tests__/update-homebrew-formula.test.sh.
+
+# sha_after_url <archive-filename> -- the value on the first sha256 DECLARATION
+# below the url declaration naming that archive, or empty if there is none.
+# A url line always re-arms or dis-arms, so the nearest url wins and a checksum
+# under the other architecture's url is never collected for this one.
+#
+# Splitting on quotes rather than offset arithmetic into the matched text: the
+# value is the second quote-delimited field of any `sha256 "<value>"` line,
+# which needs no index to be right.
+sha_after_url() {
+  awk -v want="$1" '
+    /^[[:space:]]*url "/ { armed = (index($0, want) > 0); next }
+    armed && /^[[:space:]]*sha256 "/ {
+      n = split($0, field, "\"")
+      if (n >= 2) { print field[2]; exit }
+    }
+  ' "$formula"
+}
+
+arm_landed="$(sha_after_url 'juno-cua-darwin-arm64.tar.gz')"
+x64_landed="$(sha_after_url 'juno-cua-darwin-x64.tar.gz')"
+
+[ "$arm_landed" = "$ARM64_SHA" ] || die "arm64 checksum in the wrong place" \
+  "the sha256 declared under the juno-cua-darwin-arm64.tar.gz url in $formula is '${arm_landed:-<none>}', not the arm64 checksum ${ARM64_SHA}. The arm64 block would serve a checksum for a different archive, so brew would refuse the download on Apple Silicon. If the tap's platform blocks were reordered this is working as intended - the keying is on the url, so check that each url still names the archive its block installs."
+[ "$x64_landed" = "$X64_SHA" ] || die "x64 checksum in the wrong place" \
+  "the sha256 declared under the juno-cua-darwin-x64.tar.gz url in $formula is '${x64_landed:-<none>}', not the x64 checksum ${X64_SHA}. The intel block would serve a checksum for a different archive, so brew would refuse the download on Intel."
+
 # Printed so the release log carries what was published, not just that a step
-# was green.
+# was green. The checksums are reported under the archive each is attached to,
+# which is the pairing asserted just above rather than the order they appear in.
 echo "Formula verified on disk before commit:"
 echo "  file       $formula"
 echo "  version    ${VERSION}"
 echo "  urls       ${urls_ours}/${urls_total} naming cua-v${VERSION}"
-echo "  arm64 sha  ${ARM64_SHA}"
-echo "  x64 sha    ${X64_SHA}"
+echo "  arm64 sha  ${arm_landed}  (under juno-cua-darwin-arm64.tar.gz)"
+echo "  x64 sha    ${x64_landed}  (under juno-cua-darwin-x64.tar.gz)"
