@@ -1108,7 +1108,7 @@ fn audition(app_handle: &AppHandle, state: &AppState, engine: &str, voice: &str)
         }
 
         let sample = VOICE_SAMPLE_TEXT.to_string();
-        let rendered = crate::tts::render_sample(sample, &engine, app_state).await;
+        let rendered = crate::tts::render_sample(sample, &engine, app_state.clone()).await;
 
         let outcome = match rendered {
             // The engine spoke it as it rendered it.
@@ -1118,7 +1118,7 @@ fn audition(app_handle: &AppHandle, state: &AppState, engine: &str, voice: &str)
                     return;
                 }
                 report_audition(&app, &voice, &engine, EVENT_SPEAKING, None);
-                crate::tts::play_sample(&audio).await
+                crate::tts::play_sample(&audio, &app_state).await
             }
             Err(e) => Err(e),
         };

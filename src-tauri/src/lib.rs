@@ -1278,8 +1278,8 @@ pub fn run() {
                     //
                     // This comment used to also claim the chat window holds the
                     // audio element that plays TTS for the whole app. It does
-                    // not: TTS is played by the Rust backend, which spawns
-                    // afplay (src-tauri/src/tts/mod.rs). The HTMLAudioElement in
+                    // not: TTS is played by the Rust backend
+                    // (src-tauri/src/tts/mod.rs). The HTMLAudioElement in
                     // the React tree is fed by an event Rust never emits. The
                     // hide is left as it is because the other reasons still
                     // hold, but the TTS one is not one of them.

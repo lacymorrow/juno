@@ -1,10 +1,12 @@
-//! Juno's in-process player for audio rendered ahead of time.
+//! Juno's in-process player for audio that is already rendered.
 //!
 //! The launch greeting is rendered before it is needed (`prerender.rs`) and
-//! played from here the moment the bar appears. This module only plays
-//! samples; it never synthesises speech. The Mac's own voice is always `say`
-//! with no `-v` (see `system.rs`), because that is the only way a third-party
-//! app can speak with a Siri voice: AVFoundation lists no Siri voices to apps.
+//! played from here the moment the bar appears. Replies from engines that hand
+//! back audio play from here when a speaker is chosen (`rendered.rs`). This
+//! module only plays samples; it never synthesises speech. The Mac's own voice
+//! is always `say` with no `-v` (see `system.rs`), because that is the only way
+//! a third-party app can speak with a Siri voice: AVFoundation lists no Siri
+//! voices to apps.
 //!
 //! # How a line plays
 //!
@@ -32,6 +34,10 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tauri_plugin_voice_transcription::DeviceChoice;
+
+/// A device that takes no samples for this long, while Juno is not held
+/// silent, has gone away (unplugged mid-sentence) or never started.
+pub const DEVICE_STALL: Duration = Duration::from_secs(5);
 
 /// A render that stopped sending samples without its end marker is treated
 /// as finished once everything it sent has played and this long has passed.
@@ -133,6 +139,11 @@ impl PlaybackBuffer {
         Some((self.samples.drain(..).collect(), self.source_rate))
     }
 
+    /// Samples the device has not taken yet.
+    pub fn remaining(&self) -> usize {
+        self.samples.len()
+    }
+
     pub fn received_any(&self) -> bool {
         self.received_any
     }
@@ -202,6 +213,34 @@ impl PlaybackBuffer {
         } else {
             PlaybackState::Playing
         }
+    }
+}
+
+/// Whether the device is still pulling samples. Without this, a speaker that
+/// vanishes leaves its line "playing" for ever and nothing after it speaks.
+#[derive(Debug)]
+pub struct DeviceProgress {
+    remaining: usize,
+    since: Instant,
+}
+
+impl DeviceProgress {
+    pub fn new(now: Instant) -> Self {
+        Self {
+            remaining: usize::MAX,
+            since: now,
+        }
+    }
+
+    /// True once the same `remaining` samples have waited [`DEVICE_STALL`].
+    /// Time spent held silent does not count.
+    pub fn stuck(&mut self, remaining: usize, held: bool, now: Instant) -> bool {
+        if held || remaining != self.remaining {
+            self.remaining = remaining;
+            self.since = now;
+            return false;
+        }
+        now.saturating_duration_since(self.since) >= DEVICE_STALL
     }
 }
 
@@ -465,13 +504,15 @@ mod mac {
 
         let mut told_rendering = false;
         let mut told_audible = false;
+        let mut progress = DeviceProgress::new(Instant::now());
         loop {
-            let (state, received, played) = {
+            let (state, received, played, remaining) = {
                 let buffer = session.buffer();
                 (
                     buffer.state(Instant::now()),
                     buffer.received_any(),
                     buffer.played_any(),
+                    buffer.remaining(),
                 )
             };
             if received && !told_rendering {
@@ -484,6 +525,13 @@ mod mac {
             }
             if state == PlaybackState::Done {
                 break;
+            }
+            if progress.stuck(remaining, crate::tts::is_held_silent(), Instant::now()) {
+                let _ = stream.pause();
+                let _ = events.send(PlayerEvent::Failed(
+                    "the speaker stopped taking audio".to_string(),
+                ));
+                return;
             }
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -512,16 +560,18 @@ mod mac {
         engine: &str,
         detail: &str,
         device: Option<&DeviceChoice>,
+        level_source: crate::tts::speech_level::LevelSource,
     ) -> Spoken {
         crate::tts::release_stale_hold();
         let mut level: Option<crate::tts::speech_level::SpeechLevelSession> = None;
+        let mut failure: Option<String> = None;
         while let Some(event) = rx.recv().await {
             match event {
                 PlayerEvent::Rendering => {}
                 PlayerEvent::Audible { device_open_ms } => {
                     crate::turn_timing::mark(crate::turn_timing::Stage::FirstAudio);
                     level = Some(crate::tts::speech_level::begin(
-                        crate::tts::speech_level::LevelSource::Synthetic,
+                        level_source.clone(),
                         Duration::ZERO,
                     ));
                     info!(
@@ -538,17 +588,24 @@ mod mac {
                 PlayerEvent::Finished => break,
                 PlayerEvent::Failed(e) => {
                     warn!("[Player] Playback failed: {e}");
+                    failure = Some(e);
                     break;
                 }
             }
         }
         drop(level);
         let stopped = session.is_stopped();
+        let heard = session.buffer().played_any();
         SPEAKER.end(session);
         if stopped || crate::tts::is_tts_stop_requested() {
             Spoken::Status("TTS_STOPPED_BY_USER")
         } else {
-            Spoken::Status("TTS_COMPLETED")
+            match failure {
+                // Nothing was heard, so the caller can say it another way.
+                // A line cut off part way is not said twice.
+                Some(reason) if !heard => Spoken::Unplayable(reason),
+                _ => Spoken::Status("TTS_COMPLETED"),
+            }
         }
     }
 
@@ -567,12 +624,15 @@ mod mac {
             .map_err(|e| format!("could not start the player: {e}"))
     }
 
-    /// Play audio rendered ahead of time (the greeting) on the chosen speaker,
-    /// with the same stop, hold and first-audio handling as live speech.
-    pub async fn play_pcm(
+    /// Play a complete clip on `device`, with the same stop, hold and
+    /// first-audio handling as live speech.
+    pub async fn play_clip(
         samples: &[f32],
         sample_rate: f64,
         device: Option<&DeviceChoice>,
+        engine: &str,
+        level_source: crate::tts::speech_level::LevelSource,
+        stop_requested: impl Fn() -> bool,
     ) -> Spoken {
         let started = Instant::now();
         let session = Arc::new(Session::new());
@@ -581,7 +641,7 @@ mod mac {
             buffer.push(samples, sample_rate, Instant::now());
             buffer.finish_render();
         }
-        if !SPEAKER.adopt(session.clone(), crate::tts::is_tts_stop_requested) {
+        if !SPEAKER.adopt(session.clone(), stop_requested) {
             return Spoken::Status("TTS_STOPPED_BY_USER");
         }
         let rx = match start_player(&session, device) {
@@ -591,8 +651,8 @@ mod mac {
                 return Spoken::Unplayable(e);
             }
         };
-        let detail = format!("prerendered_frames={}", samples.len());
-        play_out(&session, rx, started, "prerendered", &detail, device).await
+        let detail = format!("frames={}", samples.len());
+        play_out(&session, rx, started, engine, &detail, device, level_source).await
     }
 }
 
@@ -609,7 +669,37 @@ pub fn stop_all() {}
 /// Play samples rendered ahead on the chosen speaker and wait for them.
 #[cfg(target_os = "macos")]
 pub async fn play_pcm(samples: &[f32], sample_rate: f64, device: Option<&DeviceChoice>) -> Spoken {
-    mac::play_pcm(samples, sample_rate, device).await
+    mac::play_clip(
+        samples,
+        sample_rate,
+        device,
+        "prerendered",
+        crate::tts::speech_level::LevelSource::Synthetic,
+        crate::tts::is_tts_stop_requested,
+    )
+    .await
+}
+
+/// Play a clip an engine handed back on the speaker chosen in Settings.
+/// `stop_requested` is asked once the clip is current, so a stop that landed
+/// while it was being decoded still silences it.
+#[cfg(target_os = "macos")]
+pub async fn play_rendered_clip(
+    samples: &[f32],
+    sample_rate: f64,
+    level_source: crate::tts::speech_level::LevelSource,
+    device: &DeviceChoice,
+    stop_requested: impl Fn() -> bool,
+) -> Spoken {
+    mac::play_clip(
+        samples,
+        sample_rate,
+        Some(device),
+        "rendered",
+        level_source,
+        stop_requested,
+    )
+    .await
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -716,6 +806,28 @@ mod tests {
         buffer.fill(&mut out, 22_050.0, false);
         assert_eq!(buffer.state(pushed), PlaybackState::Playing);
         assert_eq!(buffer.state(pushed + RENDER_STALL), PlaybackState::Done);
+    }
+
+    #[test]
+    fn a_speaker_that_stops_taking_audio_is_given_up_on() {
+        let start = now();
+        let mut progress = DeviceProgress::new(start);
+        assert!(!progress.stuck(100, false, start));
+        assert!(!progress.stuck(100, false, start + DEVICE_STALL / 2));
+        assert!(progress.stuck(100, false, start + DEVICE_STALL));
+    }
+
+    #[test]
+    fn a_speaker_that_is_playing_or_held_is_not_stuck() {
+        let start = now();
+        let mut progress = DeviceProgress::new(start);
+        assert!(!progress.stuck(100, false, start));
+        // Samples are leaving.
+        assert!(!progress.stuck(50, false, start + DEVICE_STALL));
+        // Held for a long dictation, then released: the clock starts again.
+        assert!(!progress.stuck(50, true, start + DEVICE_STALL * 10));
+        assert!(!progress.stuck(50, false, start + DEVICE_STALL * 10));
+        assert!(progress.stuck(50, false, start + DEVICE_STALL * 11));
     }
 
     // --- sessions ---
