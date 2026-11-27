@@ -136,6 +136,52 @@ mod tests {
         Ok(())
     }
 
+    /// What ElevenLabs hands back, in a file named `.m4a` like every clip.
+    /// The fixture is 100 ms of tone; MP3 pads both ends.
+    #[tokio::test]
+    async fn an_mp3_clip_decodes() -> Result<(), String> {
+        let bytes: &[u8] = include_bytes!("testdata/tone.mp3");
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let clip = dir.path().join("clip.m4a");
+        std::fs::write(&clip, bytes).map_err(|e| e.to_string())?;
+
+        let (samples, rate) = decode(&clip, bytes).await?;
+        assert_eq!(rate, 24_000);
+        assert!(
+            (2_400..=4_800).contains(&samples.len()),
+            "{}",
+            samples.len()
+        );
+        assert!(samples.iter().any(|s| s.abs() > 0.05), "decoded silence");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn an_aac_clip_decodes() -> Result<(), String> {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let source = dir.path().join("source.wav");
+        let clip = dir.path().join("clip.m4a");
+        std::fs::write(&source, wav_clip()).map_err(|e| e.to_string())?;
+        let made = std::process::Command::new("/usr/bin/afconvert")
+            .args(["-f", "m4af", "-d", "aac"])
+            .arg(&source)
+            .arg(&clip)
+            .status()
+            .map_err(|e| e.to_string())?;
+        assert!(made.success());
+        let bytes = std::fs::read(&clip).map_err(|e| e.to_string())?;
+
+        let (samples, rate) = decode(&clip, &bytes).await?;
+        assert_eq!(rate, 24_000);
+        assert!(
+            (2_400..=4_800).contains(&samples.len()),
+            "{}",
+            samples.len()
+        );
+        assert!(samples.iter().any(|s| s.abs() > 0.05), "decoded silence");
+        Ok(())
+    }
+
     #[tokio::test]
     async fn bytes_that_are_not_audio_are_an_error() -> Result<(), String> {
         let file = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;

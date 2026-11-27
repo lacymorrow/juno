@@ -489,6 +489,15 @@ pub fn filter_tts_content(text: &str) -> String {
 /// what it read when it began.
 static STOP_EPOCH: AtomicU64 = AtomicU64::new(0);
 
+/// The speaker chosen in Settings. A failed read also gives `None`, the
+/// system output, so it is logged: otherwise it looks like nobody chose one.
+fn chosen_speaker(state: &AppState) -> Option<tauri_plugin_voice_transcription::DeviceChoice> {
+    state.get_output_device().unwrap_or_else(|e| {
+        warn!("[TTS] Could not read the chosen speaker: {e}; using the system output");
+        None
+    })
+}
+
 /// Start `afplay` on `path`, on the system output. The returned future waits
 /// for it to finish; the process is already registered, so a stop reaches it
 /// before the first poll.
@@ -1198,7 +1207,7 @@ pub async fn speak_prerendered(
 
     let result = match audio {
         prerender::Prerendered::Pcm { samples, rate } => {
-            let device = state.get_output_device().ok().flatten();
+            let device = chosen_speaker(&state);
             match pcm_player::play_pcm(&samples, rate, device.as_ref()).await {
                 pcm_player::Spoken::Status(status) => Ok(status.to_string()),
                 pcm_player::Spoken::Unplayable(reason) => Err(reason),
@@ -1557,7 +1566,7 @@ async fn play_rendered(
                             Ok("TTS_SOUND_DISABLED".to_string())
                         } else {
                             // CRITICAL FIX: Use completion tracking with enhanced error detection and proper error propagation
-                            let speaker = state.get_output_device().ok().flatten();
+                            let speaker = chosen_speaker(state);
                             match play_base64_audio_with_tracking(&result, speaker).await {
                                 Ok(handle) => {
                                     info!("TTS audio playback started, waiting for completion...");
@@ -2099,7 +2108,7 @@ pub async fn render_sample(
 
 /// Play a rendered sample on the chosen speaker and wait for it to finish.
 pub async fn play_sample(base64_audio: &str, state: &AppState) -> Result<(), String> {
-    let speaker = state.get_output_device().ok().flatten();
+    let speaker = chosen_speaker(state);
     let handle = play_base64_audio_with_tracking(base64_audio, speaker).await?;
     handle.wait_for_completion().await
 }
@@ -2192,10 +2201,7 @@ pub async fn invoke_tts_for_provider(
             if !mac_voice_allowed_logged().await {
                 return Err("the System Voice is not a Siri voice".to_string());
             }
-            let chosen = _state
-                .as_ref()
-                .and_then(|s| s.get_output_device().ok())
-                .flatten();
+            let chosen = _state.as_ref().and_then(chosen_speaker);
             let device = crate::commands::audio_devices::say_device_argument(chosen.as_ref());
             let words_per_minute = rate::effective("system", stored_rate(_state.as_ref()))
                 .and_then(rate::say_words_per_minute);
