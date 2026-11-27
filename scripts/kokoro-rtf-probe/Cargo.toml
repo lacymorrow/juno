@@ -1,0 +1,29 @@
+# Measurement only (LAC-9112), never shipped. Built by
+# .github/workflows/kokoro-rtf-probe.yml, which copies this directory into a
+# checkout that has the vendored any-tts.
+[package]
+name = "kokoro-rtf-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[features]
+accelerate = ["any-tts/accelerate"]
+
+[dependencies]
+any-tts = { path = "../../vendor/any-tts", default-features = false, features = ["kokoro", "download", "metal"] }
+libc = "0.2"
+
+[[bin]]
+name = "kokoro-rtf-probe"
+path = "main.rs"
+
+# Juno's release profile.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "unwind"
+strip = true

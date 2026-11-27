@@ -1,0 +1,48 @@
+# Measurement only (LAC-9112). Lives on its issue branch and is not merged.
+name: Kokoro RTF probe
+
+on:
+  push:
+    branches: ["LAC-9112-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      # PR #1064's head: the patched any-tts and the Cargo.lock it was tested with.
+      - uses: actions/checkout@v4
+        with:
+          ref: 9451e477799c5a7863f4d5a6117342815f4d450d
+      - uses: actions/checkout@v4
+        with:
+          path: probe-src
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97"
+      - name: Build both CPU variants
+        run: |
+          mkdir -p scripts out
+          cp -R probe-src/scripts/kokoro-rtf-probe scripts/
+          cp Cargo.lock scripts/kokoro-rtf-probe/
+          cd scripts/kokoro-rtf-probe
+          cargo build --release
+          cp target/release/kokoro-rtf-probe ../../out/probe-plain
+          cargo build --release --features accelerate
+          cp target/release/kokoro-rtf-probe ../../out/probe-accelerate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kokoro-rtf-probe
+          path: out/
+      - name: Measure on this runner (idle, virtual machine)
+        run: |
+          sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
+          for variant in plain accelerate; do
+            echo "== cpu, $variant"
+            ./out/probe-$variant 5 cpu
+          done
+          echo "== metal (virtual GPU)"
+          ./out/probe-plain 5 metal || echo "metal failed on this runner"
