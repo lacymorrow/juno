@@ -170,8 +170,8 @@ fn get_agent_execution_queue() -> &'static AgentExecutionQueue {
 pub struct SubmitQueryResult {
     pub text: String,
     pub spoken_text: Option<String>, // Optional separate content for TTS
-    // No audio field: playback is an `afplay` child process this module spawns
-    // and owns, so audio bytes never travel back out with the text.
+    // No audio field: `crate::tts` plays speech in the backend, so audio bytes
+    // never travel back out with the text.
     pub agent_state: String, // Send final state to frontend
     pub screenshot_data: Option<serde_json::Value>, // Optional screenshot data from the session
 }

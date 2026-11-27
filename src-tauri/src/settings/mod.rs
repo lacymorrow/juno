@@ -289,9 +289,9 @@ pub struct AudioSettings {
     /// `None` follows the system. See `input_device` for how the name and the
     /// UID relate.
     ///
-    /// Honoured by the macOS voice (`say -a`), which is the voice the Audio
-    /// pane offers. Audio that arrives from a cloud engine as a file is played
-    /// by `afplay`, which can only use the system output device.
+    /// Honoured by the macOS voice (`say -a`) and, for engines that hand back
+    /// audio (Kokoro, Supertonic, the cloud engines), by the in-process player
+    /// (`tts/rendered.rs`).
     #[serde(default)]
     pub output_device: Option<String>,
     /// The CoreAudio UID of the chosen speaker.

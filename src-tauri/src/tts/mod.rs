@@ -6,6 +6,8 @@ pub mod no_voice;
 pub mod pcm_player;
 pub mod prerender;
 pub mod rate;
+#[cfg(target_os = "macos")]
+mod rendered;
 pub mod replicate;
 pub mod speech_level;
 pub mod supertonic;
@@ -15,7 +17,7 @@ pub mod voices;
 use crate::state::AppState;
 use regex::Regex;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
@@ -482,10 +484,102 @@ pub fn filter_tts_content(text: &str) -> String {
     filtered_text
 }
 
-/// Play base64 audio with proper completion tracking and error handling
+/// Counts every stop. A clip still being decoded for the chosen speaker has
+/// no process to signal and no player session yet, so it compares this with
+/// what it read when it began.
+static STOP_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+/// Start `afplay` on `path`, on the system output. The returned future waits
+/// for it to finish; the process is already registered, so a stop reaches it
+/// before the first poll.
+#[cfg(target_os = "macos")]
+fn start_afplay(
+    path: &std::path::Path,
+    level_source: speech_level::LevelSource,
+) -> Result<impl std::future::Future<Output = Result<(), String>>, String> {
+    let mut child = tokio::process::Command::new("afplay")
+        .arg(path)
+        .spawn()
+        .map_err(|e| format!("Failed to spawn afplay: {}", e))?;
+    // The mouth follows these samples on afplay's clock, and stops
+    // when afplay exits or is killed.
+    let level_session = speech_level::begin(
+        level_source,
+        std::time::Duration::from_millis(speech_level::PLAYER_LEAD_MS),
+    );
+
+    // Capture PID before moving child into the future so we can kill it precisely
+    let child_pid = child.id();
+    if let Some(pid) = child_pid {
+        register_audio_pid(pid);
+    }
+
+    Ok(async move {
+        let result = child.wait().await;
+        drop(level_session);
+
+        // Unregister PID now that the process has exited
+        if let Some(pid) = child_pid {
+            unregister_audio_pid(pid);
+        }
+
+        match result {
+            Ok(status) if status.success() => Ok(()),
+            Ok(status) => Err(format!(
+                "macOS afplay exited with non-zero status: {}",
+                status
+            )),
+            Err(e) => Err(format!("Failed to wait for macOS afplay process: {}", e)),
+        }
+    })
+}
+
+/// Play a clip on the speaker chosen in Settings. A clip that cannot get
+/// there is played on the system output instead: the wrong speaker is better
+/// than silence.
+#[cfg(target_os = "macos")]
+async fn play_on_chosen_speaker(
+    path: std::path::PathBuf,
+    audio_bytes: Vec<u8>,
+    level_source: speech_level::LevelSource,
+    choice: tauri_plugin_voice_transcription::DeviceChoice,
+    epoch: u64,
+) -> Result<(), String> {
+    let stopped = || is_tts_stop_requested() || STOP_EPOCH.load(Ordering::SeqCst) != epoch;
+    let reason = match rendered::decode(&path, &audio_bytes).await {
+        Ok((samples, rate)) => {
+            match pcm_player::play_rendered_clip(
+                &samples,
+                f64::from(rate),
+                level_source.clone(),
+                &choice,
+                stopped,
+            )
+            .await
+            {
+                pcm_player::Spoken::Status(_) => return Ok(()),
+                pcm_player::Spoken::Unplayable(reason) => reason,
+            }
+        }
+        Err(reason) => reason,
+    };
+    if stopped() {
+        return Ok(());
+    }
+    warn!(
+        "[TTS] Could not play on {}: {}; using the system output",
+        choice.label(),
+        reason
+    );
+    start_afplay(&path, level_source)?.await
+}
+
+/// Play base64 audio with proper completion tracking and error handling, on
+/// the speaker chosen in Settings (`None` follows the system).
 /// Returns an AudioPlaybackHandle that can be awaited for completion
 async fn play_base64_audio_with_tracking(
     base64_audio: &str,
+    speaker: Option<tauri_plugin_voice_transcription::DeviceChoice>,
 ) -> Result<AudioPlaybackHandle, String> {
     use base64::prelude::*;
     use std::io::Write;
@@ -535,67 +629,28 @@ async fn play_base64_audio_with_tracking(
     let task_handle = {
         #[cfg(target_os = "macos")]
         {
-            let mut child = tokio::process::Command::new("afplay")
-                .arg(&temp_path)
-                .spawn()
-                .map_err(|e| format!("Failed to spawn afplay: {}", e))?;
-            // The mouth follows these samples on afplay's clock, and stops
-            // when afplay exits or is killed.
-            let level_session = speech_level::begin(
-                level_source,
-                std::time::Duration::from_millis(speech_level::PLAYER_LEAD_MS),
-            );
-
-            // Capture PID before moving child into the task so we can kill it precisely
-            let child_pid = child.id();
-            if let Some(pid) = child_pid {
-                register_audio_pid(pid);
-            }
+            let playback: std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<(), String>> + Send>,
+            > = match rendered::route(speaker) {
+                rendered::Route::SystemOutput => Box::pin(start_afplay(&temp_path, level_source)?),
+                rendered::Route::Chosen(choice) => Box::pin(play_on_chosen_speaker(
+                    temp_path,
+                    audio_bytes,
+                    level_source,
+                    choice,
+                    STOP_EPOCH.load(Ordering::SeqCst),
+                )),
+            };
 
             let playback_started_clone = playback_started.clone();
 
             // FIXED: Move temp_file into the spawned task to ensure proper lifecycle management
             tauri::async_runtime::spawn(async move {
-                // Add a small delay to ensure afplay has time to start
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 playback_started_clone.store(true, Ordering::SeqCst);
 
-                let result = child.wait().await;
-                drop(level_session);
-
-                // Unregister PID now that the process has exited
-                if let Some(pid) = child_pid {
-                    unregister_audio_pid(pid);
-                }
-
-                match result {
-                    Ok(status) => {
-                        if status.success() {
-                            info!("macOS afplay completed successfully");
-                        } else {
-                            let error_msg =
-                                format!("macOS afplay exited with non-zero status: {}", status);
-                            error!("{}", error_msg);
-
-                            // Store error for propagation
-                            *playback_error_clone.lock().await = Some(error_msg);
-                            error_notify_clone.notify_one();
-
-                            // Check if it failed immediately (before actually playing audio)
-                            let pid_check =
-                                std::process::Command::new("pgrep").arg("afplay").output();
-
-                            if let Ok(output) = pid_check {
-                                if output.stdout.is_empty() {
-                                    warn!(
-                                        "afplay process not found - audio may have failed to start"
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let error_msg = format!("Failed to wait for macOS afplay process: {}", e);
+                match playback.await {
+                    Ok(()) => info!("macOS TTS playback completed successfully"),
+                    Err(error_msg) => {
                         error!("{}", error_msg);
 
                         // Store error for propagation
@@ -606,7 +661,7 @@ async fn play_base64_audio_with_tracking(
 
                 // Notify completion regardless of success/failure
                 completion_notify_clone.notify_one();
-                debug!("macOS afplay task completed and notified");
+                debug!("macOS playback task completed and notified");
 
                 // FIXED: Keep temp file alive until task completes - prevents race condition
                 // temp_file is now owned by this task and will be dropped here
@@ -616,6 +671,8 @@ async fn play_base64_audio_with_tracking(
 
         #[cfg(target_os = "linux")]
         {
+            // aplay follows the system output; the speaker setting is macOS.
+            let _ = speaker;
             let mut child = tokio::process::Command::new("aplay")
                 .arg(&temp_path)
                 .spawn()
@@ -712,7 +769,7 @@ async fn play_base64_audio_with_tracking(
 /// Legacy wrapper for compatibility - now properly waits for completion with error propagation
 #[allow(dead_code)] // Direct audio playback function - kept for future use
 async fn play_base64_audio_directly(base64_audio: &str) -> Result<(), String> {
-    let handle = play_base64_audio_with_tracking(base64_audio).await?;
+    let handle = play_base64_audio_with_tracking(base64_audio, None).await?;
     handle.wait_for_completion().await?;
     info!("TTS audio playback completed");
     Ok(())
@@ -741,6 +798,9 @@ pub fn stop_speech() {
 /// (Escape, `stop_coordinator`, a new turn, an audition) comes through here.
 /// Does not touch the queue.
 fn kill_audio_processes() {
+    // Before the player is stopped: a clip either has a session `stop_all`
+    // finds, or adopts one afterwards and sees the new count.
+    STOP_EPOCH.fetch_add(1, Ordering::SeqCst);
     pcm_player::stop_all();
     let pids_to_kill: Vec<u32> = audio_processes().pids.clone();
 
@@ -1492,7 +1552,8 @@ async fn play_rendered(
                             Ok("TTS_SOUND_DISABLED".to_string())
                         } else {
                             // CRITICAL FIX: Use completion tracking with enhanced error detection and proper error propagation
-                            match play_base64_audio_with_tracking(&result).await {
+                            let speaker = state.get_output_device().ok().flatten();
+                            match play_base64_audio_with_tracking(&result, speaker).await {
                                 Ok(handle) => {
                                     info!("TTS audio playback started, waiting for completion...");
 
@@ -2031,9 +2092,10 @@ pub async fn render_sample(
     Ok(if already_done { None } else { Some(rendered) })
 }
 
-/// Play a rendered sample and wait for it to finish.
-pub async fn play_sample(base64_audio: &str) -> Result<(), String> {
-    let handle = play_base64_audio_with_tracking(base64_audio).await?;
+/// Play a rendered sample on the chosen speaker and wait for it to finish.
+pub async fn play_sample(base64_audio: &str, state: &AppState) -> Result<(), String> {
+    let speaker = state.get_output_device().ok().flatten();
+    let handle = play_base64_audio_with_tracking(base64_audio, speaker).await?;
     handle.wait_for_completion().await
 }
 
