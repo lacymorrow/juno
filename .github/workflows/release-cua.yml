@@ -20,14 +20,22 @@ on:
         description: 'CLI tag already on main (e.g., cua-v0.4.11)'
         required: true
         type: string
+      allow_downgrade:
+        description: 'Publish a version older than the tap serves (deliberate rollback only)'
+        required: false
+        type: boolean
+        default: false
 
-permissions:
-  contents: write
+# No workflow-level grant: each job declares what it needs, so a change to a
+# default can never silently move the release-publishing permission (LAC-7394).
+permissions: {}
 
 jobs:
   gate:
     name: Which commit may this build ship?
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 5
     outputs:
       sha: ${{ steps.decide.outputs.sha }}
@@ -41,6 +49,7 @@ jobs:
           REPO: ${{ github.repository }}
           REF: ${{ github.ref }}
           TAG_INPUT: ${{ inputs.tag }}
+          ALLOW_DOWNGRADE: ${{ inputs.allow_downgrade }}
         run: |
           set -euo pipefail
 
@@ -57,7 +66,20 @@ jobs:
           # Resolve the tag to the commit it points at (annotated tags are
           # peeled), then require main to contain it. A tag anyone can push
           # must not choose the tree that is built and published.
-          obj=$(gh api "repos/$REPO/git/ref/tags/$TAG_INPUT" --jq '.object | "\(.type) \(.sha)"')
+          #
+          # The tag is pushed before this run is dispatched, but a fresh ref can
+          # still 404 briefly. A miss here fails only this run, after
+          # release-every-merge has already gone green, and nothing else
+          # triggers a CLI release (LAC-7394). Bounded retry: 5 tries, 4s apart.
+          obj=""
+          for attempt in 1 2 3 4 5; do
+            if obj=$(gh api "repos/$REPO/git/ref/tags/$TAG_INPUT" --jq '.object | "\(.type) \(.sha)"'); then
+              break
+            fi
+            obj=""
+            [ "$attempt" -lt 5 ] && sleep 4
+          done
+          [ -n "$obj" ] || { echo "::error title=Tag not found::$TAG_INPUT did not resolve after 5 attempts."; exit 1; }
           type=${obj%% *}; sha=${obj#* }
           if [ "$type" = "tag" ]; then
             sha=$(gh api "repos/$REPO/git/tags/$sha" --jq '.object.sha')
@@ -71,6 +93,19 @@ jobs:
               ;;
           esac
 
+          # Refuse a release older than the one the tap already serves, or
+          # `brew upgrade` hands everyone a months-old build. The tap is public,
+          # so no token is needed. Same version is allowed (re-running a
+          # published release). A deliberate rollback sets allow_downgrade.
+          served=$(gh api repos/lacymorrow/homebrew-tap/contents/Formula/juno-cua.rb --jq .content | base64 -d | sed -n 's/^ *version *"\([0-9.]*\)".*/\1/p' | head -n1)
+          [ -n "$served" ] || { echo "::error title=Tap version unreadable::could not read the version the tap serves."; exit 1; }
+          want=${TAG_INPUT#cua-v}
+          newest=$(printf '%s\n%s\n' "$served" "$want" | sort -V | tail -n1)
+          if [ "$newest" != "$want" ] && [ "$ALLOW_DOWNGRADE" != "true" ]; then
+            echo "::error title=Downgrade::the tap serves $served; $want is older. Set allow_downgrade to roll back on purpose."
+            exit 1
+          fi
+
           {
             echo "sha=$sha"
             echo "tag=$TAG_INPUT"
@@ -80,6 +115,9 @@ jobs:
   build:
     needs: gate
     runs-on: macos-latest
+    # softprops/action-gh-release publishes the release.
+    permissions:
+      contents: write
     outputs:
       arm64: ${{ steps.sha.outputs.arm64 }}
       x64: ${{ steps.sha.outputs.x64 }}
@@ -101,7 +139,7 @@ jobs:
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust (pinned toolchain)
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master (2026-10-16)
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
           targets: aarch64-apple-darwin,x86_64-apple-darwin
@@ -140,8 +178,29 @@ jobs:
             echo "universal=$(shasum -a 256 juno-cua-darwin-universal.tar.gz | cut -d ' ' -f 1)"
           } >> "$GITHUB_OUTPUT"
 
+      # The release attaches to wherever the tag points at publish time, and
+      # the cargo build above takes ~20 minutes. Assets come from the gated
+      # SHA; this keeps the release's provenance pointer from drifting off it.
+      - name: Re-assert the tag still points at the gated commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.gate.outputs.tag }}
+          EXPECTED_SHA: ${{ needs.gate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          obj=$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq '.object | "\(.type) \(.sha)"')
+          type=${obj%% *}; sha=${obj#* }
+          if [ "$type" = "tag" ]; then
+            sha=$(gh api "repos/$REPO/git/tags/$sha" --jq '.object.sha')
+          fi
+          if [ "$sha" != "$EXPECTED_SHA" ]; then
+            echo "::error title=Tag moved::$TAG now points at $sha, but the gate approved $EXPECTED_SHA. Refusing to publish."
+            exit 1
+          fi
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ needs.gate.outputs.tag }}
           name: juno-cua ${{ needs.gate.outputs.version }}
@@ -181,6 +240,10 @@ jobs:
     needs: [gate, build]
     runs-on: macos-latest
     environment: release
+    # Read-only: the checkout below fetches the formula rewriter. The push goes
+    # to homebrew-tap with HOMEBREW_TAP_TOKEN, not GITHUB_TOKEN.
+    permissions:
+      contents: read
     steps:
       # The formula rewriter lives in the repo, so this job needs the tree.
       #
