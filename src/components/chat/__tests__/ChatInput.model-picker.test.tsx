@@ -100,7 +100,7 @@ const openPicker = async (selected: { id: string; name: string }) => {
     </TooltipProvider>
   );
   const trigger = await screen.findByRole("button", {
-    name: new RegExp(selected.name.replace(/\./g, "\\.")),
+    name: new RegExp(selected.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   });
   await vi.waitFor(() => expect(trigger).toBeEnabled());
   fireEvent.click(trigger);
