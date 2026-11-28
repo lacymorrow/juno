@@ -40,6 +40,7 @@ import { useDictationStateEvents } from "@/hooks/useDictationStateEvents";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { useEscapeStepsDown } from "@/hooks/useEscapeStepsDown";
 import { useUpdater } from "@/hooks/useUpdater";
+import { useDocumentTheme } from "@/hooks/useSystemTheme";
 
 /**
  * One id per recurring notice. Sonner replaces a toast that reuses an id, so a
@@ -51,6 +52,8 @@ const TOAST_IDS = {
 } as const;
 
 function App() {
+  useDocumentTheme();
+
   // Initialize custom hooks
   const appState = useAppState();
   const conversation = useConversation();

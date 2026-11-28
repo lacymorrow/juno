@@ -161,10 +161,10 @@ const WindowOperations: React.FC = () => {
   return (
     <div className="space-y-4">
       {/* Status Notice */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+      <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-lg p-3 mb-4">
         <div className="flex items-start space-x-2">
-          <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-          <div className="text-sm text-blue-800">
+          <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+          <div className="text-sm text-blue-800 dark:text-blue-300">
             <strong>✅ Parameter Naming:</strong> All window operations use correct
             snake_case parameter names (window_id, width, height, x, y) that match
             backend function signatures. Frontend-backend parameter binding is properly aligned.

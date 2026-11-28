@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export type SystemTheme = "light" | "dark";
@@ -47,6 +47,25 @@ export function useSystemTheme(): SystemTheme {
       unlisten?.();
     };
   }, []);
+
+  return theme;
+}
+
+/**
+ * Puts the OS appearance on this window's `<html>` as the `dark` class, which
+ * is what the theme tokens and every `dark:` utility key off. It goes on the
+ * document rather than a wrapper because Radix portals menus, dialogs and
+ * popovers to `document.body`. Each Tauri window owns its own document.
+ */
+export function useDocumentTheme(): SystemTheme {
+  const theme = useSystemTheme();
+
+  // Before paint, so a dark window never draws a light frame first.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle("dark", theme === "dark");
+    return () => root.classList.remove("dark");
+  }, [theme]);
 
   return theme;
 }

@@ -329,7 +329,7 @@ export function PermissionsFlow({
       return (
         <Badge
           variant="outline"
-          className="text-green-600 border-green-200 bg-green-50"
+          className="text-green-600 dark:text-green-400 border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/40"
         >
           ✓ Granted
         </Badge>
@@ -338,7 +338,7 @@ export function PermissionsFlow({
       return (
         <Badge
           variant="destructive"
-          className="bg-red-100 text-red-700 border-red-300"
+          className="bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 border-red-300 dark:border-red-900"
         >
           ⚠ Required
         </Badge>
@@ -347,7 +347,7 @@ export function PermissionsFlow({
       return (
         <Badge
           variant="secondary"
-          className="bg-yellow-100 text-yellow-700 border-yellow-300"
+          className="bg-yellow-100 dark:bg-yellow-950/60 text-yellow-700 dark:text-yellow-300 border-yellow-300 dark:border-yellow-900"
         >
           💡 Optional
         </Badge>
@@ -371,19 +371,19 @@ export function PermissionsFlow({
     // A row can arrive before its type does; without this the switch throws
     // and takes the whole permissions screen down.
     if (!permission?.permission_type) {
-      return <Shield className="h-5 w-5 text-gray-600" />;
+      return <Shield className="h-5 w-5 text-gray-600 dark:text-gray-400" />;
     }
     switch (permission.permission_type) {
       case "accessibility":
-        return <Lock className="h-5 w-5 text-blue-600" />;
+        return <Lock className="h-5 w-5 text-blue-600 dark:text-blue-400" />;
       case "screen_recording":
-        return <Monitor className="h-5 w-5 text-purple-600" />;
+        return <Monitor className="h-5 w-5 text-purple-600 dark:text-purple-400" />;
       case "microphone":
-        return <Mic className="h-5 w-5 text-green-600" />;
+        return <Mic className="h-5 w-5 text-green-600 dark:text-green-400" />;
       case "input_monitoring":
-        return <Keyboard className="h-5 w-5 text-orange-600" />;
+        return <Keyboard className="h-5 w-5 text-orange-600 dark:text-orange-400" />;
       default:
-        return <Shield className="h-5 w-5 text-gray-600" />;
+        return <Shield className="h-5 w-5 text-gray-600 dark:text-gray-400" />;
     }
   };
 
@@ -394,10 +394,10 @@ export function PermissionsFlow({
   ) => {
     const isRequired = permission.required;
     const cardClassName = permission.granted
-      ? "transition-colors border-green-200 bg-green-50/30"
+      ? "transition-colors border-green-200 dark:border-green-900 bg-green-50/30 dark:bg-green-950/40"
       : isRequired
-      ? "transition-colors border-red-200 bg-red-50/30"
-      : "transition-colors border-yellow-200 bg-yellow-50/30";
+      ? "transition-colors border-red-200 dark:border-red-900 bg-red-50/30 dark:bg-red-950/40"
+      : "transition-colors border-yellow-200 dark:border-yellow-900 bg-yellow-50/30 dark:bg-yellow-950/40";
 
     return (
       <Card key={permission.permission_type} className={cardClassName}>
@@ -424,15 +424,15 @@ export function PermissionsFlow({
                 {isRequired && !permission.granted && (
                   <div className="flex items-center space-x-1 mt-2">
                     <AlertCircle className="h-4 w-4 text-red-500" />
-                    <span className="text-sm font-medium text-red-700">
+                    <span className="text-sm font-medium text-red-700 dark:text-red-300">
                       This permission is required for Juno to function properly
                     </span>
                   </div>
                 )}
                 {!isRequired && !permission.granted && (
                   <div className="flex items-center space-x-1 mt-2">
-                    <Info className="h-4 w-4 text-yellow-600" />
-                    <span className="text-sm text-yellow-700">
+                    <Info className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+                    <span className="text-sm text-yellow-700 dark:text-yellow-300">
                       Optional - enhances functionality when granted
                     </span>
                   </div>
@@ -447,13 +447,13 @@ export function PermissionsFlow({
               <div
                 className={`p-3 rounded-md border ${
                   isRequired
-                    ? "bg-red-50 border-red-200"
-                    : "bg-yellow-50 border-yellow-200"
+                    ? "bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900"
+                    : "bg-yellow-50 dark:bg-yellow-950/40 border-yellow-200 dark:border-yellow-900"
                 }`}
               >
                 <p
                   className={`text-sm ${
-                    isRequired ? "text-red-800" : "text-yellow-800"
+                    isRequired ? "text-red-800 dark:text-red-300" : "text-yellow-800 dark:text-yellow-300"
                   }`}
                 >
                   <strong>
@@ -540,8 +540,8 @@ export function PermissionsFlow({
               {/* Auto-redirect feature notice */}
               {autoRedirectEnabled &&
                 permission.permission_type === "accessibility" && (
-                  <div className="mt-2 p-2 bg-blue-50 rounded-md border border-blue-200">
-                    <p className="text-xs text-blue-700">
+                  <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950/40 rounded-md border border-blue-200 dark:border-blue-900">
+                    <p className="text-xs text-blue-700 dark:text-blue-300">
                       <Zap className="h-3 w-3 inline mr-1" />
                       Auto-redirect enabled: System Settings will open
                       automatically when needed
@@ -551,9 +551,9 @@ export function PermissionsFlow({
             </div>
           )}
           {permission.granted && (
-            <div className="flex items-center space-x-2 p-3 bg-green-50 rounded-md border border-green-200">
-              <CheckCircle className="h-4 w-4 text-green-600" />
-              <p className="text-sm text-green-800 font-medium">
+            <div className="flex items-center space-x-2 p-3 bg-green-50 dark:bg-green-950/40 rounded-md border border-green-200 dark:border-green-900">
+              <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+              <p className="text-sm text-green-800 dark:text-green-300 font-medium">
                 Permission granted -{" "}
                 {permission.permission_type.replace("_", " ")} access is working
                 properly
@@ -669,14 +669,14 @@ export function PermissionsFlow({
       <div className="space-y-4">
         <div className="flex items-center space-x-2">
           <AlertCircle className="h-5 w-5 text-red-500" />
-          <h3 className="text-lg font-semibold text-red-800">
+          <h3 className="text-lg font-semibold text-red-800 dark:text-red-300">
             Required Permissions
           </h3>
-          <Badge variant="destructive" className="bg-red-100 text-red-700">
+          <Badge variant="destructive" className="bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300">
             {requiredCount} Required
           </Badge>
         </div>
-        <p className="text-sm text-gray-600 mb-4">
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
           These permissions are essential for Juno's core AI computer use
           functionality. Without them, Juno cannot automate tasks or interact
           with your desktop.
@@ -703,15 +703,15 @@ export function PermissionsFlow({
       <Separator />
       <div className="space-y-4">
         <div className="flex items-center space-x-2">
-          <Info className="h-5 w-5 text-yellow-600" />
-          <h3 className="text-lg font-semibold text-yellow-800">
+          <Info className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
+          <h3 className="text-lg font-semibold text-yellow-800 dark:text-yellow-300">
             Optional Permissions
           </h3>
-          <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">
+          <Badge variant="secondary" className="bg-yellow-100 dark:bg-yellow-950/60 text-yellow-700 dark:text-yellow-300">
             Enhances Experience
           </Badge>
         </div>
-        <p className="text-sm text-gray-600 mb-4">
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
           These permissions enhance Juno's functionality but are not required
           for basic operation. You can grant them now or skip and enable them
           later.
@@ -736,16 +736,16 @@ export function PermissionsFlow({
 
       {/* Success Footer */}
       {permissions.all_granted && (
-        <Card className="border-green-200 bg-green-50">
+        <Card className="border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/40">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                <CheckCircle className="h-6 w-6 text-green-600" />
+                <CheckCircle className="h-6 w-6 text-green-600 dark:text-green-400" />
                 <div>
-                  <span className="text-green-800 font-semibold text-lg">
+                  <span className="text-green-800 dark:text-green-300 font-semibold text-lg">
                     🎉 Setup Complete!
                   </span>
-                  <p className="text-green-700 text-sm mt-1">
+                  <p className="text-green-700 dark:text-green-300 text-sm mt-1">
                     All permissions configured. Juno is ready for AI computer
                     use.
                   </p>
