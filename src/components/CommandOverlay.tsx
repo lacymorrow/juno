@@ -98,13 +98,13 @@ export default function CommandOverlay() {
   const getStatusDisplay = (status: string) => {
     switch (status) {
       case "executing":
-        return { icon: "⏳", color: "text-blue-600", bgColor: "bg-blue-50" };
+        return { icon: "⏳", color: "text-blue-600 dark:text-blue-400", bgColor: "bg-blue-50 dark:bg-blue-950/40" };
       case "completed":
-        return { icon: "✅", color: "text-green-600", bgColor: "bg-green-50" };
+        return { icon: "✅", color: "text-green-600 dark:text-green-400", bgColor: "bg-green-50 dark:bg-green-950/40" };
       case "failed":
-        return { icon: "❌", color: "text-red-600", bgColor: "bg-red-50" };
+        return { icon: "❌", color: "text-red-600 dark:text-red-400", bgColor: "bg-red-50 dark:bg-red-950/40" };
       default:
-        return { icon: "⏳", color: "text-gray-600", bgColor: "bg-gray-50" };
+        return { icon: "⏳", color: "text-gray-600 dark:text-gray-400", bgColor: "bg-gray-50 dark:bg-muted" };
     }
   };
 
@@ -136,7 +136,7 @@ export default function CommandOverlay() {
               )}
             </div>
             {command.error && (
-              <div className="text-xs text-red-600 mt-1">{command.error}</div>
+              <div className="text-xs text-red-600 dark:text-red-400 mt-1">{command.error}</div>
             )}
           </div>
         );

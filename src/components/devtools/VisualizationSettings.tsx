@@ -130,7 +130,7 @@ const VisualizationSettings = () => {
               className="flex items-center justify-between p-3 border rounded-lg"
             >
               <div className="flex items-start gap-3">
-                <div className="text-blue-600 mt-1">{setting.icon}</div>
+                <div className="text-blue-600 dark:text-blue-400 mt-1">{setting.icon}</div>
                 <div>
                   <div className="font-medium flex items-center gap-2">
                     {setting.title}
@@ -205,7 +205,7 @@ const VisualizationSettings = () => {
               <strong>Desktop Cursor Overlay:</strong> Shows desktop-level
               cursor visualization with pulsing circles and ripple effects
             </p>
-            <p className="text-xs text-amber-600 mt-2">
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
               <AlertCircle className="h-3 w-3 inline mr-1" />
               These settings are for development and testing purposes only
             </p>

@@ -619,7 +619,7 @@ export const CloudTestPanel: React.FC = () => {
 
                     <div>
                       <Label>Server URL</Label>
-                      <p className="text-sm font-mono bg-gray-100 p-2 rounded">
+                      <p className="text-sm font-mono bg-gray-100 dark:bg-muted p-2 rounded">
                         {cloudConfig.server_url}
                       </p>
                     </div>
@@ -804,7 +804,7 @@ export const CloudTestPanel: React.FC = () => {
                   placeholder='{"action": "screenshot"}'
                 />
               </div>
-              <div className="text-xs text-gray-600 space-y-1">
+              <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
                 <p>
                   <strong>Available actions:</strong>
                 </p>
@@ -890,7 +890,7 @@ export const CloudTestPanel: React.FC = () => {
                   placeholder='{"action": "screenshot"}'
                 />
               </div>
-              <div className="text-xs text-gray-600 bg-gray-50 p-3 rounded space-y-1">
+              <div className="text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-muted p-3 rounded space-y-1">
                 <p>
                   <strong>System Command Examples:</strong>
                 </p>
@@ -953,10 +953,10 @@ export const CloudTestPanel: React.FC = () => {
 
                         {result.response && (
                           <details className="text-xs">
-                            <summary className="cursor-pointer text-blue-600">
+                            <summary className="cursor-pointer text-blue-600 dark:text-blue-400">
                               View Response
                             </summary>
-                            <pre className="bg-gray-100 p-2 rounded mt-2 overflow-auto">
+                            <pre className="bg-gray-100 dark:bg-muted p-2 rounded mt-2 overflow-auto">
                               {JSON.stringify(result.response, null, 2)}
                             </pre>
                           </details>
@@ -1016,7 +1016,7 @@ export const CloudTestPanel: React.FC = () => {
                   {diagnostics.stats && (
                     <div className="pt-4 border-t">
                       <Label>Connection Statistics</Label>
-                      <pre className="text-xs bg-gray-100 p-2 rounded mt-2">
+                      <pre className="text-xs bg-gray-100 dark:bg-muted p-2 rounded mt-2">
                         {JSON.stringify(diagnostics.stats, null, 2)}
                       </pre>
                     </div>
@@ -1024,7 +1024,7 @@ export const CloudTestPanel: React.FC = () => {
 
                   <div className="pt-4 border-t">
                     <Label>Configuration</Label>
-                    <pre className="text-xs bg-gray-100 p-2 rounded mt-2">
+                    <pre className="text-xs bg-gray-100 dark:bg-muted p-2 rounded mt-2">
                       {JSON.stringify(diagnostics.config, null, 2)}
                     </pre>
                   </div>
@@ -1081,7 +1081,7 @@ export const CloudTestPanel: React.FC = () => {
                   {connectionDiagnostics.performance_metrics && (
                     <div className="pt-4 border-t">
                       <Label>Performance Metrics</Label>
-                      <pre className="text-xs bg-gray-100 p-2 rounded mt-2">
+                      <pre className="text-xs bg-gray-100 dark:bg-muted p-2 rounded mt-2">
                         {JSON.stringify(
                           connectionDiagnostics.performance_metrics,
                           null,
@@ -1116,7 +1116,7 @@ export const CloudTestPanel: React.FC = () => {
 
                   <div className="pt-4 border-t">
                     <Label>Full Diagnostics</Label>
-                    <pre className="text-xs bg-gray-100 p-2 rounded mt-2">
+                    <pre className="text-xs bg-gray-100 dark:bg-muted p-2 rounded mt-2">
                       {JSON.stringify(connectionDiagnostics, null, 2)}
                     </pre>
                   </div>
@@ -1172,10 +1172,10 @@ export const CloudTestPanel: React.FC = () => {
 
                         {result.response && (
                           <details className="text-xs">
-                            <summary className="cursor-pointer text-blue-600">
+                            <summary className="cursor-pointer text-blue-600 dark:text-blue-400">
                               View Response
                             </summary>
-                            <pre className="bg-gray-100 p-2 rounded mt-2 overflow-auto">
+                            <pre className="bg-gray-100 dark:bg-muted p-2 rounded mt-2 overflow-auto">
                               {JSON.stringify(result.response, null, 2)}
                             </pre>
                           </details>
