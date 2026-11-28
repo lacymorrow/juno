@@ -59,15 +59,22 @@ export const ChatInput = React.memo(function ChatInput({
   const currentModelId =
     settings.formData.model || settings.providerSettings?.model || "";
 
-  // Build a sorted provider list: active provider first, then others with models
+  // Build a sorted provider list: active provider first, then others with models.
+  // Legacy models are not offered here (Settings still lists them), except the
+  // selected one, so nobody is left on a model they cannot see.
   const sortedProviders = useMemo(() => {
-    const withModels = settings.providers.filter(
-      (p) => p.model_info && p.model_info.length > 0
-    );
+    const withModels = settings.providers
+      .map((p) => ({
+        ...p,
+        model_info: (p.model_info ?? []).filter(
+          (m) => !m.is_legacy || m.id === currentModelId
+        ),
+      }))
+      .filter((p) => p.model_info.length > 0);
     const active = withModels.filter((p) => p.id === settings.activeProvider);
     const rest = withModels.filter((p) => p.id !== settings.activeProvider);
     return [...active, ...rest];
-  }, [settings.providers, settings.activeProvider]);
+  }, [settings.providers, settings.activeProvider, currentModelId]);
 
   // Find the currently selected model across all providers
   const selectedModel = useMemo(() => {
@@ -203,7 +210,7 @@ export const ChatInput = React.memo(function ChatInput({
             </span>
           </PromptInputButton>
 
-        {/* Model selector — shows all providers' models */}
+        {/* Model selector: all providers, current models plus the selected one */}
         {hasModels && (
           <ModelSelector open={modelSelectorOpen} onOpenChange={setModelSelectorOpen}>
             <ModelSelectorTrigger asChild>
